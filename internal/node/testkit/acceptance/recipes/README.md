@@ -175,7 +175,14 @@ errors. The final domain check rejects an extra prompt or an unfinished turn.
 A synchronous unknown-preset refusal includes the failed control reply in the
 first receipt, releasing the source's initial body in the control-reply write.
 The adapter-refusal and unknown-preset variants have 53 and 28 main points, with
-fixed budgets of 80 and 42. A held creation past its report window must return
+fixed budgets of 80 and 42. The adapter-refusal variant declares its typed
+`CreateRefusal` through `Env.SetAdapterInputs` before sending the creation, so
+replacing the adapter cannot discard that external condition. Its three steps
+remain refusal, creation and reply pull. Only after its real feedback drain
+succeeds does it explicitly clear the declaration. The final check still requires
+the failed control reply, actual feedback and no native-created ledger entry.
+The unknown-preset variant has no adapter input declaration and keeps its two
+steps. A held creation past its report window must return
 `unconfirmed/ready_timeout` naming a closed session with no token. Its control
 signal can be delivered while its separate initial-message delivery is still
 unknown: the exact `accepted_unconfirmed` notice must name the derived session,

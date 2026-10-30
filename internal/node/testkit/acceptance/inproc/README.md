@@ -170,6 +170,12 @@ generation under the recipe's unchanged body and feedback judgement.
 `restore-credentials` boundary. Only its drain suppresses repeated empty input
 declarations, so successful delivery cannot depend on clearing stale inputs again.
 
+`TestFailedCreationRecipesPreserveRefusalAcrossRestart` runs the complete shared
+adapter-refusal recipe cleanly and at `control-intake/derived.rename#1`, then
+compares the actual interrupted trace prefix. The unknown-preset variant runs
+cleanly and after the create boundary. Both retain their fixed budgets, real
+feedback, failed control reply and no-native-creation judgement.
+
 Deadline boundary regressions cover a returned absent-node send and creation both
 before and after their deadline steps. A creation completed by restart before its
 deadline phase owes its actual native session and original initial body through

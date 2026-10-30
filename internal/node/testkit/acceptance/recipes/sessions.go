@@ -26,7 +26,7 @@ type SessionOps struct {
 }
 
 func sessionRecipes(b Bindings) []ScriptRecipe {
-	out := []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 80), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 42), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
+	out := []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", adapterproto.CreateFailPresetInvalid, 80), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", "", 42), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
 	for i := range out {
 		out[i].Needs.RuntimeAdapter = true
 	}
@@ -186,18 +186,14 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 	}}
 }
 
-func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.Outcome, pointBudget int) ScriptRecipe {
+func failedCreationRecipe(b Bindings, name, preset string, refusal adapterproto.CreateFailure, pointBudget int) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
 	var feedback feedbackDrain
 	var message adapterproto.MessageID
 	var steps []scenario.Step
-	if failure != nil {
+	if refusal != "" {
 		steps = append(steps, scenario.Step{Name: "refuse-create", Do: func(e scenario.Env) error {
-			c, err := e.Adapter("chat")
-			if err != nil {
-				return err
-			}
-			return c.SetOutcome(e.Ctx(), fakeadapter.RequestCreate, *failure)
+			return e.SetAdapterInputs("chat", fakeadapter.ExternalInputs{CreateRefusal: refusal})
 		}})
 	}
 	steps = append(steps, []scenario.Step{
@@ -209,7 +205,15 @@ func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.
 			return err
 		}}, scenario.Advance("reply-pull", time.Minute),
 	}...)
-	return ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: pointBudget}, Steps: steps}, Drain: func(e scenario.Env) error { return feedback.run(e, facts, "sender") }, Check: func(e scenario.Env) error {
+	return ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: pointBudget}, Steps: steps}, Drain: func(e scenario.Env) error {
+		if err := feedback.run(e, facts, "sender"); err != nil {
+			return err
+		}
+		if refusal != "" {
+			return e.SetAdapterInputs("chat", fakeadapter.ExternalInputs{})
+		}
+		return nil
+	}, Check: func(e scenario.Env) error {
 		if err := facts.Check(e); err != nil {
 			return err
 		}

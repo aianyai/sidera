@@ -392,3 +392,9 @@ and require the shared recovery checker to validate the third generation.
 A separate restart after successful `restore-credentials` suppresses repeated
 empty declarations only in that test's drain: the original real delivery and
 feedback judgement must succeed without another clear hiding stale startup inputs.
+
+`TestBinaryRefusedCreationResumesInterruptedControlIntake` runs the complete shared
+adapter-refusal recipe at generation 1 `control-intake/derived.rename#1`, with the
+catalog walk's seed. The real matching crash marker and abnormal exit must reach
+the target, and the replacement generation must satisfy the unchanged failed-reply,
+real-feedback and no-native-creation judgement.

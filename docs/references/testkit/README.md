@@ -1179,6 +1179,18 @@ real recovery plan and unresolved deliveries. Failed-creation notification drain
 retain the recipe's own `DeliveryEvidence` through repeated runs and validate it
 in the final judgement.
 
+The adapter-refusal creation recipe declares `CreateRefusal` through
+`Env.SetAdapterInputs` in its existing refusal step. The condition survives adapter
+replacement before the pending control request is retried. After its real feedback
+drain succeeds, the recipe explicitly clears that declaration. It keeps the three
+steps and 80-point budget, with the original failed control reply, real feedback
+and absence of any native-created ledger entry required. The unknown-preset
+variant declares no adapter input and keeps its two steps and 42-point budget.
+Focused binary and in-process regressions interrupt
+`control-intake/derived.rename#1` and run the complete shared recipe and judgement;
+the binary regression pins the catalog walk's seed. The in-process regression
+also retains clean and after-create recovery checks for the unknown-preset variant.
+
 Ordinary interrupted staging reaches adapter garbage collection; current-version
 unstaging reaches transaction trash cleanup without a filesystem fault. Keeping
 those recovery responsibilities on the normal recipe prevents an unrelated fault
