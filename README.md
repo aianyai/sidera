@@ -25,7 +25,13 @@ is no central server and no account to sign up for.
 > **Pre-release.** This README describes Sidera as it is designed. So far the
 > repository contains the single-node daemon, its local interfaces and the
 > command-line tools for initialization, local management and Agent messaging,
-> with their tests.
+> with in-process recovery checks, binary crash walks, and filesystem and
+> transaction benchmarks.
+>
+> The [testkit reference](docs/references/testkit/README.md) describes the
+> acceptance checks; the [storage reference](docs/references/storage/README.md)
+> explains the benchmark measurements.
+>
 > Build the command with `go build ./cmd/sidera`; the available commands are
 > described in the [command-line reference](docs/references/command-line/README.md).
 
