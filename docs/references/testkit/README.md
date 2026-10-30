@@ -101,9 +101,17 @@ crash target without changing the fixture's global environment. Calls use
 `Cmd.Run`, which waits for each started child. An abnormal exit without a wire
 error preserves `*exec.ExitError` for verification alongside the crash record.
 
-Binary session observations use public `endpoints.list` to select an actual open
-runtime endpoint and public `alerts.list`, including acknowledged entries, to
-count an unknown-creation alert by kind and subject. Checkpoints travel through
+The binary fixture binds actual runtime addresses from public `endpoints.list`
+after bootstrap, enabled-instance probes and quiet. It validates one runtime
+identity per instance and unchanged addresses for known instances before merging
+the observations; collection and validation errors follow the startup error path.
+The plain business smoke uses the same private binding after public probe readiness.
+The runtime-address getter returns only this bound identity, without an RPC or
+generation-error check, and fails loudly for an unbound instance. Identities
+survive disablement, closure and daemon replacement and do not establish openness.
+Real Agent calls continue to propagate retained generation and transport errors.
+Public `alerts.list`, including acknowledged entries, counts an unknown-creation
+alert by kind and subject. Checkpoints travel through
 the current fake adapter Controller's typed `checkpoint.put`. The closed-session
 and retention callbacks inspect the real disk through the store's scanner after
 quiet: they require the retained closed endpoint's empty token and absent

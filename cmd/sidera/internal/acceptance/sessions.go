@@ -1,6 +1,7 @@
 package acceptance
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -25,33 +26,49 @@ func newSessionOps() recipes.SessionOps {
 }
 
 func runtimeAddress(e scenario.Env, instance string) string {
-	env := envFrom(e)
-	if err := env.check(); err != nil {
-		panic(err)
-	}
-	raw, err := env.fixture.Manage(e.Ctx(), "endpoints.list", manageapi.Request{})
-	if err != nil {
-		panic(err)
-	}
-	var listed struct {
-		Endpoints []struct{ Address, Kind, Instance, State string } `json:"endpoints"`
-	}
-	if err := resultBody(raw, &listed); err != nil {
-		panic(err)
-	}
-	var address string
-	for _, ep := range listed.Endpoints {
-		if ep.Kind == "runtime" && ep.Instance == instance && ep.State == "open" {
-			if address != "" {
-				panic(fmt.Sprintf("acceptance: multiple open runtime endpoints for %s", instance))
-			}
-			address = ep.Address
-		}
-	}
+	address := envFrom(e).fixture.runtimeAddresses[instance]
 	if address == "" {
-		panic(fmt.Sprintf("acceptance: no open runtime endpoint for %s", instance))
+		panic(fmt.Sprintf("acceptance: no runtime address bound for %s", instance))
 	}
 	return address
+}
+
+// bindRuntimeAddresses retains publicly observed identities across daemon
+// generations and instance disablement. An address does not prove openness.
+func (f *Fixture) bindRuntimeAddresses(ctx context.Context) error {
+	raw, err := f.Manage(ctx, "endpoints.list", manageapi.Request{})
+	if err != nil {
+		return err
+	}
+	var listed struct {
+		Endpoints []struct{ Address, Kind, Instance string } `json:"endpoints"`
+	}
+	if err := resultBody(raw, &listed); err != nil {
+		return err
+	}
+	observed := map[string]string{}
+	for _, ep := range listed.Endpoints {
+		if ep.Kind != "runtime" {
+			continue
+		}
+		if ep.Instance == "" || ep.Address == "" {
+			return fmt.Errorf("acceptance: runtime endpoint has no instance or address")
+		}
+		if _, exists := observed[ep.Instance]; exists {
+			return fmt.Errorf("acceptance: multiple runtime endpoints for %s", ep.Instance)
+		}
+		if known, exists := f.runtimeAddresses[ep.Instance]; exists && known != ep.Address {
+			return fmt.Errorf("acceptance: runtime address changed for %s: %s to %s", ep.Instance, known, ep.Address)
+		}
+		observed[ep.Instance] = ep.Address
+	}
+	if f.runtimeAddresses == nil {
+		f.runtimeAddresses = map[string]string{}
+	}
+	for instance, address := range observed {
+		f.runtimeAddresses[instance] = address
+	}
+	return nil
 }
 
 func checkpointPut(e scenario.Env, instance string, p adapterproto.CheckpointPutParams) error {

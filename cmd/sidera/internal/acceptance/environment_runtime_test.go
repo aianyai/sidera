@@ -19,13 +19,30 @@ func TestRuntimeProfileProbesAcrossGeneration(t *testing.T) {
 	for _, preset := range []string{"default", "fixture"} {
 		t.Run(preset, func(t *testing.T) {
 			f, ctx := profiledFixture(t, fixtureProfile{mainInstance: "chat", preset: preset, runtimeAdapter: true, extraInstances: []string{"managed"}, probeWarning: true})
+			addresses := map[string]string{}
 			for gen := 1; gen <= 2; gen++ {
 				if err := f.Start(ctx, GenerationSpec{Number: gen}); err != nil {
 					t.Fatal(err)
 				}
 				assertRuntimeProbeFrontends(t, ctx, f, preset)
+				e := newEnvironment(ctx, f)
+				for _, instance := range []string{"chat", "managed"} {
+					address := runtimeAddress(e, instance)
+					if gen == 1 {
+						addresses[instance] = address
+						continue
+					}
+					if address != addresses[instance] {
+						t.Fatalf("instance %s changed runtime identity after restart", instance)
+					}
+				}
 				if err := f.Kill(ctx); err != nil {
 					t.Fatal(err)
+				}
+				for instance, address := range addresses {
+					if got := runtimeAddress(e, instance); got != address {
+						t.Fatalf("instance %s lost runtime identity after exit: %s", instance, got)
+					}
 				}
 			}
 		})

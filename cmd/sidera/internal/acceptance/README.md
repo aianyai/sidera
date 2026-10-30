@@ -25,7 +25,8 @@ process. `daemon.Table` supplies declarations only.
 `Init` runs the short initialization command and waits for it. `Start` starts a
 new foreground daemon, waits for public status to report `running`, checks the
 complete tagged crash-point table, and waits for enabled-instance probes and
-quiet. A tagged ping alone may answer while recovery is still running. Its first start
+quiet before binding actual runtime addresses from public `endpoints.list`.
+A tagged ping alone may answer while recovery is still running. Its first start
 installs the caller-owned fake package, enables the `fake` instance and adds the
 `fixture` preset through management. Bootstrap retains each complete request,
 including its operation ID and expected version, before sending it. A later
@@ -288,11 +289,18 @@ resuming probe and acknowledgement in the next generation.
 
 ## Session and retention bindings
 
-`runtimeAddress` selects the unique open runtime endpoint of the requested
-instance from public `endpoints.list`; it never derives an endpoint identifier.
-Its callback shape has no error result, so missing or ambiguous endpoints and
-failed calls fail loudly. `checkpointPut` uses the current adapter Controller's
-real `checkpoint.put`. `hasUnknownCreationAlert` reads `alerts.list`, including
+`runtimeAddress` returns the requested instance's bound runtime identity without
+an RPC or generation-error check. After bootstrap, probes and quiet, `Start`
+observes public `endpoints.list`, requires a unique runtime endpoint per instance
+and an unchanged address for every known instance, then merges the verified
+identities. Collection and validation errors follow the existing startup error
+path. The plain business smoke uses the same private binding after public probe
+readiness. No endpoint identifier is derived from disk. Bound addresses survive
+disablement, closure and daemon replacement; they do not prove that an endpoint
+is open. An unbound instance fails loudly. Real Agent operations still return
+retained generation errors and current transport failures. `checkpointPut` uses
+the current adapter Controller's real `checkpoint.put`.
+`hasUnknownCreationAlert` reads `alerts.list`, including
 acknowledged entries, and requires exactly one matching kind and subject.
 
 `checkClosedSession` and `newMaintenanceOps` inspect actual node files with the

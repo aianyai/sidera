@@ -115,6 +115,9 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 		}
 		return false, nil
 	})
+	if err := f.bindRuntimeAddresses(ctx); err != nil {
+		t.Fatal(err)
+	}
 	e := newEnvironment(ctx, f)
 	if _, err := e.Direct("sender"); err != nil {
 		t.Fatal(err)

@@ -73,6 +73,8 @@ type Fixture struct {
 	inputs         []adapterInput
 	bootstrapSteps []bootstrapStep
 	bootstrapNext  int
+
+	runtimeAddresses map[string]string
 }
 
 func NewFixture(ctx context.Context, root string, binaries Binaries, opts Options) (*Fixture, error) {
@@ -281,7 +283,10 @@ func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
 	if err = f.waitProbes(ctx); err != nil {
 		return err
 	}
-	return f.Quiesce(ctx)
+	if err = f.Quiesce(ctx); err != nil {
+		return err
+	}
+	return f.bindRuntimeAddresses(ctx)
 }
 
 // A dropped management connection is only a transport failure. A recorded
