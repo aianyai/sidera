@@ -64,7 +64,7 @@ func transactionBenchmarkConfigCases() []transactionBenchmarkCase {
 }
 
 func transactionBenchmarkRequest(version admin.Version) config.Request {
-	return config.Request{Key: admin.KeyFor(admin.LocalOwner(), admin.OperationID{42}), Expected: version}
+	return config.Request{Key: admin.KeyFor(admin.LocalOwner(), admin.OperationID{42, byte(version)}), Expected: version}
 }
 
 func transactionBenchmarkResult[T any](T) (json.RawMessage, error) {
