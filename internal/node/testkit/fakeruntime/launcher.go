@@ -1,7 +1,6 @@
 package fakeruntime
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -76,8 +75,18 @@ func (l *ProcessLauncher) Create(ctx context.Context, req CreateRequest) (Sessio
 	if l.Binary == "" || l.Dir == "" || l.LedgerDir == "" || l.Control == "" || l.Now == nil {
 		return nil, errors.New("fakeruntime: a process launcher needs a binary, two directories, the control address and the test clock")
 	}
-	if s, ok := l.Find(nativeRef(l.Seed, req.Attempt)); ok && s.Alive() {
-		return s, nil
+	ref := nativeRef(l.Seed, req.Attempt)
+	if info, err := l.readProcessInfo(ref); err == nil {
+		return l.connect(ctx, info, true)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	claimed, err := l.recordExists(ref)
+	if err != nil {
+		return nil, err
+	}
+	if claimed {
+		return l.waitForProcessInfo(ctx, ref, nil)
 	}
 	l.mu.Lock()
 	first := l.firstTurn
@@ -96,62 +105,100 @@ func (l *ProcessLauncher) Create(ctx context.Context, req CreateRequest) (Sessio
 	cmd := exec.Command(l.Binary)
 	cmd.Env = append(append(os.Environ(), l.Env...), SpecEnv+"="+string(raw))
 	detach(cmd)
-	out, err := cmd.StdoutPipe()
-	if err != nil {
+	// Nil standard streams use the null device. In particular, readiness must
+	// not write to a pipe whose reader dies with the original adapter.
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	type result struct {
-		info ProcessInfo
-		err  error
+	// This is the sole Wait owner for this candidate, even if Create is
+	// cancelled. The fixture's control connection owns the native's lifetime;
+	// cancellation cannot kill a process that may already have created a session.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	return l.waitForProcessInfo(ctx, ref, exited)
+}
+
+func (l *ProcessLauncher) recordExists(ref string) (bool, error) {
+	_, err := os.Stat(filepath.Join(l.Dir, ref+".jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
 	}
-	got := make(chan result, 1)
-	go func() {
-		line, err := bufio.NewReader(out).ReadBytes('\n')
-		if err != nil {
-			got <- result{err: fmt.Errorf("fakeruntime: the runtime process ended before it was ready: %w", err)}
-			return
-		}
-		info, err := DecodeProcessInfo(line)
-		got <- result{info: info, err: err}
-	}()
-	var info ProcessInfo
-	select {
-	case r := <-got:
-		if r.err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return nil, r.err
-		}
-		info = r.info
-	case <-ctx.Done():
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return nil, ctx.Err()
+	return err == nil, err
+}
+
+func (l *ProcessLauncher) readProcessInfo(ref string) (ProcessInfo, error) {
+	raw, err := os.ReadFile(filepath.Join(l.Dir, ref+".json"))
+	if err != nil {
+		return ProcessInfo{}, err
 	}
-	// The process is meant to outlive this one. Its handle is released; it is not
-	// waited for.
-	_ = cmd.Process.Release()
-	return l.connect(ctx, info)
+	info, err := DecodeProcessInfo(raw)
+	if err != nil {
+		return ProcessInfo{}, err
+	}
+	if info.Ref != ref {
+		return ProcessInfo{}, errWrongSession
+	}
+	return info, nil
+}
+
+// waitForProcessInfo observes one native's existing atomic publication. The
+// timer only paces file reads: it supplies neither readiness nor a deadline.
+func (l *ProcessLauncher) waitForProcessInfo(ctx context.Context, ref string, exited <-chan error) (Session, error) {
+	timer := time.NewTimer(10 * time.Millisecond)
+	defer timer.Stop()
+	var candidateExited bool
+	var exitErr error
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if info, err := l.readProcessInfo(ref); err == nil {
+			return l.connect(ctx, info, true)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if candidateExited {
+			claimed, err := l.recordExists(ref)
+			if err != nil {
+				return nil, err
+			}
+			if !claimed {
+				if exitErr != nil {
+					return nil, fmt.Errorf("fakeruntime: the runtime process ended before it was ready: %w", exitErr)
+				}
+				return nil, errors.New("fakeruntime: the runtime process ended before it was ready")
+			}
+			// A candidate can lose the exclusive record create to another
+			// owner. A claim without info cannot prove either life or death;
+			// wait for publication or cancellation, never spawn a replacement.
+			candidateExited = false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case exitErr = <-exited:
+			exited = nil
+			candidateExited = true
+		case <-timer.C:
+			timer.Reset(10 * time.Millisecond)
+		}
+	}
 }
 
 // Find returns the session with the reference: a live one over a connection to its
 // process, or a dead one that reads its record. A reference without an info file
 // is no session.
 func (l *ProcessLauncher) Find(ref string) (Session, bool) {
-	raw, err := os.ReadFile(filepath.Join(l.Dir, ref+".json"))
+	info, err := l.readProcessInfo(ref)
 	if err != nil {
-		return nil, false
-	}
-	info, err := DecodeProcessInfo(raw)
-	if err != nil || info.Ref != ref {
 		return nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if s, err := l.connect(ctx, info); err == nil {
+	if s, err := l.connect(ctx, info, false); err == nil {
 		return s, true
 	}
 	return &deadSession{info: info, record: filepath.Join(l.Dir, ref+".jsonl")}, true
@@ -176,7 +223,7 @@ func (l *ProcessLauncher) Close() error {
 // one, so an info file that outlived its process may point at another session.
 var errWrongSession = errors.New("fakeruntime: the process at the address is not the session the info file names")
 
-func (l *ProcessLauncher) connect(ctx context.Context, info ProcessInfo) (Session, error) {
+func (l *ProcessLauncher) connect(ctx context.Context, info ProcessInfo, requireAlive bool) (Session, error) {
 	c, err := fakectl.Dial(ctx, info.Addr)
 	if err != nil {
 		return nil, err
@@ -215,9 +262,14 @@ func (l *ProcessLauncher) connect(ctx context.Context, info ProcessInfo) (Sessio
 		_ = c.Close()
 		return nil, err
 	}
-	if err := s.checkIdentity(ctx); err != nil {
+	state, err := s.checkIdentity(ctx)
+	if err != nil {
 		_ = c.Close()
 		return nil, err
+	}
+	if requireAlive && !state.Alive {
+		_ = c.Close()
+		return nil, ErrNotAlive
 	}
 	l.mu.Lock()
 	l.clients = append(l.clients, c)
@@ -261,15 +313,15 @@ func (s *remoteSession) Created() LedgerRef {
 }
 
 // checkIdentity asks the process who it is and compares it with the info file.
-func (s *remoteSession) checkIdentity(ctx context.Context) error {
+func (s *remoteSession) checkIdentity(ctx context.Context) (StateReply, error) {
 	var st StateReply
 	if err := s.client.Call(ctx, MethodState, nil, &st); err != nil {
-		return err
+		return StateReply{}, err
 	}
 	if st.Ref != s.info.Ref || st.PID != s.info.PID || st.StartKey != s.info.StartKey {
-		return fmt.Errorf("%w: wanted %s pid %d key %s, got %s pid %d key %s", errWrongSession, s.info.Ref, s.info.PID, s.info.StartKey, st.Ref, st.PID, st.StartKey)
+		return StateReply{}, fmt.Errorf("%w: wanted %s pid %d key %s, got %s pid %d key %s", errWrongSession, s.info.Ref, s.info.PID, s.info.StartKey, st.Ref, st.PID, st.StartKey)
 	}
-	return nil
+	return st, nil
 }
 
 func (s *remoteSession) dispatch(f func(Watcher)) {

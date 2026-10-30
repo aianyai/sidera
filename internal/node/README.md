@@ -83,7 +83,13 @@ what happened. They import only the standard library, `sdk/go` and each other, a
 a real third party would, so they cannot reach `fsx`; the files they touch are
 not daemon state; and the ledger is a test oracle that must stay independent of
 the `fsx` under test. A test in `testkit` enforces the import rule. No testkit
-package is an exception to the time rule.
+package has a time exemption. The sole method-scoped wait is one direct
+`time.NewTimer` call in `testkit/fakeruntime/launcher.go`, in
+`(*ProcessLauncher).waitForProcessInfo`, to sample the same native's existing
+atomic ProcessInfo publication every 10 ms. It cannot establish readiness,
+set a completion deadline, retry creation or advance logical time. The layout
+scan enforces that exact boundary. Future waits must first seek an event
+mechanism and cannot reuse this exception.
 
 ## Enforcement
 

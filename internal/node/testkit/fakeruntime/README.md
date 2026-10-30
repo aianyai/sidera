@@ -95,6 +95,34 @@ A session is driven through `Session`, and sessions are made and found through a
 - **A process ends with its control connection** and writes its address to
   `<native ref>.json` in one atomic step.
 
+Process startup is independent of the adapter's standard streams: all three are
+the null device. A replay first reads the existing ProcessInfo; if only the
+exclusive `<native ref>.jsonl` record exists, it waits for that same native's
+publication without starting another candidate. Concurrent callers that both see
+neither file may start candidates, but the record's existing exclusive create
+permits only one real session effect. Every returned creation checks the published
+reference, PID and start key against one live `runtime.state` reply. Invalid
+publication, identity and connection errors fail rather than being retried.
+
+`(*ProcessLauncher).waitForProcessInfo` in `launcher.go` has the only narrowly
+permitted real-time wait: one direct `time.NewTimer` call paces re-reading that
+same ProcessInfo at 10 ms. There is no existing cross-process publication event.
+Timer expiry is never readiness, a completion deadline, another spawn, a turn
+decision or a logical clock advance. This exception cannot be reused for future
+waits: first seek an event mechanism, then a separate decision if none suffices.
+The method stops its timer on return. Each started candidate has one `Wait`
+goroutine, which can reap it after the caller cancels; the launcher never kills a
+possibly created native on cancellation. The fixture still owns native lifetime
+through its control connection.
+
+A creation error after starting does not prove absence of an effect. In
+particular, a native that exits after claiming its record but before publishing
+ProcessInfo cannot be distinguished from another candidate still initializing.
+The record is retained and never rebuilt; creation waits for publication or
+caller cancellation rather than returning fictional readiness. Unlike the old
+stdout-EOF startup path, such a failure need not return immediately. Contexts do
+not always have deadlines, so this wait has no guaranteed finite duration.
+
 `Controller.SessionEnv(ref)` returns an independent environment map from an
 actually created, live native session. `Runtime` clones the held map under the
 session lock; unknown references return `ErrUnknownSession`, and closed or killed
@@ -135,3 +163,12 @@ messages and `FuzzDecodeLink`, `FuzzDecodeProcessSpecAndInfo`).
 `session_env_test.go` checks the same environment contract in process and in a
 real runtime process: actual values, independent maps, two-session routing,
 unknown and closed sessions, strict replies, runtime role and private outputs.
+`startup_test.go` holds the real control hello response after exclusive creation
+and before publication, then loses the launcher parent or cancels its caller.
+Replay must return the same actual live identity and environment with one real
+creation; fixture closure ends the native and reclaims launcher goroutines.
+`TestUnpublishedNativeDeathRetainsItsClaimUntilCallerCancellation` kills that
+test-owned native before publication and confirms actual control departure.
+The pending creation ends on explicit cancellation; a replay with a live,
+deadline-bounded caller returns only its deadline error, retaining the exact
+original record and sole creation effect without inventing readiness.

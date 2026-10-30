@@ -52,6 +52,17 @@ Three rules bind every runtime package:
 - Randomness arrives as an `io.Reader`; only the composition root and `cmd/`
   read `crypto/rand`.
 
+There is one method-scoped real-time waiting exception, not a package exemption:
+`internal/node/testkit/fakeruntime/launcher.go` permits one direct `time.NewTimer`
+call in `(*ProcessLauncher).waitForProcessInfo`, at fixed 10 ms intervals, solely
+to re-read the same native's existing atomic ProcessInfo publication. No existing
+cross-process event reports its completion. Expiry supplies neither readiness nor
+a completion deadline, spawn retry, logical timestamp or business decision;
+complete ProcessInfo and matching live runtime state remain required. The method
+owns timer cleanup and observes caller cancellation. Future waits must first seek
+an event mechanism and cannot reuse this exception; a further exception needs its
+own decision.
+
 ## Why
 
 - **Contract packages stay pure** because two nodes evaluating the same inputs
@@ -72,6 +83,10 @@ Three rules bind every runtime package:
 - **The scans cover selectors, not only calls, and ignore build constraints**
   so that `now := time.Now`, an import alias and a file that only builds on one
   platform cannot slip past.
+  The native publication exception recognizes the exact file, pointer receiver,
+  method and a direct timer call in its body. Function values, nested closures,
+  other real-time functions and dot imports remain forbidden; ordinary import
+  aliases are resolved to the actual package.
 - **The import scan runs per platform and tag set** because a platform file or a
   tagged file can import a package the default build does not.
 - **Exception lists live in the test.** Some package must touch the real
@@ -135,6 +150,8 @@ Three rules bind every runtime package:
   - `TestRuntimeScanWalksTree`: builds a tree in a temporary directory and
     checks that the walk reaches nested directories and platform files, honors
     the exact-directory exemptions, and skips test files and `testdata`.
+  - `TestNativeReadinessTimerExceptionIsExact`: rejects widening the native
+    publication sampling exception beyond its single direct timer call.
 - `internal/node/doc.go`: the package that gives these tests a home inside the
   tree they scan.
 

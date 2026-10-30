@@ -51,7 +51,15 @@ to each fake process over `fakectl` and waits for every answer. The order matter
 the daemon treats a time that an adapter reports as later than its own now as
 unknown, so a fake that is ahead of the daemon would make blocked-delivery tests
 depend on how two clocks happen to relate. No fake sleeps, reads the wall clock or
-ends a turn because time passed.
+ends a turn because time passed. The sole real-time waiting exception is one
+direct `time.NewTimer` call in `(*ProcessLauncher).waitForProcessInfo`, in
+`fakeruntime/launcher.go`: fixed 10 ms sampling of the same native process's
+existing atomic ProcessInfo publication. No existing cross-process event reports
+that publication; the timer only paces reads, never establishes readiness, adds a
+completion deadline, retries creation or advances this clock. Runtime identity
+and liveness still come from the real process. This exception is not reusable:
+every future wait must first seek an event mechanism and obtain its own decision
+if none suffices.
 
 ## The ledger is the oracle
 

@@ -287,9 +287,64 @@ func modulePath(t *testing.T, root string) string {
 // reads or waits on the real clock in a runtime package outside the clock
 // packages. Fake clocks can then drive every deadline, lease and retry.
 func TestRuntimeReadsTimeOnlyThroughClock(t *testing.T) {
-	scanRuntime(t, timeExceptions, func(fset *token.FileSet, f *ast.File) []string {
-		return bannedSelectors(fset, f, bannedTimeFuncs)
+	scanRuntimeDirs(t, func(dir string, fset *token.FileSet, f *ast.File) []string {
+		if slices.Contains(timeExceptions, dir) {
+			return nil
+		}
+		return runtimeTimeSelectors(dir, fset, f)
 	})
+}
+
+// runtimeTimeSelectors permits only the native launcher's direct publication
+// sampling timer. It is not a package exemption or a reusable waiting facility.
+func runtimeTimeSelectors(dir string, fset *token.FileSet, f *ast.File) []string {
+	var allowed map[*ast.SelectorExpr]bool
+	if dir == "internal/node/testkit/fakeruntime" && filepath.Base(fset.Position(f.Pos()).Filename) == "launcher.go" {
+		timeNames := map[string]bool{}
+		for _, spec := range f.Imports {
+			if spec.Path.Value == `"time"` {
+				name := "time"
+				if spec.Name != nil {
+					name = spec.Name.Name
+				}
+				if name != "." && name != "_" {
+					timeNames[name] = true
+				}
+			}
+		}
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != "waitForProcessInfo" || fn.Recv == nil || len(fn.Recv.List) != 1 {
+				continue
+			}
+			ptr, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+			if !ok {
+				continue
+			}
+			receiver, ok := ptr.X.(*ast.Ident)
+			if !ok || receiver.Name != "ProcessLauncher" {
+				continue
+			}
+			var timers []*ast.SelectorExpr
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if _, nested := n.(*ast.FuncLit); nested {
+					return false
+				}
+				if call, ok := n.(*ast.CallExpr); ok {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTimer" {
+						if id, ok := sel.X.(*ast.Ident); ok && timeNames[id.Name] {
+							timers = append(timers, sel)
+						}
+					}
+				}
+				return true
+			})
+			if len(timers) == 1 {
+				allowed = map[*ast.SelectorExpr]bool{timers[0]: true}
+			}
+		}
+	}
+	return bannedSelectorsExcept(fset, f, bannedTimeFuncs, allowed)
 }
 
 // TestRuntimeTouchesFilesOnlyThroughFsx fails on any use of an operating
@@ -391,6 +446,10 @@ func scanTree(root, base string, check dirCheck) ([]string, error) {
 // resolves import aliases. A dot import of a package in banned is reported as a
 // whole: its names can no longer be told from local ones.
 func bannedSelectors(fset *token.FileSet, f *ast.File, banned map[string]map[string]bool) []string {
+	return bannedSelectorsExcept(fset, f, banned, nil)
+}
+
+func bannedSelectorsExcept(fset *token.FileSet, f *ast.File, banned map[string]map[string]bool, allowed map[*ast.SelectorExpr]bool) []string {
 	var out []string
 	locals := map[string]string{} // local package name -> import path
 	for _, spec := range f.Imports {
@@ -422,12 +481,49 @@ func bannedSelectors(fset *token.FileSet, f *ast.File, banned map[string]map[str
 		if !ok {
 			return true
 		}
-		if importPath, ok := locals[id.Name]; ok && banned[importPath][sel.Sel.Name] {
+		if importPath, ok := locals[id.Name]; ok && banned[importPath][sel.Sel.Name] && !allowed[sel] {
 			out = append(out, fmt.Sprintf("%s: %s.%s is not allowed here", fset.Position(sel.Pos()), importPath, sel.Sel.Name))
 		}
 		return true
 	})
 	return out
+}
+
+func TestNativeReadinessTimerExceptionIsExact(t *testing.T) {
+	const dir = "internal/node/testkit/fakeruntime"
+	const method = `func (l *ProcessLauncher) waitForProcessInfo() { %s }`
+	for _, row := range []struct {
+		name, dir, file, imports, method, body string
+		want                                   int
+	}{
+		{"direct timer", dir, "launcher.go", `"time"`, method, `_ = time.NewTimer(10*time.Millisecond)`, 0},
+		{"import alias", dir, "launcher.go", `wall "time"`, method, `_ = wall.NewTimer(10*wall.Millisecond)`, 0},
+		{"wrong directory", "internal/node/other", "launcher.go", `"time"`, method, `_ = time.NewTimer(1)`, 1},
+		{"wrong file", dir, "other.go", `"time"`, method, `_ = time.NewTimer(1)`, 1},
+		{"wrong method", dir, "launcher.go", `"time"`, `func (l *ProcessLauncher) other() { %s }`, `_ = time.NewTimer(1)`, 1},
+		{"wrong receiver", dir, "launcher.go", `"time"`, `func (l *Other) waitForProcessInfo() { %s }`, `_ = time.NewTimer(1)`, 1},
+		{"value receiver", dir, "launcher.go", `"time"`, `func (l ProcessLauncher) waitForProcessInfo() { %s }`, `_ = time.NewTimer(1)`, 1},
+		{"no receiver", dir, "launcher.go", `"time"`, `func waitForProcessInfo() { %s }`, `_ = time.NewTimer(1)`, 1},
+		{"clock read", dir, "launcher.go", `"time"`, method, `_ = time.Now()`, 1},
+		{"ticker", dir, "launcher.go", `"time"`, method, `_ = time.NewTicker(1)`, 1},
+		{"function value", dir, "launcher.go", `"time"`, method, `_ = time.NewTimer`, 1},
+		{"nested closure", dir, "launcher.go", `"time"`, method, `func() { _ = time.NewTimer(1) }()`, 1},
+		{"dot import", dir, "launcher.go", `. "time"`, method, `_ = NewTimer(1)`, 1},
+		{"two direct timers", dir, "launcher.go", `"time"`, method, `_ = time.NewTimer(1); _ = time.NewTimer(1)`, 2},
+		{"timer and forbidden clock read", dir, "launcher.go", `"time"`, method, `_ = time.NewTimer(1); _ = time.Now()`, 1},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			src := "package p; import " + row.imports + "; " + fmt.Sprintf(row.method, row.body)
+			f, err := parser.ParseFile(fset, row.file, src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := runtimeTimeSelectors(row.dir, fset, f); len(got) != row.want {
+				t.Fatalf("got %d reports %q, want %d", len(got), got, row.want)
+			}
+		})
+	}
 }
 
 // bannedImports returns one message per import of a package in banned.

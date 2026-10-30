@@ -256,6 +256,17 @@ coverage dimensions.
   real time and its outcome would depend on how the two clocks happen to relate. So the
   fakes take a `func() time.Time` (they cannot import the clock package) and in the
   binary layer are set over the control channel, daemon first, fakes after.
+  The only real-time waiting exception is one direct `time.NewTimer` call in
+  `(*ProcessLauncher).waitForProcessInfo`, in
+  `internal/node/testkit/fakeruntime/launcher.go`: fixed 10 ms sampling of the same
+  native's existing atomic ProcessInfo publication. No existing cross-process event
+  reports its completion. The method stops the timer and observes caller
+  cancellation. Expiry only triggers another read; it is never readiness, a
+  completion deadline, a spawn retry, a logical clock advance or a business decision.
+  This exception cannot be reused: future waits must first seek an event mechanism
+  and obtain a separate decision if none suffices. The layout scan limits it to that
+  exact file, pointer receiver, method and one direct call; it grants no package
+  time exemption.
 - **A turn never ends because time passed.** Turns whose length depends on the machine
   make every test that waits on one flaky. Turns start and end when the script says so;
   what the model does inside is a list of actions run by whoever supplies the runner.
@@ -319,6 +330,30 @@ coverage dimensions.
   session still there, or gone. So each session is a detached process, found again by a
   file it writes atomically, and a process that is gone is still a session whose record
   can be read.
+  All native standard streams use the null device, so losing the original adapter
+  during startup cannot break a readiness stdout pipe. A replay with an existing
+  exclusive session record waits for that same native's ProcessInfo without
+  spawning again. If callers race before either file exists, candidates may start,
+  but the existing exclusive record create permits only one real native session
+  effect. Creation accepts only a complete publication and a matching live
+  `runtime.state` reference, PID and start key; deterministic read, decode, identity
+  or connection errors return directly. Each started candidate has one buffered
+  `Wait` owner that can reap it after cancellation, which does not kill a possibly
+  created native. A claim with no publication may mean initialization is pending or
+  has failed, even if that candidate exited; it is never fictional readiness, nor
+  grounds to delete the record and recreate. Unlike the old stdout-EOF path, it can
+  wait until caller cancellation, with no guaranteed finite duration when the
+  context has no deadline. The fixture's control connection still owns lifetime.
+  `TestPendingStartupSurvivesLauncherLoss` holds a real hello response in this
+  window, kills and waits for the launcher parent or cancels its caller, and
+  requires replay of the same actual live identity, environment and sole native
+  creation. `TestUnpublishedNativeDeathRetainsItsClaimUntilCallerCancellation`
+  kills the test-owned native before publication, confirms control departure,
+  and requires cancellation rather than readiness from both the pending call and
+  a replay, with the exact original record retained and no second creation effect.
+  The replay's test-only deadline bounds its caller, not production startup.
+  The complete binary recovery regression retains the real
+  `clock-high-water/clock.rename#1` cut and its original recipe judgement.
 - **Loopback TCP for the control channel,** not a Unix socket or a named pipe: it is the
   same on all three platforms, has no path-length limit, and stays on the local host.
   Session environment responses contain credentials and must not be copied to arguments, static inputs, records or
