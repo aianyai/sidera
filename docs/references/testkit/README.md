@@ -18,6 +18,7 @@ document gives the reasons and says where the tests are.
 | `fakeagent/engineagent` | The engine-layer backend of the fake agent: the engine's service interface called in process. Ten methods call the engine; Probe needs a credential this caller-bound backend does not hold. |
 | `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
 | `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, the in-process crash-walk backend, and the generator of control signals for model tests. |
+| `diskfacts` | Named read-only lifecycle observations shared by execution bindings: init preservation, signing-file snapshots and stopped-disk operation results and verified revocations. |
 | `acceptance/agent/mcp` | The MCP backend of the fake agent: independently encoded exchanges for both supported revisions, exact receive text, and tool errors mapped to the scenario categories. It takes process pipes and imports neither the production MCP server nor an MCP SDK. |
 | `acceptance/recipes`, `acceptance/disk`, `acceptance/inproc` | Fixture-independent acceptance descriptions and their in-process binding; fresh closures per run, real lifecycle entry points and externally evidenced domain checks. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
@@ -25,8 +26,13 @@ document gives the reasons and says where the tests are.
 The first four, with the two programs, are the **third-party side**: they import the
 standard library, the SDK module and each other and nothing else. `fakeagent`,
 `engineagent`, `scenario`, `harness` and `crashwalk` are the **Sidera side** and may
-import any runtime or contract package; `scenario` alone imports neither the engine
+import any runtime or contract package; `scenario` imports neither the engine
 nor a fixture.
+
+`diskfacts` is also on the Sidera side, with a narrower dependency boundary: the
+standard library, `fsx`, `keys`, `config`, `store`, `admin`, `ident` and
+`revocation`. It imports no engine, daemon, harness, recipe or in-process binding.
+Its callers keep process lifecycle and domain judgements.
 
 The backends of the fake agent that run the command-line client and speak to the MCP
 server, the binary-layer fixture and the binary backend of the crash walk build on
@@ -878,6 +884,29 @@ subsequent attempt, and return facts to a domain judgement. A selected crash is
 followed by a real next walk generation; a retirement rejection during that
 recovery remains that generation's actual trace. Natural exit never marks a
 crash target reached.
+
+Shared disk observations live in `testkit/diskfacts`. `InitPreservation`
+remembers the first actually present bytes of the identity key, network key,
+self-revocation, clock record and the node, policy, presets and instances
+configuration files. Missing files supply no baseline until a later `Remember`
+finds them. `Check` requires all remembered bytes to remain unchanged. The
+certificate and serial remain outside this set because interrupted init may
+reissue them. `ReadSigning` instead snapshots all five signing files: the two
+keys, self-revocation, certificate and serial. `SigningSnapshot.Unchanged`
+compares their private byte copies and reports missing or unreadable files as
+errors. Both snapshot types format only as fixed type names, so diagnostic
+printing cannot expose retained key or self-revocation bytes.
+
+`InspectTerminal` accepts a read-only filesystem and the binding's actual
+stopped-disk store scan. It copies only the result of the supplied operation ID
+under `admin.LocalOwner`, preserving its raw bytes and nil absence. It verifies
+every kept revocation with `config.DecodeRevocation`, including the signature
+and digest filename, and requires `KindNodeSelf` and the actual initialized node
+for retirement. Finding a valid self-revocation does not hide later invalid or
+unreadable entries. It neither constructs responses or replays nor obtains a
+writer to observe these facts. `diskfacts_test.go` covers each protected and
+signing path, late appearance, allowed reissue, result ownership and absence,
+foreign-node revocations and errors after a valid self-revocation.
 
 After the chain has already terminated, a separate `TerminalAudit` retains an
 additional restart attempt's trace and startup/exit errors. Stop queries its

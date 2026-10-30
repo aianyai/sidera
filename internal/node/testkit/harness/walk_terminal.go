@@ -7,12 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
-	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -21,8 +19,8 @@ import (
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
+	"github.com/aianyai/sidera/internal/node/testkit/diskfacts"
 	"github.com/aianyai/sidera/internal/node/txn"
-	"github.com/aianyai/sidera/internal/revocation"
 )
 
 // TerminalOperation selects a management request that ends the real daemon.
@@ -108,7 +106,7 @@ func runTerminal(ctx context.Context, t *walkTest, s *TerminalWalkScenario, r *w
 	if s.Operation == TerminalRetire {
 		request.Params = map[string]string{"node": facts.Node.String()}
 	}
-	signing, err := terminalSigning(disk)
+	signing, err := diskfacts.ReadSigning(disk)
 	if err != nil {
 		return err
 	}
@@ -161,7 +159,7 @@ func runTerminal(ctx context.Context, t *walkTest, s *TerminalWalkScenario, r *w
 				return startErr
 			}
 			facts.RecoveryRejected = true
-			facts.SigningUnchanged, err = terminalSigningUnchanged(disk, signing)
+			facts.SigningUnchanged, err = signing.Unchanged(disk)
 			if err != nil {
 				return err
 			}
@@ -176,10 +174,15 @@ func runTerminal(ctx context.Context, t *walkTest, s *TerminalWalkScenario, r *w
 	if err := r.checkTrigger(); err != nil {
 		return err
 	}
-	facts.Persisted, facts.Retired, err = terminalDiskFacts(disk, ProgramTable(t), facts.Node, s.RequestID)
+	scan, err := store.New(txn.New(disk, ProgramTable(t), nil)).Scan()
 	if err != nil {
 		return err
 	}
+	terminal, err := diskfacts.InspectTerminal(disk, scan, facts.Node, s.RequestID)
+	if err != nil {
+		return err
+	}
+	facts.Persisted, facts.Retired = terminal.Persisted, terminal.Retired
 	if !facts.RecoveryRejected {
 		facts.Audit, err = auditTerminal(ctx, t, home, disk, clk, s, request, signing, len(r.result.Hits)+1)
 		if err != nil {
@@ -194,7 +197,7 @@ func runTerminal(ctx context.Context, t *walkTest, s *TerminalWalkScenario, r *w
 	return nil
 }
 
-func auditTerminal(ctx context.Context, t *walkTest, home string, disk *fsxtest.Mem, clk *clocktest.Fake, s *TerminalWalkScenario, request manageapi.Request, signing map[string][]byte, attempt int) (*TerminalAudit, error) {
+func auditTerminal(ctx context.Context, t *walkTest, home string, disk *fsxtest.Mem, clk *clocktest.Fake, s *TerminalWalkScenario, request manageapi.Request, signing diskfacts.SigningSnapshot, attempt int) (*TerminalAudit, error) {
 	audit := &TerminalAudit{Attempted: true}
 	g := newWalkGeneration(attempt, nil)
 	g.openWindow()
@@ -240,60 +243,7 @@ func auditTerminal(ctx context.Context, t *walkTest, home string, disk *fsxtest.
 	}
 	return audit, err
 }
-func terminalAuditSigning(r fsx.Reader, before map[string][]byte, cause error) (bool, error) {
-	unchanged, err := terminalSigningUnchanged(r, before)
+func terminalAuditSigning(r fsx.Reader, before diskfacts.SigningSnapshot, cause error) (bool, error) {
+	unchanged, err := before.Unchanged(r)
 	return unchanged, errors.Join(cause, err)
-}
-func terminalSigning(r fsx.Reader) (map[string][]byte, error) {
-	out := map[string][]byte{}
-	for _, p := range []string{keys.IdentityKeyPath, keys.NetworkKeyPath, keys.SelfRevocationPath, keys.CertificatePath, keys.SerialPath} {
-		data, err := r.ReadFile(p)
-		if err != nil {
-			return nil, err
-		}
-		out[p] = data
-	}
-	return out, nil
-}
-func terminalSigningUnchanged(r fsx.Reader, before map[string][]byte) (bool, error) {
-	after, err := terminalSigning(r)
-	if err != nil {
-		return false, err
-	}
-	for p, data := range before {
-		if !bytes.Equal(data, after[p]) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-func terminalDiskFacts(disk fsx.FS, table *txn.Table, node ident.NodeID, id admin.OperationID) (json.RawMessage, bool, error) {
-	scan, err := store.New(txn.New(disk, table, nil)).Scan()
-	if err != nil {
-		return nil, false, err
-	}
-	var result json.RawMessage
-	key := admin.KeyFor(admin.LocalOwner(), id)
-	for _, r := range scan.Admin {
-		if r.Key == key {
-			result = bytes.Clone(r.Result)
-		}
-	}
-	entries, err := disk.ReadDir(config.RevocationsDir)
-	if err != nil {
-		return nil, false, err
-	}
-	retired := false
-	for _, entry := range entries {
-		raw, err := disk.ReadFile(path.Join(config.RevocationsDir, entry.Name))
-		if err != nil {
-			return nil, false, err
-		}
-		rev, _, err := config.DecodeRevocation(entry.Name, raw)
-		if err != nil {
-			return nil, false, err
-		}
-		retired = retired || (rev.Kind() == revocation.KindNodeSelf && rev.Node() == node)
-	}
-	return result, retired, nil
 }

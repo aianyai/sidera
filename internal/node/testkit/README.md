@@ -15,7 +15,7 @@ The packages fall on two sides of one line.
 | Side | Packages | May import |
 | ---- | -------- | ---------- |
 | Third party | [`ledger`](ledger/README.md), [`fakectl`](fakectl/README.md), [`fakeruntime`](fakeruntime/README.md), [`fakeadapter`](fakeadapter/README.md), and the programs `cmd/sidera-fake-adapter`, `cmd/sidera-fake-runtime` | the standard library, `sdk/go/...` and each other |
-| Sidera | [`fakeagent`](fakeagent/README.md), [`fakeagent/engineagent`](fakeagent/engineagent/README.md), [`scenario`](scenario/README.md), [`harness`](harness/README.md), [`crashwalk`](crashwalk/README.md) | anything of the runtime tree and the contract packages, except that `scenario` imports neither the engine nor a fixture |
+| Sidera | [`fakeagent`](fakeagent/README.md), [`fakeagent/engineagent`](fakeagent/engineagent/README.md), [`scenario`](scenario/README.md), [`harness`](harness/README.md), [`crashwalk`](crashwalk/README.md), [`diskfacts`](diskfacts/README.md) | anything of the runtime tree and the contract packages, except that `scenario` imports neither the engine nor a fixture and `diskfacts` is restricted to the disk readers and contracts listed in its README |
 
 The third-party side plays programs a stranger would write: an adapter that speaks
 the published protocol, a native runtime that has never heard of Sidera, and the
@@ -98,6 +98,14 @@ fixture is [`harness`](harness/README.md), and the agent it hands out is
 the ledger entries. What a layer cannot provide (a runtime that sessions can use, an
 adapter host in a fixture made without one) is an error that is
 `scenario.ErrNotAvailable`, never a stand-in.
+
+## Read-only lifecycle facts
+
+[`diskfacts`](diskfacts/README.md) shares named read-only lifecycle observations:
+init preservation, signing-file snapshots and stopped-disk terminal results and
+revocations. It uses the binding's actual store scan and imports no engine,
+daemon, fixture or recipe. Execution and domain judgements stay with the bindings
+and recipes.
 
 ## Acceptance recipes
 

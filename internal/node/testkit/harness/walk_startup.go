@@ -1,13 +1,11 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,6 +18,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
+	"github.com/aianyai/sidera/internal/node/testkit/diskfacts"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -95,13 +94,13 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 	}
 	// Init's never-overwrite promise is judged against bytes present before each
 	// attempt, independently of the writer that will try to finish the home.
-	protected := map[string][]byte{}
+	var protected diskfacts.InitPreservation
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if s.Operation == StartupInit {
-			if err := rememberInitFiles(disk, protected); err != nil {
+			if err := protected.Remember(disk); err != nil {
 				return err
 			}
 		}
@@ -141,7 +140,7 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 		}
 		r.finishGeneration()
 		if s.Operation == StartupInit {
-			if err := checkInitFiles(disk, protected); err != nil {
+			if err := protected.Check(disk); err != nil {
 				r.result.Violations = append(r.result.Violations, err.Error())
 				return nil
 			}
@@ -276,41 +275,4 @@ func (r *startupRandom) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.r.Read(p)
-}
-
-// These are the files init must reuse verbatim. Certificates and their serial
-// may be reissued after an interrupted init and therefore are not in this list.
-var initPreservedFiles = []string{
-	keys.IdentityKeyPath, keys.NetworkKeyPath, keys.SelfRevocationPath, keys.ClockPath,
-	"config/node.json", "config/policy.json", "config/presets.json", "config/instances.json",
-}
-
-func rememberInitFiles(r fsx.Reader, protected map[string][]byte) error {
-	for _, path := range initPreservedFiles {
-		if _, ok := protected[path]; ok {
-			continue
-		}
-		data, err := r.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		protected[path] = data
-	}
-	return nil
-}
-func checkInitFiles(r fsx.Reader, protected map[string][]byte) error {
-	for _, path := range initPreservedFiles {
-		want, ok := protected[path]
-		if !ok {
-			continue
-		}
-		got, err := r.ReadFile(path)
-		if err != nil || !bytes.Equal(got, want) {
-			return fmt.Errorf("harness: init changed existing %s", path)
-		}
-	}
-	return nil
 }

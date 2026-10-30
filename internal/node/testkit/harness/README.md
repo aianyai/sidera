@@ -398,6 +398,11 @@ snapshots the disk before cleanup, and its next real startup is the next walk
 generation, including an identity-retired refusal. A natural terminal exit never
 claims a target and has no after-return boundary. No response is invented for an
 interrupted request; the stopped disk is read independently before further work.
+The runner obtains the actual store scan and passes it to
+[`diskfacts`](../diskfacts/README.md) for the local-owner result and verified
+node-bound retirement. That package also owns the startup runner's init
+preservation set and terminal signing-file snapshots; lifecycle execution,
+responses, replay and judgements remain here or in the acceptance recipes.
 
 Once that chain has terminated, an additional restart audit verifies stop replay
 or retirement refusal. It is explicitly separate from recovery: `TerminalAudit`
