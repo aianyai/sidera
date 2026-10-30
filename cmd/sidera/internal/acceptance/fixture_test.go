@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 )
 
@@ -34,6 +35,64 @@ func fixture(t *testing.T) (*Fixture, context.Context) {
 		}
 	})
 	return f, ctx
+}
+
+func TestRealBinaryAdapterAcquisitionEndsWithGeneration(t *testing.T) {
+	for _, alreadyExited := range []bool{true, false} {
+		name := "during-wait"
+		if alreadyExited {
+			name = "already-exited"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, ctx := fixture(t)
+			if err := f.prepare(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Start(ctx, GenerationSpec{Number: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyExited {
+				if err := f.Kill(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The deadline is only a failure bound: the caller must remain live
+			// when actual process exit ends the missing-connection acquisition.
+			caller, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			type acquisition struct {
+				ctl fakeadapter.Controller
+				err error
+			}
+			result := make(chan acquisition, 1)
+			go func() {
+				ctl, err := f.Adapter(caller, "missing")
+				result <- acquisition{ctl, err}
+			}()
+			if !alreadyExited {
+				select {
+				case got := <-result:
+					t.Fatalf("missing adapter returned before daemon exit: %v", got.err)
+				case <-time.After(20 * time.Millisecond):
+				}
+				// Only the process owner is used concurrently; Fixture calls are
+				// serialized, and no replacement starts until Adapter returns.
+				if _, err := f.current.p.killAndWait(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := <-result
+			if got.ctl != nil || got.err == nil || caller.Err() != nil || !f.current.p.exited() {
+				t.Fatalf("acquisition controller=%v error=%v caller error=%v process exited=%v", got.ctl, got.err, caller.Err(), f.current.p.exited())
+			}
+			if err := f.Start(ctx, GenerationSpec{Number: 2}); err != nil {
+				t.Fatal(err)
+			}
+			if ctl, err := f.Adapter(ctx, "fake"); err != nil || ctl == nil {
+				t.Fatalf("replacement acquisition: %v, %v", ctl, err)
+			}
+		})
+	}
 }
 
 func TestRealBinaryRestartRetainsTimeAfterClockRPCFails(t *testing.T) {

@@ -165,6 +165,18 @@ Tagged daemons clear their process crash controls before launching adapters,
 so fake native runtimes and their CLI descendants cannot inherit a daemon target.
 The fixture's README describes the runtime creation-step limitation.
 
+Acquiring an adapter Controller captures the current daemon generation and bounds
+both connection waiting and synchronization by the caller context and that
+process's completed exit. This prevents an interrupted recipe step from waiting
+for a replacement that its own caller cannot start until the step returns. An
+already-ended generation also fails acquisition. Same-generation reconnects
+still wait while the daemon lives; a later `Start` gives subsequent calls the
+replacement's lifetime. Without a current generation acquisition remains bounded
+only by the caller context. The listener and native runtimes survive daemon exit,
+and returned controllers keep their ordinary transport errors rather than a
+process-liveness lease. Real-process lifecycle regressions cover exits before and
+during a missing-connection wait and successful acquisition after replacement.
+
 `NewWalkBackend` in that same binary support package runs scripts and actual
 startup and terminal lifecycles through this fixture. It accepts prebuilt programs
 and an existing absolute short directory owned by its caller; each run creates,

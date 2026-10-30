@@ -53,7 +53,15 @@ crash controls before launching adapters, so descendant CLI processes do not
 inherit the daemon generation's target or record file.
 
 `Manage`, `Adapter` and `Runtime` expose the existing external clients. The
-fixture owns one logical `Now` across daemon generations. `SetTime` retains the
+`Adapter` acquisition captures the current daemon generation. Its connection
+wait and synchronization end on caller cancellation or that process's completed
+exit, including an exit before acquisition begins. A later `Start` gives new
+acquisitions the replacement generation; reconnects within a live generation
+still wait for a new connection. With no current generation only the caller
+context bounds acquisition. Returned controllers retain their ordinary transport
+errors; acquisition does not promise continued process liveness.
+
+The fixture owns one logical `Now` across daemon generations. `SetTime` retains the
 requested target before sending it to the daemon, even if the RPC fails: a
 daemon may have changed its clock before losing its response, and the next
 generation starts at the retained target. An RPC failure remains an error and

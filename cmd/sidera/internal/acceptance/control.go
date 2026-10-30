@@ -100,11 +100,33 @@ func (f *Fixture) waitProbes(ctx context.Context) error {
 }
 
 func (f *Fixture) Adapter(ctx context.Context, name string) (fakeadapter.Controller, error) {
-	c, err := f.control.Wait(ctx, name)
-	if err != nil {
-		return nil, err
+	g := f.current
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if g != nil {
+		// The listener survives generations, but this acquisition must end
+		// before its caller can start a replacement daemon.
+		go func() {
+			select {
+			case <-g.p.done:
+				cancel()
+			case <-waitCtx.Done():
+			}
+		}()
 	}
-	if err = f.syncConnections(ctx); err != nil {
+	c, err := f.control.Wait(waitCtx, name)
+	if err == nil {
+		err = f.syncConnections(waitCtx)
+	}
+	// Wait may find an existing connection, and synchronization may have no
+	// members. Neither fast path establishes that acquisition is still live.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if g != nil && g.p.exited() {
+		return nil, fmt.Errorf("acceptance: daemon generation %d exited while acquiring adapter %s", g.spec.Number, name)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return fakeadapter.RemoteKnobs{Conn: c}, nil
