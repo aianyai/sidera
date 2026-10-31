@@ -6,6 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/Microsoft/go-winio v0.6.4
+	github.com/coder/websocket v1.8.15
 	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/sys v0.49.0
