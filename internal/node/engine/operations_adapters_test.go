@@ -1078,6 +1078,72 @@ func TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion(t *testi
 	}
 }
 
+// A running adapter holds the presets it was started with, so a change of the presets
+// stops and starts again each enabled instance whose adapter declares a runtime, and
+// leaves alone the instances that are given no presets (direct-only, or disabled).
+// The engine marks the restarted instance offline, since the host reports nothing for
+// a stop, and the adapter.start it is taken on with carries the presets as they are.
+func TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command func(version admin.Version) engine.ManagementCommand
+		want    []string // the names in the presets of the next adapter.start
+	}{
+		{"adding a preset", func(v admin.Version) engine.ManagementCommand {
+			return addPresetCommand(50, "add", v, "tight", `{"local_sources":"deny"}`)
+		}, []string{"default", "plain", "tight"}},
+		{"removing a preset", func(v admin.Version) engine.ManagementCommand {
+			return removePresetCommand(51, "remove", v, "plain")
+		}, []string{"default"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			host := newHostDouble()
+			r := newRig(t, 10, withAdapters(host))
+			r.enableInstance("agent", "")
+			r.enableInstance("idle", "")
+			r.disableInstance("idle")
+			r.addPreset("plain", `{"local_sources":"deny"}`)
+			e := r.start()
+			rt := runtimeAdmission(t, 0, adapterproto.FrontendCLI)
+			if _, err := admitFull(ctx, e, "agent", rt); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.AdapterStarted(ctx, "agent", adapterproto.StartResult{}); err != nil {
+				t.Fatal(err)
+			}
+			// chat is admitted as the direct-only adapter it is.
+			if err := admitOn(ctx, e, "chat", r.admit); err != nil {
+				t.Fatal(err)
+			}
+			if v, err := e.Adapter(ctx, "agent"); err != nil || !v.Online {
+				t.Fatalf("the instance before: %+v, %v; want it online", v, err)
+			}
+
+			if _, err := e.Execute(ctx, tc.command(r.cfg.Presets().Version)); err != nil {
+				t.Fatal(err)
+			}
+			if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent", "run:agent"}) {
+				t.Errorf("the host was asked for %v, want agent stopped and started again, and nothing else", got)
+			}
+			if v, err := e.Adapter(ctx, "agent"); err != nil || v.Online {
+				t.Errorf("the instance after: %+v, %v; want it offline until the new adapter is taken on", v, err)
+			}
+			got, err := admitFull(ctx, e, "agent", rt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, p := range got.Presets {
+				names = append(names, p.Name)
+			}
+			if !reflect.DeepEqual(names, tc.want) {
+				t.Errorf("the new adapter.start carries the presets %v, want %v", names, tc.want)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Install, then enable, then the probe
 

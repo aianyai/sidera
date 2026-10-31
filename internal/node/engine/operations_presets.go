@@ -3,8 +3,11 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
 )
 
@@ -27,11 +30,39 @@ func presetResult(encode func(PresetChange) ([]byte, error), name string, x *opR
 	}
 }
 
+// presetsChanged is what follows the commit of a change of the presets. The presets
+// reach an adapter only in adapter.start, so an adapter that runs holds the ones it
+// was started with: every enabled instance whose adapter declares a runtime (or is
+// not known to yet, which may be about to be started with the old ones) is stopped
+// and started again, so that it is taken on with the presets as they are now. The
+// engine marks the instance offline as it does for a connection that ended, since
+// the host reports nothing for a stop; the sessions the adapter holds are attached
+// again by the new adapter.start.
+func (e *Engine) presetsChanged(now time.Time) {
+	if e.d.Adapters == nil {
+		return
+	}
+	for _, instance := range sortedKeys(e.d.Config.Instances().Items) {
+		if _, ok := e.enabledInstance(instance); !ok {
+			continue
+		}
+		if adm, admitted := e.admission(instance); admitted && !adm.Declares(adapterreg.KindRuntime) {
+			continue // a direct-only adapter is given no presets
+		}
+		if err := e.gone(now, instance, adapterhost.GoneConnectionEnded); err != nil {
+			e.log.Warn("an instance could not be marked offline for its restart", "instance", instance, "error", err.Error())
+		}
+		e.d.Adapters.Stop(instance)
+		e.d.Adapters.EnsureRunning(instance)
+	}
+}
+
 // AddPresetOp is the operation that adds a preset from its document. The document
 // must make the statement about local sources, which has no default, and a name
 // that is taken is refused: a preset is changed by removing it and adding it again.
 // Adding a preset loosens what the node allows, so the administrative rules judge it
-// as loosening. The version is that of the whole collection, checked inside the
+// as loosening. After the commit the running adapters are restarted to be given the
+// presets (presetsChanged). The version is that of the whole collection, checked inside the
 // change, the operation and its result kept in presets.json in the same replacement.
 // encode makes the result; it runs in the loop and must not wait.
 func AddPresetOp(name string, preset []byte, encode func(PresetChange) ([]byte, error)) Operation {
@@ -53,12 +84,14 @@ func (o *addPresetOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.presetsChanged(x.now)
 	return after.LastOperation.Result, nil
 }
 
 // RemovePresetOp is the operation that removes a preset. Removing narrows what the
-// node allows, so the administrative rules judge it as narrowing. The version and
-// the keeping of the result are those of AddPresetOp.
+// node allows, so the administrative rules judge it as narrowing. The version, the
+// keeping of the result and the restart of the running adapters are those of
+// AddPresetOp.
 func RemovePresetOp(name string, encode func(PresetChange) ([]byte, error)) Operation {
 	return &removePresetOp{name: name, encode: encode}
 }
@@ -77,5 +110,6 @@ func (o *removePresetOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.presetsChanged(x.now)
 	return after.LastOperation.Result, nil
 }

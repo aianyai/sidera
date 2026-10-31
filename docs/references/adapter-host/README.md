@@ -28,6 +28,12 @@ line per write and rotates between writes, so the bytes of a pipe are cut into
 lines); a log that cannot be opened is a warning and the adapter runs with its
 standard error discarded. The protocol never goes there: it is the other stream.
 
+A change of the presets is also a reason to start an instance again: the presets are
+carried in `adapter.start` only, so the engine stops the instance and asks for it to
+run again (`Stop`, then `EnsureRunning`). The new supervisor waits for the process that
+is ending before it launches, which is what keeps two processes from holding the
+instance at once.
+
 ### Taking an adapter on
 
 In this order, each call to the adapter limited by `Params.HandshakeTimeout` on the

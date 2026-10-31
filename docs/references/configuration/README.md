@@ -213,7 +213,10 @@ sandbox.
 the shape is checked here (an adapter id, configuration keys, values that are
 not `null`): the adapter may not be installed when the file is read, and the
 manifest says what a value may be, which is checked when an instance starts.
-A preset cannot be changed, only removed and added again.
+A preset cannot be changed, only removed and added again. The values reach an adapter
+only in `adapter.start`, so adding or removing a preset restarts the instances that run
+and declare a runtime (the engine reference says which); a restart is the one way a
+running adapter learns of a change.
 
 ### `instances.json`
 

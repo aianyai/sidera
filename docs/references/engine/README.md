@@ -242,7 +242,7 @@ wire stay with the interface.
 | `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
 | `InstallAdapterOp` | a package is copied outside the loop, the copy is judged, and the loop renames it to its version and replaces the pointer that makes it current | `state/admin/`, the last-but-one write of `adapter-install`, or alone in `adapter-install-current` |
 | `EnableAdapterOp`, `DisableAdapterOp` | the instance is made (or turned on) or turned off in `instances.json`; then the host is asked to run or stop it | the `last_operation` of `instances.json` |
-| `AddPresetOp`, `RemovePresetOp` | a preset is added from its document or removed, in `presets.json`; adding is judged as loosening and removing as narrowing | the `last_operation` of `presets.json` |
+| `AddPresetOp`, `RemovePresetOp` | a preset is added from its document or removed, in `presets.json`; adding is judged as loosening and removing as narrowing; then the instances that run are restarted to be given the presets | the `last_operation` of `presets.json` |
 
 Each of the first three is one transaction of two owners that the engine opens,
 because only the composer can declare a transaction of two owners: the effect and
@@ -305,6 +305,17 @@ removes what is left (a copy under way finishes, because staging takes no contex
 pointer leaves the old version current and a directory that the repair of the adapter
 directory removes at the next start; after it the new version is current and the repair
 removes what is left of the old.
+
+**Changing the presets.** Presets reach an adapter only in `adapter.start`, so an adapter
+that runs keeps the ones it was started with. After the commit `presetsChanged` stops and
+starts again, through the host, every enabled instance whose adapter declares a runtime,
+or is not admitted yet and so cannot be told apart; an instance that is disabled, or whose
+adapter declares direct endpoints only and is given no presets, is left alone. As for a
+disabling, the instance is marked offline here, through the handling of a connection that
+ended, because the host reports nothing for a stop; the new adapter is taken on with the
+presets as they now are and attaches the open sessions again as after any restart. The
+restart follows the committed state, and a crash between the commit and the restart is
+the same as a start, which takes every adapter on with the presets on disk.
 
 **Enabling and disabling an instance.** Both change `instances.json` through `config`
 (one replacement, with the version of the whole collection checked inside and the
@@ -1620,6 +1631,7 @@ reproducible).
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |
 | Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |
 | Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
+| A change of the presets restarts the runtime instances that run, and the new `adapter.start` carries the presets | `operations_presets.go` (`presetsChanged`) | `TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun` |
 | The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
