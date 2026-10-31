@@ -278,9 +278,9 @@ anything not listed, including unknown codes, counts as unknown.
   a negative value is a mistake and is an error.
 - **Left to the layers above:** `initialize`, `ping`, `shutdown` and their
   states ("not initialized", "shutting down") are method semantics. The peer
-  gives the owner the pieces (handlers, the codes, `Close`); a draining
-  shutdown and an admission hook were left out because their shape depends on
-  the adapter serve loop that has not been written.
+  gives the owner the pieces (handlers, the codes, `Close`). The
+  adapter's serve loop, with those states and the instance lock, is
+  `sdk/go/adapterkit`, so that adapters do not each copy it.
 
 ### Where
 
@@ -511,7 +511,16 @@ escape stay valid.
 before it answers `initialize`, and answers `1011` when it cannot. A hung old
 process and its replacement therefore never control sessions at once; the lock
 dies with the process. Before `initialize` only `initialize`, `ping` and
-`$/cancel_request` are accepted; anything else is `-32003`.
+`$/cancel_request` are accepted; anything else is `-32003`. After `shutdown` began only
+`ping` is accepted and anything else is `-32002`; the state is judged before the
+parameters are read.
+
+**The adapter kit.** `sdk/go/adapterkit` serves these rules for an adapter written in Go:
+version negotiation, the lock before the answer (`1011` when it is held), the two gates
+above, strict decoding of every request, validation of every result before it is sent,
+and typed calls and notifications to the daemon. The adapter implements the methods that
+remain as an `adapterkit.Application`. An adapter in another language implements the same
+rules from this reference.
 
 **Prompt delivery.** The daemon records the attempt as dispatching before it
 sends `prompt.deliver`. The adapter delivers `text` unchanged (it may append one
@@ -778,6 +787,13 @@ is authoritative.
   `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
   `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
   `validate.go`.
+- `sdk/go/adapterkit`: the serve loop of an adapter (`serve.go`: the states and the lock
+  order, `conn.go`: what the adapter sends, `application.go`: what it implements, `lock_*.go`:
+  the instance lock). Tests: `TestOnlyInitializePingAndCancelAreServedBeforeInitialize`,
+  `TestInitializeWithoutACommonVersionIsRefusedAndTakesNoLock`,
+  `TestInitializeAnswersInstanceLockedWhileAnotherAdapterHoldsTheLock`,
+  `TestAfterShutdownOnlyPingIsServed`, `TestRequestsAndAnswersAreHeldToTheProtocol`,
+  `TestAServedAdapterAnswersAndSends`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy. Nearly every
   input error names the path of the offending value, a wrong JSON type included, so a
