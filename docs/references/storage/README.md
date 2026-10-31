@@ -829,13 +829,17 @@ finally the open `endpoint`. The head contains one delivered first attempt at
 the successful ctl's `Record.DeliveredAt()`. `CreationEffect` builds those same
 records for the writer and engine view; their preparation and target-before-head
 write are shared with `PromptEnd`. `ctl-effect-replay` completes this sequence
-from the committed control result while the endpoint is still creating. It
-never initializes an already open endpoint again, so later attempts, trimming
+from the committed control result while the endpoint is still creating. When several
+creations are replayed in one call, the one transaction writes the sequence across
+all of them (every notified `in` record with one directory sync, then every `attempts`
+head, then every endpoint), because a declared write cannot follow a later one of the
+same transaction. It never initializes an already open endpoint again, so later attempts, trimming
 and blocked state survive. Failed, unconfirmed and already closed endpoints get
 no initial prompt head. No record format or timestamp field is added.
 
 The crash scenarios `control-result with an initial prompt` and `initial prompt
-of a committed creation not yet applied` check target-before-head-before-open,
+of a committed creation not yet applied` (and its variant with two creations) check
+target-before-head-before-open,
 exactly one first attempt, stable confirmation time, power loss and a further
 crash during recovery through `TestEveryTransactionConvergesFromEveryCrashState`.
 `TestOldCreationResultDoesNotReplaceLaterPromptState` checks that replay leaves

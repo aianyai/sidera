@@ -83,7 +83,8 @@ engine applies the delivery rules and calls the writes.
   target-before-head writer as `PromptEnd`, and only then the endpoint. The
   first attempt is delivered at the successful control record's `DeliveredAt()`.
   `EffectReplays` and `CtlEffectReplay` finish this same work while the endpoint
-  is still creating. Once open, the old creation never replaces its later
+  is still creating; replaying several creations at once writes all their deliveries,
+  then all their heads, then all their endpoints, as the one declaration orders them. Once open, the old creation never replaces its later
   prompt or blocked state. A closed endpoint stays closed and gets no initial
   prompt head; failed and unconfirmed creations get none either.
 - **A control record refused at intake holds the refusal alone.** `ControlIntake`

@@ -1057,7 +1057,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
 	all := append(append(scenarios(), recoveryScenarios()...), doubleFaultScenarios()...)
-	all = append(all, initialPromptScenario(false), initialPromptScenario(true))
+	all = append(all, initialPromptScenario(false, 1), initialPromptScenario(true, 1), initialPromptScenario(true, 2))
 	total := scenarioStats{}
 	var mu sync.Mutex
 	// The walks are independent: they run side by side, and the coverage is

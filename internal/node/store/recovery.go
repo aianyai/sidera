@@ -422,23 +422,26 @@ func (s *Store) OrphanGCEndpoint(eps []EndpointRecord) error {
 
 // CtlEffectReplay completes the initial prompts and then writes the endpoint
 // records EffectReplays returned. An open endpoint is never an initial-prompt replay.
+// The transaction declares its writes in one order, so it holds across the effects:
+// every delivery the prompts notify, made durable together, then every attempts head,
+// then the endpoints. An endpoint is therefore never open before its head, nor a head
+// complete before its delivery.
 func (s *Store) CtlEffectReplay(eps []ControlEffect) error {
 	if len(eps) == 0 {
 		return nil
 	}
-	var files []file
-	var prompts []preparedPrompt
+	var files, ins, heads []file
 	for _, e := range eps {
-		head, ins, err := e.PromptRecords()
+		head, notified, err := e.PromptRecords()
 		if err != nil {
 			return err
 		}
 		if head != nil {
-			prompt, err := preparePrompt(*head, ins)
+			prompt, err := preparePrompt(*head, notified)
 			if err != nil {
 				return err
 			}
-			prompts = append(prompts, prompt)
+			ins, heads = append(ins, prompt.ins...), append(heads, prompt.head)
 		}
 		f, err := recordFile(EndpointsDir, e.EndpointRecord)
 		if err != nil {
@@ -448,8 +451,11 @@ func (s *Store) CtlEffectReplay(eps []ControlEffect) error {
 	}
 	tx := s.w.Begin(&declCtlEffectReplay)
 	defer tx.Close()
-	for _, prompt := range prompts {
-		if err := prompt.write(s, tx); err != nil {
+	if err := writeGroup(tx, "in", "in-dir", InDir, ins); err != nil {
+		return err
+	}
+	for _, head := range heads {
+		if err := s.replace(tx, "attempts", head); err != nil {
 			return err
 		}
 	}
