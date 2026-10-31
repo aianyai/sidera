@@ -29,6 +29,9 @@ func TestParsePreset(t *testing.T) {
 			Preset{Name: "p", CWD: "/work", Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny"}, ""},
 		{"everything", map[string]any{"cwd": "/work", "sandbox": "read-only", "approval_policy": "on-request", "approvals": "approve", "model": "gpt-6.1-sol", "effort": "low"},
 			Preset{Name: "p", CWD: "/work", Sandbox: "read-only", ApprovalPolicy: "on-request", Approvals: "approve", Model: "gpt-6.1-sol", Effort: "low"}, ""},
+		{"instructions", map[string]any{"cwd": "/work", "developer_instructions": "Answer in French."},
+			Preset{Name: "p", CWD: "/work", Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny", DeveloperInstructions: "Answer in French."}, ""},
+		{"instructions too long", map[string]any{"cwd": "/w", "developer_instructions": strings.Repeat("x", MaxDeveloperInstructions+1)}, Preset{}, "developer_instructions"},
 		{"no cwd", map[string]any{}, Preset{}, "a project directory is required"},
 		{"relative cwd", map[string]any{"cwd": "work"}, Preset{}, "absolute path"},
 		{"bad sandbox", map[string]any{"cwd": "/w", "sandbox": "open"}, Preset{}, "sandbox"},
@@ -94,5 +97,47 @@ func TestThreadConfig(t *testing.T) {
 	const want = `{"mcp_servers":{"sidera":{"args":["mcp"],"command":"/bin/sidera","default_tools_approval_mode":"approve","env":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"},"tool_timeout_sec":120}},"shell_environment_policy":{"set":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"}}}`
 	if string(raw) != want {
 		t.Fatalf("config = %s\nwant     %s", raw, want)
+	}
+}
+
+// The text Codex gets as developer instructions is the adapter's statement of what
+// the channel is, then the owner's own instructions after a blank line. The
+// adapter's part says nothing about how to treat a message: that is the owner's
+// policy.
+func TestDeveloperInstructions(t *testing.T) {
+	for _, tc := range []struct{ name, preset, want string }{
+		{"no preset text", "", ChannelStatement},
+		{"preset text follows", "Be brief.", ChannelStatement + "\n\nBe brief."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DeveloperInstructions(tc.preset); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	for _, fact := range []string{"owner's own cluster", "other agents and people", "recv", "reply", "send", "control", "status", "ack", "sidera MCP server", "sandbox"} {
+		if !strings.Contains(ChannelStatement, fact) {
+			t.Errorf("the statement does not say %q", fact)
+		}
+	}
+}
+
+func TestPresetFieldsDeclareDeveloperInstructions(t *testing.T) {
+	for _, f := range PresetFields() {
+		if f.Key == KeyDeveloperInstructions {
+			return
+		}
+	}
+	t.Fatal("the manifest does not declare developer_instructions")
+}
+
+// A string that is not UTF-8 is refused as it is, before decoding would turn its
+// bad bytes into U+FFFD and change what the owner wrote.
+func TestParsePresetRefusesInstructionsThatAreNotUTF8(t *testing.T) {
+	v := values(map[string]any{"cwd": "/w"})
+	v[KeyDeveloperInstructions] = json.RawMessage("\"bad \xff\"")
+	_, problems := ParsePreset("p", v)
+	if !strings.Contains(strings.Join(problems, "; "), "UTF-8") {
+		t.Fatalf("problems = %q", problems)
 	}
 }

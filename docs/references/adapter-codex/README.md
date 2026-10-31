@@ -311,6 +311,24 @@ and Windows' named pipes under Codex's sandbox are not measured. The capability
 declaration lists both front ends; each session is created with the ones its preset
 supports.
 
+### What the agent is told
+
+Each thread gets developer instructions: the adapter's fixed statement of what Sidera
+is, then, after a blank line, the preset's `developer_instructions` when it has any
+(`codexcfg.DeveloperInstructions`). The statement says, as facts, that the session is
+connected to a channel on which it exchanges messages with other agents and people in
+its owner's own cluster, that it is woken by a short notification that a message is
+waiting, and which tools to use: the `sidera` MCP server's tools first (`recv`,
+`reply`, `send`, `control`, `status`, `ack`), the `sidera` command only where the
+sandbox lets it reach the channel. It does not say how to treat a message (obey it,
+treat it as a task, ignore it): that is the owner's policy and belongs in the preset's
+own text. The Claude adapter appends a statement of the same facts to the system prompt.
+
+`thread/start` and `thread/resume` both take `developerInstructions`, and the server
+keeps none of a thread's parameters with the thread, so the adapter sends the text at
+the start and again at every resume, like the thread's `config`. The schema guard
+checks that both parameter sets still have the member.
+
 ### Configuration, manifest and package
 
 The instance configuration has `codex_program` and `sidera_program`, each a path or a
@@ -318,7 +336,8 @@ name looked up in `PATH` (on Windows `codex.exe`, not a `.cmd` wrapper, which ca
 be detached or ended reliably). A preset has `cwd` (a directory, required), `sandbox`
 (`read-only`, `workspace-write`, the default, or `danger-full-access`), `approval_policy`
 (`never`, the default, `on-request`, `untrusted`), `approvals` (`deny`, the default, or
-`approve`), and optionally `model` and `effort` (`low`, `medium`, `high`, `xhigh`);
+`approve`), and optionally `model`, `effort` (`low`, `medium`, `high`, `xhigh`) and
+`developer_instructions` (UTF-8, at most 32 KiB; see "What the agent is told");
 what is left out is the owner's own Codex configuration, whose default model may be an
 expensive one, so a preset for unattended use names both. `codexcfg` holds the
 descriptions the manifest declares and the checks that read them, from one list.
@@ -374,6 +393,10 @@ about ten seconds to the background.
   processes small. The measurement showed the thread's configuration is the one place
   that gives each thread its own environment for both its commands and its MCP server,
   and that it must be sent again at every resume.
+- **A fixed statement of the channel, and none of the owner's policy.** A wake-up
+  notice only says a message waits; a session that was never told what Sidera is
+  cannot know what to do with it. Whether a message is to be obeyed differs by owner
+  and by preset, so the adapter states only facts and the preset carries the policy.
 - **Nothing in the server's `-c` flags.** A thread that has its own configuration
   ignores them, so a setting put there would hold for some threads and not for others.
 - **The pair of credentials is never stored.** A checkpoint is a file the daemon keeps;

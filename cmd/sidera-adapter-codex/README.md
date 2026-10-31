@@ -14,7 +14,7 @@ are in [`docs/references/adapter-codex/`](../../docs/references/adapter-codex/RE
 | `internal/appserver/` | The App Server client: WebSocket over a Unix socket or TCP, lenient JSON-RPC, the hand-written subset of its types and methods, the read loop, and the queue that hands notifications on in order. `appservertest/` is a fake server for tests. |
 | `internal/server/` | The App Server's life: connect to the one that is up or start one detached, the environment it is given, the state file, the version of the program, and ending only a server this process started. Its `realcodex_*_test.go` files are the opt-in tests against the installed Codex (`-tags realcodex`). |
 | `internal/adapter/` | The protocol methods, the session table, the events, the reconnect loop, the availability snapshot, the probes. |
-| `internal/codexcfg/` | Pure. Instance and preset configuration, the thread-level configuration that carries a session's credentials, the sandbox policy, the front ends of a preset. |
+| `internal/codexcfg/` | Pure. Instance and preset configuration, the thread-level configuration that carries a session's credentials, the developer instructions every thread is given (the adapter's statement of the channel, then the preset's own text), the sandbox policy, the front ends of a preset. |
 | `internal/create/` | Pure. The next step of creating one session, and the checkpoint format. |
 | `internal/reconcile/` | Pure. The verdict of `prompt.reconcile` from the thread's record. |
 | `internal/serverreq/` | Pure. The answer to each request of the server, from the preset. |

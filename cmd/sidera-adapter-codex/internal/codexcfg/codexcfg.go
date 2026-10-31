@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -30,7 +31,14 @@ const (
 	KeyApprovals      = "approvals"
 	KeyModel          = "model"
 	KeyEffort         = "effort"
+
+	KeyDeveloperInstructions = "developer_instructions"
 )
+
+// MaxDeveloperInstructions is the longest developer_instructions of a preset, in
+// bytes: the text goes to the model with every turn, so it is meant to be a few
+// paragraphs of policy, not a document.
+const MaxDeveloperInstructions = 32 * 1024
 
 // Sandbox modes, as Codex names them.
 const (
@@ -99,6 +107,8 @@ func PresetFields() []manifest.Field {
 			Description: "The model; the owner's own Codex configuration decides when it is left out."},
 		{Key: KeyEffort, Type: manifest.FieldEnum, Title: "Reasoning effort", Options: slices.Clone(efforts),
 			Description: "The reasoning effort; the owner's own Codex configuration decides when it is left out."},
+		{Key: KeyDeveloperInstructions, Type: manifest.FieldString, Title: "Developer instructions",
+			Description: "Instructions for the agent, after the adapter's own statement of what the Sidera channel is. How the agent treats the messages it receives is decided here."},
 	}
 }
 
@@ -130,6 +140,9 @@ type Preset struct {
 	Approvals      string
 	Model          string
 	Effort         string
+	// DeveloperInstructions is the owner's own text; the package function of the
+	// same name puts the adapter's statement before it.
+	DeveloperInstructions string
 }
 
 // ParsePreset reads a preset's configuration, with the defaults, and lists every
@@ -162,6 +175,13 @@ func ParsePreset(name string, v adapterproto.ConfigValues) (Preset, []string) {
 	p.Effort = read(KeyEffort, "", nil)
 	if p.Effort != "" && !slices.Contains(efforts, p.Effort) {
 		problems = append(problems, fmt.Sprintf("%s: %q is not one of %v", KeyEffort, p.Effort, efforts))
+	}
+	if raw, ok := v[KeyDeveloperInstructions]; ok && !utf8.Valid(raw) {
+		problems = append(problems, KeyDeveloperInstructions+": not valid UTF-8")
+	}
+	p.DeveloperInstructions = read(KeyDeveloperInstructions, "", nil)
+	if len(p.DeveloperInstructions) > MaxDeveloperInstructions {
+		problems = append(problems, fmt.Sprintf("%s: %d bytes, at most %d", KeyDeveloperInstructions, len(p.DeveloperInstructions), MaxDeveloperInstructions))
 	}
 	return p, problems
 }
@@ -245,4 +265,21 @@ func (p Preset) ThreadConfig(a Access) map[string]any {
 			},
 		},
 	}
+}
+
+// ChannelStatement tells the agent what Sidera is and how to use it, as facts: it
+// says nothing about how to treat a message, which is the owner's policy and is
+// written in the preset. The agent has to be told because a wake-up notice only
+// says that a message is waiting.
+const ChannelStatement = `This session is connected to Sidera, a channel on which you exchange messages with other agents and people in your owner's own cluster.
+You are woken by a short notification that a message is waiting. Use the tools of the sidera MCP server first: recv reads the waiting messages, reply answers one, send writes to another address, control sends control signals, status shows what became of a message you sent, and ack acknowledges what you have read. The sidera command in the shell ("sidera recv", "sidera reply", "sidera --help" and so on) does the same, but only where the sandbox lets it reach the channel.`
+
+// DeveloperInstructions is the developer instructions of a thread: the adapter's
+// statement of what the channel is, then the preset's own text. Codex keeps none
+// of it with the thread, so it is sent at every start and every resume.
+func DeveloperInstructions(preset string) string {
+	if preset == "" {
+		return ChannelStatement
+	}
+	return ChannelStatement + "\n\n" + preset
 }

@@ -166,8 +166,9 @@ type Thread struct {
 	Status ThreadStatus `json:"status"`
 }
 
-// ThreadStartParams starts a thread. Config is the thread-level configuration:
-// the server does not keep it, so every resume sends it again.
+// ThreadStartParams starts a thread. Config and DeveloperInstructions are the
+// thread-level configuration: the server does not keep them, so every resume
+// sends them again.
 type ThreadStartParams struct {
 	CWD            string         `json:"cwd,omitempty"`
 	ApprovalPolicy string         `json:"approvalPolicy,omitempty"`
@@ -175,6 +176,8 @@ type ThreadStartParams struct {
 	Model          string         `json:"model,omitempty"`
 	Ephemeral      bool           `json:"ephemeral"`
 	Config         map[string]any `json:"config,omitempty"`
+
+	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
 // ThreadResult is the answer of thread/start and thread/resume.
@@ -199,6 +202,8 @@ type ThreadResumeParams struct {
 	Model          string         `json:"model,omitempty"`
 	ExcludeTurns   bool           `json:"excludeTurns"`
 	Config         map[string]any `json:"config,omitempty"`
+
+	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
 // ThreadResume loads a thread and subscribes this connection to it.

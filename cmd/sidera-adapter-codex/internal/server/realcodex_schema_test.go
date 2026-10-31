@@ -86,8 +86,8 @@ func TestSchemaGuard(t *testing.T) {
 
 	for file, members := range map[string][]string{
 		"TurnStartParams":          {"clientUserMessageId", "threadId", "input", "cwd", "approvalPolicy", "sandboxPolicy", "model", "effort"},
-		"ThreadStartParams":        {"config", "ephemeral", "cwd", "approvalPolicy", "sandbox", "model"},
-		"ThreadResumeParams":       {"config", "excludeTurns", "threadId", "cwd", "approvalPolicy", "sandbox", "model"},
+		"ThreadStartParams":        {"config", "ephemeral", "cwd", "approvalPolicy", "sandbox", "model", "developerInstructions"},
+		"ThreadResumeParams":       {"config", "excludeTurns", "threadId", "cwd", "approvalPolicy", "sandbox", "model", "developerInstructions"},
 		"ThreadTurnsListParams":    {"threadId", "itemsView", "sortDirection", "limit", "cursor"},
 		"CommandExecParams":        {"command", "cwd", "env", "sandboxPolicy", "timeoutMs"},
 		"ThreadShellCommandParams": {"threadId", "command", "timeoutMs"},

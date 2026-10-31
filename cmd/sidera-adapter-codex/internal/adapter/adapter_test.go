@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -38,9 +39,13 @@ func TestCreateSession(t *testing.T) {
 	}
 
 	start := decode[struct {
-		Ephemeral bool
-		Config    map[string]map[string]any
+		Ephemeral             bool
+		Config                map[string]map[string]any
+		DeveloperInstructions string
 	}](codex.callsOf("thread/start")[0].Params)
+	if start.DeveloperInstructions != codexcfg.DeveloperInstructions("") {
+		t.Errorf("developer instructions = %q", start.DeveloperInstructions)
+	}
 	if start.Ephemeral {
 		t.Error("the thread was started ephemeral")
 	}
@@ -116,8 +121,12 @@ func TestCreateAfterARestartFindsThePromptInTheRecord(t *testing.T) {
 	if n := len(codex.callsOf("turn/start")) + len(codex.callsOf("thread/start")); n != 0 {
 		t.Fatalf("%d starts: the prompt was already delivered", n)
 	}
-	if len(codex.callsOf("thread/resume")) != 1 {
+	resumes := codex.callsOf("thread/resume")
+	if len(resumes) != 1 {
 		t.Fatal("the stored thread was not resumed")
+	}
+	if di := decode[struct{ DeveloperInstructions string }](resumes[0].Params).DeveloperInstructions; di != codexcfg.DeveloperInstructions("") {
+		t.Fatalf("developer instructions of the resume = %q", di)
 	}
 }
 
@@ -201,11 +210,20 @@ func TestStartAttachesSessions(t *testing.T) {
 		res.Sessions[1].State != adapterproto.AttachLost {
 		t.Fatalf("start = %+v", res)
 	}
-	var cfg struct{ Config map[string]map[string]any }
+	var cfg struct {
+		Config                map[string]map[string]any
+		DeveloperInstructions string
+	}
 	for _, c := range codex.callsOf("thread/resume") {
 		if decode[struct{ ThreadID string }](c.Params).ThreadID == "th-1" {
-			cfg = decode[struct{ Config map[string]map[string]any }](c.Params)
+			cfg = decode[struct {
+				Config                map[string]map[string]any
+				DeveloperInstructions string
+			}](c.Params)
 		}
+	}
+	if cfg.DeveloperInstructions != codexcfg.DeveloperInstructions("") {
+		t.Fatalf("resume developer instructions = %q: the server keeps none, so they are sent again", cfg.DeveloperInstructions)
 	}
 	if cfg.Config["shell_environment_policy"]["set"].(map[string]any)["SIDERA_TOKEN"] != token {
 		t.Fatalf("resume configuration = %+v: the server keeps none, so it is sent again", cfg)

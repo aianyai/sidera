@@ -233,6 +233,7 @@ func (a *App) startThread(ctx context.Context, c *appserver.Client, rec *createA
 	th, err := c.ThreadStart(ctx, appserver.ThreadStartParams{
 		CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy, Sandbox: preset.Sandbox, Model: preset.Model,
 		Ephemeral: false, Config: a.threadConfig(s, preset),
+		DeveloperInstructions: codexcfg.DeveloperInstructions(preset.DeveloperInstructions),
 	})
 	if err != nil {
 		if errors.Is(err, appserver.ErrClosed) {
@@ -272,6 +273,7 @@ func (a *App) loadThread(ctx context.Context, rec *createAttempt, p adapterproto
 	th, err := c.ThreadResume(ctx, appserver.ThreadResumeParams{
 		ThreadID: rec.state.ThreadID, CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy,
 		Sandbox: preset.Sandbox, Model: preset.Model, ExcludeTurns: true, Config: a.threadConfig(s, preset),
+		DeveloperInstructions: codexcfg.DeveloperInstructions(preset.DeveloperInstructions),
 	})
 	switch {
 	case err == nil:
