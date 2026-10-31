@@ -216,3 +216,38 @@ func TestTheAnswerToARequestForAPairing(t *testing.T) {
 		t.Errorf("an answer: %v, printed %q", err, out.String())
 	}
 }
+
+// `paired with` is said when the pairing is complete, whether the answer showed it
+// or the wait ended on it, and never for a command that did not wait or that did
+// not see the pairing complete.
+func TestPairedWithIsSaidWhenThePairingIsComplete(t *testing.T) {
+	answer := func(status string) []byte {
+		return []byte(`{"result":{"pairing_id":"p1","node":"n1","status":"` + status + `","code":"482 019"}}`)
+	}
+	reads := func(v trustView) func(context.Context) (trustView, error) {
+		return func(context.Context) (trustView, error) { return v, nil }
+	}
+	complete := trustView{Outgoing: []outgoingEntry{{PairingID: "p1", Status: "complete"}}}
+	for _, tc := range []struct {
+		name   string
+		status string
+		wait   time.Duration
+		view   trustView
+		want   bool
+	}{
+		{"complete in the answer", "complete", time.Minute, trustView{}, true},
+		{"complete when the wait ended", "awaiting_target", time.Minute, complete, true},
+		{"no wait", "awaiting_target", 0, complete, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			c := command{Config: Config{Stdout: nopCloser{&out}}}
+			if err := c.awaitPairing(context.Background(), reads(tc.view), answer(tc.status), tc.wait); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(out.String(), "paired with n1\n"); got != tc.want {
+				t.Errorf("printed %q, want `paired with n1` %v", out.String(), tc.want)
+			}
+		})
+	}
+}

@@ -81,8 +81,9 @@ func decodeResult(raw []byte, v any) error {
 // successful answer of the node and a failure of the command, with the exit code of
 // a refusal. Otherwise the answer is printed at once, the code first, because the
 // other node's owner needs it while this command waits; then, for at most wait,
-// the command reads trust.list until the pairing is complete.
-func (c *command) awaitPairing(ctx context.Context, client *manageapi.Client, raw []byte, wait time.Duration) error {
+// the command reads the trust view through poll until the pairing is complete, and
+// says so only when it is: by the answer itself or by the wait it ended on.
+func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (trustView, error), raw []byte, wait time.Duration) error {
 	var answer pairingAnswer
 	if err := decodeResult(raw, &answer); err != nil {
 		return err
@@ -104,10 +105,23 @@ func (c *command) awaitPairing(ctx context.Context, client *manageapi.Client, ra
 			return err
 		}
 	}
-	if wait == 0 || answer.Status == "complete" {
-		return c.pairedWith(answer)
+	complete := answer.Status == "complete"
+	if !complete && wait > 0 {
+		if err := waitForPairing(ctx, answer, wait, poll, sleepContext); err != nil {
+			return err
+		}
+		complete = true
 	}
-	poll := func(ctx context.Context) (trustView, error) {
+	if c.json || !complete {
+		return nil
+	}
+	_, err := fmt.Fprintf(c.Stdout, "paired with %s\n", answer.Node)
+	return err
+}
+
+// readTrustView returns the reader of the trust view that the wait of `trust request` polls.
+func readTrustView(client *manageapi.Client) func(context.Context) (trustView, error) {
+	return func(ctx context.Context) (trustView, error) {
 		raw, err := client.Call(ctx, "trust.list", manageapi.Request{})
 		if err != nil {
 			return trustView{}, err
@@ -115,20 +129,6 @@ func (c *command) awaitPairing(ctx context.Context, client *manageapi.Client, ra
 		var view trustView
 		return view, decodeResult(raw, &view)
 	}
-	if err := waitForPairing(ctx, answer, wait, poll, sleepContext); err != nil {
-		return err
-	}
-	return c.pairedWith(answer)
-}
-
-// pairedWith says that the pairing is complete, when the request's answer or the
-// wait showed it. A command that did not wait says nothing more.
-func (c *command) pairedWith(answer pairingAnswer) error {
-	if c.json || answer.Status != "complete" {
-		return nil
-	}
-	_, err := fmt.Fprintf(c.Stdout, "paired with %s\n", answer.Node)
-	return err
 }
 
 // waitForPairing reads the trust view, now and then every pairingPollInterval, until

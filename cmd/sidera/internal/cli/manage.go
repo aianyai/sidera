@@ -70,7 +70,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	}
 	switch {
 	case plan.method == "trust.request":
-		return c.awaitPairing(ctx, client, raw, plan.wait)
+		return c.awaitPairing(ctx, readTrustView(client), raw, plan.wait)
 	case plan.method == "trust.list" && !c.json:
 		return c.trustList(raw)
 	}
