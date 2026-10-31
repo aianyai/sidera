@@ -77,6 +77,24 @@ func TestPairingExpectationsWriteInsideAnotherTransaction(t *testing.T) {
 	}
 }
 
+// The initiator's request is also written inside a transaction another package
+// opens, with the result.
+func TestPairingInitiatorWritesInsideAnotherTransaction(t *testing.T) {
+	r := newRig(t)
+	rec := pairingInitiatorOf(t)
+	p, err := store.PreparePairingInitiator(rec)
+	mustDo(t, err)
+	res, err := store.PrepareAdminResult(adminResult(1))
+	mustDo(t, err)
+	tx := r.w.Begin(&declXRequest)
+	mustDo(t, store.PutPairingInitiator(tx, store.RolePairingInitiator, p))
+	mustDo(t, store.PutAdminResult(tx, store.RoleResult, res))
+	mustDo(t, tx.Commit())
+	if got := r.scan().PairingInitiators; len(got) != 1 || !equalRecords(got[0], rec) {
+		t.Errorf("initiators: %#v", got)
+	}
+}
+
 // A pairing file is read as its kind says and is refused, as a damaged body,
 // when what it holds is not what the key and the kind make it: a request under
 // the key of another, bytes of another record, or bytes the pairing package does

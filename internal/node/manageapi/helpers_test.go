@@ -83,12 +83,19 @@ type fakeService struct {
 	adapters engine.AdapterList
 	presets  config.Presets
 	network  engine.NetworkView
+	trust    engine.TrustView
 }
 
 func (f *fakeService) NetworkView(context.Context) (engine.NetworkView, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.network, nil
+}
+
+func (f *fakeService) TrustView(context.Context) (engine.TrustView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.trust, nil
 }
 
 func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) {

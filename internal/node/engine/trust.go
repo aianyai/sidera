@@ -395,23 +395,13 @@ func (e *Engine) signRevocation(h heldCredential) (record.Record, error) {
 	return rec, nil
 }
 
-// revokedLocally is what removing a node from this node's trust did, for the
-// result of the operation to say.
-type revokedLocally struct {
-	Node ident.NodeID
-	// Already: the node was removed before, and its entry is as it was.
-	Already bool
-	// Credentials are the credentials this node revoked now, by digest.
-	Credentials []record.Digest
-}
-
 // revokeNodeLocally removes a node from this node's trust, as the operation named
 // x.name: the node is refused whatever path leads to it, and the credentials this
 // node holds with it are revoked with its identity key, which tells the other end,
 // and the nodes that reach it through this one, that the edge is gone. The entry,
 // the revocations and the result are one transaction (declTrustLocalRevoke); done
 // again for a node already removed it writes only what is missing.
-func (e *Engine) revokeNodeLocally(x *opRun, node ident.NodeID, encode func(revokedLocally) ([]byte, error)) ([]byte, error) {
+func (e *Engine) revokeNodeLocally(x *opRun, node ident.NodeID, encode func(NodeRemoved) ([]byte, error)) ([]byte, error) {
 	effects, err := trust.RevokeLocally(e.trust.view, node)
 	if err != nil {
 		return nil, invalidArgument("node", err)
@@ -425,7 +415,7 @@ func (e *Engine) revokeNodeLocally(x *opRun, node ident.NodeID, encode func(revo
 	if err != nil {
 		return nil, err
 	}
-	out := revokedLocally{Node: node, Already: already}
+	out := NodeRemoved{Node: node, Already: already}
 	var revoked []store.CredRevocationRecord
 	var prepared []store.PreparedCredRevocation
 	for _, d := range effects.RevokeCredentials {
@@ -474,18 +464,37 @@ func (e *Engine) revokeNodeLocally(x *opRun, node ident.NodeID, encode func(revo
 	return result, nil
 }
 
-// clearLocallyRevoked takes a node back into this node's trust. It restores only
-// what the removal did not end: the credentials revoked with it stay revoked, so a
-// node that held one is trusted again only through a new pairing. A node that was
-// not removed changes nothing.
-func (e *Engine) clearLocallyRevoked(node ident.NodeID) error {
-	if _, ok := e.trust.locallyRevoked[node]; !ok {
-		return nil
+// clearLocallyRevoked takes a node back into this node's trust, as the operation
+// named x.name. It restores only what the removal did not end: the credentials
+// revoked with it stay revoked, so a node that held one is trusted again only
+// through a new pairing, which the result says. The removal of the entry and the
+// result are one transaction (declTrustClear); a node that was not removed changes
+// nothing and stores its result alone.
+func (e *Engine) clearLocallyRevoked(x *opRun, node ident.NodeID, encode func(NodeCleared) ([]byte, error)) ([]byte, error) {
+	_, removed := e.trust.locallyRevoked[node]
+	result, err := encode(NodeCleared{Node: node, NewPairingRequired: removed && e.holdsRevokedCredential(node)})
+	if err != nil {
+		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)
 	}
-	if err := e.d.Store.LocalRevokedClear(node); err != nil {
-		return err
+	if !removed {
+		return result, e.storeResultOnly(x, result)
+	}
+	pr, err := store.PrepareAdminResult(x.record(result))
+	if err != nil {
+		return nil, err
+	}
+	tx := e.d.Writer.Begin(&declTrustClear)
+	defer tx.Close()
+	if err := store.RemoveLocalRevoked(tx, store.RoleLocalRevoked, store.RoleLocalRevokedDir, node); err != nil {
+		return nil, err
+	}
+	if err := store.PutAdminResult(tx, store.RoleResult, pr); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	delete(e.trust.locallyRevoked, node)
 	e.trustChanged()
-	return nil
+	return result, nil
 }

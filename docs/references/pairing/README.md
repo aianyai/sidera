@@ -89,7 +89,13 @@ on the side whose owner reported it; a mismatch claimed by the other side counts
 for nothing here. A request whose code equals the code of another request that
 still awaits its owner is not confirmed by code. Confirming trust and initiating
 a pairing are authorized as `OpConfirmTrust` (local owner or full control),
-rejecting as `OpRejectTrustRequest`; both run in the order `admin` defines. A
+rejecting as `OpRejectTrustRequest`; both run in the order `admin` defines. The state
+machine can be given the stored requests of the management interface (`World.Stored`)
+to make the replay check itself; this node does not, because its replay check has one
+home, the engine's table of stored results, which is read before any command here is
+called, and the fingerprint this package makes of a request is not the interface's,
+so a second check would turn a genuine resend into a conflict. A command here that is
+not an execution (a refusal) stores nothing. A
 client that fetches a record through a management connection derives the
 identifier, the code and the credential from the raw fields itself and never
 shows digits a node reports.

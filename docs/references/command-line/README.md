@@ -43,6 +43,10 @@ arguments, purpose and one example.
 | `network show` | Show where the node listens, the contact line, the addresses kept for other nodes and which of them are connected. |
 | `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
 | `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted. |
+| `trust expect <node>` / `trust forget <node>` | Enter or delete the expectation for a node: the owner means to pair with it, which stands for a confirmation made in advance. |
+| `trust request <node> [<multiaddr> ...] [--wait <duration>]` | Ask a node for a pairing, dialing the multiaddrs for this request only; prints the verification code and waits for the pairing to complete (default `--wait 10s`, `0` does not wait). |
+| `trust list` | List the nodes trusted, the expectations, the requests held and those started, and the nodes removed from trust. |
+| `trust remove <node>` / `trust clear <node>` | Remove a node from this node's trust (the other node is not told), or take a removed node back. |
 | `identity export-revocation [--out <new-file>]` | Export the self-revocation and its digest; optionally write the verified raw record to a new private file. |
 | `identity confirm-backup <digest>` | Confirm an offline backup by the digest printed on export. |
 | `identity retire --node <id> --yes` | Retire this identity permanently and stop the daemon; omitting `--yes` is usage error 2. |
@@ -117,6 +121,39 @@ of the address (`addresses[1]`) and the reason; removing a node that has no addr
 (exit 6). A missing node or address is usage error 2 before anything is sent. The
 commands under `network address` and `network listen` have a third word, which the
 command discovery recognises, so their flags and help are their own.
+
+### Trust commands
+
+The commands of `trust` are changes with no version: each chooses one operation
+identifier and is resent at most once after an unknown outcome, as every change is.
+They take a node id; the node's rules (itself, retired, removed, already trusted) are
+the engine's, and the refusals are in the words of every change (see the
+[daemon reference](../daemon/README.md#the-management-interface)). A missing node, or
+a `--wait` that is not a duration (`10s`, `1m`; a bare number is not one) or is
+negative, is usage error 2 before anything is sent. `--json` prints the whole response
+for each command.
+
+`trust list` prints five sections (`trusted`, `expectations`, `incoming`, `outgoing`,
+`locally_revoked`), one line for each entry, and `none` for an empty section; times
+are written as the interface gives them.
+
+`trust request` is answered by the node when the online segment of the pairing ends,
+which can take most of a minute. A refusal by the target is a successful answer with
+`status` `refused`; the command turns it into the error `refused/pairing_refused`
+(exit 7, with `details.node` and `details.refusal`) and prints no code. Otherwise it
+prints, first and on a line of its own, `Verification code: <code>`, which the owner
+compares with the screen of the other node, then the fields of the answer. `--wait` is
+the client's alone and is not sent: unless it is `0` (or the answer is already
+`complete`), the command then reads `trust.list` at once and every 500 ms until the
+node is trusted or the outgoing request with the answer's `pairing_id` is `complete`,
+and prints `paired with <node>`. The time waited is counted as the intervals slept.
+A request that ends otherwise (its state is `rejected`, `expired`, `cancelled`,
+`unknown`, `gave_up`, `withdrawing` or `withdrawn`) stops the wait, and a wait that runs out
+ends the command, each with exit code 1 and a message that names the node, the pairing
+identifier and the code; the message for a wait that ran out says to compare the code
+with the other node's owner and confirm there, or to run `sidera trust list` later. The
+pairing itself goes on either way. With `--json` the answer is printed as soon as it
+arrives and the wait changes only the exit code.
 
 Enabling an adapter returns before background startup and probing finish. Human
 output says `enabled, probing in progress; see sidera adapter list`; that list

@@ -99,10 +99,48 @@ var declTrustLocalRevoke = txn.Decl{Name: "trust-local-revoke", Kind: txn.Normal
 	{Role: store.RoleResult, Op: txn.OpReplace},
 }}
 
+// The owner's operations on pairing and on a node removed from trust. Each is one
+// transaction of two owners, opened by the engine: the effect, then the result,
+// which is the last write.
+var (
+	// trust-expect and trust-forget: the whole list of expectations, replaced, and
+	// the result.
+	declTrustExpect = txn.Decl{Name: "trust-expect", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingExpectations, Op: txn.OpReplace},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	declTrustForget = txn.Decl{Name: "trust-forget", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingExpectations, Op: txn.OpReplace},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	// trust-request: the request the initiator saved when the target accepted it
+	// and the result of the owner's request for the pairing, so that the result
+	// never exists without the request it reports, nor the request without the
+	// result.
+	declTrustRequest = txn.Decl{Name: "trust-request", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingInitiator, Op: txn.OpReplace},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	// trust-clear: the removal of the entry of a node removed from trust, made
+	// durable, and the result.
+	declTrustClear = txn.Decl{Name: "trust-clear", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RoleLocalRevoked, Op: txn.OpRemove},
+		{Role: store.RoleLocalRevokedDir, Op: txn.OpSyncDir},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	// trust-result stores the result of an operation on trust whose effect wrote
+	// nothing: a request for a pairing that the target refused, and the clearing of
+	// a node that was not removed.
+	declTrustResult = txn.Decl{Name: "trust-result", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+)
+
 // Transactions returns the declarations of the transactions of the engine that
 // write the files of more than one owner, for the composition root to put in
 // the table of the program. The transactions of one owner are declared by the
 // owner.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent, &declTrustLocalRevoke}
+	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent, &declTrustLocalRevoke,
+		&declTrustExpect, &declTrustForget, &declTrustRequest, &declTrustClear, &declTrustResult}
 }

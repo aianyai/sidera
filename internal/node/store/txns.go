@@ -15,6 +15,9 @@ const (
 	// RoleLocalRevoked is the role of the record of a node removed from this
 	// node's own trust, with PutLocalRevoked.
 	RoleLocalRevoked = "local-revoked"
+	// RoleLocalRevokedDir is the role of the sync of the directory the record of a
+	// removed node is removed from, with RemoveLocalRevoked.
+	RoleLocalRevokedDir = "local-revoked-dir"
 	// RoleCredRevocation is the role of the revocation of a credential, with
 	// PutCredRevocation.
 	RoleCredRevocation = "revocation"
@@ -182,7 +185,7 @@ var (
 	// removal is made durable before the call returns: a node removed from trust
 	// that came back after a crash would be a revocation lost without a trace.
 	declTrustLocalClear = txn.Decl{Name: "trust-local-clear", Kind: txn.Normal, Writes: []txn.Write{
-		rm(RoleLocalRevoked), syncDir("local-revoked-dir"),
+		rm(RoleLocalRevoked), syncDir(RoleLocalRevokedDir),
 	}}
 	declPeerCert = txn.Decl{Name: "peer-cert", Kind: txn.Normal, Writes: []txn.Write{rep("peer")}}
 

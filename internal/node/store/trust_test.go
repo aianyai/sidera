@@ -64,6 +64,29 @@ func TestTrustAndPeerRecordsComeBackFromTheDisk(t *testing.T) {
 	}
 }
 
+// The removal of a node's entry is also written inside a transaction another
+// package opens, with the result, and the other nodes' entries stay.
+func TestLocalRevokedIsRemovedInsideAnotherTransaction(t *testing.T) {
+	r := newRig(t)
+	mustDo(t, r.st.LocalRevokedClear(trustNode(t, 9))) // nothing there: not an error
+	for _, n := range []int{1, 2} {
+		pl, err := store.PrepareLocalRevoked(localRevokedOf(t, n))
+		mustDo(t, err)
+		tx := r.w.Begin(&declXRevokeOnly)
+		mustDo(t, store.PutLocalRevoked(tx, store.RoleLocalRevoked, pl))
+		mustDo(t, tx.Commit())
+	}
+	res, err := store.PrepareAdminResult(adminResult(1))
+	mustDo(t, err)
+	tx := r.w.Begin(&declXTakeBack)
+	mustDo(t, store.RemoveLocalRevoked(tx, store.RoleLocalRevoked, store.RoleLocalRevokedDir, trustNode(t, 1)))
+	mustDo(t, store.PutAdminResult(tx, store.RoleResult, res))
+	mustDo(t, tx.Commit())
+	if got := r.scan().LocalRevoked; len(got) != 1 || got[0].Node != trustNode(t, 2) {
+		t.Errorf("entries left: %#v, want only the second node's", got)
+	}
+}
+
 // The owner takes one node back into trust and the other stays; a node with no
 // record is not an error and writes nothing.
 func TestLocalRevokedClearRemovesOnlyThatNode(t *testing.T) {

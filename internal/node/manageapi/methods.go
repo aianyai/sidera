@@ -117,6 +117,7 @@ func defaultMethods() (map[string]*method, error) {
 		networkShow, networkAddressSet, networkAddressRemove, networkListenSet,
 		adaptersInstall, adaptersList, adaptersEnable, adaptersDisable,
 		presetsList, presetsAdd, presetsRemove,
+		trustExpect, trustForget, trustRequest, trustList, trustRemove, trustClear,
 		endpointsList, endpointsClose, endpointsSet, daemonStop, operationResult,
 	}
 	for _, m := range append(rows, testMethods()...) {

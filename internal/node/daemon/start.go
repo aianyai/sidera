@@ -310,6 +310,14 @@ func (n engineNetwork) PairingFetch(ctx context.Context, node ident.NodeID, addr
 	return answer, engine.PairingPeer(peer), err
 }
 
+func (n engineNetwork) StartPairing(ctx context.Context, node ident.NodeID, addrs []string, sid pairing.SessionID) (engine.PairingPeer, engine.PairingStream, error) {
+	peer, stream, err := n.Network.StartPairing(ctx, node, addrs, sid)
+	if err != nil {
+		return engine.PairingPeer{}, nil, err
+	}
+	return engine.PairingPeer(peer), stream, nil
+}
+
 // Step 7: the place of the synchronisation of revocations and of the trust graph,
 // and of the gate on vouchers. A node of one machine has none of it.
 func (d *Daemon) stepTrust(ctx context.Context) error { return run(ctx, d.cfg.Attach.TrustSync, d) }

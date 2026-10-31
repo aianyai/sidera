@@ -76,7 +76,6 @@ type Store interface {
 	TrustCredential(c store.CredentialRecord, peer *store.PeerRecord) error
 	TrustRevocation(r store.CredRevocationRecord) error
 	PeerCert(p store.PeerRecord) error
-	LocalRevokedClear(node ident.NodeID) error
 
 	PairingTargetPut(r pairing.TargetRecord) error
 	PairingTargetDelete(id pairing.ID) error

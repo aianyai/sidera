@@ -95,6 +95,9 @@ type pairingDriver struct {
 	// fetchesOpen says the network may be asked: the second recovery entry has
 	// ended. Until then a node that is starting has no connection a fetch could use.
 	fetchesOpen bool
+	// requests are the owner's requests for a pairing that are not answered yet; see
+	// pairing_request.go.
+	requests map[admin.RequestKey]*pairingRequestInFlight
 }
 
 // openPairing builds the state machine from the scan and recovers it. A stored
@@ -111,6 +114,7 @@ func (e *Engine) openPairing(sc *store.Scan) error {
 		state:    st,
 		sessions: map[pairing.SessionID]*pairingSession{},
 		fetches:  map[pairing.ID]*pairingFetch{},
+		requests: map[admin.RequestKey]*pairingRequestInFlight{},
 	}
 	if e.d.Keys == nil {
 		return nil // no identity key to sign with: the node runs no pairing
@@ -123,8 +127,17 @@ func (e *Engine) openPairing(sc *store.Scan) error {
 }
 
 // pairingWorld is what the state machine reads of the node, made fresh for every
-// call. No management command of the pairing is driven yet, so Actors and Stored,
-// which only those commands read, are not set.
+// call. No authorized persons and no actors are given: the management interface is
+// the local owner's alone, whom no list judges.
+//
+// Stored is not set, on purpose. The replay check of a management request has one
+// home, the engine's table of stored results that Execute reads, and it is made
+// before any command of the state machine is called. The state machine's own
+// request fingerprint is not the one the management interface makes, so a second
+// check against the same results would take a resend that the interface already
+// judged to be one (the same request, to be answered with the stored result) for a
+// reuse of its identifier. The state machine's authorization and validation of a
+// request stay as they are: they are its guard, not a replay check.
 func (e *Engine) pairingWorld() pairing.World {
 	w := pairing.World{
 		Params:      pairing.DefaultParams(),
@@ -194,11 +207,21 @@ func (e *Engine) pairingPerform(next pairing.State, acts []pairing.Action, peer 
 			return err
 		}
 	}
+	// An owner's request for a pairing that this list ends has its result stored in
+	// the transaction that saves the request, so that neither exists without the
+	// other; see pairing_request.go.
+	ends := e.endingRequests(acts)
 	for _, a := range acts {
 		if kind, _ := pairingActionKindOf(a); kind != actionPersist {
 			continue
 		}
-		if err := e.pairingPersist(a, peer); err != nil {
+		var err error
+		if p, ok := a.(pairing.PersistInitiator); ok && savingRequest(ends, p.Record) != nil {
+			err = e.persistRequested(savingRequest(ends, p.Record))
+		} else {
+			err = e.pairingPersist(a, peer)
+		}
+		if err != nil {
 			return e.classify(err)
 		}
 	}
@@ -206,6 +229,11 @@ func (e *Engine) pairingPerform(next pairing.State, acts []pairing.Action, peer 
 	for _, a := range acts {
 		if kind, _ := pairingActionKindOf(a); kind == actionIO {
 			e.pairingIO(a)
+		}
+	}
+	for _, end := range ends {
+		if end.saved == nil {
+			e.endUnsaved(end)
 		}
 	}
 	return nil
@@ -510,6 +538,11 @@ func (e *Engine) pairingFrame(now time.Time, sid pairing.SessionID, frame []byte
 func (e *Engine) pairingClosed(now time.Time, sid pairing.SessionID) error {
 	s := e.pairing.sessions[sid]
 	if s == nil {
+		// The network may report the end of a stream of a request before the loop
+		// has registered it.
+		if req := e.requestOf(sid); req != nil && !req.live {
+			req.closedEarly = true
+		}
 		return nil
 	}
 	err := e.pairingEnded(sid, s)

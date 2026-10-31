@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/preauth"
 	"github.com/aianyai/sidera/internal/record"
 )
@@ -41,6 +42,13 @@ type Network interface {
 	// with the facts of the connection it came over. The engine calls it from a
 	// worker, never from the loop.
 	PairingFetch(ctx context.Context, node ident.NodeID, addrs []string, frame []byte) ([]byte, PairingPeer, error)
+	// StartPairing opens the initiator's end of a pairing stream to a node and
+	// returns the facts of the connection and the stream the engine writes to. The
+	// frames the node sends, and the end of the stream when it is not the engine's
+	// own, come back as frames and the close of session sid, which may arrive before
+	// StartPairing returns. addrs are dial hints for this pairing only. The engine
+	// calls it from a worker, never from the loop.
+	StartPairing(ctx context.Context, node ident.NodeID, addrs []string, sid pairing.SessionID) (PairingPeer, PairingStream, error)
 }
 
 // Membership is the snapshot of what the network layer needs to judge a peer: the

@@ -144,6 +144,10 @@ func (e *Engine) Execute(ctx context.Context, c ManagementCommand) (StoredResult
 		cmd := &cmdPrepare{call: newCall[StoredResult](), cmd: c, op: p}
 		return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
 	}
+	if r, ok := c.Operation.(requestingOperation); ok {
+		cmd := &cmdRequest{call: newCall[StoredResult](), cmd: c, op: r}
+		return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
+	}
 	cmd := &cmdExecute{call: newCall[StoredResult](), cmd: c}
 	return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
 }

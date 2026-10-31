@@ -43,6 +43,7 @@ type ManageService interface {
 	NodeSettings(ctx context.Context) (config.Node, error)
 	NetworkView(ctx context.Context) (NetworkView, error)
 	AdapterList(ctx context.Context) (AdapterList, error)
+	TrustView(ctx context.Context) (TrustView, error)
 	Presets(ctx context.Context) (config.Presets, error)
 	ExportRevocation(ctx context.Context) (RevocationExport, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)

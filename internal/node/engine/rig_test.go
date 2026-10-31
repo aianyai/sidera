@@ -427,6 +427,8 @@ func (r *rig) seedRecord(rec store.Record) {
 		dir = store.AttemptsDir
 	case store.CredentialRecord, store.LocalRevokedRecord:
 		dir = store.TrustDir
+	case store.PairingExpectationsRecord:
+		dir = store.PairingDir
 	default:
 		r.t.Fatalf("seedRecord: no directory for %T", rec)
 	}

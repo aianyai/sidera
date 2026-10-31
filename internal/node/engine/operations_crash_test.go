@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/pairing"
 )
 
 // The owner's operations on identity, alerts and settings are each walked through
@@ -35,6 +37,10 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 		first, again func(f *rig) string
 		// effect says whether the effect is on disk in the forked node.
 		effect func(f *rig, sc *store.Scan) bool
+		// refusedAgain: the request sent again after the effect, with no result, is a
+		// refusal (the effect is there, so the command has nothing to do) and stores
+		// nothing.
+		refusedAgain bool
 		// inConfig: the result is kept in a versioned file of config/ and not under
 		// state/admin/.
 		inConfig bool
@@ -54,6 +60,19 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 			}
 			return string(b)
 		}
+	}
+	peer := newPeerNode(t, 4)
+	expectation := pairing.Expectation{Node: peer.node, Author: pairing.LocalAuthor(), Operation: admin.OperationID{0xe1}, CreatedAt: t0}
+	expected := func(f *rig) string {
+		b, err := encodeExpected(engine.NodeExpected{Node: peer.node, ExpiresAt: t0.Add(pairing.DefaultParams().ExpectationTTL)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	cleared := func(*rig) string {
+		b, _ := encodeCleared(engine.NodeCleared{Node: peer.node})
+		return string(b)
 	}
 	alert := store.AlertRecord{ID: store.AlertID{0xa1}, Kind: "disk_low", At: t0, Detail: "d", Subject: "state"}
 	for _, tc := range []op{
@@ -88,6 +107,40 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 			first:  func(*rig) string { return `{"alert":"` + alert.ID.String() + `","acknowledged":true}` },
 			again:  func(*rig) string { return `{"alert":"` + alert.ID.String() + `","acknowledged":true}` },
 			effect: func(_ *rig, sc *store.Scan) bool { return len(sc.Alerts) == 1 && sc.Alerts[0].Acked != nil },
+		},
+		{
+			name: "entering an expectation", txs: []string{"trust-expect"},
+			cmd:    func(*rig) engine.ManagementCommand { return expectCommand(116, peer.node) },
+			first:  expected,
+			again:  expected,
+			effect: func(_ *rig, sc *store.Scan) bool { return len(sc.PairingExpectations) == 1 },
+		},
+		{
+			name: "forgetting an expectation", txs: []string{"trust-forget"}, refusedAgain: true,
+			setup:  func(r *rig) { r.seedRecord(store.PairingExpectationsRecord{List: []pairing.Expectation{expectation}}) },
+			cmd:    func(*rig) engine.ManagementCommand { return forgetCommand(117, peer.node) },
+			first:  func(*rig) string { return `{"node":"` + peer.node.String() + `","forgotten":true}` },
+			again:  func(*rig) string { return "" },
+			effect: func(_ *rig, sc *store.Scan) bool { return len(sc.PairingExpectations) == 0 },
+		},
+		{
+			name: "clearing a node that was removed", txs: []string{"trust-clear"},
+			setup: func(r *rig) {
+				r.seedRecord(store.LocalRevokedRecord{Node: peer.node, At: t0, Operation: "trust.remove"})
+			},
+			cmd:    func(*rig) engine.ManagementCommand { return clearCommandOf(118, peer.node) },
+			first:  cleared,
+			again:  cleared,
+			effect: func(_ *rig, sc *store.Scan) bool { return len(sc.LocalRevoked) == 0 },
+		},
+		{
+			name: "clearing a node that was not removed", txs: []string{"trust-result"},
+			cmd:   func(*rig) engine.ManagementCommand { return clearCommandOf(119, peer.node) },
+			first: cleared,
+			effect: func(f *rig, sc *store.Scan) bool {
+				_, ok := f.adminResultOf(sc, clearCommandOf(119, peer.node))
+				return ok
+			},
 		},
 		{
 			name: "changing the settings of the node", txs: []string{"node-set"}, inConfig: true,
@@ -141,6 +194,12 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 					none++
 				}
 				got, err := e.Execute(context.Background(), cmd)
+				if tc.refusedAgain && effect && !haveResult {
+					if !isReason(err, engine.ReasonInvalidArgument) || hasResult(f.scan(), cmd.Key) {
+						t.Errorf("%s: the request sent again: %v, want a refusal that stores nothing", where, err)
+					}
+					return
+				}
 				if err != nil {
 					t.Errorf("%s: the request sent again: %v", where, err)
 					return

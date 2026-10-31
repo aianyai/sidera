@@ -115,3 +115,27 @@ func PutPairingExpectations(tx *txn.Tx, role string, p PreparedPairingExpectatio
 	}
 	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
 }
+
+// PreparedPairingInitiator is a request the initiator started, encoded for a
+// transaction another package opens, as PreparedPairingExpectations is.
+type PreparedPairingInitiator struct{ f file }
+
+// PreparePairingInitiator validates and encodes the record of a request the
+// initiator started. It does no I/O.
+func PreparePairingInitiator(r pairing.InitiatorRecord) (PreparedPairingInitiator, error) {
+	f, err := recordFile(PairingDir, PairingInitiatorRecord{r})
+	if err != nil {
+		return PreparedPairingInitiator{}, err
+	}
+	return PreparedPairingInitiator{f}, nil
+}
+
+// PutPairingInitiator writes the prepared record in a transaction another package
+// opened, under the role the declaration gives it (RolePairingInitiator by
+// convention). It panics for a value PreparePairingInitiator did not return.
+func PutPairingInitiator(tx *txn.Tx, role string, p PreparedPairingInitiator) error {
+	if p.f.path == "" {
+		panic("store: PutPairingInitiator of a value PreparePairingInitiator did not return")
+	}
+	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
+}

@@ -622,13 +622,14 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations. The table holds 65 declarations (txn 2, config 9, keys 2,
-store 42, engine 8 and daemon 2), and the suite has fixtures for 53 of them: the
-twelve of the trust and peer records, the pairing records, the removal of a node
-from trust and the network configuration (`trust-credential`, `trust-revocation`,
+owners' declarations. The table holds 70 declarations (txn 2, config 9, keys 2,
+store 42, engine 13 and daemon 2), and the suite has fixtures for 53 of them: the
+seventeen of the trust and peer records, the pairing records, the owner's operations
+on trust and the network configuration (`trust-credential`, `trust-revocation`,
 `trust-local-clear`, `peer-cert`, `pairing-target-put`, `pairing-target-delete`,
 `pairing-initiator-put`, `pairing-initiator-delete`, `pairing-limits`,
-`pairing-expectations`, `trust-local-revoke`, `network-set`) have none yet, and
+`pairing-expectations`, `trust-local-revoke`, `trust-expect`, `trust-forget`,
+`trust-request`, `trust-clear`, `trust-result`, `network-set`) have none yet, and
 until they do their sub-benchmarks of an unfiltered run fail. It runs one named sub-benchmark per declaration,
 including Recovery declarations. Every selected declaration must have a fixture
 and at least one nonempty successful commit through its owner's existing entry point on
@@ -811,10 +812,16 @@ node from trust writes its entry, the revocations of its credentials and the
 result in one transaction the engine opens (`PrepareLocalRevoked`,
 `PrepareCredRevocation` and `PrepareAdminResult` before it begins, then
 `PutLocalRevoked` with `RoleLocalRevoked`, `PutCredRevocation` with
-`RoleCredRevocation` and `PutAdminResult` with `RoleResult`). Tests: the four
+`RoleCredRevocation` and `PutAdminResult` with `RoleResult`). Taking a node back
+into trust is also one transaction the engine opens, `trust-clear`: the removal of
+the entry (`RemoveLocalRevoked` with `RoleLocalRevoked`, which also syncs the
+directory under `RoleLocalRevokedDir`) and then the result; the caller knows the
+entry is there, as a removal of a file that is not is the transaction layer's error.
+Tests: the four
 vectors `credential`, `cred-revocation`, `local-revoked` and `peer` of
 `TestRecordGoldenVectors`, `TestTrustAndPeerRecordsAreHeldToTheirRules`,
 `TestTrustAndPeerRecordsComeBackFromTheDisk`, `TestLocalRevokedClearRemovesOnlyThatNode`,
+`TestLocalRevokedIsRemovedInsideAnotherTransaction`,
 `TestTrustAndPeerRecordsAreNeverSwept`.
 
 **Pairing records.** `pairing/` holds what the pairing package asks to be kept
@@ -855,9 +862,16 @@ already happened and one a crash prevented are the same to the pairing rules. Th
 expectations are also written inside a transaction the engine opens, together
 with the operation's result: `PreparePairingExpectations` before it begins, then
 `PutPairingExpectations` with `RolePairingExpectations` and `PutAdminResult` with
-`RoleResult`; that transaction is declared by the engine, not here. Tests: the
+`RoleResult`; that transaction is declared by the engine (`trust-expect` and
+`trust-forget`), not here. A request the initiator started is written the same way
+with the result of the owner's request for it, in the engine's `trust-request`
+(`PreparePairingInitiator`, then `PutPairingInitiator` with `RolePairingInitiator`
+and `PutAdminResult` with `RoleResult`); a target's refusal, which saves no request,
+and the clearing of a node that was not removed store their result alone
+(`trust-result`). Tests: the
 scenarios of the six declarations in `TestEveryTransactionConvergesFromEveryCrashState`,
 `TestPairingRecordsComeBackFromTheDisk`, `TestPairingExpectationsWriteInsideAnotherTransaction`,
+`TestPairingInitiatorWritesInsideAnotherTransaction`,
 `TestPairingRecordsAreHeldToTheirKeys`, `TestPairingRecordsAreNeverSwept`.
 
 **The time of the state.** Every stored delivery record, whatever its side, kind

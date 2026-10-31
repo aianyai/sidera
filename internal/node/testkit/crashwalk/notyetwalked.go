@@ -21,5 +21,10 @@ var NotYetWalked = map[string]string{
 	"pairing-limits":           "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"pairing-expectations":     "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"trust-local-revoke":       "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"trust-expect":             "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"trust-forget":             "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"trust-request":            "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"trust-clear":              "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"trust-result":             "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
 	"network-set":              "the network configuration write is not yet walked by the acceptance recipes",
 }

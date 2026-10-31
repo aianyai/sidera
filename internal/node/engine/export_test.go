@@ -552,7 +552,7 @@ func (l LoopSide) RevokeCredential(digest record.Digest) error { return l.e.revo
 func (l LoopSide) RevokeNodeLocally(key admin.RequestKey, fp admin.Fingerprint, name string, node ident.NodeID) ([]record.Digest, error) {
 	var revoked []record.Digest
 	x := &opRun{now: l.e.d.Clock.Now(), key: key, fingerprint: fp, name: name}
-	result, err := l.e.revokeNodeLocally(x, node, func(r revokedLocally) ([]byte, error) {
+	result, err := l.e.revokeNodeLocally(x, node, func(r NodeRemoved) ([]byte, error) {
 		revoked = r.Credentials
 		return []byte(fmt.Sprintf(`{"revoked":%d}`, len(r.Credentials))), nil
 	})
@@ -562,9 +562,12 @@ func (l LoopSide) RevokeNodeLocally(key admin.RequestKey, fp admin.Fingerprint, 
 	return revoked, err
 }
 
-// ClearLocallyRevoked takes the node back into this node's trust.
+// ClearLocallyRevoked takes the node back into this node's trust, storing a result
+// under a key of its own.
 func (l LoopSide) ClearLocallyRevoked(node ident.NodeID) error {
-	return l.e.clearLocallyRevoked(node)
+	x := &opRun{now: l.e.d.Clock.Now(), key: admin.RequestKey{ID: admin.OperationID{0xc1}}, fingerprint: admin.Fingerprint{1}, name: "trust.clear"}
+	_, err := l.e.clearLocallyRevoked(x, node, func(NodeCleared) ([]byte, error) { return []byte(`{}`), nil })
+	return err
 }
 
 // VerifyReport verifies a status report the target signed, as the engine does for

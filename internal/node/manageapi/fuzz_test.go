@@ -34,6 +34,9 @@ func FuzzDecodeRequest(f *testing.F) {
 		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"disk_reserve_bytes":9223372036854775807,"reply_permission":true}}}`,
 		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"a":null,"b":[1,{"c":1e2}],"d":"\u00e9"}}}`,
 		`{"params":{"include_acknowledged":true}}`,
+		// a request for a pairing with and without addresses to dial
+		`{"operation_id":"00000000000000000000000000000001","params":{"node":"` + ownNode.String() + `","addresses":["/ip4/10.0.0.1/tcp/7744"]}}`,
+		`{"operation_id":"00000000000000000000000000000001","params":{"node":"` + ownNode.String() + `","addresses":[]}}`,
 		// adapters and presets: a package path, an adapter with and without its instance
 		// and configuration, a preset document
 		`{"operation_id":"00000000000000000000000000000001","params":{"source":"/srv/adapters/relay"}}`,

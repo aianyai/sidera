@@ -246,6 +246,9 @@ wire stay with the interface.
 | `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
 | `SetPeerAddressesOp`, `RemovePeerOp`, `SetListenOp` | the addresses of a node replaced or removed, or the listen list replaced, in `network.json`, a versioned change judged by `config`; an address set is first judged by the network's rule (below). The new address book is pushed to the network after the write of an address change; the listen list takes effect at the next start | the `last_operation` of `network.json` |
 | `InstallAdapterOp` | a package is copied outside the loop, the copy is judged, and the loop renames it to its version and replaces the pointer that makes it current | `state/admin/`, the last-but-one write of `adapter-install`, or alone in `adapter-install-current` |
+| `ExpectNodeOp`, `ForgetNodeOp` | the pairing's list of expectations replaced (a node the owner means to pair with is entered, or deleted); the state machine's own refusal is the answer when the node is itself or invalid, or has no expectation to forget | `state/admin/`, the last write of `trust-expect` and `trust-forget`, with the list |
+| `RequestPairingOp` | the node is dialed from a worker and the online segment of a pairing is started on the stream; the answer comes when the segment ends (below) | `state/admin/`, the last write of `trust-request` with the saved request, or alone in `trust-result` for a target's refusal |
+| `RemoveNodeOp`, `ClearNodeOp` | a node is removed from this node's trust with the revocation of the credentials held with it (`trust-local-revoke`), or taken back (`trust-clear`: the removal of the entry, then the result; a node that was not removed stores its result alone in `trust-result`) | `state/admin/`, the last write of each |
 | `EnableAdapterOp`, `DisableAdapterOp` | the instance is made (or turned on) or turned off in `instances.json`; then the host is asked to run or stop it | the `last_operation` of `instances.json` |
 | `AddPresetOp`, `RemovePresetOp` | a preset is added from its document or removed, in `presets.json`; adding is judged as loosening and removing as narrowing; then the instances that run are restarted to be given the presets | the `last_operation` of `presets.json` |
 
@@ -928,7 +931,13 @@ the write that makes the change durable returned (`trust.go`).
   The `World` is made fresh for every call from the engine's own sources: the default
   parameters, the identity signer of the keys, the revocation set, `trustView()` (whose
   `Local` is this node, as the state machine requires), no authorized persons and no
-  stored results, because no management command of the pairing is driven yet. Randomness is
+  stored results. The `World` has no `Stored` on purpose: the replay check of a
+  management request has one home, the table of stored results that `Execute` reads
+  before any command of the state machine is called, and the state machine's own
+  request fingerprint is not the one the management interface makes, so a second check
+  against the same results would turn a genuine resend into a reuse of its identifier.
+  The state machine still authorizes and validates a request itself; that is its guard
+  and not a replay check. Randomness is
   `Deps.Rand`. A node without keys has no identity key to sign with and runs no pairing:
   nothing is recovered or ticked and a stream is refused.
 - **The actions of a call are performed by one function, `pairingPerform`, in one order.** The
@@ -974,9 +983,40 @@ the write that makes the change durable returned (`trust.go`).
   next tick that anything else causes. The engine's schedule is used rather than a periodic
   task of the composition root because the commands move it and a restart restores it from the
   records, which a fixed period does not.
+- **The owner's operations on trust come through the door like every other.** `trust.expect`
+  and `trust.forget` call the state machine's `Expect` and `Forget` and store the list of
+  expectations it asks to persist with the result (`trust-expect`, `trust-forget`); the
+  state is taken after the write is durable. What the state machine says that is not an
+  execution is a refusal and stores nothing, so the identifier stays free: a result of
+  `ResultInvalid` (the node is itself or unusable, or hints that cannot be used),
+  `ResultNotFound` (no expectation), `ResultNotAccepted` and `ResultWrongPeer` (the node
+  cannot be paired with) is `ReasonInvalidArgument` naming the field, and `ResultPaused`,
+  `ResultInProgress` and `ResultFull` (the node cannot do it now) is `ReasonLoopBusy` with
+  the state machine's word in the log. A disposition that is not an execution at all is a
+  disagreement with the loop's own authorization and fails loudly.
+- **A request for a pairing is answered when its online segment ends.** `RequestPairingOp` is
+  not run by the loop but started (`pairing_request.go`): the loop looks the request up in
+  the stored results (a request done before is answered without dialing), refuses one whose
+  key is in flight (`ReasonLoopBusy`: the first is still running), allocates the session
+  identifier and starts a worker; the worker calls `Network.StartPairing` and hands the stream
+  to the loop, which registers an initiator session and calls `Initiate` with the owner as the
+  actor and the operation identifier as the request; the worker then waits, bounded by the
+  engine's context, for the loop to answer. Every end of the segment is a call of the state
+  machine whose actions say what became of it, and `pairingPerform` is where it is found: the
+  call that saves the request the target accepted writes it with the result in one
+  transaction (`trust-request`: the request, then the result), and a segment that ends with
+  the target's refusal stores the result alone (`trust-result`; `PairingRequested.Refusal`).
+  A node that cannot be dialed, a stream that ended before the engine held it and a segment
+  that ends with neither a saved request nor a refusal (the connection was lost, an attempt
+  was used) are answered `ReasonDirectoryUnavailable` and store nothing, so the owner can ask
+  again. The request is in a table of the loop until it is answered and only the loop answers
+  it, so whichever of a frame, a close or a tick comes first answers it and the others find it
+  gone. The table is per key, not the adapter installation's one place: pairings with
+  different nodes may run at once. Dial hints are the pairing's own and never join the
+  address book.
 - **The steps on trust** (`installCredential`, `installRevocation`, `revokeCredential`,
-  `revokeNodeLocally`, `clearLocallyRevoked`) run in the loop and are what the pairing and the
-  owner's operations on trust will call; nothing exposes them yet. A credential is stored with,
+  `revokeNodeLocally`, `clearLocallyRevoked`) run in the loop; the pairing and the
+  owner's operations on trust call them. A credential is stored with,
   optionally, the certificate of the node at its other end (`trust-credential`: the credential
   is the commit point). A revocation is made with the identity key, which only these steps use
   (`Keys.IdentitySigner`), and never while the identity is retired; a build with the
@@ -986,9 +1026,9 @@ the write that makes the change durable returned (`trust.go`).
   commit point, then the revocation of each credential this node holds with the node, then the
   result of the operation; the first removal's time and operation name are kept when it is
   done again, and done again after a crash it writes what is missing. Clearing the removal
-  (`trust-local-clear`) restores nothing that was revoked: the credentials revoked with the
+  (`trust-clear`: the removal of the entry made durable, then the result) restores nothing that was revoked: the credentials revoked with the
   removal stay revoked, and the node is trusted again only through a new credential.
-- **The network.** The engine defines `Network` (`SetMembership`, `Connected`, and for the owner's network commands `SetAddressBook`, `CheckAddresses`, `PeerID`, `ListenAddrs` and `ContactAddrs`) and its own
+- **The network.** The engine defines `Network` (`SetMembership`, `Connected`, and for the owner's network commands `SetAddressBook`, `CheckAddresses`, `PeerID`, `ListenAddrs` and `ContactAddrs`, and for the pairing `PairingFetch` and `StartPairing`) and its own
   `Membership`, which has the fields of the network layer's type and none other, so the
   composition root converts between them as they are; the engine imports nothing of the
   network package. `SetNetwork` is called before `Start`; no network means nothing is pushed.
@@ -1764,6 +1804,8 @@ reproducible).
 | The network is given a snapshot at the start, after each change of the facts and after a renewal of the certificate | `network.go`, `engine.go` (`Start`, `fire`) | `TestTheNetworkIsGivenAFreshSnapshotWhenTheFactsChange`, `TestTheNetworkIsGivenTheRenewedCertificate` |
 | The address book is pushed after a durable change of it only, and the view tells what the network and the engine know | `operations_network.go` | `TestNetworkChangesPushTheAddressBookOnlyAfterADurableChange` |
 | The actions of a pairing call run persists first and in order, then the rest; a persist after an action that reaches outside refuses the whole list | `pairing.go` (`pairingPerform`) | `TestPairingActionsArePerformedInOrderOrNotAtAll` |
+| An owner's request for a pairing stores its result with the saved request, a refusal alone, and a resend after the answer dials nothing | `pairing_request.go` (`persistRequested`, `endUnsaved`), `pairing.go` (`pairingPerform`) | `TestARequestForAPairingStoresItsResultWithTheSavedRequest`, `TestARequestThatIsRefusedOrNotAnsweredStoresTheRightThing`, `TestARequestForAPairingRecoversFromACrashAtEveryPoint` |
+| The owner's operations on trust store their results, a refusal stores nothing, and each recovers from a crash at every point | `operations_trust.go`, `transactions.go` (`trust-expect`, `trust-forget`, `trust-clear`, `trust-result`) | `TestTrustOperationsStoreTheirResultsAndRefusalsStoreNothing`, `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | A result fetch asked for while the node starts is held until the second recovery entry has ended | `pairing.go` (`pairingFetchRequested`, `openPairingFetches`), `recovery.go` (`recoverLoopback`) | `TestPairingFetchIsHeldUntilTheNodeHasStarted` |
 | The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |

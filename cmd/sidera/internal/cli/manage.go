@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -22,6 +23,9 @@ type managementPlan struct {
 	versionMethod string
 	expected      *admin.Version
 	exportOut     *string
+	// wait is how long `trust request` waits, on the client's side only, for the
+	// pairing to complete after the node has answered; zero does not wait.
+	wait time.Duration
 }
 
 func (c *command) manage(ctx context.Context, args []string) error {
@@ -63,6 +67,12 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	switch {
+	case plan.method == "trust.request":
+		return c.awaitPairing(ctx, client, raw, plan.wait)
+	case plan.method == "trust.list" && !c.json:
+		return c.trustList(raw)
 	}
 	if err := c.managementResult(raw); err != nil {
 		return err
@@ -182,6 +192,23 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.change = true
 		plan.versionMethod = "network.show"
 		versioned = true
+	case "trust expect":
+		plan.method = "trust.expect"
+		plan.change = true
+	case "trust forget":
+		plan.method = "trust.forget"
+		plan.change = true
+	case "trust request":
+		plan.method = "trust.request"
+		plan.change = true
+	case "trust list":
+		plan.method = "trust.list"
+	case "trust remove":
+		plan.method = "trust.remove"
+		plan.change = true
+	case "trust clear":
+		plan.method = "trust.clear"
+		plan.change = true
 	case "identity export-revocation":
 		plan.method = "identity.export_revocation"
 	case "identity confirm-backup":
@@ -209,6 +236,17 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	}
 	want := 0
 	switch plan.method {
+	case "trust.request":
+		if len(p) < 1 {
+			return plan, usage("trust request needs a node and optionally multiaddrs to dial")
+		}
+		if o.wait < 0 {
+			return plan, usage("--wait cannot be negative")
+		}
+		want = len(p)
+		plan.wait = o.wait
+	case "trust.expect", "trust.forget", "trust.remove", "trust.clear":
+		want = 1
 	case "alerts.ack", "presets.add", "presets.remove", "adapters.install", "adapters.enable", "adapters.disable", "endpoints.close", "identity.confirm_backup":
 		want = 1
 	case "node.set":
@@ -285,6 +323,13 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.params["node"], plan.params["addresses"] = p[0], p[1:]
 	case "network.address.remove":
 		plan.params["node"] = p[0]
+	case "trust.expect", "trust.forget", "trust.remove", "trust.clear":
+		plan.params["node"] = p[0]
+	case "trust.request":
+		plan.params["node"] = p[0]
+		if len(p) > 1 {
+			plan.params["addresses"] = p[1:]
+		}
 	case "network.listen.set":
 		plan.params["addresses"] = p
 	case "node.set":
@@ -343,6 +388,7 @@ type managementFlags struct {
 	file, instance, node, output string
 	all, yes                     bool
 	version                      uint64
+	wait                         time.Duration
 }
 
 func (o *managementFlags) add(f *flag.FlagSet, name string) {
@@ -358,6 +404,8 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&o.instance, "instance", "", "filter by instance")
 	case "identity export-revocation":
 		f.StringVar(&o.output, "out", "", "write the verified raw record to a new private file")
+	case "trust request":
+		f.DurationVar(&o.wait, "wait", defaultPairingWait, "how long to wait for the pairing to complete; 0 returns at once")
 	case "identity retire":
 		f.StringVar(&o.node, "node", "", "node to retire")
 		f.BoolVar(&o.yes, "yes", false, "confirm permanent retirement")

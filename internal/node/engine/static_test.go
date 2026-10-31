@@ -19,7 +19,7 @@ func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 		"Ack", "Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
 		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
 		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "PairingClosed", "PairingFrame", "PairingOpened", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
-		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
+		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "TrustView", "UnregisterDirect",
 	}
 	allowed = append(allowed, testOnlyMethods...)
 	typ := reflect.TypeOf(&engine.Engine{})
@@ -69,7 +69,7 @@ func TestTheEngineDeclaresTheTransactionsOfTwoOwnersItOpens(t *testing.T) {
 		got = append(got, d.Name)
 	}
 	sort.Strings(got)
-	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit", "trust-local-revoke"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit", "trust-clear", "trust-expect", "trust-forget", "trust-local-revoke", "trust-request", "trust-result"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("engine.Transactions = %v, want %v", got, want)
 	}
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -88,10 +89,26 @@ func (s *Store) LocalRevokedClear(node ident.NodeID) error {
 	if _, err := s.removeRef(tx, RoleLocalRevoked, ref, ex); err != nil {
 		return err
 	}
-	if err := tx.SyncDir("local-revoked-dir", TrustDir); err != nil {
+	if err := tx.SyncDir(RoleLocalRevokedDir, TrustDir); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// RemoveLocalRevoked removes the record of a node removed from this node's trust,
+// and syncs the directory so that the removal is durable, in a transaction another
+// package opened, under the two roles the declaration gives them (RoleLocalRevoked
+// and RoleLocalRevokedDir by convention). The caller knows the record is there: a
+// remove of a file that is not, which no one can tell inside a transaction without
+// reading the disk, is the transaction layer's error.
+func RemoveLocalRevoked(tx *txn.Tx, removeRole, syncRole string, node ident.NodeID) error {
+	if node.IsZero() {
+		return errors.New("store: RemoveLocalRevoked of a zero node")
+	}
+	if err := tx.Remove(removeRole, path.Join(TrustDir, LocalRevokedRecord{Node: node}.Name())); err != nil {
+		return err
+	}
+	return tx.SyncDir(syncRole, TrustDir)
 }
 
 // PreparedLocalRevoked is a local-revoked record encoded for a transaction

@@ -15,6 +15,8 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/transport"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
 )
@@ -135,6 +137,8 @@ type fakeNetwork struct {
 	connected map[ident.NodeID]bool
 	// fetches are the pairing fetches the engine asked for, by the node asked.
 	fetches []ident.NodeID
+	// dial is what StartPairing does; nil means the node cannot be reached.
+	dial func(ctx context.Context, node ident.NodeID, addrs []string, sid pairing.SessionID) (engine.PairingPeer, engine.PairingStream, error)
 }
 
 // PairingFetch records the exchange and answers that none came.
@@ -143,6 +147,18 @@ func (n *fakeNetwork) PairingFetch(_ context.Context, node ident.NodeID, _ []str
 	defer n.mu.Unlock()
 	n.fetches = append(n.fetches, node)
 	return nil, engine.PairingPeer{}, errors.New("no answer")
+}
+
+// StartPairing answers that the node cannot be reached, unless a test gave the
+// network a way to dial.
+func (n *fakeNetwork) StartPairing(ctx context.Context, node ident.NodeID, addrs []string, sid pairing.SessionID) (engine.PairingPeer, engine.PairingStream, error) {
+	n.mu.Lock()
+	dial := n.dial
+	n.mu.Unlock()
+	if dial == nil {
+		return engine.PairingPeer{}, nil, transport.ErrUnreachable
+	}
+	return dial(ctx, node, addrs, sid)
 }
 
 func (n *fakeNetwork) fetched() []ident.NodeID {

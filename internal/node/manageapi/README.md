@@ -41,7 +41,13 @@ the version is that of `network.json`, given by `network.show` and named by a ch
 the expected version, as for `node.set`; the rule for an address is `config`'s and the
 network's, judged by the engine, so a row only words the params and the result) and
 `methods_adapters.go` (`adapters.install|list|enable|disable`,
-`presets.list|add|remove`). The words of each
+`presets.list|add|remove`) and
+`methods_trust.go` (`trust.expect|forget|request|list|remove|clear`: no version; the rules for a node
+and for a pairing are the engine's and `pairing`'s, so a row only reads the node, checks the form of
+the dial hints of `trust.request` and words the result; the one function that names the state of
+an initiator record and the one for a target record are here and serve both `trust.list` and
+`trust.request`; `trust.request` is answered when the online segment ends, so its call can take
+most of a minute). The words of each
 result, and of the reminders, are the interface's: the engine says which reminder
 stands and what an operation did, and a function the row passes to the operation
 words it. A patch of settings is passed to the engine as it was written, in a
@@ -182,7 +188,9 @@ the fingerprint of a patch, the stop after a retirement, and the golden answers 
 the interface words it, the fingerprint of equal writes and the refusals of the engine
 on the wire); `fuzz_test.go` fuzzes the one
 entry that reads a request, for every method the table has: it never panics, and
-what it accepts is canonical. `methods_adapters_test.go` the rows for adapters and
+what it accepts is canonical. `methods_trust_test.go` the rows for trust: the commands the
+engine is asked for (an empty list of dial hints and none are one request), the words of each
+result, and `trust.list` with the name of each state of a record. `methods_adapters_test.go` the rows for adapters and
 presets: the operation each is authorized as (a preset is added as loosening and
 removed as narrowing), the strict reading of their params (a package named by a
 path that is not absolute, a member that is empty or null), what the engine is asked

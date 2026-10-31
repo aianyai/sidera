@@ -235,6 +235,22 @@ var (
 		{Role: store.RolePairingExpectations, Op: txn.OpReplace},
 		{Role: store.RoleResult, Op: txn.OpReplace},
 	}}
+	// declXRequest is the shape of the transaction that saves a request the
+	// initiator started with the result of the owner's request for it.
+	declXRequest = txn.Decl{Name: "x-request", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingInitiator, Op: txn.OpReplace},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	// declXTakeBack is the shape of the transaction that takes a node back into
+	// this node's trust: the removal of its entry, made durable, then the result.
+	declXTakeBack = txn.Decl{Name: "x-take-back", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RoleLocalRevoked, Op: txn.OpRemove},
+		{Role: store.RoleLocalRevokedDir, Op: txn.OpSyncDir},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
+	declXRevokeOnly = txn.Decl{Name: "x-revoke-only", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RoleLocalRevoked, Op: txn.OpReplace},
+	}}
 	// declXLayout is what the composition root declares for the layout rule.
 	declXLayout = txn.Decl{Name: "layout", Kind: txn.Recovery, Writes: []txn.Write{
 		{Role: "dir", Op: txn.OpMakeDir, Many: true, Optional: true},
@@ -263,7 +279,7 @@ func program(t testing.TB) *txn.Table {
 
 func programTable() (*txn.Table, error) {
 	decls := append(txn.Internal(), store.Transactions()...)
-	decls = append(decls, &declXAdmit, &declXClear, &declXRevoke, &declXExpect, &declXLayout)
+	decls = append(decls, &declXAdmit, &declXClear, &declXRevoke, &declXExpect, &declXRequest, &declXTakeBack, &declXRevokeOnly, &declXLayout)
 	return txn.NewTable(decls...)
 }
 

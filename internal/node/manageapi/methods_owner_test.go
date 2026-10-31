@@ -53,6 +53,12 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 		{"presets.list", admin.OpRead, false, false},
 		{"presets.add", admin.OpChangePreset, true, true},
 		{"presets.remove", admin.OpChangePreset, true, true},
+		{"trust.expect", admin.OpConfirmTrust, true, false},
+		{"trust.forget", admin.OpRejectTrustRequest, true, false},
+		{"trust.request", admin.OpConfirmTrust, true, false},
+		{"trust.list", admin.OpRead, false, false},
+		{"trust.remove", admin.OpLocallyRevokeNode, true, false},
+		{"trust.clear", admin.OpClearLocallyRevoked, true, false},
 	} {
 		m := r.srv.methods[tc.method]
 		if m == nil {
@@ -98,6 +104,15 @@ func TestTheParamsOfTheOwnersMethodsAreReadStrictly(t *testing.T) {
 		{"a member of the clear that is not there", "clock.clear_rollback", `{"operation_id":"` + id + `","params":{"force":true}}`, "params.force"},
 		{"a member of the retirement that is not there", "identity.retire", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","yes":true}}`, "params.yes"},
 		{"an unknown member of the list", "alerts.list", `{"params":{"all":true}}`, "params.all"},
+		{"a node to expect that is not an identifier", "trust.expect", `{"operation_id":"` + id + `","params":{"node":"here"}}`, "params.node"},
+		{"a node to forget that is absent", "trust.forget", `{"operation_id":"` + id + `","params":{}}`, "params.node"},
+		{"a node to remove that is not an identifier", "trust.remove", `{"operation_id":"` + id + `","params":{"node":"here"}}`, "params.node"},
+		{"a node to clear with another member", "trust.clear", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","force":true}}`, "params.force"},
+		{"a node to request that is not an identifier", "trust.request", `{"operation_id":"` + id + `","params":{"node":"here"}}`, "params.node"},
+		{"an address to dial that is not valid", "trust.request", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","addresses":["/ip4/10.0.0.1/tcp/7744","not an address"]}}`, "params.addresses[1]"},
+		{"too many addresses to dial", "trust.request", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","addresses":["` + strings.Repeat(`/ip4/10.0.0.1/tcp/7744","`, 16) + `/ip4/10.0.0.1/tcp/7744"]}}`, "params.addresses"},
+		{"addresses to dial of the wrong type", "trust.request", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","addresses":"/ip4/10.0.0.1/tcp/7744"}}`, "params.addresses"},
+		{"a member of the list that is not there", "trust.list", `{"params":{"all":true}}`, "params.all"},
 		{"a null for a member", "alerts.ack", `{"operation_id":"` + id + `","params":{"alert":null}}`, "params.alert"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -46,6 +46,12 @@ type usageError struct{ message string }
 func (e *usageError) Error() string { return e.message }
 func usage(message string) error    { return &usageError{message} }
 
+// failure is a command that ran and did not get what it waited for, with the words
+// for the owner. It is a plain failure: exit code 1, no category of the wire.
+type failure struct{ message string }
+
+func (e *failure) Error() string { return e.message }
+
 // Run dispatches argv, including the executable name, and returns its exit code.
 // Only main ends the process, so clients and daemon resources are closed first.
 func Run(ctx context.Context, argv []string, cfg Config) int {
@@ -82,6 +88,11 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 	if errors.As(err, &u) {
 		fmt.Fprintln(c.Stderr, "error:", u.message)
 		return apiwire.ExitUsage
+	}
+	var fail *failure
+	if errors.As(err, &fail) {
+		fmt.Fprintln(c.Stderr, "error:", fail.message)
+		return 1
 	}
 	var d *daemonError
 	if errors.As(err, &d) {
@@ -208,7 +219,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return c.local(ctx, args)
 	}
 	switch args[0] {
-	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network":
+	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust":
 		return c.manage(ctx, args)
 	case "status":
 		if len(args) == 1 {
