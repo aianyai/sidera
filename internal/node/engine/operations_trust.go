@@ -44,8 +44,8 @@ func (x *opRun) pairingRequest() pairing.Request {
 // disagreement between the two and fails loudly. Of the results, those that say the
 // node it names cannot be used are invalid arguments; those that say the node cannot
 // do it now (a pause after failed verifications, a pairing under way with that
-// node, a full list of expectations) are answered as busy, with the state machine's
-// own word in the log. invalid is the field a result of ResultInvalid is about.
+// node, a full list of expectations) each have a reason of their own. invalid is the
+// field a result of ResultInvalid is about.
 func (e *Engine) pairingRefusal(out pairing.Outcome, invalid string) error {
 	if out.Disposition != pairing.DispositionExecuted {
 		return fmt.Errorf("engine: the pairing did not execute a command the engine had authorized and checked (disposition %d, reason %q)", out.Disposition, out.Reason)
@@ -57,9 +57,12 @@ func (e *Engine) pairingRefusal(out pairing.Outcome, invalid string) error {
 		return invalidArgument(invalid, fmt.Errorf("the pairing refused it as %s", out.Result))
 	case pairing.ResultNotFound, pairing.ResultNotAccepted, pairing.ResultWrongPeer:
 		return invalidArgument("node", fmt.Errorf("the pairing refused it as %s", out.Result))
-	case pairing.ResultPaused, pairing.ResultInProgress, pairing.ResultFull:
-		e.log.Warn("a pairing command is refused", "result", out.Result.String(), "retry_after", out.RetryAfter.String())
-		return &Refusal{Reason: ReasonLoopBusy, Err: fmt.Errorf("the pairing refused it as %s", out.Result)}
+	case pairing.ResultPaused:
+		return &Refusal{Reason: ReasonPairingPaused, RetryAfter: out.RetryAfter, Err: fmt.Errorf("the pairing refused it as %s", out.Result)}
+	case pairing.ResultInProgress:
+		return &Refusal{Reason: ReasonPairingInProgress, Err: fmt.Errorf("the pairing refused it as %s", out.Result)}
+	case pairing.ResultFull:
+		return &Refusal{Reason: ReasonExpectationsFull, Err: fmt.Errorf("the pairing refused it as %s", out.Result)}
 	}
 	return fmt.Errorf("engine: a pairing command ended as %s, which none of the owner's operations on pairing can", out.Result)
 }

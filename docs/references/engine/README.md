@@ -990,14 +990,16 @@ the write that makes the change durable returned (`trust.go`).
   execution is a refusal and stores nothing, so the identifier stays free: a result of
   `ResultInvalid` (the node is itself or unusable, or hints that cannot be used),
   `ResultNotFound` (no expectation), `ResultNotAccepted` and `ResultWrongPeer` (the node
-  cannot be paired with) is `ReasonInvalidArgument` naming the field, and `ResultPaused`,
-  `ResultInProgress` and `ResultFull` (the node cannot do it now) is `ReasonLoopBusy` with
-  the state machine's word in the log. A disposition that is not an execution at all is a
+  cannot be paired with) is `ReasonInvalidArgument` naming the field, and `ResultPaused`
+  (pairing stopped after reported code mismatches; the `RetryAfter` of the refusal says when
+  to come back) is `ReasonPairingPaused`, `ResultInProgress` (already pairing with that node)
+  is `ReasonPairingInProgress` and `ResultFull` (the list of expectations is at its cap) is
+  `ReasonExpectationsFull`. A disposition that is not an execution at all is a
   disagreement with the loop's own authorization and fails loudly.
 - **A request for a pairing is answered when its online segment ends.** `RequestPairingOp` is
   not run by the loop but started (`pairing_request.go`): the loop looks the request up in
   the stored results (a request done before is answered without dialing), refuses one whose
-  key is in flight (`ReasonLoopBusy`: the first is still running), allocates the session
+  key is in flight (`ReasonPairingInProgress`: the first is still running), allocates the session
   identifier and starts a worker; the worker calls `Network.StartPairing` and hands the stream
   to the loop, which registers an initiator session and calls `Initiate` with the owner as the
   actor and the operation identifier as the request; the worker then waits, bounded by the
@@ -1008,7 +1010,7 @@ the write that makes the change durable returned (`trust.go`).
   the target's refusal stores the result alone (`trust-result`; `PairingRequested.Refusal`).
   A node that cannot be dialed, a stream that ended before the engine held it and a segment
   that ends with neither a saved request nor a refusal (the connection was lost, an attempt
-  was used) are answered `ReasonDirectoryUnavailable` and store nothing, so the owner can ask
+  was used) are answered `ReasonNodeUnreachable` and store nothing, so the owner can ask
   again. The request is in a table of the loop until it is answered and only the loop answers
   it, so whichever of a frame, a close or a tick comes first answers it and the others find it
   gone. The table is per key, not the adapter installation's one place: pairings with

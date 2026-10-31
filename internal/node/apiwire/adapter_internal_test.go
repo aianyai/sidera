@@ -49,6 +49,10 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonProbeTokenUsed:       {-32603, ""},
 	engine.ReasonProbeTokenExpired:    {-32603, ""},
 	engine.ReasonDirectoryUnavailable: {-32603, ""},
+	engine.ReasonPairingPaused:        {-32603, ""},
+	engine.ReasonPairingInProgress:    {-32603, ""},
+	engine.ReasonExpectationsFull:     {-32603, ""},
+	engine.ReasonNodeUnreachable:      {-32603, ""},
 
 	engine.ReasonNodeQueueFull:      {1012, `{"reason":"node_queue_full"}`},
 	engine.ReasonStorageFull:        {1012, `{"reason":"storage_full"}`},

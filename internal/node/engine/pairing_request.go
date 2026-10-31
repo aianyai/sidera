@@ -118,11 +118,11 @@ func (e *Engine) takeRequest(c *cmdRequest) error {
 		return errNoKeys
 	case e.net == nil:
 		// Without a network there is nothing to reach the node over.
-		return refuse(ReasonDirectoryUnavailable)
+		return refuse(ReasonNodeUnreachable)
 	}
 	if _, running := e.pairing.requests[c.cmd.Key]; running {
 		// The request that is running is this one, sent again too early.
-		return refuse(ReasonLoopBusy)
+		return refuse(ReasonPairingInProgress)
 	}
 	e.pairing.last++
 	req := &pairingRequestInFlight{cmd: c.cmd, op: c.op, sid: e.pairing.last, ended: make(chan requestEnd, 1)}
@@ -197,7 +197,7 @@ func (e *Engine) requestStarted(now time.Time, c *cmdRequestStarted) {
 	}
 	if req.closedEarly {
 		c.stream.Close()
-		e.endRequest(req, StoredResult{}, refuse(ReasonDirectoryUnavailable))
+		e.endRequest(req, StoredResult{}, refuse(ReasonNodeUnreachable))
 		return
 	}
 	fail := func(err error) {
@@ -230,7 +230,7 @@ func (e *Engine) requestStarted(now time.Time, c *cmdRequestStarted) {
 func (e *Engine) dialRefusal(err error) error {
 	switch {
 	case errors.Is(err, transport.ErrUnreachable):
-		return refuse(ReasonDirectoryUnavailable)
+		return refuse(ReasonNodeUnreachable)
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return refuse(ReasonShuttingDown)
 	}
@@ -347,7 +347,7 @@ func (e *Engine) persistRequested(end *requestEnding) error {
 // and leaves its identifier free for the owner to ask again.
 func (e *Engine) endUnsaved(end requestEnding) {
 	if end.refusal == 0 {
-		e.endRequest(end.req, StoredResult{}, refuse(ReasonDirectoryUnavailable))
+		e.endRequest(end.req, StoredResult{}, refuse(ReasonNodeUnreachable))
 		return
 	}
 	result, x, err := e.requestResult(&end)

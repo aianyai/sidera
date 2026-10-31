@@ -197,10 +197,10 @@ producers must keep request bodies, credentials and private keys out of them.
 | `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `cursor_invalid`, `probe_frontend_mismatch`, `socket_path_too_long` |
 | `unauthenticated` | 401 | 4 | `token_missing`, `token_malformed`, `token_unknown`, `probe_token_used`, `probe_token_expired` |
 | `not_found` | 404 | 5 | `method_unknown`, `message_unknown`, `lease_unknown`, `endpoint_unknown`, `instance_unknown` |
-| `conflict` | 409 | 6 | `idempotency_conflict`, `daemon_already_running`, `data_directory_already_initialized` |
-| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`; `data_directory_unusable` |
-| `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy` |
-| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `request_canceled`, `request_timeout`, `data_directory_not_initialized`, `daemon_storage_fatal` |
+| `conflict` | 409 | 6 | `idempotency_conflict`, `daemon_already_running`, `data_directory_already_initialized`, `pairing_in_progress` |
+| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`; `data_directory_unusable`, `expectations_full` |
+| `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy`, `pairing_paused` |
+| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `node_unreachable`, `request_canceled`, `request_timeout`, `data_directory_not_initialized`, `daemon_storage_fatal` |
 | `internal` | 500 | 1 | `internal`, `engine_not_stopped`, `instance_lock_not_held` |
 | `outcome_unknown` | 500 | 10 | `outcome_unknown`, `storage_fatal` |
 

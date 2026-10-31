@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -312,6 +313,19 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryUnavailable, "recovering", "the node is starting; it does not take this yet")
 	case engine.ReasonDirectoryUnavailable:
 		return New(CategoryUnavailable, "directory_unavailable", "the directory could not be reached in time; try again later")
+	case engine.ReasonPairingPaused:
+		// The wire has no field for a retry hint, so the time is in the words.
+		message := "pairing is paused after code mismatches were reported; try again later"
+		if r.RetryAfter > 0 {
+			message = "pairing is paused after code mismatches were reported; try again in " + r.RetryAfter.Round(time.Second).String()
+		}
+		return New(CategoryBackpressure, "pairing_paused", message)
+	case engine.ReasonPairingInProgress:
+		return New(CategoryConflict, "pairing_in_progress", "a pairing with this node is already in progress, or this same request is still running; try again when it ends")
+	case engine.ReasonExpectationsFull:
+		return New(CategoryRefused, "expectations_full", "the list of expectations is full; forget one before entering another")
+	case engine.ReasonNodeUnreachable:
+		return New(CategoryUnavailable, "node_unreachable", "the node could not be reached, or the pairing ended without an answer; check its address and try again")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

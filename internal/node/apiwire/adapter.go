@@ -198,6 +198,11 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonPlatformUnsupported: internalCode,
 	engine.ReasonProbeTokenUsed:      internalCode,
 	engine.ReasonProbeTokenExpired:   internalCode,
+	// The owner's operations on trust are not an adapter's.
+	engine.ReasonPairingPaused:     internalCode,
+	engine.ReasonPairingInProgress: internalCode,
+	engine.ReasonExpectationsFull:  internalCode,
+	engine.ReasonNodeUnreachable:   internalCode,
 
 	engine.ReasonNodeQueueFull:      backPressure,
 	engine.ReasonStorageFull:        backPressure,

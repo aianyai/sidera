@@ -133,6 +133,17 @@ a `--wait` that is not a duration (`10s`, `1m`; a bare number is not one) or is
 negative, is usage error 2 before anything is sent. `--json` prints the whole response
 for each command.
 
+The refusals that say a pairing cannot be done now each have a code and, as every error,
+the exit code of their category: `backpressure/pairing_paused` (exit 8; pairing stopped
+after code mismatches were reported, and the message says in how long to try again),
+`conflict/pairing_in_progress` (exit 6; a pairing with that node is under way, or the
+same `trust request` is still running), `refused/expectations_full` (exit 7; forget an
+expectation first) and, for `trust request` only, `unavailable/node_unreachable` (exit 9;
+the node could not be dialed, or the pairing ended with neither a saved request nor the
+target's refusal; nothing is stored, so the command may be run again). A node with no
+expectation for `trust forget` is `invalid_argument/malformed_request` (exit 3, field
+`node`).
+
 `trust list` prints five sections (`trusted`, `expectations`, `incoming`, `outgoing`,
 `locally_revoked`), one line for each entry, and `none` for an empty section; times
 are written as the interface gives them.

@@ -67,6 +67,16 @@ not import it: the words of the wire never enter the engine.
   and an unreachable target map to `unavailable/directory_unavailable`. This
   stable code means try again later; it is never renamed, removed or reused for
   another meaning. It is not an uncertain message outcome, nor an inbox timeout.
+- **The owner's operations on trust have a reason for each way they are refused.**
+  `pairing_paused` is `backpressure` (nothing was done and the node takes it again
+  later), `pairing_in_progress` is `conflict` (one pairing with a node at a time, as one
+  installation at a time; it also words an identical `trust.request` resend while the first
+  is in flight), `expectations_full` is `refused` (a limit of the node, as
+  `endpoint_limit`) and `node_unreachable` is `unavailable` (the node asked to pair with
+  did not answer, or the pairing ended with neither a saved request nor a refusal). The wire
+  has no field for a retry hint, so the time a pause lasts is in the message of
+  `pairing_paused`, rounded to the second. None of them is a request of an adapter, so each
+  is `-32603` there.
 - **Daemon lifecycle errors keep actionable, bounded messages.** `daemonerr`
   exposes only the daemon's existing declarations, avoiding an import of the
   composition root. The shared mapping covers those errors and IPC path-length

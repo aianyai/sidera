@@ -306,7 +306,7 @@ func TestARequestForAPairingStoresItsResultWithTheSavedRequest(t *testing.T) {
 	sid := <-s.sid
 	s.frame(sid, s.answer(s.stream.next(t))) // M1 answered by the reveal
 	_, err := s.e.Execute(context.Background(), cmd)
-	wantRefusal(t, err, engine.ReasonLoopBusy, "")
+	wantRefusal(t, err, engine.ReasonPairingInProgress, "")
 	s.frame(sid, s.answer(s.stream.next(t))) // M3 answered by the acceptance
 
 	got := s.await(out)
@@ -370,12 +370,12 @@ func TestARequestThatIsRefusedOrNotAnsweredStoresTheRightThing(t *testing.T) {
 		s.net.dial = nil
 		cmd := requestCommand(0x71, s.peer.node)
 		got := s.await(s.start(cmd))
-		wantRefusal(t, got.err, engine.ReasonDirectoryUnavailable, "")
+		wantRefusal(t, got.err, engine.ReasonNodeUnreachable, "")
 		if hasResult(s.r.scan(), cmd.Key) {
 			t.Error("a request that got no answer stored a result")
 		}
 		s.net.dial = nil
-		if _, err := s.e.Execute(context.Background(), cmd); !isReason(err, engine.ReasonDirectoryUnavailable) {
+		if _, err := s.e.Execute(context.Background(), cmd); !isReason(err, engine.ReasonNodeUnreachable) {
 			t.Errorf("asked again: %v, want the same refusal and not a conflict", err)
 		}
 	})

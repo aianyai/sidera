@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aianyai/sidera/internal/node/transport"
 )
@@ -100,6 +101,20 @@ const (
 	// ReasonDirectoryUnavailable: a directory query got no answer within its
 	// budget or could not reach its target. A later query may succeed.
 	ReasonDirectoryUnavailable
+	// ReasonPairingPaused: the node stopped pairing after code mismatches were
+	// reported, so it takes no pairing command now; the RetryAfter of the Refusal
+	// says when it may again.
+	ReasonPairingPaused
+	// ReasonPairingInProgress: a pairing with that node is under way, or the same
+	// request for a pairing is still running; nothing of this request was done.
+	ReasonPairingInProgress
+	// ReasonExpectationsFull: the list of expectations holds as many as it may, so
+	// a new one is not entered.
+	ReasonExpectationsFull
+	// ReasonNodeUnreachable: the node the owner asked to pair with could not be
+	// reached, or the pairing ended without a request saved and without the node's
+	// refusal. Nothing is stored, so the owner can ask again.
+	ReasonNodeUnreachable
 
 	reasonEnd
 )
@@ -134,6 +149,10 @@ var reasonNames = [reasonEnd]string{
 	ReasonLeaseUnknown:         "lease_unknown",
 	ReasonAttemptUnknown:       "attempt_unknown",
 	ReasonDirectoryUnavailable: "directory_unavailable",
+	ReasonPairingPaused:        "pairing_paused",
+	ReasonPairingInProgress:    "pairing_in_progress",
+	ReasonExpectationsFull:     "expectations_full",
+	ReasonNodeUnreachable:      "node_unreachable",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.
@@ -251,6 +270,9 @@ type Refusal struct {
 	// package that cannot be read, set for DetailSourceUnreadable only, and empty
 	// when the package itself is the fault.
 	Path string
+	// RetryAfter says how long until the refused request may be made again; set for
+	// ReasonPairingPaused only.
+	RetryAfter time.Duration
 	// Err is the cause, when there is one beyond the reason (a storage error).
 	Err error
 }

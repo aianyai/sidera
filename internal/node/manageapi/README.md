@@ -47,7 +47,7 @@ and for a pairing are the engine's and `pairing`'s, so a row only reads the node
 the dial hints of `trust.request` and words the result; the one function that names the state of
 an initiator record and the one for a target record are here and serve both `trust.list` and
 `trust.request`; `trust.request` is answered when the online segment ends, so its call can take
-most of a minute). The words of each
+most of a minute; a refusal of the pairing keeps the engine's reason, so its words are `apiwire`'s). The words of each
 result, and of the reminders, are the interface's: the engine says which reminder
 stands and what an operation did, and a function the row passes to the operation
 words it. A patch of settings is passed to the engine as it was written, in a

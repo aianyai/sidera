@@ -63,6 +63,13 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonProbeTokenUsed:       {"unauthenticated", "probe_token_used"},
 	engine.ReasonProbeTokenExpired:    {"unauthenticated", "probe_token_expired"},
 	engine.ReasonDirectoryUnavailable: {"unavailable", "directory_unavailable"},
+	// The owner's operations on trust: a pause says when to come back (backpressure),
+	// one pairing at a time (conflict), a full list is a limit (refused), and a node
+	// that does not answer is unavailable.
+	engine.ReasonPairingPaused:     {"backpressure", "pairing_paused"},
+	engine.ReasonPairingInProgress: {"conflict", "pairing_in_progress"},
+	engine.ReasonExpectationsFull:  {"refused", "expectations_full"},
+	engine.ReasonNodeUnreachable:   {"unavailable", "node_unreachable"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
