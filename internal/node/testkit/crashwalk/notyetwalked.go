@@ -12,7 +12,6 @@ package crashwalk
 var NotYetWalked = map[string]string{
 	"trust-credential":         "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"trust-revocation":         "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
-	"trust-local-clear":        "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"peer-cert":                "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"pairing-target-put":       "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"pairing-target-delete":    "not yet walked by the acceptance recipes; the scenario rows of the store cover it",

@@ -80,7 +80,6 @@ var designTable = []struct {
 	{"daemon-stop", txn.Normal, "result:Replace"},
 	{"trust-credential", txn.Normal, "credential:Replace peer:Replace[O]"},
 	{"trust-revocation", txn.Normal, "revocation:Replace"},
-	{"trust-local-clear", txn.Normal, "local-revoked:Remove local-revoked-dir:SyncDir"},
 	{"peer-cert", txn.Normal, "peer:Replace"},
 	{"pairing-target-put", txn.Normal, "pairing-target:Replace"},
 	{"pairing-target-delete", txn.Normal, "pairing-target:Remove pairing-dir:SyncDir"},

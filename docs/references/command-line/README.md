@@ -135,15 +135,28 @@ negative, is usage error 2 before anything is sent. `--json` prints the whole re
 for each command.
 
 The refusals that say a pairing cannot be done now each have a code and, as every error,
-the exit code of their category: `backpressure/pairing_paused` (exit 8; pairing stopped
-after code mismatches were reported, and the message says in how long to try again),
-`conflict/pairing_in_progress` (exit 6; a pairing with that node is under way, or the
-same `trust request` is still running), `refused/expectations_full` (exit 7; forget an
-expectation first) and, for `trust request` only, `unavailable/node_unreachable` (exit 9;
-the node could not be dialed, or the pairing ended with neither a saved request nor the
-target's refusal; nothing is stored, so the command may be run again). A node with no
-expectation for `trust forget` is `invalid_argument/malformed_request` (exit 3, field
-`node`).
+the exit code of their category. Of `trust request` only: `backpressure/pairing_paused`
+(exit 8; pairing stopped after code mismatches were reported, and the message says in
+how long to try again), `conflict/pairing_in_progress` (exit 6; a pairing with that node
+is under way, or the same `trust request` is still running) and
+`unavailable/node_unreachable` (exit 9; the node could not be dialed, or the pairing
+ended with neither a saved request nor the target's refusal; nothing is stored, so the
+command may be run again). Of `trust expect` only: `refused/expectations_full` (exit 7;
+forget an expectation first). Of `trust request` and `trust reject`, while the node may
+not sign: `backpressure/clock_rollback` (exit 8; the owner has to clear the pause of the
+clock) or `unavailable/identity_retired`. A node with no expectation for `trust forget`
+is `invalid_argument/malformed_request` (exit 3, field `node`), and so is a pairing
+identifier for `trust reject` that names no request that still waits (field
+`pairing_id`).
+
+The addresses given to `trust request` are dial hints for that pairing only: they are
+not saved to the address book. After the pairing each side needs `network address set`
+for the other node before messages can flow.
+
+`trust remove` does not tell the other node. Pairing again with a node removed and then
+taken back with `trust clear` is refused by that node (`refused/pairing_refused` with the refusal `not_accepted`)
+for as long as it still holds the credential, so its owner has to remove the node too
+(`trust remove`, then `trust clear`) before the pairing can be made again.
 
 `trust list` prints five sections (`trusted`, `expectations`, `incoming`, `outgoing`,
 `locally_revoked`), one line for each entry, and `none` for an empty section; times

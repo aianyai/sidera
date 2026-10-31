@@ -181,13 +181,7 @@ var (
 		rep("credential"), rep("peer", optional),
 	}}
 	declTrustRevocation = txn.Decl{Name: "trust-revocation", Kind: txn.Normal, Writes: []txn.Write{rep(RoleCredRevocation)}}
-	// trust-local-clear: the owner takes a node back into this node's trust. The
-	// removal is made durable before the call returns: a node removed from trust
-	// that came back after a crash would be a revocation lost without a trace.
-	declTrustLocalClear = txn.Decl{Name: "trust-local-clear", Kind: txn.Normal, Writes: []txn.Write{
-		rm(RoleLocalRevoked), syncDir(RoleLocalRevokedDir),
-	}}
-	declPeerCert = txn.Decl{Name: "peer-cert", Kind: txn.Normal, Writes: []txn.Write{rep("peer")}}
+	declPeerCert        = txn.Decl{Name: "peer-cert", Kind: txn.Normal, Writes: []txn.Write{rep("peer")}}
 
 	// The pairing records: each action of the pairing package is one write of one
 	// file. A removal is made durable before the call returns, as the clearing of a
@@ -245,7 +239,7 @@ func Transactions() []*txn.Decl {
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
 		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
-		&declTrustCredential, &declTrustRevocation, &declTrustLocalClear, &declPeerCert,
+		&declTrustCredential, &declTrustRevocation, &declPeerCert,
 		&declPairingTargetPut, &declPairingTargetDelete, &declPairingInitiatorPut, &declPairingInitiatorDelete,
 		&declPairingLimits, &declPairingExpectations,
 		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay, &declDerivedReplay,

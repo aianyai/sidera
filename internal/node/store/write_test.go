@@ -57,8 +57,6 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 			[]string{path.Join(store.TrustDir, revocationOf(t, 1, 2).Name())}},
 		{"peer-cert", nil, func(r *rig) error { return r.st.PeerCert(peerOf(t, 2, 1, 1)) },
 			[]string{path.Join(store.PeersDir, peerOf(t, 2, 1, 1).Name())}},
-		{"trust-local-clear", func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, localRevokedOf(t, 1)) },
-			func(r *rig) error { return r.st.LocalRevokedClear(trustNode(t, 1)) }, nil},
 		{"daemon-stop", nil, func(r *rig) error { return r.st.DaemonStop(adminResult(2)) },
 			[]string{path.Join(store.AdminDir, adminResult(2).Name())}},
 		{"archive-summaries", nil, func(r *rig) error { return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}) },

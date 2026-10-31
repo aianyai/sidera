@@ -68,7 +68,6 @@ func TestTrustAndPeerRecordsComeBackFromTheDisk(t *testing.T) {
 // package opens, with the result, and the other nodes' entries stay.
 func TestLocalRevokedIsRemovedInsideAnotherTransaction(t *testing.T) {
 	r := newRig(t)
-	mustDo(t, r.st.LocalRevokedClear(trustNode(t, 9))) // nothing there: not an error
 	for _, n := range []int{1, 2} {
 		pl, err := store.PrepareLocalRevoked(localRevokedOf(t, n))
 		mustDo(t, err)
@@ -84,25 +83,6 @@ func TestLocalRevokedIsRemovedInsideAnotherTransaction(t *testing.T) {
 	mustDo(t, tx.Commit())
 	if got := r.scan().LocalRevoked; len(got) != 1 || got[0].Node != trustNode(t, 2) {
 		t.Errorf("entries left: %#v, want only the second node's", got)
-	}
-}
-
-// The owner takes one node back into trust and the other stays; a node with no
-// record is not an error and writes nothing.
-func TestLocalRevokedClearRemovesOnlyThatNode(t *testing.T) {
-	r := newRig(t)
-	seed(t, r.mem, localRevokedOf(t, 1), localRevokedOf(t, 2))
-	mustDo(t, r.st.LocalRevokedClear(trustNode(t, 1)))
-	if got := r.scan().LocalRevoked; len(got) != 1 || got[0].Node != trustNode(t, 2) {
-		t.Errorf("after the clear: %#v", got)
-	}
-	before := r.rec.count()
-	mustDo(t, r.st.LocalRevokedClear(trustNode(t, 1)))
-	if r.rec.count() != before {
-		t.Error("clearing a node with no record wrote something")
-	}
-	if err := r.st.LocalRevokedClear(store.LocalRevokedRecord{}.Node); err == nil {
-		t.Error("the zero node was accepted")
 	}
 }
 

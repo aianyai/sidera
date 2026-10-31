@@ -69,32 +69,6 @@ func (s *Store) PeerCert(p PeerRecord) error {
 	return tx.Commit()
 }
 
-// LocalRevokedClear takes a node back into this node's trust: it removes the
-// record of its local removal and makes the removal durable. A node that has no
-// record is not an error, and nothing is written.
-func (s *Store) LocalRevokedClear(node ident.NodeID) error {
-	if node.IsZero() {
-		return errors.New("store: LocalRevokedClear of a zero node")
-	}
-	ref := FileRef{Dir: TrustDir, Name: LocalRevokedRecord{Node: node}.Name()}
-	ex, err := s.exist([]FileRef{ref})
-	if err != nil {
-		return err
-	}
-	if !ex[ref] {
-		return nil
-	}
-	tx := s.w.Begin(&declTrustLocalClear)
-	defer tx.Close()
-	if _, err := s.removeRef(tx, RoleLocalRevoked, ref, ex); err != nil {
-		return err
-	}
-	if err := tx.SyncDir(RoleLocalRevokedDir, TrustDir); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // RemoveLocalRevoked removes the record of a node removed from this node's trust,
 // and syncs the directory so that the removal is durable, in a transaction another
 // package opened, under the two roles the declaration gives them (RoleLocalRevoked

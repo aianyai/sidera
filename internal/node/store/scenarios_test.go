@@ -703,17 +703,6 @@ func scenarios() []scenario {
 			},
 		},
 		{
-			name: "trust-local-clear",
-			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, localRevokedOf(t, 1), localRevokedOf(t, 2))
-			},
-			durable: "trust-local-clear/local-revoked-dir.sync-dir#1",
-			mode:    atomic,
-			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.LocalRevokedClear(trustNode(t, 1))
-			},
-		},
-		{
 			// A request record is replaced whole by its next state.
 			name: "pairing-target-put",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {

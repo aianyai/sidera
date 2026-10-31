@@ -622,11 +622,11 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations. The table holds 71 declarations (txn 2, config 9, keys 2,
-store 42, engine 14 and daemon 2), and the suite has fixtures for 53 of them: the
-eighteen of the trust and peer records, the pairing records, the owner's operations
+owners' declarations. The table holds 70 declarations (txn 2, config 9, keys 2,
+store 41, engine 14 and daemon 2), and the suite has fixtures for 53 of them: the
+seventeen of the trust and peer records, the pairing records, the owner's operations
 on trust and the network configuration (`trust-credential`, `trust-revocation`,
-`trust-local-clear`, `peer-cert`, `pairing-target-put`, `pairing-target-delete`,
+`peer-cert`, `pairing-target-put`, `pairing-target-delete`,
 `pairing-initiator-put`, `pairing-initiator-delete`, `pairing-limits`,
 `pairing-expectations`, `trust-local-revoke`, `trust-expect`, `trust-forget`,
 `trust-reject`, `trust-request`, `trust-clear`, `trust-result`, `network-set`) have none yet, and
@@ -802,12 +802,11 @@ the same serial but another content be told from the one seen (a conflict) inste
 of being taken for it. The record only
 moves up: the caller replaces it with a certificate of a serial not below the one
 it read (`PeerCert`). A `local-revoked` entry is the node's alone and no other node
-learns of it; it goes only with an explicit removal (`LocalRevokedClear`), never
+learns of it; it goes only with an explicit removal (the engine's `trust-clear`), never
 by retention. A damaged file of either directory is settled like any other
 (an alert, the file removed), so a damaged entry no longer holds what it recorded.
 The writes are `trust-credential` (the credential, which is the commit point, then
-the peer's certificate when the call has one), `trust-revocation`, `peer-cert` and
-`trust-local-clear` (one removal and the sync of the directory). The removal of a
+the peer's certificate when the call has one), `trust-revocation` and `peer-cert`. The removal of a
 node from trust writes its entry, the revocations of its credentials and the
 result in one transaction the engine opens (`PrepareLocalRevoked`,
 `PrepareCredRevocation` and `PrepareAdminResult` before it begins, then
@@ -820,7 +819,7 @@ entry is there, as a removal of a file that is not is the transaction layer's er
 Tests: the four
 vectors `credential`, `cred-revocation`, `local-revoked` and `peer` of
 `TestRecordGoldenVectors`, `TestTrustAndPeerRecordsAreHeldToTheirRules`,
-`TestTrustAndPeerRecordsComeBackFromTheDisk`, `TestLocalRevokedClearRemovesOnlyThatNode`,
+`TestTrustAndPeerRecordsComeBackFromTheDisk`,
 `TestLocalRevokedIsRemovedInsideAnotherTransaction`,
 `TestTrustAndPeerRecordsAreNeverSwept`.
 
@@ -1889,7 +1888,7 @@ so that the double cannot drift from what it stands for.
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheOwnersFileAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
-| trust and peer records | `internal/node/store/codec_trust.go`, `write_trust.go` | `trust_test.go`, `trust_fixtures_test.go`, the four trust and peer vectors of `golden_vectors_test.go`, the scenarios `trust-credential`, `trust-revocation`, `peer-cert` and `trust-local-clear` of `TestEveryTransactionConvergesFromEveryCrashState` |
+| trust and peer records | `internal/node/store/codec_trust.go`, `write_trust.go` | `trust_test.go`, `trust_fixtures_test.go`, the four trust and peer vectors of `golden_vectors_test.go`, the scenarios `trust-credential`, `trust-revocation` and `peer-cert` of `TestEveryTransactionConvergesFromEveryCrashState` |
 | pairing records | `internal/node/store/codec_pairing.go`, `write_pairing.go` | `pairing_test.go`, `pairing_fixtures_test.go`, the six pairing scenarios of `TestEveryTransactionConvergesFromEveryCrashState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
