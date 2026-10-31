@@ -155,7 +155,11 @@ share the outbox mutex, so nothing can deliver or requeue a task after abandonme
 The result returns through a typed command. A source or target already recovering,
 paused or stopping refuses with the existing typed state reason. A query held
 behind unrelated outbound work still ends at its own budget; timeout and an
-unreachable transport are `ReasonDirectoryUnavailable`.
+unreachable transport are `ReasonDirectoryUnavailable`. A refusal of the target keeps
+its reason, whether its engine returned it in this process or a remote target named it
+(`callReasonOf` maps the name back); every other failure of the call, a target that says
+only that it failed and a name this engine does not know included, is
+`ReasonDirectoryUnavailable`, so the caller is never handed the transport's own errors.
 
 The single worker is a known limit: a slow target holds every outbound call behind
 it. A directory timeout cancels its own work, never another call ahead of it.
@@ -626,7 +630,10 @@ is the other fact: the first failure of a run of failures to a node is remembere
 memory, per record and node) and each further failure applies
 `delivery.EventContactFailing` with that start, so that the unreachable hint is given
 once contact has failed for two minutes while the sender still retries; an answer that
-comes ends the run. Both go through the envelope package's `ApplyObservation`, and
+comes ends the run. A call that fails once shutdown has begun is not that fact: the
+network closes while the worker still runs, so the failure says nothing of the target;
+it is dropped like a call the engine cancelled, nothing is applied, and the next start
+looks at the record again. Both go through the envelope package's `ApplyObservation`, and
 neither is applied while the wall clock is in doubt. The source never
 sends the message again because of a `NoRecord`: a message it holds a receipt for is not in
 doubt, only the target's record of it is, and whether to send again is the agents' to decide

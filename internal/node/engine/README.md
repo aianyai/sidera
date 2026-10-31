@@ -423,7 +423,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   again after `ResendBackoff`, until the delivery deadline, to each node that has not
   answered (a node that answered does not make the others' sends unnecessary); a send
   again is made anew from the record, so its evidence is signed anew while the request
-  digest, and so the request, is the same. A delivery that is not settled is asked
+  digest, and so the request, is the same. A call that fails after `BeginShutdown` is
+  dropped as a cancelled call is: the network closes before the worker stops, and
+  its failures are not contact failing; the next start sends again. A delivery that is not settled is asked
   about every `PullInterval` until its report deadline, which already holds the
   tolerance of the clock (a pull names each delivery of the record on that node that
   is not settled, and the target answers for those only; a derived delivery, which only a

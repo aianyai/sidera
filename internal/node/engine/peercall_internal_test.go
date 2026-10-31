@@ -71,3 +71,19 @@ func TestTheEntriesOfTheReceivingSideLogWhatIsNoRefusal(t *testing.T) {
 		})
 	}
 }
+
+// Shutdown closes the network before the worker has stopped, so calls fail in
+// that window for no reason of the target's: they are not contact that fails, and
+// leave no mark on the record, which a start picks up again.
+func TestACallThatFailsAfterShutdownBeganIsNotContactFailing(t *testing.T) {
+	for _, err := range []error{transport.ErrTimeout, transport.ErrUnreachable} {
+		e := &Engine{outbox: newOutbox(), log: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))}
+		st := &outState{inflight: 1, sent: map[ident.NodeID]bool{}, failingSince: map[ident.NodeID]time.Time{}}
+		e.outbox.state["record"] = st
+		e.phase.Store(uint32(PhaseStopping))
+		e.outResult(time.Now(), outWork{kind: workSend, name: "record"}, nil, nil, nil, err)
+		if st.inflight != 0 || len(st.failingSince) != 0 {
+			t.Errorf("%v: inflight %d, failing since %v; want the call settled and no contact failing", err, st.inflight, st.failingSince)
+		}
+	}
+}

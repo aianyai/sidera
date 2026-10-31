@@ -390,7 +390,8 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 // answer to a pull that has no report for a delivery with no receipt is a query that
 // found none, which is what the expiry of a delivery is judged by; for any other
 // delivery it says nothing yet and the next pull asks again. A call that got no
-// answer is also what the unreachable hint is judged by.
+// answer is also what the unreachable hint is judged by, unless the engine had
+// begun to shut down when it failed.
 func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, noRecord []ident.EndpointID, controlReply *record.Record, callErr error) {
 	st := e.outbox.state[w.name]
 	if st == nil { // the record was settled or taken away while the call was out
@@ -398,8 +399,12 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 	}
 	st.inflight--
 	switch {
-	case callErr != nil && errors.Is(callErr, context.Canceled):
-		return // the engine is stopping; a start picks the record up again
+	case callErr != nil && (errors.Is(callErr, context.Canceled) || e.Phase() >= PhaseStopping):
+		// The engine is stopping, and so is what carries its calls (the network
+		// closes while the worker still runs), so a call that fails now says
+		// nothing about the target: it is not told as contact failing, and a start
+		// picks the record up again.
+		return
 	case callErr != nil:
 		if reason, ok := callReasonOf(callErr); ok && reason == ReasonMessageConflict {
 			e.log.Error("the target holds another request under the identifier of a message; it is not sent again", "message", string(w.message))

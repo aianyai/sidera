@@ -155,13 +155,29 @@ func (c *cmdDirectoryResult) gate() gate { return gateLoopback }
 func (c *cmdDirectoryResult) run(e *Engine, _ time.Time) {
 	err := e.directoryState()
 	if err == nil {
-		err = c.err
-		if errors.Is(err, transport.ErrUnreachable) || errors.Is(err, transport.ErrTimeout) {
-			err = refuse(ReasonDirectoryUnavailable)
-		}
+		err = directoryFailure(c.err)
 	}
 	e.finishDirectory(c.task, c.page, err)
 	c.done(struct{}{}, nil)
+}
+
+// directoryFailure is what a caller of Directory is told of an error of the
+// transport call: a refusal keeps its reason, whether the target's engine
+// returned it in this process or a remote target named it, and every other
+// failure of the call (no answer, an answer that says it failed, a reason this
+// engine does not know) is that the directory is unavailable. The caller is
+// never handed the transport's own errors.
+func directoryFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := ReasonOf(err); ok {
+		return err
+	}
+	if reason, ok := callReasonOf(err); ok {
+		return refuse(reason)
+	}
+	return refuse(ReasonDirectoryUnavailable)
 }
 
 type cmdQueryDirectory struct {
