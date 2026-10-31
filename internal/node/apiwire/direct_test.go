@@ -307,6 +307,22 @@ func TestDirectProtocolRefusalsLeaveMessagesAndAcknowledgementsUnchanged(t *test
 	if !reflect.DeepEqual(messageSnapshot(t, h), before) {
 		t.Fatal("status query changed persisted messages or acknowledgements")
 	}
+	// Asking recv for a message the endpoint holds nothing of is the same fixed
+	// refusal as for its status, whether the message exists or not.
+	for _, id := range []adapterproto.MessageID{creation.MessageID, "00000000000000000000000000000000"} {
+		_, err := ctl.Recv(h.Ctx(), adapterproto.RecvParams{Endpoint: refB, MessageID: id, Part: 1})
+		pe := wireError(t, err)
+		if pe.Code != -32602 {
+			t.Fatalf("recv of an unknown message %+v", pe)
+		}
+		raw, _ := json.Marshal(pe)
+		if string(raw) != unknown {
+			t.Fatalf("recv of an unknown message answered %s, status answered %s", raw, unknown)
+		}
+	}
+	if !reflect.DeepEqual(messageSnapshot(t, h), before) {
+		t.Fatal("recv of an unknown message changed persisted messages or acknowledgements")
+	}
 	// A rejected target record is not receipt and grants no reply permission.
 	paused := true
 	if err := h.Agent("c").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: &paused}); err != nil {

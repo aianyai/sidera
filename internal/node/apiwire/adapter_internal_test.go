@@ -240,3 +240,36 @@ func TestDirectSendErrorMappingKeepsNoEffectSeparateFromUnknown(t *testing.T) {
 		t.Fatal("unknown error or success changed")
 	}
 }
+
+// A message that is unknown to the endpoint is a normal answer of recv and of
+// message_status, and is the same fixed one for a message that does not exist and
+// one the endpoint may not read, so it discloses nothing about another endpoint's
+// traffic. Every other refusal keeps the table's words.
+func TestMessageLookupErrorIsTheFixedAnswerForAnUnknownMessage(t *testing.T) {
+	for _, tc := range []struct {
+		reason engine.Reason
+		code   int
+	}{
+		{engine.ReasonMessageUnknown, -32602},
+		{engine.ReasonLeaseUnknown, 1010},
+		{engine.ReasonEndpointUnknown, 1001},
+		{engine.ReasonStorageFatal, -32603},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			pe := asPeerError(t, messageLookupError(&engine.Refusal{Reason: tc.reason, Err: errors.New("secret-path")}))
+			if pe.Code != tc.code || pe.Data != nil || strings.Contains(pe.Message, "secret-path") {
+				t.Fatalf("%+v", pe)
+			}
+			if tc.reason == engine.ReasonMessageUnknown && pe.Message != "the message_id is not available" {
+				t.Fatalf("the message is %q", pe.Message)
+			}
+			if !peer.NoEffect(pe) != (tc.code == -32603) {
+				t.Fatalf("effect: %+v", pe)
+			}
+		})
+	}
+	plain := errors.New("unknown storage failure")
+	if messageLookupError(plain) != plain || messageLookupError(nil) != nil {
+		t.Fatal("unknown error or success changed")
+	}
+}

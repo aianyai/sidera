@@ -87,7 +87,7 @@ func (a adapterEngine) EndpointRecv(ctx context.Context, instance string, p adap
 	}
 	raw, err := a.e.Recv(ctx, engine.ByAdapter(instance, p.Endpoint), r)
 	if err != nil {
-		return adapterproto.RecvResult{}, adapterError(err)
+		return adapterproto.RecvResult{}, messageLookupError(err)
 	}
 	var page adapterproto.RecvPage
 	if err := json.Unmarshal(raw, &page); err != nil {
@@ -103,11 +103,19 @@ func (a adapterEngine) EndpointAck(ctx context.Context, instance string, p adapt
 
 func (a adapterEngine) EndpointMessageStatus(ctx context.Context, instance string, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	res, err := a.e.MessageStatus(ctx, engine.ByAdapter(instance, p.Endpoint), p.MessageID)
+	return res, messageLookupError(err)
+}
+
+// messageLookupError is the error of a method that names a message the endpoint
+// may not have: an unknown message is a normal answer there, and the same fixed
+// one whether the message does not exist or belongs to another endpoint, so the
+// answer discloses nothing about other traffic. Every other error is the table's.
+func messageLookupError(err error) error {
 	var ref *engine.Refusal
 	if errors.As(err, &ref) && ref.Reason == engine.ReasonMessageUnknown {
-		return res, peer.NewError(peer.CodeInvalidParams, "the message_id is not available")
+		return peer.NewError(peer.CodeInvalidParams, "the message_id is not available")
 	}
-	return res, adapterError(err)
+	return adapterError(err)
 }
 
 func directSendError(err error) error {
@@ -176,7 +184,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	// Whether the request took effect is not known, which is what -32603 says.
 	engine.ReasonStorageFatal: internalCode,
 	// These reasons keep the historical mapping of the older adapter methods.
-	// Direct send and status have their own intake-specific mapping above.
+	// Direct send, recv and status have their own mapping above.
 	engine.ReasonIdempotencyConflict: internalCode,
 	engine.ReasonMessageConflict:     internalCode,
 	engine.ReasonMessageUnknown:      internalCode,

@@ -48,8 +48,9 @@ not import it: the words of the wire never enter the engine.
   syntax is `1008` with `data.field`; invalid content, a missing reply source or
   an idempotency conflict is `1009` with the engine reason in `data.reason`.
   Back pressure remains `1012`, ownership `1001`, and leases `1010`.
-  `endpoint.message_status` answers an unknown or foreign message with the same
-  fixed `-32602` response, revealing no ownership. Unknown effects remain
+  `endpoint.message_status` and `endpoint.recv` of a `message_id` answer an unknown
+  or foreign message with the same fixed `-32602` response (`messageLookupError`),
+  revealing no ownership. Unknown effects remain
   `-32603`. Other adapter methods retain their existing mappings.
 - **Refusals with no effect are `node_busy` on the adapter side.** The six that mean
   "not now, nothing was recorded" (node queue full, storage full, storage unavailable,

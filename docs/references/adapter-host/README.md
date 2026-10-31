@@ -135,11 +135,14 @@ For direct send intake, invalid address syntax is `1008` with `data.field` namin
 with the engine's stable reason in `data.reason`. The existing back pressure,
 ownership and lease codes remain `1012`, `1001` and `1010`. A status query for a
 message the caller did not send, including an unknown id, always returns the
-same fixed `-32602` response without data. Unknown effects and fatal storage
+same fixed `-32602` response without data, and so does an `endpoint.recv` of a
+`message_id` and `part` the endpoint holds nothing of (an unknown message is a
+normal answer there, not an internal failure). Unknown effects and fatal storage
 failures remain `-32603`. These method-specific mappings do not change the
 previously reachable registration, checkpoint or observed-receive methods.
 `TestDirectProtocolPreservesSendControlAndReplyFields` and
-`TestDirectProtocolRefusalsLeaveMessagesAndAcknowledgementsUnchanged` exercise
+`TestDirectProtocolRefusalsLeaveMessagesAndAcknowledgementsUnchanged` (with
+`TestMessageLookupErrorIsTheFixedAnswerForAnUnknownMessage` for the table) exercise
 these paths through a real host and compare persisted message and acknowledgement
 records after refusals. The binary acceptance lifecycle test repeats the real
 send/receive/ack/status round trip after replacing the daemon generation.

@@ -425,7 +425,8 @@ recipient is normalized away as in every envelope. A control signal cannot carry
 `reply_to`, and otherwise preserves its applicable fields, including thread.
 These checks belong to the daemon's engine rather than the SDK string schema.
 `endpoint.message_status` returns the same `-32602` for an unknown message and
-one the endpoint did not send, so it cannot disclose another endpoint's traffic.
+one the endpoint did not send, so it cannot disclose another endpoint's traffic;
+`endpoint.recv` with a `message_id` the endpoint holds nothing of answers the same.
 The production error mapping and its no-effect tests are described in the
 [adapter-host reference](../adapter-host/README.md).
 
