@@ -253,3 +253,16 @@ func TestIsTurnOf(t *testing.T) {
 		})
 	}
 }
+
+// The adapter's part of the system prompt says what the channel and its tools do and
+// nothing about how to treat a message, which is the owner's policy and belongs in
+// the preset. A receive that is not acknowledged hands the same page out again at
+// once; a session that does not know it concludes that no reply came.
+func TestSystemPromptStatesTheChannel(t *testing.T) {
+	for _, fact := range []string{"owner's own cluster", "other agents and people", "recv", "reply", "send", "control", "status", "ack",
+		"sidera MCP server", "again at once", "sidera ack <lease>", "sidera recv --ack <lease>", "wait for new messages"} {
+		if !strings.Contains(SystemPrompt(""), fact) {
+			t.Errorf("the system prompt does not say %q", fact)
+		}
+	}
+}

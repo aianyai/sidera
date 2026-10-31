@@ -254,7 +254,15 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   Sidera, a channel to other agents and people in the owner's own cluster, and that
   `recv` in a wake-up notice means the `recv` tool of the `sidera` MCP server or
   `sidera recv`. Without it a session that has only the command-line front end
-  cannot know.
+  cannot know. It names the tools (`recv`, `reply`, `send`, `control`, `status`,
+  `ack`) and says that `recv` hands out a page that has not been acknowledged again
+  at once, with the same lease, and that the page is acknowledged with `ack`
+  (`sidera ack <lease>`) or by passing its lease to the next `recv` (`ack_lease`,
+  `sidera recv --ack <lease>`); only after that does `recv` with a wait wait for new
+  messages. A session that does not know it takes the same page, returned at once
+  by every wait, for a channel with no reply. It says nothing about how to treat a
+  message: that is the owner's policy and belongs in the preset's own text. The
+  Codex adapter states the same facts in its developer instructions.
 - The standard input is a regular file, so that reaching its end closes it and no pipe
   ties the process to the adapter; standard output and error are files too. They are
   `<attempt>.in.jsonl`, `.out.jsonl` and `.err.jsonl` in the instance's state directory,

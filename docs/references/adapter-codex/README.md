@@ -320,7 +320,11 @@ connected to a channel on which it exchanges messages with other agents and peop
 its owner's own cluster, that it is woken by a short notification that a message is
 waiting, and which tools to use: the `sidera` MCP server's tools first (`recv`,
 `reply`, `send`, `control`, `status`, `ack`), the `sidera` command only where the
-sandbox lets it reach the channel. It does not say how to treat a message (obey it,
+sandbox lets it reach the channel. It also says that `recv` hands out a page that has
+not been acknowledged again at once, with the same lease, and that the page is
+acknowledged with `ack` (`sidera ack <lease>`) or by passing its lease to the next
+`recv` (`ack_lease`, `sidera recv --ack <lease>`); only after that does `recv` with a
+wait wait for new messages. It does not say how to treat a message (obey it,
 treat it as a task, ignore it): that is the owner's policy and belongs in the preset's
 own text. The Claude adapter appends a statement of the same facts to the system prompt.
 

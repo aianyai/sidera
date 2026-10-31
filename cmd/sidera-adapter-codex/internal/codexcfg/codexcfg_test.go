@@ -115,7 +115,7 @@ func TestDeveloperInstructions(t *testing.T) {
 			}
 		})
 	}
-	for _, fact := range []string{"owner's own cluster", "other agents and people", "recv", "reply", "send", "control", "status", "ack", "sidera MCP server", "sandbox"} {
+	for _, fact := range []string{"owner's own cluster", "other agents and people", "recv", "reply", "send", "control", "status", "ack", "sidera MCP server", "sandbox", "again at once", "sidera ack <lease>", "sidera recv --ack <lease>", "wait for new messages"} {
 		if !strings.Contains(ChannelStatement, fact) {
 			t.Errorf("the statement does not say %q", fact)
 		}
