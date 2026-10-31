@@ -19,6 +19,7 @@ no clock but the one its knobs were given.
 | `Origin`, `RemoteOrigin(node)` | Where a request came from. `Local()` is true only for a request the loopback handed over. |
 | `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for: one message and the recipients the source tracks on the target. The answer to a pull lists, for each recipient asked about, its signed report or the recipient in `NoRecord` (the target holds no record of that delivery); a recipient in neither means nothing yet. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
 | `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. Every transport implementation returns them with this meaning. |
+| `Refused{Reason}` | The error of a call a target in another process answered with a refusal; `Reason` is the target engine's reason name. A target in the same process hands its own error over instead. |
 | `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull`, `QueryDirectory` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
 | `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
 
@@ -36,7 +37,10 @@ no clock but the one its knobs were given.
 - **The loopback reaches only its own node.** A call to another node is
   `ErrUnreachable` without a knob.
 - **A receipt is the target's.** An error from the `Handler` passes through
-  unchanged and means no receipt exists. `ErrTimeout` and `ErrUnreachable` are the
+  unchanged and means no receipt exists. A transport whose target is in another
+  process cannot pass the error itself and returns `Refused` with the reason's
+  name in its place; it means the same, and the engine maps a name it knows back to
+  its reason. `ErrTimeout` and `ErrUnreachable` are the
   transport's own: after a timeout the target may have processed the envelope, so
   the same request (the same request digest) is sent again and the target
   deduplicates by sender node, sender endpoint, message id and recipient, comparing the

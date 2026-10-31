@@ -133,3 +133,21 @@ var (
 	// endpoint, message id and recipient, and compares the request digest.
 	ErrTimeout = errors.New("transport: no answer in time")
 )
+
+// Refused is the error of a call the target answered with a refusal that comes
+// from another node: the target saw the call, judged it and said no, for a
+// reason it names. Reason is the name of the target engine's refusal reason, as
+// the engine writes it (`message_conflict`), carried as text because it crossed
+// a wire and the sender's engine maps it back by name. A transport whose target
+// is in the same process hands the target's own error over instead, and its
+// name is not needed.
+//
+// A name the sender does not know is still a refusal: the sender treats it as
+// any other error the target answered with, which means no receipt exists. The
+// engine's one branch on a reason, a message that conflicts with one the target
+// holds, is the only thing a known name changes.
+type Refused struct {
+	Reason string
+}
+
+func (r Refused) Error() string { return "transport: the target refused the call: " + r.Reason }

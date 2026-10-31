@@ -3,6 +3,8 @@ package engine
 import (
 	"errors"
 	"fmt"
+
+	"github.com/aianyai/sidera/internal/node/transport"
 )
 
 // Reason is why an engine method refused to do what it was asked: a closed
@@ -279,6 +281,36 @@ func ReasonOf(err error) (Reason, bool) {
 	var r *Refusal
 	if errors.As(err, &r) {
 		return r.Reason, true
+	}
+	return 0, false
+}
+
+// reasonByName returns the reason that has the name, the inverse of String.
+func reasonByName(name string) (Reason, bool) {
+	for r := Reason(1); r < reasonEnd; r++ {
+		if reasonNames[r] == name {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// callReasonOf returns the reason a transport call was refused for: that of a
+// refusal the target's engine returned in this process, or the reason a remote
+// target named, mapped back by name. A name this engine does not know has no
+// reason, so the call is read like any other error of the target.
+//
+// It is for the error of a call to another node only. A name that came over a
+// wire says what the target did, not what this node did, so it must never stand
+// where ReasonOf is read for a failure of this node's own work, a fatal storage
+// error above all.
+func callReasonOf(err error) (Reason, bool) {
+	if r, ok := ReasonOf(err); ok {
+		return r, true
+	}
+	var remote transport.Refused
+	if errors.As(err, &remote) {
+		return reasonByName(remote.Reason)
 	}
 	return 0, false
 }

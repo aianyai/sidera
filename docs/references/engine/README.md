@@ -670,7 +670,9 @@ that was put back asks for it and the close follows. A delivery of a record the 
 without a transport) closes at once, so nothing waits for a pull that cannot come;
 `outboundWorks` says which, and a control signal is carried like a message, so the pull
 before its close brings its control reply too. A delivery removed from the outbox because the target
-answered a send with a conflict is still queued, is no longer sent to, and is still pulled
+answered a send with a conflict (a refusal of its engine with the reason
+`message_conflict`, or a `transport.Refused` that names it, which is how a target on
+another node says it) is still queued, is no longer sent to, and is still pulled
 before its close; what that learns depends on what the target holds. When the target cannot
 be reached or holds no record of the message, the delivery closes with the notice like any
 other. When the target holds the conflicting request, its pull returns that request's

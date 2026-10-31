@@ -428,7 +428,10 @@ delivery to a session: when it is judged and how the verdict is recorded.
   answered is asked, not sent to. The evidence of a reply is a signature: while the wall clock
   cannot be trusted the send is put off. Nothing about the sending is persisted: after a restart every unsettled
   source record is looked at again (the start's last step), and the target answers a
-  send it already took in from its record. A worker waiting out a delay that the
+  send it already took in from its record. A send the target refused as a conflict
+  (the reason `message_conflict`, whether the target's own refusal or a
+  `transport.Refused` that names it) is not made again; `callReasonOf` maps the
+  name back and reads no name as a reason of the node's own failures. A worker waiting out a delay that the
   transport was asked to make is not work for `Quiesce`.
 - **What a pull brings back is told apart by what it holds.** A call that returns an
   error got no answer: it is made again after `ResendBackoff`. On a successful answer

@@ -401,7 +401,7 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 	case callErr != nil && errors.Is(callErr, context.Canceled):
 		return // the engine is stopping; a start picks the record up again
 	case callErr != nil:
-		if reason, ok := ReasonOf(callErr); ok && reason == ReasonMessageConflict {
+		if reason, ok := callReasonOf(callErr); ok && reason == ReasonMessageConflict {
 			e.log.Error("the target holds another request under the identifier of a message; it is not sent again", "message", string(w.message))
 			delete(e.outbox.state, w.name)
 			return

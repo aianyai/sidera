@@ -68,6 +68,21 @@ other error comes from the target and passes unchanged; it means no receipt
 exists. The error of the caller's own context is returned as it is, neither of the
 two: the target may or may not have seen the call.
 
+**A refusal across a wire.** A target in this process hands its own error over, a
+refusal of its engine with a reason. A target on another node cannot: its answer
+says that it refused and names the reason, as text, and the transport returns
+`Refused{Reason}` with that name. It is the third thing a transport returns beside
+the two ways to get no answer, and it is an answer: the target saw the call and
+judged it. The name is what its engine calls the reason (`message_conflict`), so
+that the sender's engine maps it back by name and does what it would do for the same
+refusal from a target in the same process; the only decision that depends on a
+reason is that of a message whose identifier the target holds under another
+request, which the sender stops sending. A name the sender's engine does not know is
+still a refusal and nothing more: it is read like any other error of the target, so
+no receipt exists and the call is made again by the usual schedule. The name is a
+wire value, so it is never read where the engine reads the reason of its own
+failures.
+
 **The origin.** `Origin` says where a request came from. `Local()` is true only for
 a request the loopback handed to the `Handler`; a transport of any other package
 can make `RemoteOrigin(node)` only, which is never local, whatever node it names.

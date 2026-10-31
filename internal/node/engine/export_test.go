@@ -444,6 +444,17 @@ func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message 
 	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, nil, &Refusal{Reason: ReasonMessageConflict})
 }
 
+// SendFailedWith is the result the outbound worker brings the loop when the
+// transport returns err for the send of a message of the source record named name.
+// A send must be in flight (SendInFlight).
+func (l LoopSide) SendFailedWith(name string, node ident.NodeID, message delivery.MessageID, err error) {
+	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, nil, err)
+}
+
+// OutboxHolds reports whether the outbound worker still carries the source record
+// named name: it does until a conflict removes it or everything it needs is done.
+func (l LoopSide) OutboxHolds(name string) bool { return l.e.outbox.state[name] != nil }
+
 // FinalPullUntil is the last instant at which the engine makes its last pull of a
 // target for a delivery with this report_by.
 func FinalPullUntil(reportBy time.Time) time.Time { return finalPullUntil(reportBy) }
