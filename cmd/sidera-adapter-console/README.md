@@ -1,0 +1,28 @@
+# sidera-adapter-console
+
+The console bridge adapter and its client in one program: the adapter registers
+the node owner's direct endpoint, and the client, run in a terminal, starts
+sessions on runtime endpoints, sends messages and reads replies. What it is for,
+the commands, how replies arrive and why it is built this way are in
+[`docs/references/adapter-console/`](../../docs/references/adapter-console/README.md).
+
+Build it with `go build ./cmd/sidera-adapter-console`; `package` writes a package
+for `sidera adapter install` (see the reference for the three commands).
+
+## Layout
+
+| Path | Holds |
+| ---- | ----- |
+| `main.go` | The process: its streams and environment into `console.Main`, and the only `os.Exit`. |
+| `internal/console/` | Everything else: both roles, the local protocol, the control channel per platform and the package writer. |
+
+## Conventions
+
+- The adapter imports only `sdk/go` (`adapterkit`, `adapterproto`, `manifest`), as a
+  third-party adapter would; it never imports the daemon's packages, so
+  the layout of the data directory is spelled once, in `internal/console/paths.go`,
+  from the adapter-host reference.
+- `internal/console` holds the adapter's identity (`AdapterID`, `Version`) once; the
+  manifest and `initialize` both read it.
+- A change to the commands, the local protocol or the control channel updates the
+  reference in the same commit.

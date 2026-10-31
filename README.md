@@ -126,8 +126,9 @@ to, what to say and how to react. It is not:
 - `sdk/go/`: the Go module adapters and Sidera share, see its
   [README](sdk/go/README.md).
 - `cmd/`: the [node command line](cmd/sidera/README.md), fake adapter and runtime
-  test programs, and the Claude Code adapter's
-  [session-creation logic](cmd/sidera-adapter-claude/README.md).
+  test programs, the Claude Code adapter's
+  [session-creation logic](cmd/sidera-adapter-claude/README.md) and the
+  [console bridge adapter](cmd/sidera-adapter-console/README.md).
 - `.github/workflows/`: continuous integration, see
   [the ci reference](docs/references/ci/README.md).
 - `docs/references/`: engineering references by topic, see its
