@@ -131,7 +131,6 @@ func prepareTransactionStoreMessage(b *testing.B, observer txn.Observer, name st
 			expectBody(in.Name(), true)
 		} else {
 			must(st.ControlIntake(body, &ep, ctl, &inputs.derived))
-			expect(store.InDir, inputs.derived)
 			expectBody(inputs.derived.Name(), true)
 			ctl.Intent.State, ctl.Intent.NativeRef = store.IntentCreated, "benchmark-native"
 			ctl.Record = apply(ctl.Record, delivery.Event{Type: delivery.EventReplyCommitted})
@@ -139,7 +138,16 @@ func prepareTransactionStoreMessage(b *testing.B, observer txn.Observer, name st
 			must(err)
 			ctl.Result = []byte(`{"created":true}`)
 			ep.Status, ep.Session.NativeRef = store.EndpointOpen, ctl.Intent.NativeRef
-			invoke = func() error { return st.ControlResult(ctl, &ep) }
+			effect := store.CreationEffect(ctl, ep, &inputs.derived)
+			head, notified, err := effect.PromptRecords()
+			must(err)
+			if head != nil {
+				expect(store.AttemptsDir, *head)
+			}
+			for _, target := range notified {
+				expect(store.InDir, target)
+			}
+			invoke = func() error { return st.ControlResult(ctl, &effect) }
 		}
 		expect(store.CtlDir, ctl)
 		expect(store.EndpointsDir, ep)

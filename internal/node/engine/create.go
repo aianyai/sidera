@@ -203,6 +203,9 @@ func (e *Engine) createParams(c store.CtlRecord, ep store.EndpointRecord) (adapt
 		FirstPrompt:     adapterproto.FirstPrompt{Attempt: firstPromptAttempt(c.Intent.Attempt), Text: handoff.NewSessionPromptText},
 		ToolAccess:      access,
 	}
+	if c.Initial != nil {
+		p.FirstPrompt.Text = handoff.PromptText(1)
+	}
 	if cp, ok := e.view.checkpoints[store.CheckpointKey{Scope: string(adapterproto.ScopeAttempt), ID: string(c.Intent.Attempt)}]; ok {
 		p.Checkpoint = append([]byte(nil), cp...)
 	}
@@ -428,14 +431,33 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 		ep.Status, ep.Token = store.EndpointClosed, nil
 	}
 	n.Intent = &intent
-	var write *store.EndpointRecord
+	var write *store.ControlEffect
+	var head *store.AttemptsRecord
+	var ins []store.InRecord
 	if ep.Status != st.rec.Status || (reply.Outcome == adapterproto.CreateReplyCreated && ep.Status == store.EndpointClosed) {
-		write = &ep
+		var initial *store.InRecord
+		if c.Initial != nil {
+			if in, ok := e.view.in[store.DerivedKey(c)]; ok {
+				initial = &in
+			}
+		}
+		effect := store.CreationEffect(n, ep, initial)
+		head, ins, err = effect.PromptRecords()
+		if err != nil {
+			return err
+		}
+		write = &effect
 	}
 	if err := e.d.Store.ControlResult(n, write); err != nil {
 		return err
 	}
 	e.view.setCtl(n)
+	for _, in := range ins {
+		e.view.setIn(in)
+	}
+	if head != nil {
+		e.view.attempts[ep.ID] = *head
+	}
 	if write != nil {
 		e.putEndpoint(ep, st.decl)
 		if ep.Status == store.EndpointClosed && e.view.Draining(ep.ID) {

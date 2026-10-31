@@ -40,7 +40,7 @@ func TestEndpointLeftByAFailedControlIntakeIsReclaimedAfterARetry(t *testing.T) 
 	retry := sessionCtl(1, 6)
 	mustDo(t, f.st.ControlIntake(nil, ptr(session(6, store.EndpointCreating, ctlName(1))), retry, nil))
 	done := created(t, 1, 6)
-	mustDo(t, f.st.ControlResult(done, ptr(openedBy(done))))
+	mustDo(t, f.st.ControlResult(done, ptr(store.CreationEffect(done, openedBy(done), nil))))
 
 	r := openRig(t, mem)
 	if got := endpointStatuses(r.scan())[ep(5).String()]; got != store.EndpointCreating {

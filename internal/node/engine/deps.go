@@ -36,7 +36,7 @@ type Store interface {
 	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) error
 	SourceUpdate(out store.OutRecord) error
 	ControlIntake(body []byte, endpoint *store.EndpointRecord, ctl store.CtlRecord, derived *store.InRecord) error
-	ControlResult(ctl store.CtlRecord, endpoint *store.EndpointRecord) error
+	ControlResult(ctl store.CtlRecord, effect *store.ControlEffect) error
 	ControlReply(out store.OutRecord) error
 
 	EndpointUpdate(ep store.EndpointRecord) error
@@ -49,7 +49,7 @@ type Store interface {
 	DaemonStop(result store.AdminRecord) error
 	InstanceDrain(closed []store.EndpointRecord, b store.DrainBatch) error
 
-	CtlEffectReplay(eps []store.EndpointRecord) error
+	CtlEffectReplay(eps []store.ControlEffect) error
 	DerivedReplay(ins []store.InRecord) error
 	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) error
 	OrphanGCEndpoint(eps []store.EndpointRecord) error

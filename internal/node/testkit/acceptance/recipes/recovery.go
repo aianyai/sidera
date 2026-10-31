@@ -114,6 +114,7 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 		budget := 107
 		cases := append(recoveryCases(recoveryCrash("control-intake/ctl.create#1"), "orphan-gc-endpoint/endpoint.remove", "orphan-gc-endpoint/commit"), recoveryCases(recoveryCrash("control-intake/derived.create#1"), "derived-replay/derived.create", "derived-replay/derived.write", "derived-replay/derived.rename", "derived-replay/commit")...)
 		cases = append(cases, recoveryCases(recoveryCrash("control-result/endpoint.create#1"), "ctl-effect-replay/endpoint.create", "ctl-effect-replay/endpoint.write", "ctl-effect-replay/endpoint.rename", "ctl-effect-replay/commit")...)
+		cases = append(cases, recoveryCases(recoveryCrash("control-result/in.create#1"), "ctl-effect-replay/in.create", "ctl-effect-replay/in.write", "ctl-effect-replay/in.rename", "ctl-effect-replay/attempts.create", "ctl-effect-replay/attempts.write", "ctl-effect-replay/attempts.rename")...)
 		if held {
 			name = "recovery-creating"
 			budget = 113

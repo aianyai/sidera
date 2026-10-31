@@ -921,9 +921,16 @@ the runtime endpoint, the new endpoint, the preset, the first prompt, the tool a
 checkpoint of the attempt), and its result is a command of the loop that settles the intent in
 one transaction, `control-result`: the control reply is made and stored with the deduplication
 record, the delivery of the signal ends as delivered, and the endpoint opens, mapped to the native
-session, when the session was created and is closed with its token dropped when it was not. The
+session, when the session was created and is closed with its token dropped when it was not.
+With an initial message, its first prompt uses `handoff.PromptText(1)` and the
+transaction marks that delivery notified and writes one delivered first attempt
+before opening the endpoint. Its time is the successful control record's
+`DeliveredAt()`, when this node confirmed creation. Creating endpoints cannot
+receive by token; the first successful recv can only follow that confirmation.
+Without an initial message the text is `NewSessionPromptText`, with no attempts
+record or hourly count. The
 first prompt's attempt follows from the creation attempt, so a call made again carries what the
-first carried, as the adapter requires, and nothing else is stored for it. Once the intent is settled,
+first carried, as the adapter requires. Once the intent is settled,
 whatever the outcome (a creation failed because its endpoint was lost included), the checkpoints the adapter kept under the creation attempt and under the first
 prompt's attempt are dropped: no call will be made again. A call that failed, an
 answer of `indeterminate` and an adapter that is not connected are tried again, after
@@ -949,7 +956,7 @@ others, with the same attempt; the adapter answers an attempt it knows with the 
 crash or a killed adapter after the native session was made still yields one session. A turn of the new
 session may be reported before the result of its creation (the session works on its first prompt as
 soon as it exists): the notification is kept by reference and writes nothing, and the endpoint is
-open when the result is in.
+open when the result and initial-prompt effects are durable.
 
 **The initial message of a creation.** A creation that goes on to the adapter also writes, in
 `control-intake`, the delivery of its message to the session endpoint it allocated: an `in/`
@@ -1674,6 +1681,7 @@ reproducible).
 | The declarations of a session govern its messages, not the signals that act on it | `intake_control.go` (`controlTarget`) | `TestSignalsReachASessionThatTakesNothing` |
 | What the endpoint cannot take is answered without the adapter, what the adapter cannot be asked is told after its deadline | `execute.go` (`takeInExecute`, `executeDeadline`) | `TestSignalsNobodyCanCarryOutAreAnsweredWithoutTheAdapter`, `TestSignalsWhileTheAdapterIsAwayAreTold` |
 | `adapter.start` lists the open sessions with their access and checkpoint | `adapters.go` (`sessionAttaches`) | `TestAdapterStartCarriesTheOpenSessionsWithTheirAccess` |
+| A creation with an initial message counts its body-free first prompt once, preserves its unread barrier across restart, and allows normal prompts after recv | `create.go`, `store.CreationEffect` | `TestCreationFirstPromptIsCountedAndRecoveredOnlyWithAnInitialMessage` |
 | Every write of a session creation, with or without an initial message, and of a close survives a crash | `control-intake`, `control-result`, `control-reply` (declared by the store) | `TestSessionCreationRecoversFromACrashAtEveryPoint` |
 | A body that is not what its record says settles that record by what it needs | `quarantine.go` (`readBody`, `quarantineBody`) | `TestBodyWithWrongHashIsQuarantinedAndRecordsTreatedAsLost` |
 | A damaged floor file met by a write is settled and the write goes on; a damaged file of another directory is not settled while the node runs | `quarantine.go` (`settleLive`, `retryingDamaged`, `syncAfterSettlement`) | `TestADamagedFileOtherThanAFloorFileIsNotSettledWhileTheNodeRuns`, `TestADamagedFloorFileMetWhileTheNodeRunsIsSettledAndTheWriteGoesOn` |

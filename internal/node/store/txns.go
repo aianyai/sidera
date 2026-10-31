@@ -75,9 +75,10 @@ var (
 	declControlIntake = txn.Decl{Name: "control-intake", Kind: txn.Normal, Writes: []txn.Write{
 		rep("body", prepare, optional), rep("endpoint", prepare, optional), rep("ctl"), rep("derived", optional),
 	}}
-	// control-result: the result of a control signal, then the endpoint it moves.
+	// control-result: the control result is the authority. An initial prompt
+	// settles its target and head before the created endpoint becomes open.
 	declControlResult = txn.Decl{Name: "control-result", Kind: txn.Normal, Writes: []txn.Write{
-		rep("ctl"), rep("endpoint", optional),
+		rep("ctl"), repDefer("in", optional), syncDir("in-dir", optional), rep("attempts", optional), rep("endpoint", optional),
 	}}
 	// control-reply: the source handles a control reply; the body of the record is
 	// removed after it when it no longer refers to one.
@@ -168,7 +169,7 @@ var (
 	declOrphanGC         = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}
 	declOrphanGCEndpoint = txn.Decl{Name: "orphan-gc-endpoint", Kind: txn.Recovery, Writes: []txn.Write{rm("endpoint", many, optional), syncDir("dir", many)}}
 	declDerivedReplay    = txn.Decl{Name: "derived-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("derived", many, optional), syncDir("in-dir", optional)}}
-	declCtlEffectReplay  = txn.Decl{Name: "ctl-effect-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("endpoint", many, optional), syncDir("endpoint-dir", optional)}}
+	declCtlEffectReplay  = txn.Decl{Name: "ctl-effect-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("in", many, optional), syncDir("in-dir", many, optional), rep("attempts", many, optional), repDefer("endpoint", many, optional), syncDir("endpoint-dir", optional)}}
 )
 
 // instanceHead is the part of instance-drain before the part it shares with

@@ -194,6 +194,14 @@ delivery to a session: when it is judged and how the verdict is recorded.
   before anything else. A wall clock set back beyond the tolerance pauses new
   work that depends on a deadline until the owner clears it; moving the clock on
   does not clear it. The pause is made durable by the command that finds it.
+- **A creation's initial prompt is settled before its endpoint opens.** With an
+  initial message, `session.create.first_prompt` is `handoff.PromptText(1)` and
+  counts once; without one it is `NewSessionPromptText` and has no attempts head.
+  Only a successful `created` result supplies the delivered fact, at the ctl's
+  `DeliveredAt()`. Store settlement and effect replay complete notification and
+  attempts before open; the engine publishes those same records afterward.
+  Creating endpoints cannot receive, so no successful earlier recv can be
+  hidden by that timestamp. Later recv and turn events use the ordinary rules.
 - **Disk first, memory second.** Everything that can be refused is checked before
   `Begin`. A write that failed before its commit point was acknowledged to no one
   and changed nothing: `ReasonStorageFull` for a full volume, otherwise

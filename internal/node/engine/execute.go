@@ -392,7 +392,7 @@ func (e *Engine) writeExecution(now time.Time, c store.CtlRecord, result envelop
 	if err != nil {
 		return err
 	}
-	var write *store.EndpointRecord
+	var write *store.ControlEffect
 	st := e.view.endpoints[c.Key.Recipient]
 	if c.Kind == envelope.KindSessionClose && st != nil && st.rec.Status == store.EndpointOpen {
 		closed := st.rec
@@ -400,14 +400,14 @@ func (e *Engine) writeExecution(now time.Time, c store.CtlRecord, result envelop
 		if result.Close != nil && result.Close.Outcome == adapterproto.CloseReplyClosed && closed.ReleasePending() {
 			closed = releasedRecord(closed) // the answer of the signal is the release
 		}
-		write, n.ClosedEndpoint = &closed, closed.ID
+		write, n.ClosedEndpoint = &store.ControlEffect{EndpointRecord: closed}, closed.ID
 	}
 	if err := e.d.Store.ControlResult(n, write); err != nil {
 		return err
 	}
 	e.view.setCtl(n)
 	if write != nil {
-		e.putEndpoint(*write, st.decl)
+		e.putEndpoint(write.EndpointRecord, st.decl)
 		if e.view.Draining(write.ID) {
 			e.later(&cmdDrain{endpoint: write.ID})
 		}

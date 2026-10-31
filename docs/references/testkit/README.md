@@ -1131,8 +1131,8 @@ serves requests; reconnecting therefore cannot silently remove the scripted
 refusal and forward the pending body before its blocking phase finishes.
 `restore-prompt` clears only refusal and `restore-credentials` clears availability.
 The repeatable drain finishes an interrupted blocking phase before explicitly
-clearing both. All fourteen steps, the 285-point budget, original clock advances
-and both mandatory real blocked/recovered notices remain unchanged.
+clearing both. The blocking phases retain their clock advances, original 285-point budget
+and both mandatory real blocked/recovered notices.
 Focused in-process and binary regressions interrupt the original
 `blocked/attempts.rename#1`, then a real blocked rewrite from the complete second
 generation, and require third-generation convergence through the shared recovery
@@ -1178,6 +1178,18 @@ missing Required keys, interruption counts, dynamic planned/selected/executed
 counts, per-run and total elapsed times, and the explicit smoke skip reason.
 This entry point defines how to execute the full catalog; its presence is not
 evidence that a full-mode walk has completed.
+
+The creation's initial notification and attempts head are part of control
+settlement, before its endpoint opens. The catalog declares 493 Normal and 67
+Recovery keys. `recovery-create` additionally cuts before
+`control-result/in.create#1` and interrupts the replay's `in` and `attempts`
+create/write/rename points in generation 2, preserving its existing cases.
+The 43 static responsibilities use 16 complete trigger recordings. After
+restoring credentials, `session-blocked-recovered` explicitly advances by
+`handoff.DefaultRetryAfterFailure` before its unchanged receive; its positive
+ordinary prompt supplies the `prompt-end/in` notification coverage. Its 209
+main points and 15 boundaries remain within the original 285 budget. No judge
+or budget is relaxed for the larger write set.
 
 `Catalog.AnalyzeLayer` uses the complete clean and second-generation recordings
 for supported recipes. Reachable keys are their observed union; in-process-only

@@ -15,7 +15,13 @@ checks that the model saw it before acknowledging for the agent.
   reads them with `recv` once it is told they have arrived
   (`NewSessionPromptText`). It is not a prompt attempt: the caller does not
   record it and it does not count toward the hourly cap. With an initial
-  message the first prompt is the ordinary one for one message.
+  message the first prompt is the ordinary one for one message. The node records
+  that first attempt as delivered only when creation is confirmed as `created`,
+  at the successful control delivery's `DeliveredAt()`. Its notification and
+  attempts head are durable before the endpoint opens, and recovery completes
+  them from that same confirmation. An open endpoint's later attempts are never
+  replaced by its old creation result. Creating endpoints cannot successfully
+  call recv, so this time cannot conceal an earlier successful read.
 - A message whose `recv`-stage authorization is currently Suspend is not a
   waiting message: it counts toward no prompt, no blocked verdict and no
   arrival time, because suspension means no lease, no prompt and no feedback.

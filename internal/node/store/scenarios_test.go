@@ -384,7 +384,7 @@ func scenarios() []scenario {
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				c := created(t, 1, 5)
-				return r.st.ControlResult(c, ptr(openedBy(c)))
+				return r.st.ControlResult(c, ptr(store.CreationEffect(c, openedBy(c), nil)))
 			},
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, sessionCtl(1, 5))
@@ -407,7 +407,7 @@ func scenarios() []scenario {
 				c := created(t, 1, 5)
 				closed := session(5, store.EndpointClosed, ctlName(1))
 				closed.Session.NativeRef, closed.Session.Process = c.Intent.NativeRef, c.Intent.Process
-				return r.st.ControlResult(c, &closed)
+				return r.st.ControlResult(c, ptr(store.ControlEffect{EndpointRecord: closed}))
 			},
 			verify: func(t *testing.T, r *rig) {
 				for _, e := range r.scan().Endpoints {
@@ -1057,6 +1057,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
 	all := append(append(scenarios(), recoveryScenarios()...), doubleFaultScenarios()...)
+	all = append(all, initialPromptScenario(false), initialPromptScenario(true))
 	total := scenarioStats{}
 	var mu sync.Mutex
 	// The walks are independent: they run side by side, and the coverage is

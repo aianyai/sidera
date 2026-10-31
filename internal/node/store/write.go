@@ -369,25 +369,44 @@ func checkDerivedOf(ctl CtlRecord, d InRecord) error {
 	return nil
 }
 
-// ControlResult records the result of a control signal and then the session
-// endpoint it moves.
-func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
+// ControlResult records the authoritative control result, then its initial
+// prompt effects, and finally the endpoint it moves.
+func (s *Store) ControlResult(ctl CtlRecord, effect *ControlEffect) error {
 	cf, err := recordFile(CtlDir, ctl)
 	if err != nil {
 		return err
 	}
 	var ef *file
-	if endpoint != nil {
-		f, err := recordFile(EndpointsDir, *endpoint)
+	if effect != nil {
+		f, err := recordFile(EndpointsDir, effect.EndpointRecord)
 		if err != nil {
 			return err
 		}
 		ef = &f
 	}
+	var prompt *preparedPrompt
+	if effect != nil {
+		head, ins, err := effect.PromptRecords()
+		if err != nil {
+			return err
+		}
+		if head != nil {
+			prepared, err := preparePrompt(*head, ins)
+			if err != nil {
+				return err
+			}
+			prompt = &prepared
+		}
+	}
 	tx := s.w.Begin(&declControlResult)
 	defer tx.Close()
 	if err := s.replace(tx, "ctl", cf); err != nil {
 		return err
+	}
+	if prompt != nil {
+		if err := prompt.write(s, tx); err != nil {
+			return err
+		}
 	}
 	if ef != nil {
 		if err := s.replace(tx, "endpoint", *ef); err != nil {
@@ -434,6 +453,35 @@ func (s *Store) PromptBegin(a AttemptsRecord) error {
 	return tx.Commit()
 }
 
+type preparedPrompt struct {
+	head file
+	ins  []file
+}
+
+func preparePrompt(head AttemptsRecord, ins []InRecord) (preparedPrompt, error) {
+	af, err := recordFile(AttemptsDir, head)
+	if err != nil {
+		return preparedPrompt{}, err
+	}
+	for _, in := range ins {
+		if in.Key.Recipient != head.Endpoint {
+			return preparedPrompt{}, fmt.Errorf("store: a target record of %s cannot go with the head of %s: the head says the work for its own endpoint is done", in.Key.Recipient, head.Endpoint)
+		}
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return preparedPrompt{}, err
+	}
+	return preparedPrompt{head: af, ins: files}, nil
+}
+
+func (p preparedPrompt) write(s *Store, tx *txn.Tx) error {
+	if err := writeGroup(tx, "in", "in-dir", InDir, p.ins); err != nil {
+		return err
+	}
+	return s.replace(tx, "attempts", p.head)
+}
+
 // recipientsThenHead writes the target records an event of a prompt or a block
 // applies to, made durable together, and the head record of the endpoint last. The
 // head is the commit mark: when it is there, every recipient is written, and when it
@@ -443,25 +491,13 @@ func (s *Store) PromptBegin(a AttemptsRecord) error {
 // before anything is written: the head would say that work is done which it does
 // not cover.
 func (s *Store) recipientsThenHead(decl *txn.Decl, head AttemptsRecord, ins []InRecord) error {
-	af, err := recordFile(AttemptsDir, head)
-	if err != nil {
-		return err
-	}
-	for _, in := range ins {
-		if in.Key.Recipient != head.Endpoint {
-			return fmt.Errorf("store: a target record of %s cannot go with the head of %s: the head says the work for its own endpoint is done", in.Key.Recipient, head.Endpoint)
-		}
-	}
-	files, err := inFiles(ins)
+	prompt, err := preparePrompt(head, ins)
 	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
-	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return err
-	}
-	if err := s.replace(tx, "attempts", af); err != nil {
+	if err := prompt.write(s, tx); err != nil {
 		return err
 	}
 	return tx.Commit()

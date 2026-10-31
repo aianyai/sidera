@@ -532,7 +532,14 @@ that message's first prompt attempt, counted as one; without one the text is
 of the endpoint, so it does not count toward the hourly cap or hold back the
 first real message. In both cases its attempt identifier is the one the adapter
 finds in the native record to show the session is ready, and the one the daemon
-reconciles by after an unknown outcome.
+reconciles by after an unknown outcome. For a creation with an initial message,
+`created` supplies the delivered proof: the daemon settles one delivered first
+attempt and the initial delivery's notification before opening the endpoint.
+The attempt's time is when this node confirmed creation (the successful control
+record's `DeliveredAt()`), retained through effect replay. Failed and unconfirmed
+creations count no delivered first prompt, and a closed endpoint is not reopened.
+Creating endpoints cannot successfully recv even though their tools already
+hold the token; native first-turn events may still precede the result.
 
 The result is `created`, `failed` or `indeterminate`. `failed` means that no
 session will be attached to the channel for this attempt, and `reason` says why:

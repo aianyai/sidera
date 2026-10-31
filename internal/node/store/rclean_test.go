@@ -95,10 +95,10 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	mustDo(t, r.st.ControlIntake(bodyBytes(20), ptr(session(5, store.EndpointCreating, ctlName(20))), c, &derived))
 	check("session creation accepted with its initial message")
 	cr := created(t, 20, 5)
-	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr))))
+	mustDo(t, r.st.ControlResult(cr, ptr(store.CreationEffect(cr, openedBy(cr), nil))))
 	check("session created")
 	closeCtl := closedBy(21, 5)
-	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20)))))
+	mustDo(t, r.st.ControlResult(closeCtl, ptr(store.ControlEffect{EndpointRecord: closedSession(5, ctlName(20))})))
 	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
 	check("session drained")
 

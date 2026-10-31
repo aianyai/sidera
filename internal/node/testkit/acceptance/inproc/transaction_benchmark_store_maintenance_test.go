@@ -468,7 +468,7 @@ func prepareTransactionMaintenanceCtlEffectReplay(b *testing.B, observer txn.Obs
 	return transactionBenchmarkFixture{
 		invoke: func() error { return st.CtlEffectReplay(work) },
 		verify: func() error {
-			if err := transactionMaintenanceStored(fs, store.EndpointsDir, work[0]); err != nil {
+			if err := transactionMaintenanceStored(fs, store.EndpointsDir, work[0].EndpointRecord); err != nil {
 				return err
 			}
 			sc, err := st.Scan()

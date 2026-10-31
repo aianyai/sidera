@@ -20,9 +20,9 @@ import (
 type RecoveryPlan struct {
 	// Quarantine is the damaged files.
 	Quarantine []store.DamagedFile
-	// CtlEffectReplay are the endpoints whose control record says more than they
-	// do.
-	CtlEffectReplay []store.EndpointRecord
+	// CtlEffectReplay completes the initial prompts and endpoints whose control
+	// records hold committed effects not yet published.
+	CtlEffectReplay []store.ControlEffect
 	// DerivedReplay are the control records whose delivery of an initial message a
 	// crash left unwritten.
 	DerivedReplay []store.CtlRecord

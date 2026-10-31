@@ -66,6 +66,17 @@ checkpoint removal on close and blocked/recovered notices. External runtime and
 agent evidence proves visibility; the final closed-session audit alone reads the
 endpoint's status, token and remaining checkpoint facts.
 
+Creation with an initial body settles its counted first prompt before opening
+its endpoint. The `recovery-create` cut before `control-result/in.create#1`
+therefore owns the six create/write/rename interruptions of the replay's initial
+notification and attempts head. Existing endpoint replay cases remain. There
+are 43 static Recovery responsibilities across 16 complete trigger recordings.
+The program declares 493 Normal and 67 Recovery keys. Full in-process evidence
+covers all of them; BinaryCapabilities assigns 545 keys to supported sources
+and the remaining 15 to in-process-only sources. Dynamic recovery-normal
+responsibilities remain derived from actual complete recordings, with 9 in the
+full in-process catalog and 8 among binary-capable sources.
+
 Recovery descriptions explicitly own non-sync Recovery declarations and their real
 first-crash or offline-damage trigger. `RecoveryTriggers` adds complete recovery
 recordings without assigning a declaration; the binding deduplicates these with
@@ -229,7 +240,7 @@ succeed. Interrupted reads remain unfinished. A close may commit without returni
 its result and recovery can already close the native; a completed read is therefore
 not repeated through that closed session. The drain still repeats the identical
 `retention-close` request and retains its identifier only after a successful real
-response. Its 164-point recording has a fixed budget of 246.
+response. Its 171-point recording has a fixed budget of 246.
 
 A separate control-expiry variant fails the first create-result replacement at
 its recoverable create point. The control reaches its report deadline before a
@@ -318,7 +329,9 @@ ledger before the send and reused unchanged. `restore-prompt` clears only the
 refusal; `restore-credentials` clears availability. An interrupted blocking phase
 finishes before the drain explicitly clears both inputs, so startup cannot
 forward the pending prompt before the strict blocked/recovered obligations are
-established. The fourteen steps, clock advances and 285-point budget are retained.
+established. The blocking phases and their clock advances retain the original
+285-point budget; the fifteen-step script also lets the restored prompt retry
+before its final receive.
 
 `Needs` declares runtime-adapter use, extra instances, sweep period, package input,
 an installed but disabled probe-warning adapter (`ProbeWarning`), offline damage
@@ -356,13 +369,25 @@ budgets for the remaining affected recipes are:
 | --- | --- | --- |
 | `delivery-expiry` | 60 | 90 |
 | `delivery-redelivery` | 120 | 180 |
-| `session-lifecycle` | 216 | 324 |
-| `session-blocked-recovered` | 190 | 285 |
+| `session-lifecycle` | 219 | 324 |
+| `session-blocked-recovered` | 209 | 285 |
 | `recovery-send`, `recovery-source-trusted`, `recovery-source-unreadable`, `recovery-target` | 48 each | 72 each |
-| `recovery-create` | 71 | 107 |
-| `recovery-creating` | 75 | 113 |
+| `recovery-create` | 77 | 107 |
+| `recovery-creating` | 81 | 113 |
 | `recovery-body-feedback` | 44 | 66 |
 | `recovery-body-archive` | 65 | 98 |
 
 Unaffected budgets retain their existing values. Counts include all main targets;
 clock writes are never filtered out, and domain judgements are unchanged.
+
+The blocked recipe restores credentials, advances by the existing failed-prompt
+retry interval (`prompt-retry`), then performs its unchanged receive. This
+exercises a successful ordinary prompt before the pending body is read, so
+`prompt-end/in` notification writes have a real source independently of initial
+creation settlement. The single added clock step preserves every budget and
+judge. The recorded 36-scenario in-process full plan contains 2331 main targets
+and 124 boundaries; its 32 binary-capable scenarios contribute 2053 main targets
+and 110 boundaries. These are in-process recording counts, not a replacement for
+the binary backend's own recording and interruption ordinals. The ordinary and
+recovery writes together add 41 main targets, one boundary and six static
+Recovery targets; the dynamic target count is unchanged.

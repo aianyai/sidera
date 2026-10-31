@@ -199,13 +199,17 @@ func QuarantineSessions(sc *Scan, ctlName string) []EndpointRecord {
 	return out
 }
 
-// EffectReplays is the work of ctl-effect-replay, as the endpoint records to
-// write: a session endpoint still being created whose control record holds the
+// EffectReplays is the work of ctl-effect-replay, including the initial prompt
+// that must settle before a confirmed creation opens its endpoint: a session endpoint still being created whose control record holds the
 // end of the creation becomes open or closed accordingly, an open session
 // endpoint a control record closed becomes closed, and a closed one whose creation
 // ended as created gets the native session recorded. Nothing is ever moved from
 // closed to open.
-func EffectReplays(sc *Scan) []EndpointRecord {
+func EffectReplays(sc *Scan) []ControlEffect {
+	initial := map[TargetKey]InRecord{}
+	for _, in := range sc.In {
+		initial[in.Key] = in
+	}
 	ctls := map[string]*CtlRecord{}
 	closedBy := map[ident.EndpointID]bool{}
 	for i := range sc.Ctl {
@@ -215,7 +219,7 @@ func EffectReplays(sc *Scan) []EndpointRecord {
 			closedBy[c.ClosedEndpoint] = true
 		}
 	}
-	var out []EndpointRecord
+	var out []ControlEffect
 	for _, e := range sc.Endpoints {
 		switch {
 		case e.Status == EndpointCreating && e.CreatedBy != "":
@@ -235,11 +239,17 @@ func EffectReplays(sc *Scan) []EndpointRecord {
 			} else {
 				n.Status, n.Token = EndpointClosed, nil
 			}
-			out = append(out, n)
+			var in *InRecord
+			if c.Initial != nil {
+				if found, ok := initial[DerivedKey(*c)]; ok {
+					in = &found
+				}
+			}
+			out = append(out, CreationEffect(*c, n, in))
 		case e.Status == EndpointOpen && closedBy[e.ID]:
 			n := e
 			n.Status, n.Token = EndpointClosed, nil
-			out = append(out, n)
+			out = append(out, ControlEffect{EndpointRecord: n})
 		case e.Status == EndpointClosed && e.CreatedBy != "" && (e.Session == nil || e.Session.NativeRef == ""):
 			// The endpoint was closed while its session was being made, and the
 			// session was made all the same: the native session is recorded on the
@@ -255,7 +265,7 @@ func EffectReplays(sc *Scan) []EndpointRecord {
 			}
 			sess.Preset, sess.NativeRef, sess.Process = c.Preset, c.Intent.NativeRef, c.Intent.Process
 			n.Session = &sess
-			out = append(out, n)
+			out = append(out, ControlEffect{EndpointRecord: n})
 		}
 	}
 	return out
@@ -410,14 +420,27 @@ func (s *Store) OrphanGCEndpoint(eps []EndpointRecord) error {
 	return tx.Commit()
 }
 
-// CtlEffectReplay writes the endpoint records EffectReplays returned.
-func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
+// CtlEffectReplay completes the initial prompts and then writes the endpoint
+// records EffectReplays returned. An open endpoint is never an initial-prompt replay.
+func (s *Store) CtlEffectReplay(eps []ControlEffect) error {
 	if len(eps) == 0 {
 		return nil
 	}
 	var files []file
+	var prompts []preparedPrompt
 	for _, e := range eps {
-		f, err := recordFile(EndpointsDir, e)
+		head, ins, err := e.PromptRecords()
+		if err != nil {
+			return err
+		}
+		if head != nil {
+			prompt, err := preparePrompt(*head, ins)
+			if err != nil {
+				return err
+			}
+			prompts = append(prompts, prompt)
+		}
+		f, err := recordFile(EndpointsDir, e.EndpointRecord)
 		if err != nil {
 			return err
 		}
@@ -425,6 +448,11 @@ func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
 	}
 	tx := s.w.Begin(&declCtlEffectReplay)
 	defer tx.Close()
+	for _, prompt := range prompts {
+		if err := prompt.write(s, tx); err != nil {
+			return err
+		}
+	}
 	if err := writeGroup(tx, "endpoint", "endpoint-dir", EndpointsDir, files); err != nil {
 		return err
 	}

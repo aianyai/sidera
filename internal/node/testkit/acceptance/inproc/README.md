@@ -258,3 +258,14 @@ defines the boundary and command. These timings are independent of crash-walk
 coverage and never use its memory filesystem. Low-level preparation uses the
 existing `harness.MakeLayout` and `SeedNode` on a private real disk; the measured
 operation always calls its existing owner entry point.
+
+Initial creation settlement adds notification and attempts writes to both
+`control-result` and `ctl-effect-replay`. The catalog's complete recordings cover
+493 Normal and 67 Recovery keys. The cut before `control-result/in.create#1`
+supplies six additional static recovery interruptions, with the existing cases
+retained: 43 static targets and 16 unique complete recovery recordings. The
+blocked recipe's explicit prompt-retry interval makes an ordinary successful
+notification observable before its direct receive, independently of creation.
+Binary-capable sources cover 545 keys and leave the same 15 in-process-only
+keys; dynamic recovery-normal targets remain 9 here and 8 for those supported
+sources. All main-point budgets and domain judgements retain their values.

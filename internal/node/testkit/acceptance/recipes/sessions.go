@@ -479,6 +479,7 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			inputs.Availability = nil
 			return e.SetAdapterInputs("chat", inputs)
 		}},
+		scenario.Advance("prompt-retry", handoff.DefaultRetryAfterFailure),
 		{Name: "read", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
 	}}, Drain: func(e scenario.Env) error {
 		if blocking {

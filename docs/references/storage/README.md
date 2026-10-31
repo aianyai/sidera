@@ -822,6 +822,25 @@ the digest and length of the body (`ctl.initial`) and holds no body file, so the
 has one copy and one record that settles it, and a record that is a creation refused at
 intake holds none of it.
 
+A confirmed creation with an initial message settles the first prompt in the
+same publication sequence: `ControlResult` writes `ctl`, then the notified
+initial `in` record and its directory, then the endpoint's `attempts` head, and
+finally the open `endpoint`. The head contains one delivered first attempt at
+the successful ctl's `Record.DeliveredAt()`. `CreationEffect` builds those same
+records for the writer and engine view; their preparation and target-before-head
+write are shared with `PromptEnd`. `ctl-effect-replay` completes this sequence
+from the committed control result while the endpoint is still creating. It
+never initializes an already open endpoint again, so later attempts, trimming
+and blocked state survive. Failed, unconfirmed and already closed endpoints get
+no initial prompt head. No record format or timestamp field is added.
+
+The crash scenarios `control-result with an initial prompt` and `initial prompt
+of a committed creation not yet applied` check target-before-head-before-open,
+exactly one first attempt, stable confirmation time, power loss and a further
+crash during recovery through `TestEveryTransactionConvergesFromEveryCrashState`.
+`TestOldCreationResultDoesNotReplaceLaterPromptState` checks that replay leaves
+an open endpoint's later head alone.
+
 The crash states are the prefixes of those writes. Only the body: an orphan, collected.
 The body and the endpoint, no control record: the endpoint is garbage and the body an
 orphan, collected. The control record and no delivery: `derived-replay` (`DerivedReplays`
@@ -911,8 +930,9 @@ the commit point of the transaction: that is the rename of the first target reco
 means nothing was written; from it on a failure is fatal. A crash before the
 head leaves some, all or none of the target records written, each as it was or as
 the event makes it (a record is replaced whole, so there is no third form), and the old head,
-whose prompt in flight or old report says the work is not done. Nothing finishes it
-at the next start. The next attempt applies the event again and writes the records
+whose prompt in flight or old report says the work is not done. For an ordinary prompt, nothing finishes it
+at the next start; a creation's initial prompt is instead completed from its
+committed control result before the endpoint opens. The next attempt applies the event again and writes the records
 that change and the head last; the delivery rules ignore an event a record already
 holds, so a record written before the crash is not written again, and one written
 again is written the same. The order is what the floor asks of it: a record that
@@ -1318,7 +1338,8 @@ store: every predicate is a function of one scan, and the store cannot know whic
 writes the scan it is given has seen. The order is: quarantine of damaged files
 (it writes replacement records and closed session endpoints, and raises sequence
 floors, which every later rule and the sequence book read);
-`ctl-effect-replay` (it closes endpoints, and records the native session of a creation that ended as created on an endpoint that was closed meanwhile, the recovery scenario "effect of a control result not yet applied to its endpoint" of `TestEveryTransactionConvergesFromEveryCrashState`), `derived-replay` (it writes the delivery of an
+`ctl-effect-replay` (it completes a confirmed creation's initial prompt before opening
+its endpoint, closes endpoints, and records the native session of a creation that ended as created on an endpoint that was closed meanwhile, the recovery scenario "effect of a control result not yet applied to its endpoint" of `TestEveryTransactionConvergesFromEveryCrashState`), `derived-replay` (it writes the delivery of an
 initial message, before `orphan-gc` can take the body that delivery holds) and
 `instance-drain-replay` (it closes endpoints);
 `orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued

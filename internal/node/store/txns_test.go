@@ -56,7 +56,7 @@ var designTable = []struct {
 	{"deliver-reply", txn.Normal, "reply-body:Replace[MOP] out:Replace[O] in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"source-update", txn.Normal, "out:Replace body:Remove[MO] body-dir:SyncDir[O]"},
 	{"control-intake", txn.Normal, "body:Replace[OP] endpoint:Replace[OP] ctl:Replace derived:Replace[O]"},
-	{"control-result", txn.Normal, "ctl:Replace endpoint:Replace[O]"},
+	{"control-result", txn.Normal, "ctl:Replace in:ReplaceDefer[O] in-dir:SyncDir[O] attempts:Replace[O] endpoint:Replace[O]"},
 	{"control-reply", txn.Normal, "out:Replace body:Remove[MO] body-dir:SyncDir[O]"},
 	{"prompt-begin", txn.Normal, "attempts:Replace"},
 	{"prompt-end", txn.Normal, "in:ReplaceDefer[MO] in-dir:SyncDir[O] attempts:Replace"},
@@ -82,7 +82,7 @@ var designTable = []struct {
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
 	{"derived-replay", txn.Recovery, "derived:ReplaceDefer[MO] in-dir:SyncDir[O]"},
-	{"ctl-effect-replay", txn.Recovery, "endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},
+	{"ctl-effect-replay", txn.Recovery, "in:ReplaceDefer[MO] in-dir:SyncDir[MO] attempts:Replace[MO] endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},
 }
 
 func TestDeclarationsMatchTheDesignTable(t *testing.T) {

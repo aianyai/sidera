@@ -25,6 +25,7 @@ engine applies the delivery rules and calls the writes.
 | `OutRecord`, `OutLostRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
+| `ControlEffect`, `CreationEffect`, `ControlEffect.PromptRecords` | The endpoint and initial prompt effects of a confirmed creation. The prompt records use the successful control record's delivery time; the writer and the engine view use the same construction. |
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records stores them as given and returns only an error. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DerivedReplays`, `DrainCandidates`, `ClosedSessionCheckpoints`, ... | The predicates of the recovery rules, pure functions of a `Scan`. `DerivedKey` is the key of the delivery of the initial message a control record remembers, `CheckpointOfClosedSession` the one rule of when the state of a session goes; `Store.DerivedReplay` and `Store.CheckpointDrop` write what those find. |
@@ -76,6 +77,15 @@ engine applies the delivery rules and calls the writes.
   writes the head: a call with only some of them would mark the rest as done. A
   target record whose recipient is not the head's endpoint is refused before
   anything is written.
+- **A successful creation settles its initial prompt before opening.**
+  `ControlResult` writes the authoritative control record, then the initial
+  delivery's notification and attempts head using the same preparation and
+  target-before-head writer as `PromptEnd`, and only then the endpoint. The
+  first attempt is delivered at the successful control record's `DeliveredAt()`.
+  `EffectReplays` and `CtlEffectReplay` finish this same work while the endpoint
+  is still creating. Once open, the old creation never replaces its later
+  prompt or blocked state. A closed endpoint stays closed and gets no initial
+  prompt head; failed and unconfirmed creations get none either.
 - **A control record refused at intake holds the refusal alone.** `ControlIntake`
   takes a control record in the state `rejected` (a signal the target refused when it
   arrived; the reasons it may carry are the delivery package's) only with no reply,
