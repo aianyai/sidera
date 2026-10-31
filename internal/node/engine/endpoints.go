@@ -490,9 +490,14 @@ func (e *Engine) Endpoints(ctx context.Context) ([]EndpointView, error) {
 // ways to close one it was, and a checkpoint a crash left is removed by the scan
 // entry (store.ClosedSessionCheckpoints). Its native session, when the adapter has not
 // confirmed releasing it, is released after the command (see release.go), whichever way
-// the endpoint was closed.
+// the endpoint was closed. A session that may be prompted is judged by the prompt rules
+// again, since this is where one that was being created opens, with the end of a turn
+// that was kept while it was (see noteTurnEnded).
 func (e *Engine) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
 	e.view.putEndpoint(rec, decl)
+	if promptable(e.view.endpoints[rec.ID]) {
+		e.promptsDirty = true
+	}
 	if rec.ReleasePending() {
 		e.later(&cmdRelease{endpoint: rec.ID})
 	}

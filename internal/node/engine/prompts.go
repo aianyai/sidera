@@ -122,11 +122,22 @@ func (e *Engine) noteArrival(id ident.EndpointID) {
 	}
 }
 
+// creatingSession says whether the endpoint is a session whose creation is not settled.
+// Its session may already run: the adapter's answer to the creation can be lost after
+// the native session exists, and the session works on its first prompt as soon as it
+// exists.
+func creatingSession(st *endpointState) bool {
+	return st != nil && st.rec.Kind == adapterreg.KindSession && st.rec.Status == store.EndpointCreating
+}
+
 // noteTurnEnded is the event of a turn of the endpoint's session that ended, whoever
 // started it: the place it held, if a prompt started it, is free, and an agent that
-// left its prompt unread is due the one repeat.
+// left its prompt unread is due the one repeat. The end of a turn of a session whose
+// creation is not settled is kept as well, and counts once the endpoint opens: the
+// settlement records the first prompt as delivered and unread, and without the end
+// that has already come nothing would ever wait for it again.
 func (e *Engine) noteTurnEnded(id ident.EndpointID) {
-	if st := e.view.endpoints[id]; promptable(st) {
+	if st := e.view.endpoints[id]; promptable(st) || creatingSession(st) {
 		p := e.promptOf(id)
 		p.turn = false
 		p.trigger = handoff.TriggerTurnEnd

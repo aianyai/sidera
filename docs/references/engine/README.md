@@ -1080,6 +1080,16 @@ or the result waits to be written. The prompt input reads this from the control 
 wake a session whose close or interrupt is still being carried out. This adds no running turn
 to the node's cap. Ending the execution marks the prompt input changed, so an interrupt's
 settlement judges the still-open session and its waiting event again.
+The end of a turn that is reported while the session's creation is not settled counts once
+the endpoint opens. The adapter's answer to a creation can be lost after the native session
+exists, so the session may run and finish its first turn before the creation is confirmed;
+the confirmation then records the first prompt as delivered and unread, and with no later
+turn end nothing would wake the session again. The engine therefore keeps the end of a turn
+for a creating session endpoint like that of an open one, and `putEndpoint` marks the prompt
+input changed for a session that may be prompted, so the opening judges the unread prompt as
+at a turn end and repeats it. Like the rest of the waiting event this is memory: a restart
+while the session is still being created forgets the end, and an idle session whose first turn
+has not started is not told apart from one whose turn ended.
 Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
 prompt is sent or nothing waits), when it last called recv, and whether a turn that a prompt
 started may be running: from the dispatch of the prompt until that turn ends or the prompt is
@@ -1682,6 +1692,7 @@ reproducible).
 | What the endpoint cannot take is answered without the adapter, what the adapter cannot be asked is told after its deadline | `execute.go` (`takeInExecute`, `executeDeadline`) | `TestSignalsNobodyCanCarryOutAreAnsweredWithoutTheAdapter`, `TestSignalsWhileTheAdapterIsAwayAreTold` |
 | `adapter.start` lists the open sessions with their access and checkpoint | `adapters.go` (`sessionAttaches`) | `TestAdapterStartCarriesTheOpenSessionsWithTheirAccess` |
 | A creation with an initial message counts its body-free first prompt once, preserves its unread barrier across restart, and allows normal prompts after recv | `create.go`, `store.CreationEffect` | `TestCreationFirstPromptIsCountedAndRecoveredOnlyWithAnInitialMessage` |
+| A turn that ended while its session was being created counts once the endpoint opens: the unread first prompt is repeated | `prompts.go` (`noteTurnEnded`), `endpoints.go` (`putEndpoint`) | `TestTurnEndedWhileCreatingCountsOnceTheEndpointOpens` |
 | Every write of a session creation, with or without an initial message, and of a close survives a crash | `control-intake`, `control-result`, `control-reply` (declared by the store) | `TestSessionCreationRecoversFromACrashAtEveryPoint` |
 | A body that is not what its record says settles that record by what it needs | `quarantine.go` (`readBody`, `quarantineBody`) | `TestBodyWithWrongHashIsQuarantinedAndRecordsTreatedAsLost` |
 | A damaged floor file met by a write is settled and the write goes on; a damaged file of another directory is not settled while the node runs | `quarantine.go` (`settleLive`, `retryingDamaged`, `syncAfterSettlement`) | `TestADamagedFileOtherThanAFloorFileIsNotSettledWhileTheNodeRuns`, `TestADamagedFloorFileMetWhileTheNodeRunsIsSettledAndTheWriteGoesOn` |

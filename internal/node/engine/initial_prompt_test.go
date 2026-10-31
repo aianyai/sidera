@@ -1,11 +1,15 @@
 package engine_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -93,4 +97,65 @@ func TestCreationFirstPromptIsCountedAndRecoveredOnlyWithAnInitialMessage(t *tes
 			}
 		})
 	}
+}
+
+// A creation whose answer is unknown after the native session exists lets the
+// session run its first turn while the endpoint is still being created. That turn
+// ends before the creation settles, and the settlement then records the first
+// prompt as delivered and unread. The end of the turn was observed and counts once
+// the endpoint opens: the unread prompt is repeated, as for a turn that ended after
+// opening, so the initial message is not left waiting for an end that already came.
+func TestTurnEndedWhileCreatingCountsOnceTheEndpointOpens(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "sender")
+	rt, err := h.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.SetFirstTurn(fakeruntime.TurnPlan{ManualStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.QueueOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, AfterEffect: true}); err != nil {
+		t.Fatal(err)
+	}
+	msg := signal(t, h, "sender", h.RuntimeAddr(), adapterproto.SignalSessionCreate, "the initial message")
+	quiet(t, h)
+	eps := sessionEndpoints(t, h)
+	if len(eps) != 1 || eps[0].Status != store.EndpointCreating {
+		t.Fatalf("endpoints %+v, want one creating", eps)
+	}
+	lg, err := h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := lg.Kind(ledger.KindNativeCreateReturned)
+	if len(created) != 1 {
+		t.Fatalf("%d native sessions, want 1", len(created))
+	}
+	ref := created[0].Attrs.NativeRef
+	if err := rt.StartTurn(ref); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	if err := rt.EndTurn(ref, fakeruntime.FinalCompleted); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	h.Advance(engine.DefaultParams().CreateRetryBackoff + time.Second)
+	quiet(t, h)
+	eps = sessionEndpoints(t, h)
+	if len(eps) != 1 || eps[0].Status != store.EndpointOpen {
+		t.Fatalf("endpoints %+v, want one open", eps)
+	}
+	addr := addressOf(eps[0].ID)
+	wantPrompts(t, h, addr, 1)
+	if got := attemptKinds(t, h, addr); !slices.Equal(got, []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}) {
+		t.Errorf("delivered prompt kinds %v, want the first prompt and one repeat", got)
+	}
+	agent := h.Session(eps[0].ID.String())
+	page := recvAs(t, h, agent, fakeagent.RecvInput{})
+	wantOnly(t, page, msg)
 }

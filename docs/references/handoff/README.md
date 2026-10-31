@@ -30,6 +30,8 @@ checks that the model saw it before acknowledging for the agent.
   or the session is busy, new messages add no prompt: the next prompt counts
   them all. Five messages arriving together start one turn.
 - When a turn ends with the prompt unread, the endpoint is prompted again once.
+  A turn that ended while the session was still being created counts too, once
+  the endpoint opens with its first prompt recorded as unread.
 - A message that arrives after the last delivered prompt renews that allowance
   and wakes the endpoint, provided the minimum interval since that prompt has
   passed. A message that arrives inside the interval is held with the instant
