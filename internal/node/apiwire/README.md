@@ -45,8 +45,9 @@ not import it: the words of the wire never enter the engine.
   of the engine by asking the value,
   and a method of the engine that was promoted would be answered in the engine's words.
 - **Direct sends have a method-specific intake mapping.** Invalid recipient address
-  syntax is `1008` with `data.field`; invalid content, a missing reply source or
-  an idempotency conflict is `1009` with the engine reason in `data.reason`.
+  syntax is `1008` with `data.field`; invalid content, a missing reply source,
+  an idempotency conflict or a send after the identity was retired is `1009` with
+  the engine reason in `data.reason`.
   Back pressure remains `1012`, ownership `1001`, and leases `1010`.
   `endpoint.message_status` and `endpoint.recv` of a `message_id` answer an unknown
   or foreign message with the same fixed `-32602` response (`messageLookupError`),

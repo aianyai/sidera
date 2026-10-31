@@ -211,6 +211,7 @@ func TestDirectSendErrorMappingKeepsNoEffectSeparateFromUnknown(t *testing.T) {
 		{engine.ReasonTooLarge, "body", 1009, `{"reason":"too_large"}`},
 		{engine.ReasonMessageUnknown, "", 1009, `{"reason":"message_unknown"}`},
 		{engine.ReasonIdempotencyConflict, "", 1009, `{"reason":"idempotency_conflict"}`},
+		{engine.ReasonIdentityRetired, "", 1009, `{"reason":"identity_retired"}`},
 		{engine.ReasonEndpointUnknown, "", 1001, ""},
 		{engine.ReasonStorageFatal, "", -32603, ""},
 	} {

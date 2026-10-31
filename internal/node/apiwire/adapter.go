@@ -129,7 +129,7 @@ func directSendError(err error) error {
 			return peer.NewError(adapterproto.CodeInvalidAddress, "an address is not valid").WithData(map[string]any{"field": ref.Field})
 		}
 		fallthrough
-	case engine.ReasonTooLarge, engine.ReasonIdempotencyConflict, engine.ReasonMessageUnknown:
+	case engine.ReasonTooLarge, engine.ReasonIdempotencyConflict, engine.ReasonMessageUnknown, engine.ReasonIdentityRetired:
 		return peer.NewError(adapterproto.CodeSendRefused, "the message was not accepted").WithData(map[string]any{"reason": ref.Reason.String()})
 	default:
 		return adapterError(err)

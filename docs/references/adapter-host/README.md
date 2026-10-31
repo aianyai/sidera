@@ -131,8 +131,10 @@ and acceptance in that command. Receive pages are decoded from the engine's
 JSON page into the protocol's typed result; no page fields are reconstructed.
 
 For direct send intake, invalid address syntax is `1008` with `data.field` naming
-`to[index]`; content and reply-rule refusals and idempotency conflicts are `1009`
-with the engine's stable reason in `data.reason`. The existing back pressure,
+`to[index]`; content and reply-rule refusals, idempotency conflicts and a send after
+the node's identity was retired are `1009` with the engine's stable reason in
+`data.reason` (`identity_retired` for the last: nothing is accepted in a retired
+node's name, and the refusal has no effect). The existing back pressure,
 ownership and lease codes remain `1012`, `1001` and `1010`. A status query for a
 message the caller did not send, including an unknown id, always returns the
 same fixed `-32602` response without data, and so does an `endpoint.recv` of a
