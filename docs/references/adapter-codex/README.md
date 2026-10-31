@@ -1,14 +1,16 @@
 # Codex adapter
 
-How the Codex adapter keeps and talks to its Codex App Server: the private server
-it runs, its connection, and how each session gets its own credentials in a server
-that all sessions share. The adapter lives under `cmd/sidera-adapter-codex/`,
-outside the top-level `internal/`, so the core cannot import it and contains no
-product name. The protocol it implements is in
-[adapter-protocol](../adapter-protocol/README.md).
+How the Codex adapter drives Codex: it keeps a private Codex App Server, makes
+each session a thread of that server, and maps the adapter protocol onto the
+server's own. The adapter lives under `cmd/sidera-adapter-codex/`, outside the
+top-level `internal/`, so the core cannot import it and contains no product
+name. The protocol it implements is in
+[adapter-protocol](../adapter-protocol/README.md); the serve loop it shares with
+every adapter is `sdk/go/adapterkit`.
 
 The App Server is Codex's experimental JSON-RPC interface (`codex app-server`).
-The adapter is written against one release of it.
+The adapter is written against one release of it and is held to that release by a
+test that reads the schema the installed Codex generates (see "Where").
 
 ## What
 
@@ -24,11 +26,12 @@ version is not ours to fix.
 | Unix | `--listen unix://<state_dir>/app-server.sock` | WebSocket over the Unix socket. Codex makes the socket `0600` in a `0700` directory, symlinks it at the path given, and takes a lock per path, so a second server for the same path cannot run. |
 | Windows | `--listen ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <state_dir>/ws-token` | WebSocket over loopback with `Authorization: Bearer <token>`. The port is found by binding port 0 and releasing it; the port and the pid are in `app-server.json`, the token (`0600`, random, 32 bytes) in `ws-token`. |
 
-`<state_dir>` is the instance's private state directory, which the daemon makes and gives the adapter in `initialize` (`instance.state_dir`). On Unix the socket path must
+`<state_dir>` is `instance.state_dir` of `initialize`. On Unix the socket path must
 fit the socket address limit; the adapter refuses a longer one with a message that
 says so (the limit is checked at 100 bytes, which fits macOS's 104).
 
-**Connect or start.** `Server.Connect` first tries the address. A server that answers is used: the server is started detached so that it outlives the
+**Connect or start.** At `adapter.start` the adapter first tries the address. A
+server that answers is used: the server is started detached so that it outlives the
 adapter, and finding the one a previous run left is the normal case after the
 adapter restarts, with its turns still running. Otherwise it starts one and waits up
 to 15 seconds for it to answer. A server that exits before it answered ends the wait
@@ -59,9 +62,14 @@ could be anyone's by now and the adapter does not verify a process's identity. T
 adapter's own shutdown does not stop the server. On Windows only the process itself
 is ended, not what it started.
 
-**Versions.** `server.CLIVersion` runs `codex --version`. The server's own version is in
-the user agent it answers `initialize` with (`appserver.ServerVersion`), so the two can
-be compared: they differ when Codex was upgraded under a running server.
+**Versions.** `adapter.probe` reports the version of the `codex` program
+(`codex --version`). The server's own version is in the user agent it answers
+`initialize` with. When the two differ (Codex was upgraded under a running server)
+the probe reports the `app-server` dependency as `wrong_version`; the adapter does
+not restart a server it did not start. The range of versions the adapter was tested
+with is `tested` in the manifest and `declare.TestedMin`/`TestedMax`; the daemon
+judges a version outside it (`version_untested`), and `prompt.reconcile` does not
+conclude that a prompt is absent on one.
 
 ### The connection
 
@@ -71,7 +79,8 @@ taken from a library:
 - **Frames have no `"jsonrpc"` member**, in either direction, so the peer of the SDK
   (which requires it) cannot be used. A frame with a method and an id is a request
   of the server, with a method only a notification, with an id only an answer.
-  Unknown members are ignored, so a release that adds one does not break the client.
+  Unknown members are ignored; the members the adapter depends on are checked by the
+  schema guard test.
 - **The read limit is 32 MiB.** The server sends messages up to 16 MiB; the WebSocket
   library's default limit of 32 KiB would end the connection on the first large read
   of a thread.
@@ -79,12 +88,16 @@ taken from a library:
   decision; **notifications are queued without bound and handed to one goroutine in
   arrival order**, so the read loop never waits for the adapter, and a notification
   is never dropped. `Done` closes after the last queued notification was handled.
-- **The client can opt out of** streamed output and reasoning
-  (`optOutNotificationMethods`, `QuietNotifications`): they are most of the traffic and
-  the adapter reads none of it.
-- **A connection only receives the events of the threads it started or resumed.** When
-  the last connection that holds a thread ends, the server unloads the thread, and the
-  next `thread/resume` starts its MCP servers again.
+- **The adapter opts out of** streamed output and reasoning
+  (`optOutNotificationMethods`): they are most of the traffic and nothing reads them.
+- **A connection only receives the events of the threads it started or resumed.**
+  The adapter keeps one connection for all its sessions and resumes each thread in it.
+  When the last connection that holds a thread ends, the server unloads the thread.
+  After a connection ends the adapter says `native_unavailable`, reconnects with a
+  backoff (starting the server if it is gone), resumes every session with its
+  configuration, and settles its books on the turns from the server's list: a turn it
+  thought running that ended is reported ended (a turn the server no longer lists is
+  `failed`), and a turn running that it did not know is reported started.
 
 ### Credentials of a session
 
@@ -99,7 +112,8 @@ mcp_servers.sidera = {command: <sidera program>, args: ["mcp"],
                       default_tools_approval_mode: "approve", tool_timeout_sec: 120}
 ```
 
-The values are the `tool_access.env` the daemon gives for a session.
+The values are the `tool_access.env` of `session.create` or of the session's entry in
+`adapter.start`. They are held in memory only: not in a checkpoint, not in a file.
 
 Measured on Codex 0.164.0 with two threads in one server, each with its own pair:
 
@@ -124,16 +138,227 @@ read it from the thread's environment, Codex's logs hold the environment it gave
 command (`~/.codex/logs_2.sqlite`), and a model that prints its environment shows it.
 It stops working when the session is closed.
 
+### Methods
+
+| Protocol | What the adapter does |
+| -------- | --------------------- |
+| `initialize` | Declares a runtime with `interrupt: false`, `ack_on_behalf: false`, `server_requests: true` and front ends `mcp` and `cli`. It does not touch the server. |
+| `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, connects or starts the server, `initialize` and `account/read`, then resumes every session listed: `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), `unreachable` otherwise or when the preset is unusable. It ends with a full availability snapshot. A server that cannot be reached is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
+| `adapter.probe` | The runtime version; `auth` from `account/read` (`valid` with an account, `invalid` without, `unknown` when the server is unreachable); the dependencies `codex`, `sidera` and `app-server`; each preset's problems and whether its directory exists; the tool probes. |
+| `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.close` | Below. |
+| `session.interrupt` | Not declared. The id of the running turn is kept, so that `turn/interrupt` can be added without a change of format. |
+| `checkpoint.put` | `scope: attempt` while creating, and only there. |
+
+**Availability.** A full snapshot at `adapter.start`, and again whenever it changes:
+`dependency_missing` when `codex` or `sidera` is not found, `native_unavailable` while
+there is no connection to the server, `runtime_auth` when the server has no account.
+
+**Tool probes.** The MCP front end is started by Codex outside the sandbox, so its
+probe runs `sidera mcp` the same way, with `SIDERA_PROBE_TOKEN` and the request's
+environment, sends it an MCP `initialize` (which makes it probe the daemon itself) and
+waits up to ten seconds for the line on its standard error that says the probe
+succeeded or failed; the result is `ran` with method `unsandboxed`, or `failed` when the
+server did not answer or says it could not reach the daemon. The command-line
+front end runs in the preset's sandbox, so its probe is `command/exec` of
+`sidera probe` under that sandbox policy, through the server, which costs no model
+turn: `ran` with method `sandboxed`, or `failed` with the exit code and the first line
+of its standard error. A preset that is not usable gives `not_run`.
+
+### Creating a session
+
+One `session.create` is one attempt, and every attempt is idempotent. The adapter
+keeps the attempt in memory: a repeat waits for the run in progress, a repeat after a
+final answer gets that answer, and the same attempt with other parameters is `1005`.
+`create.Decide` is the pure function that picks each next step from what is stored and
+what was just observed; the same function serves the first run, a retry and the check
+after a restart.
+
+Before a thread exists, the answer is `failed` with `preset_unknown`, `preset_invalid`,
+`dependency_missing` (`codex` or `sidera` not found), `native_unavailable` (the server
+cannot be reached) or `runtime_auth` (no account); certainly nothing was created. The
+steps are:
+
+1. `thread/start` with the preset's `cwd`, `approvalPolicy`, `sandbox` and `model`,
+   `ephemeral: false` and the thread's configuration. The thread is registered as the
+   session at once, so its events are reported from the first one.
+2. `checkpoint.put` (scope `attempt`) of `{"v":1,"thread_id":"…"}`, before anything else
+   is done to the thread. Nothing else is ever put: not the credentials, and not that
+   the prompt arrived, which the thread's record shows.
+3. `thread/name/set` to `sidera <attempt>`. The server writes a thread to disk from its
+   first name on, so this is the step that makes it persistent.
+4. Wait for the channel's MCP server to report in `mcpServer/startupStatus/updated`.
+   `failed` archives the thread and answers `failed` with `dependency_missing`. A
+   server that stays silent for 20 seconds is taken as ready and the creation goes on:
+   a server that did fail then shows as a failed tool call.
+5. `turn/start` with `clientUserMessageId` equal to the first prompt's attempt and the
+   prompt's text as it came.
+6. Ready is the first prompt in the record: the `item/completed` of a `userMessage`
+   whose `clientId` is that attempt, or the same found in `thread/turns/list`
+   (consulted at every wake, so a missed event costs a poll, and by the same call after
+   a restart). Only then is the answer `created` with the thread id as `native_ref`
+   and the front ends of the preset.
+
+`created` carries `first_turn_ended: true` when the turn of the first prompt is already
+over at the moment of the answer (found in the record), so a daemon that restarted
+while the creation was unsettled does not wait for a `turn.ended` that went to a
+connection that is gone.
+
+**Retry.** With the attempt in memory its state is used. After an adapter restart the
+state is the checkpoint the daemon hands back: the thread is resumed with its
+configuration, and a thread the server does not have (`no rollout found`) was never
+written, because naming comes after the stored checkpoint, so the attempt starts over
+with a new thread and stores that one. A prompt found in the record is never started
+again. A turn that ended without the prompt in the record is started again, at most
+twice (`MaxStarts`).
+
+**Outcomes.** If the turn still runs and the prompt has not appeared two minutes after
+the latest `turn/start`, the answer is `indeterminate` with `turn_running`; the daemon
+repeats the attempt. If the connection ends before the prompt is found it is
+`indeterminate` with `native_unreachable`, and the session is dropped until the repeat
+loads the thread again. If the two starts ended without the prompt, or the server
+refuses a step, it is `failed` with `native_error`. A failure is final: the reason is
+stored in the checkpoint first (`{"v":1,"thread_id":"…","failed":"native_error"}`), the
+thread is archived, and every later request of the attempt gets the same failure.
+Cancellation of the request (the daemon gave up waiting) concludes nothing.
+
+`control_unknown` is never produced: the server is private to the adapter, and two
+servers on one socket cannot run.
+
+### Prompts, turns, reconciliation and close
+
+**`prompt.deliver`.** The text goes in unchanged as a `turn/start` whose
+`clientUserMessageId` is the attempt; no line with the attempt is appended to the
+text, since the server keeps the id on the prompt's record. A session that runs a turn
+(the server's word, or the adapter's own books) is refused `busy`: the adapter is the
+thread's only writer and neither queues behind nor steers a turn. A thread the server
+unloaded is resumed with its configuration first. The answer is `accepted`, and the
+adapter sends `prompt.persisted` when the `userMessage` of the attempt completes in
+the record; if that came before the answer, the answer is `persisted`. The same attempt
+and text again gets the same answer, brought up to date; with another text it is
+`1005`. A refusal the server words clearly (the thread is gone, not signed in, a turn
+is running) is `refused` with `session_lost`, `runtime_auth` or `busy`; no account or
+no connection before the request is `refused` with `runtime_auth` or
+`native_unavailable`; any other failure is an internal error, which the daemon settles
+with `prompt.reconcile`.
+
+**`prompt.reconcile`** is `reconcile.Judge` over the thread's record, newest turn first,
+read page by page until the attempt is found or the record is exhausted:
+
+| Found | Verdict | Grounds |
+| ----- | ------- | ------- |
+| the attempt is in a turn | `found`, with the turn and its state | `attempt_in_record` |
+| the server cannot be asked | `indeterminate` | `native_unreachable` |
+| not found, version outside the tested range | `indeterminate` | `runtime_version_untested` |
+| not found, the thread is active or the adapter's own turn has not ended | `indeterminate` | `turn_running` |
+| not found, the record was not read to its end | `indeterminate` | `record_unreadable` |
+| not found, idle, whole record read | `provably_absent` | `record_complete_without_attempt` |
+
+A server that was killed while a prompt was being taken in leaves a record that ends
+in an interrupted turn without the prompt: the last row.
+
+**Turn events.** `turn/started` becomes `turn.started` with the attempt that caused
+the turn: the answer to `turn/start` says which turn it made, and an event that comes
+first waits up to two seconds for it, then goes without an attempt. A turn the adapter
+did not start has no attempt. `turn/completed` becomes `turn.ended` (`completed`,
+`interrupted`, `failed`). Every turn has one pair: a turn whose start was missed is
+reported started just before it is reported ended. When the adapter restarts, the
+busy state comes from `turn_active` in the result of `adapter.start`, the running turn
+is taken from the server's list silently and its end is reported when it comes.
+
+**`session.close`.** A held session that runs a turn is `close_unconfirmed` with
+`turn_still_running` (interrupt is not declared). Otherwise the thread is unsubscribed
+and archived, which unloads it (the `sidera mcp` it started ends when its input does)
+and keeps its record, and the answer is `closed`. An endpoint the adapter does not hold
+but that comes with a `native_ref`: a thread held under another open endpoint is left
+alone and answered `closed`; otherwise it is archived, and a thread the server does not
+have is as closed as an archived one. No server connection is `close_unconfirmed` with
+`native_unreachable`; an endpoint not held and without a reference is `1001`.
+
+### Requests of the server
+
+Every request of the server is answered at once, from the preset, and reported with
+`native_request.handled` on the endpoint of the session (the runtime endpoint when
+the request names no thread of the adapter). `serverreq.Handle` is the table; the
+schema guard holds its list of methods equal to the server's.
+
+| Method | Answer | Disposition |
+| ------ | ------ | ----------- |
+| `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` | `accept` when the preset's `approvals` is `approve`, else `decline` | `preset` / `rejected_by_preset` |
+| `applyPatchApproval`, `execCommandApproval` (older) | `approved`, or `denied` with a fixed reason | the same |
+| `item/permissions/requestApproval` | no permission beyond the sandbox | `rejected_by_preset` |
+| `mcpServer/elicitation/request` | `decline`: nobody can make the content up | `rejected_by_preset` |
+| `item/tool/requestUserInput`, `item/tool/call`, `account/chatgptAuthTokens/refresh`, `attestation/generate` | an error answer; the tool call fails and the model goes on | `rejected_by_preset` |
+| any other method | `-32601` | `rejected_unknown` |
+
+The default preset has an approval policy of `never`, so Codex refuses what the sandbox
+does not allow itself and almost nothing reaches the adapter; the table is complete
+anyway.
+
+### Front ends
+
+The **MCP** front end is the main one on every platform: the thread's own MCP server
+`sidera` (above). Codex starts it outside the sandbox, so it reaches the daemon's agent
+socket whatever the sandbox of the preset is. The **command-line** front end is offered
+(`created` lists it, and the preset's sandbox is `danger-full-access`) only without a
+sandbox: on macOS a sandbox of `read-only` or `workspace-write` refuses `connect` on a
+Unix socket (measured), and `network_access` opens all networking, which is not
+acceptable for the channel. A precise exception needs a permission profile with
+`network.unix_sockets`, which is experimental; Linux's sandbox blocks new Unix sockets
+and Windows' named pipes under Codex's sandbox are not measured. The capability
+declaration lists both front ends; each session is created with the ones its preset
+supports.
+
+### Configuration, manifest and package
+
+The instance configuration has `codex_program` and `sidera_program`, each a path or a
+name looked up in `PATH` (on Windows `codex.exe`, not a `.cmd` wrapper, which cannot
+be detached or ended reliably). A preset has `cwd` (a directory, required), `sandbox`
+(`read-only`, `workspace-write`, the default, or `danger-full-access`), `approval_policy`
+(`never`, the default, `on-request`, `untrusted`), `approvals` (`deny`, the default, or
+`approve`), and optionally `model` and `effort` (`low`, `medium`, `high`, `xhigh`);
+what is left out is the owner's own Codex configuration, whose default model may be an
+expensive one, so a preset for unattended use names both. `codexcfg` holds the
+descriptions the manifest declares and the checks that read them, from one list.
+
+The manifest is generated from the constants the adapter answers `initialize` with
+(`declare.Manifest`), one package per platform with only that platform in `platforms`,
+since the list is what installation checks and the package holds one binary:
+
+```
+go build -o <binary> ./cmd/sidera-adapter-codex   # with GOOS and GOARCH set
+<binary> package --goos <os> --goarch <arch> --binary <binary> --out <dir>
+```
+
+writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-codex` (with `.exe`
+for Windows). The platforms are `darwin/arm64`, `linux/amd64`, `linux/arm64` and
+`windows/amd64`. Receive budgets are 8000 tokens for both front ends (Codex cuts a tool
+result at 10,000 tokens and counts CJK text conservatively); a receive through MCP waits
+at most 100 seconds, 20 less than the tool timeout the thread's configuration sets, and
+through the command line at most 8, since Codex moves a command that runs longer than
+about ten seconds to the background.
+
 ### Known limitations
 
+- **No interrupt, and no acknowledgement on the agent's behalf**; `ack_markers` is
+  absent for the same reason.
+- **The command-line front end needs `danger-full-access`** (above).
+- **`SIDERA_HOME` is readable from the sandbox**, and holds the other sessions' tokens
+  on the same node; an exact deny is not done.
 - **The token is in Codex's logs** and in anything a model prints.
 - **A thread's configuration replaces the `-c` layer** of the server's flags and the
   owner's `shell_environment_policy.set` entries of the same name; whether it replaces
   that table as a whole is not measured.
-- **Linux and Windows are not yet run**: a server under `systemd` (its cgroup ends
-  with the unit), `--listen unix://` on Windows (which would unify the transports), the
-  header the capability token needs, breakaway from the daemon's job, ending a whole
-  process tree, and environment variables that are not valid UTF-8.
+- **Not measured**: resuming, with a configuration, a thread that is running a turn
+  (the adapter resumes only after a connection ended or a thread was unloaded); that the
+  server replays a request that was pending when the connection ended, which the
+  adapter would answer as usual (the `late` disposition is never reported); the
+  process identity of the server, which `adapter.start` does not report.
+- **Linux and Windows are not yet run**: the Linux sandbox's refusal of Unix sockets
+  (the MCP front end is expected to be unaffected), a server under `systemd` (its
+  cgroup ends with the unit), `--listen unix://` on Windows (which would unify the
+  transports), the header the capability token needs, breakaway from the daemon's job,
+  ending a whole process tree, a named pipe under Codex's Windows sandbox, and
+  environment variables that are not valid UTF-8.
 
 ## Why
 
@@ -148,15 +373,31 @@ It stops working when the session is closed.
   and that it must be sent again at every resume.
 - **Nothing in the server's `-c` flags.** A thread that has its own configuration
   ignores them, so a setting put there would hold for some threads and not for others.
+- **The pair of credentials is never stored.** A checkpoint is a file the daemon keeps;
+  a token in it would outlive the session.
+- **The prompt is found by its client id, not by text.** The server keeps the id on the
+  record, so the prompt can be found after a crash without adding a line to its text
+  (which the model would read), and the same id makes reconciliation exact.
+- **The thread is stored before it is named, and named before it is used.** The server
+  writes a thread from its first name on; a crash before that leaves nothing on disk, and
+  the stored checkpoint then names a thread that is gone, which the retry detects and
+  starts over from. After it the name makes no difference to a retry, since the
+  checkpoint already holds the id.
+- **Absence is concluded only from a whole record of an idle thread.** A running turn
+  may be about to record the prompt, and a record cut short or a newer format may hold
+  it; saying "absent" wrongly would send the prompt twice.
+- **A busy session is refused, not queued or steered.** One writer per thread keeps the
+  order of prompts and the books of turns the adapter's own; the daemon retries a
+  refusal when the turn ends.
 - **Only the server this process started is ended.** The alternative needs a check of
   the identity of a process from a pid and a start time on every platform, which is
   other work; a wrong kill is worse than a leftover server, which is found and reused
   anyway.
 - **A hand-written client and subset of types.** The schema is large with many `oneOf`s,
-  and a generated copy would carry all of it and its instability. A test against the
-  installed Codex pins what is used. The community Go SDKs found target an older
-  Codex, start the server as a child over standard input where this adapter needs to
-  reach one that outlives it, and are far larger than the dozen methods used. `github.com/coder/websocket` is
+  and a generated copy would carry all of it and its instability. The guard test pins
+  what is used. The community Go SDKs found target an older Codex, start the server as
+  a child over standard input where this adapter needs to reach one that outlives it,
+  and are far larger than the dozen methods used. `github.com/coder/websocket` is
   the one dependency (ISC, no dependencies of its own, maintained): a WebSocket client
   is about three hundred lines with handshake, framing, masking, ping and close, and
   `gorilla/websocket` would also do but is not built around contexts.
@@ -169,21 +410,38 @@ It stops working when the session is closed.
 | The subset of types and methods; `IsThreadGone`; `ServerVersion` | `internal/appserver/types.go` |
 | A fake App Server for tests | `internal/appserver/appservertest/` |
 | Start, connect, detach, environment, stop | `internal/server/` (`server.go`, `env.go`, `detach_*.go`, `version.go`) |
+| Preset and instance configuration, thread configuration, sandbox policy | `internal/codexcfg/` |
+| Creation decisions and the checkpoint | `internal/create/` |
+| Reconciliation | `internal/reconcile/` |
+| Answers to the server's requests | `internal/serverreq/` |
+| Identity, capabilities, manifest, package | `internal/declare/` |
+| The adapter's methods, events, reconnect | `internal/adapter/` |
+| The executable and the `package` subcommand | `cmd/sidera-adapter-codex/main.go` |
 
-Tests: `TestCallsAndNotificationsOverBothTransports`, `TestTCPWithoutTheTokenIsRefused`,
-`TestServerErrorIsAnRPCError`, `TestServerRequestsAreAnsweredFromTheHandler`,
-`TestPendingCallsFailWhenTheConnectionDrops`, `TestLargeMessagesAreRead` (the client
-against the fake server); `TestEnviron` and `TestParseCLIVersion` (the server's
-environment and version).
+Tests: `TestCallsAndNotificationsOverBothTransports`, `TestServerRequestsAreAnsweredFromTheHandler`,
+`TestPendingCallsFailWhenTheConnectionDrops`, `TestLargeMessagesAreRead` (the client against
+the fake server); `TestEnviron` (the environment of the server); `TestParsePreset`,
+`TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
+`TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
+(requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
+(the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
+`TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
+`TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
+`TestCloseSession` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
+against a stand-in program).
 
-Against the installed Codex, in `internal/server/realcodex_test.go`, behind
-`-tags realcodex` and `SIDERA_REALCODEX=1` (no model turn; the temporary directory must
-be short enough for a socket path):
+Against the installed Codex, in `internal/server/realcodex_test.go` and
+`realcodex_schema_test.go`, behind `-tags realcodex` and `SIDERA_REALCODEX=1` (no model
+turn; the temporary directory must be short enough for a socket path):
 
 ```
 SIDERA_REALCODEX=1 go test -tags realcodex -count=1 ./cmd/sidera-adapter-codex/...
 ```
 
+`TestSchemaGuard` generates the schema with `codex app-server generate-json-schema` and
+fails when the server's requests are not exactly those `serverreq` answers (a new one
+has to be decided on, not refused by default), when a method, member or notification the
+adapter uses is missing, or when `clientUserMessageId` or `clientId` is gone.
 `TestThreadEnvironmentAndServerCleanup` starts a real server, gives a thread its
 credentials through its configuration, reads them back from a command the thread runs,
 runs a command under each sandbox policy, checks the words that say a thread is gone, and

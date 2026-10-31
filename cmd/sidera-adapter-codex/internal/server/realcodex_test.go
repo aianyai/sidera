@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/declare"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
 )
 
@@ -37,7 +39,9 @@ func requireRealCodex(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("codex %s", v)
+	if !declare.VersionTested(v) {
+		t.Logf("codex %s is outside the tested range %s..%s: a failure below may be the version", v, declare.TestedMin, declare.TestedMax)
+	}
 	return program
 }
 
@@ -105,15 +109,10 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 	}
 	t.Logf("signed in: %v", acct.SignedIn())
 
-	env := map[string]any{"SIDERA_TOKEN": "tok-real", "SIDERA_HOME": "/real/home"}
-	cfg := map[string]any{
-		"shell_environment_policy": map[string]any{"set": env},
-		"mcp_servers": map[string]any{"sidera": map[string]any{
-			"command": "true", "args": []any{"mcp"}, "env": env, "default_tools_approval_mode": "approve",
-		}},
-	}
+	preset := codexcfg.Preset{Sandbox: codexcfg.SandboxReadOnly}
+	cfg := preset.ThreadConfig(codexcfg.Access{Program: "true", Env: map[string]string{"SIDERA_TOKEN": "tok-real", "SIDERA_HOME": "/real/home"}})
 	th, err := client.ThreadStart(ctx, appserver.ThreadStartParams{
-		CWD: dir, ApprovalPolicy: "never", Sandbox: "read-only", Ephemeral: true, Config: cfg,
+		CWD: dir, ApprovalPolicy: codexcfg.ApprovalNever, Sandbox: codexcfg.SandboxReadOnly, Ephemeral: true, Config: cfg,
 	})
 	if err != nil {
 		t.Fatalf("thread/start: %v", err)
@@ -132,9 +131,9 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 
 	// A command runs under each sandbox policy a preset can name, which is how the
 	// command-line front end is probed without a model turn.
-	for _, sandbox := range []string{"readOnly", "workspaceWrite", "dangerFullAccess"} {
+	for _, sandbox := range []string{codexcfg.SandboxReadOnly, codexcfg.SandboxWorkspaceWrite, codexcfg.SandboxDangerFullAccess} {
 		r, err := client.CommandExec(ctx, appserver.CommandExecParams{
-			Command: []string{"/usr/bin/true", "probe"}, CWD: dir, SandboxPolicy: map[string]any{"type": sandbox}, TimeoutMs: 20000,
+			Command: []string{"/usr/bin/true", "probe"}, CWD: dir, SandboxPolicy: codexcfg.Preset{Sandbox: sandbox}.SandboxPolicy(), TimeoutMs: 20000,
 		})
 		if err != nil || r.ExitCode != 0 {
 			t.Errorf("command/exec under %s: %+v, %v", sandbox, r, err)
