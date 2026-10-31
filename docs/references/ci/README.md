@@ -1,5 +1,27 @@
 # Continuous integration
 
+> **Temporary diagnostic branch only; never merge.** On
+> `codex/f7b-ubuntu-cost`, the registered workflow is replaced by one manual-only,
+> branch-guarded `ubuntu-latest` job with a 12-minute total limit. Its exact
+> `TestUbuntuRunCostSample` entry point is listed before execution, then runs with
+> `-race=true -count=3 -failfast -json -timeout 6m -tags acceptance,diagnostic`.
+> It measures two fixed targets, each preceded by a fresh clean recording, without
+> changing their seed, recipes, budgets or oracles. The retained `full` and `1/3`
+> environment identifies the source conditions; direct target selection is not a
+> full shard. There is no fallback, retry, additional platform or performance
+> pass threshold. This is wall-clock cost evidence, not a root-cause or formal
+> coverage result. The formal workflow described below remains the baseline.
+>
+> The job creates its own short export directory and uploads only `manifest.json`
+> and `timings.jsonl`, retained for three days. The manifest allowlists candidate
+> and diagnostic SHAs, runner OS/architecture/image, Go version, fixed command,
+> race/seed/targets, test start/end and exit code. Only typed fixed-label timing
+> records enter the other file; no homes, ledgers, raw process output, environment
+> maps, paths or errors are uploaded. Standard test2json output remains in the
+> job log. An always-run upload never overrides a failed test step. If setup or
+> the job limit prevents a complete sample, the evidence is insufficient; the
+> budget is not extended automatically. No diagnostic code is integrated.
+
 What the repository checks on every change, on which platform, what is left
 out for now and why, and how to run the same checks on a development machine.
 The workflow is [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml).

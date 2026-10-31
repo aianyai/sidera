@@ -1,5 +1,28 @@
 # Acceptance support
 
+
+> **Temporary diagnostic branch only.** `TestUbuntuRunCostSample` requires both
+> `acceptance` and `diagnostic`. It runs the unchanged `maintenance-retention`
+> recipe at generation 1 `ack/body.remove#2`, followed by the unchanged
+> `recovery-body-feedback` recipe at generation 1 `clock-high-water/clock.rename#2`.
+> Each target has its own clean recording, original seed, budget, domain checks
+> and recording comparison. `-count=3` supplies three rounds, without an inner
+> repeat loop. Private callbacks measure the existing backend and script call
+> boundaries; ordinary calls install none and read no clock for diagnostics.
+> This branch is disposable and must never be merged. The sample is not formal
+> coverage and cannot establish that a full walk fits its original limit.
+>
+> `[DEBUG-ubuntu-cost]` JSON contains fixed scenario/target and phase labels,
+> attempt/generation counts, run-relative monotonic nanoseconds and fixed result
+> classes. Inner boundaries are buffered until the run finishes after its original
+> cleanup. `run-remainder` subtracts fixture, scenario, close and remove durations;
+> `scenario-remainder` subtracts prepare and each generation's Start/normal Stop.
+> Remainders are sums of unassigned time, not contiguous spans; their offset is
+> the run end. Close's internal Stop belongs only to close. On timeout, buffered
+> inner stages may be unavailable; the immediate run-start marker and Go timeout
+> stack are the available evidence. Error strings, paths and run results never
+> enter the typed timing export. Standard Go failure output stays in the job log.
+
 Support for exercising the built program through its public front ends.
 [`agent/cli`](agent/cli/README.md) implements the layer-neutral fake Agent by
 starting the actual CLI. [`agent/mcp`](agent/mcp/README.md) drives a persistent

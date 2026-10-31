@@ -55,6 +55,7 @@ type WalkBackend struct {
 	root     string
 	binaries Binaries
 	opts     Options
+	cost     *walkCost
 }
 
 // NewWalkBackend uses an existing absolute root owned and removed by the caller.
@@ -66,6 +67,8 @@ func NewWalkBackend(root string, binaries Binaries, opts Options) *WalkBackend {
 var _ crashwalk.Backend = (*WalkBackend)(nil)
 
 func (b *WalkBackend) Run(ctx context.Context, s crashwalk.Scenario, plan crashwalk.RunPlan) (out crashwalk.RunResult, err error) {
+	runCost := b.cost.start("run", 0)
+	defer func() { b.cost.end(runCost, err) }()
 	if !filepath.IsAbs(b.root) {
 		return out, errors.New("acceptance: walk root must be absolute")
 	}
@@ -91,17 +94,31 @@ func (b *WalkBackend) Run(ctx context.Context, s crashwalk.Scenario, plan crashw
 	if err = ctx.Err(); err != nil {
 		return out, err
 	}
+	r.cost = b.cost
 	root, err := os.MkdirTemp(b.root, "w")
 	if err != nil {
 		return out, err
 	}
-	defer func() { err = errors.Join(err, os.RemoveAll(root)) }()
+	defer func() {
+		span := b.cost.start("remove", 0)
+		removeErr := os.RemoveAll(root)
+		b.cost.end(span, removeErr)
+		err = errors.Join(err, removeErr)
+	}()
+	fixtureCost := b.cost.start("fixture", 0)
 	f, err := newFixture(ctx, root, b.binaries, b.opts, profile)
+	b.cost.end(fixtureCost, err)
 	if err != nil {
 		return out, err
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
+	defer func() {
+		span := b.cost.start("close", 0)
+		closeErr := f.Close()
+		b.cost.end(span, closeErr)
+		err = errors.Join(err, closeErr)
+	}()
 	r.fixture = f
+	scenarioCost := b.cost.start("scenario", 0)
 	switch s := s.(type) {
 	case *WalkScenario:
 		err = r.runScript(ctx, s)
@@ -110,6 +127,7 @@ func (b *WalkBackend) Run(ctx context.Context, s crashwalk.Scenario, plan crashw
 	case *TerminalWalkScenario:
 		err = r.runTerminal(ctx, s)
 	}
+	b.cost.end(scenarioCost, err)
 	if err == nil && plan.Trigger != nil && !r.triggered {
 		err = errors.New("acceptance: recovery trigger was not reached")
 	}
@@ -123,6 +141,7 @@ type binaryRun struct {
 	result    crashwalk.RunResult
 	triggered bool
 	damage    recoveryState
+	cost      *walkCost
 }
 
 func newBinaryRun(plan crashwalk.RunPlan, damage recipes.DamageKind) (*binaryRun, error) {
@@ -268,14 +287,19 @@ func (r *binaryRun) runScript(ctx context.Context, s *WalkScenario) error {
 		return errors.New("acceptance: fresh script binding changed scenario metadata")
 	}
 	f := r.fixture
-	if err = f.prepare(ctx); err != nil {
+	prepareCost := r.cost.start("prepare", 0)
+	err = f.prepare(ctx)
+	r.cost.end(prepareCost, err)
+	if err != nil {
 		return err
 	}
 	var env *environment
 	first := true
 	for {
 		spec := r.spec()
+		startCost := r.cost.start("start", spec.Number)
 		err = f.Start(ctx, spec)
+		r.cost.end(startCost, err)
 		g := f.current
 		if g == nil {
 			return err
@@ -323,7 +347,10 @@ func (r *binaryRun) runScript(ctx context.Context, s *WalkScenario) error {
 				}
 			}
 			if !crashed && first && r.plan.Trigger != nil && r.plan.Trigger.Kind == crashwalk.TriggerCorrupt {
-				if err = f.Stop(ctx); err != nil {
+				stopCost := r.cost.start("stop", spec.Number)
+				err = f.Stop(ctx)
+				r.cost.end(stopCost, err)
+				if err != nil {
 					return err
 				}
 				if err = r.damage.apply(f, *r.plan.Trigger); err != nil {
@@ -361,12 +388,36 @@ func (r *binaryRun) runScript(ctx context.Context, s *WalkScenario) error {
 		}
 		// Domain checks may query the serving daemon. Stop only after judging the
 		// completed script; Stop excludes its own cleanup writes from the trace.
-		if err = f.Stop(ctx); err != nil {
+		stopCost := r.cost.start("stop", spec.Number)
+		err = f.Stop(ctx)
+		r.cost.end(stopCost, err)
+		if err != nil {
 			return err
 		}
 		return r.finish(g)
 	}
 }
+
+// Only the diagnostic test installs these private callbacks. Ordinary runs do
+// not read a clock, retain measurements or emit output at these boundaries.
+type walkCost struct {
+	begin  func(phase string, generation int) int
+	finish func(span int, err error)
+}
+
+func (c *walkCost) start(phase string, generation int) int {
+	if c == nil {
+		return 0
+	}
+	return c.begin(phase, generation)
+}
+
+func (c *walkCost) end(span int, err error) {
+	if c != nil {
+		c.finish(span, err)
+	}
+}
+
 func (r *binaryRun) violation(err error) {
 	if err != nil {
 		r.result.Violations = append(r.result.Violations, err.Error())
