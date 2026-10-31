@@ -158,6 +158,16 @@ build and the tidy check cannot resolve `github.com/aianyai/sidera/sdk/go/...`.
 Once the SDK is tagged, the root `go.mod` requires it and both checks are added
 to the workflow.
 
+### Before the first release
+
+The third-party licences of everything the binaries link must be listed with the
+release. The networking library brings about fifty modules; almost all are MIT,
+BSD, Apache-2.0 or ISC, and `github.com/libp2p/go-yamux` is MPL-2.0, a file-level
+copyleft that allows linking into a program under another licence on the
+condition that the source of those files stays available and its notice is
+included. Nothing modifies it. The list is written before the first tag, from
+`go list -m all` and the licence file of each module the build uses.
+
 ## Why
 
 - **`sdk-standalone`**: `sdk/go` is consumed as its own module by adapters

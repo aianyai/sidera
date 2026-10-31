@@ -227,7 +227,9 @@ timers, and applies the answers.
   same mutable limit object for a peer for as long as the scope may live, move it
   between the unauthenticated tier and the member tier as the state changes, and
   on the peer's last disconnect reset it to the unauthenticated tier rather than
-  delete it; reconcile the table with the manager's peer list from time to time.
+  delete it; bound the table, which grows with the identities seen (the manager
+  offers no peer list, so the network layer drops the entries of peers with no
+  connection that have been idle for two minutes).
 - Applications register their stream handlers only through the gated host that
   asks `Allowed` first. A handler registered on the raw host bypasses the gate;
   the library's own protocols are the ones registered that way on purpose.

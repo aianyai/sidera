@@ -242,6 +242,6 @@ The knobs that name no message have no such window.
 
 ## Known gaps
 
-- A second node, and with it a remote transport and a choice of transport per
-  target node, is not built. The seam is shaped so that a remote implementation
-  adds a package and changes nothing here.
+- The remote transport is the router of `internal/node/network` (see
+  [network](../network/README.md)): it adds a package and changes nothing here.
+  A choice of transport per target node is not built.

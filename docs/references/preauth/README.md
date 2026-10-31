@@ -207,8 +207,10 @@ collected every minute and recreated on reconnect), move it between tiers when
 the connection state changes, reset it to the unauthenticated tier at the peer's
 last disconnect instead of deleting it (a stranger reconnecting under the same
 identity would otherwise inherit a member's allowance from a live scope), and
-reconcile its table with the manager's peer list, since the table grows with the
-identities seen. The connection manager's protection is for members and is not a
+bound its table, since it grows with the identities seen. The manager offers no
+list of the peers it holds, so the network layer drops the entry of a peer that has
+no connection and has not been asked about for two minutes, after the manager has
+collected the scope. The connection manager's protection is for members and is not a
 cache of who is known: the accounting keeps its own known set.
 
 ## Why

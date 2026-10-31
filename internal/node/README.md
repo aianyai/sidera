@@ -28,6 +28,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
+| 5 | `network` | layers 0 to 4 and the networking library (`go-libp2p`, `go-multiaddr`, `quic-go` and `go-multistream`): the libp2p host, the gate, the certificate exchange and the remote transport; it imports neither `engine` nor `daemon`, and reaches the engine through the `Node` interface it defines |
 | 6 | `apiwire` | `engine`, `config`, `ipc`, `adapterhost`, `daemonerr`, layer 0: the words of the wire (category, code, exit code; the adapter protocol's codes for the requests of an adapter) for what the engine and the layers below say; the engine never speaks them |
 | 7 | `localhttp` | `apiwire`, `ipc`, layer 0: the shared local HTTP transport, exact method routing, bounded bodies and responses |
 | 8 | `agentapi`, `manageapi` | the `engine` service interface, `localhttp`, `ipc`, `apiwire`, layer 0 |
@@ -43,7 +44,8 @@ host; `adapterhost` defines `Engine`, which it calls on the engine. `*engine.Eng
 implements the first two and `adapterhost`'s `Engine`, and the adapter host
 implements `engine.Adapters`, without either package importing the other: `daemon`
 hands each the other's implementation, and nothing but `daemon` connects across
-layers.
+layers. `network` defines `Node`, which the engine implements to take what arrives
+from other nodes, and `network.Router` is the transport the engine calls.
 
 ## Rules for every runtime package
 
