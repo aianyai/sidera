@@ -5,13 +5,6 @@
 package declare
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -102,47 +95,9 @@ func Manifest(goos, goarch string) manifest.Manifest {
 	}
 }
 
-// Encode returns a manifest as the text of sidera-adapter.json.
-func Encode(m manifest.Manifest) ([]byte, error) {
-	if err := m.Validate(); err != nil {
-		return nil, err
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(m); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 // WritePackage writes the adapter package for a platform into dir: the manifest
 // and a copy of the binary, built for that platform, at the manifest's entry.
 func WritePackage(dir, binary, goos, goarch string) error {
-	raw, err := Encode(Manifest(goos, goarch))
-	if err != nil {
-		return err
-	}
-	entry := filepath.Join(dir, filepath.FromSlash(ProgramPath(goos)))
-	if err := os.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), raw, 0o644); err != nil {
-		return err
-	}
-	src, err := os.Open(binary)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	dst, err := os.OpenFile(entry, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = dst.Close()
-		return fmt.Errorf("copy %s: %w", binary, err)
-	}
-	return dst.Close()
+	m := Manifest(goos, goarch)
+	return manifest.WritePackage(dir, m, binary, m.Entry.Program)
 }

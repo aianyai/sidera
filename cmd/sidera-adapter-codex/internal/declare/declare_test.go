@@ -15,7 +15,7 @@ func TestManifestAndCapabilitiesAreValid(t *testing.T) {
 		t.Fatalf("capabilities: %v", err)
 	}
 	for _, p := range [][2]string{{"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}} {
-		raw, err := Encode(Manifest(p[0], p[1]))
+		raw, err := manifest.Encode(Manifest(p[0], p[1]))
 		if err != nil {
 			t.Fatalf("%v: %v", p, err)
 		}

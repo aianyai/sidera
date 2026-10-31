@@ -1093,7 +1093,9 @@ reading platform-specific process tables, which stay in the adapter.
 ### What
 
 `sidera-adapter.json` sits at the root of an adapter package. The daemon reads it
-to install an adapter and to admit one. `sdk/go/manifest` parses and validates it.
+to install an adapter and to admit one. `sdk/go/manifest` parses and validates it, and
+writes a package directory (`manifest.WritePackage`: the manifest and the binary at
+its entry) for the `package` subcommand of each adapter.
 
 ```json
 {

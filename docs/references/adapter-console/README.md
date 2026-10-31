@@ -100,7 +100,8 @@ of the request, so a recv waits as long as the client asked, up to 30 seconds.
 constants `initialize` answers from, so the two cannot disagree, and validated with
 `manifest.Validate`. Its `platforms` is the one platform of the package, `entry.args`
 is `["serve"]`, and it declares no budgets (a direct endpoint takes the default)
-and no configuration. The directory must be new or empty. The supported platforms are the
+and no configuration. The directory must be new or empty (checked here; the files
+are written by `manifest.WritePackage`, which every adapter's `package` shares). The supported platforms are the
 five the project builds for: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64
 and windows/amd64.
 

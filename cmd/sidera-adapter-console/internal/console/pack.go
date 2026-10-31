@@ -1,13 +1,11 @@
 package console
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -62,23 +60,9 @@ func writePackage(goos, goarch, binary, out string) error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	program := ProgramName
+	program := "bin/" + ProgramName
 	if goos == "windows" {
 		program += ".exe"
 	}
-	bin, err := os.ReadFile(binary)
-	if err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Join(out, "bin"), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(out, "bin", program), bin, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(out, manifest.FileName), append(data, '\n'), 0o644)
+	return manifest.WritePackage(out, m, binary, program)
 }
