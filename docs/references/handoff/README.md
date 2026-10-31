@@ -31,7 +31,11 @@ checks that the model saw it before acknowledging for the agent.
   them all. Five messages arriving together start one turn.
 - When a turn ends with the prompt unread, the endpoint is prompted again once.
   A turn that ended while the session was still being created counts too, once
-  the endpoint opens with its first prompt recorded as unread.
+  the endpoint opens with its first prompt recorded as unread. So does one that
+  ended while the node had no connection to the adapter: a creation settled with
+  `first_turn_ended`, and a session the adapter reports idle in its start
+  result, are each a turn end seen once. An idle session with nothing unread is
+  not woken by it.
 - A message that arrives after the last delivered prompt renews that allowance
   and wakes the endpoint, provided the minimum interval since that prompt has
   passed. A message that arrives inside the interval is held with the instant

@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "failed with first turn ended",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "failed",
+      "reason": "native_error",
+      "first_turn_ended": true
+    }
+  }
+}

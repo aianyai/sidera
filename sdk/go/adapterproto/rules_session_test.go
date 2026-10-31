@@ -59,6 +59,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"process optional", func(r *adapterproto.SessionCreateResult) { r.Process = nil }, "", false},
 			{"process validated", func(r *adapterproto.SessionCreateResult) { r.Process.PID = 0 }, "process.pid", false},
 			{"reason forbidden", func(r *adapterproto.SessionCreateResult) { r.Reason = "native_error" }, "reason", false},
+			{"first turn ended allowed", func(r *adapterproto.SessionCreateResult) { r.FirstTurnEnded = true }, "", false},
 			{"grounds forbidden", func(r *adapterproto.SessionCreateResult) { r.Grounds = &adapterproto.Grounds{Code: "turn_running"} }, "grounds", false},
 			{"detail over the limit", func(r *adapterproto.SessionCreateResult) { r.Detail = repeat("d", 1025) }, "detail", false},
 		})
@@ -72,6 +73,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"process forbidden", func(r *adapterproto.SessionCreateResult) { r.Process = proc() }, "no session to describe", false},
 			{"frontends forbidden", func(r *adapterproto.SessionCreateResult) { r.Frontends = []adapterproto.Frontend{"cli"} }, "no session to describe", false},
 			{"grounds forbidden", func(r *adapterproto.SessionCreateResult) { r.Grounds = &adapterproto.Grounds{Code: "turn_running"} }, "grounds", false},
+			{"first turn ended forbidden", func(r *adapterproto.SessionCreateResult) { r.FirstTurnEnded = true }, "first_turn_ended", false},
 		})
 	})
 	t.Run("indeterminate", func(t *testing.T) {
@@ -86,6 +88,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"reason forbidden", func(r *adapterproto.SessionCreateResult) { r.Reason = "native_error" }, "reason", false},
 			{"reason control_unknown forbidden", func(r *adapterproto.SessionCreateResult) { r.Reason = "control_unknown" }, "reason", false},
 			{"frontends forbidden", func(r *adapterproto.SessionCreateResult) { r.Frontends = []adapterproto.Frontend{"cli"} }, "frontends", false},
+			{"first turn ended forbidden", func(r *adapterproto.SessionCreateResult) { r.FirstTurnEnded = true }, "first_turn_ended", false},
 			{"native ref optional", func(r *adapterproto.SessionCreateResult) { r.NativeRef = ""; r.Process = nil }, "", false},
 		})
 	})

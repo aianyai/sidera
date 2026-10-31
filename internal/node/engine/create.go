@@ -464,6 +464,11 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 			e.later(&cmdDrain{endpoint: ep.ID})
 		}
 	}
+	if reply.Outcome == adapterproto.CreateReplyCreated && native.FirstTurnEnded {
+		// The turn of the first prompt ended before this answer, possibly before the
+		// node restarted: the end the adapter reports is the one a restart forgets.
+		e.noteTurnEnded(ep.ID)
+	}
 	e.forgetCreation(c.Key)
 	e.dropCreationCheckpoints(intent.Attempt)
 	if st.rec.Status == store.EndpointClosed && intent.State == store.IntentCreated {

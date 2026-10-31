@@ -50,7 +50,7 @@ const (
 	RequestStart     = forStart
 )
 
-var kindNames = []OutcomeKind{OutcomeFail, OutcomeIndeterminate, OutcomeRefuse, OutcomeAccepted, OutcomeRequested, OutcomeNotRunning, OutcomeUnconfirmed, OutcomeUnreachable, OutcomeError, OutcomeHold}
+var kindNames = []OutcomeKind{OutcomeFail, OutcomeIndeterminate, OutcomeRefuse, OutcomeAccepted, OutcomeRequested, OutcomeNotRunning, OutcomeUnconfirmed, OutcomeUnreachable, OutcomeError, OutcomeHold, OutcomeFirstTurnEnded}
 
 func outcomeKindOf(name string) (OutcomeKind, bool) {
 	for _, k := range kindNames {
@@ -68,7 +68,7 @@ type OutcomeArgs struct {
 	// Mode is "set" (every later request) or "queue" (the next one only).
 	Mode string `json:"mode"`
 	// Kind is the name of an OutcomeKind: fail, indeterminate, refuse, accepted,
-	// requested, not-running, unconfirmed, unreachable, error or hold.
+	// requested, not-running, unconfirmed, unreachable, error, hold or first-turn-ended.
 	Kind        string `json:"kind"`
 	Reason      string `json:"reason,omitempty"`
 	Code        int    `json:"code,omitempty"`

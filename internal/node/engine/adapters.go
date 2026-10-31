@@ -367,6 +367,15 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 			continue
 		}
 		setFlag(&st.busy, s.Endpoint, s.TurnActive)
+		if !s.TurnActive {
+			// A prompt that was delivered started a turn, so an idle session whose prompt
+			// is unread is one whose turn ended while the node had no connection to the
+			// adapter. That end is counted once; the prompt rules repeat only an unread
+			// prompt, so a session with nothing unread is not woken by it.
+			if id, err := ident.ParseEndpointID(string(s.Endpoint)); err == nil {
+				e.noteTurnEnded(id)
+			}
+		}
 	}
 	e.noteLeasesOfInstance(instance) // the turns it reports are the ones that extend leases
 	// What the instance was asked to create before its last connection ended may

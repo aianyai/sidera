@@ -404,6 +404,8 @@ func outcomeName(k OutcomeKind) string {
 		return "error"
 	case OutcomeHold:
 		return "hold"
+	case OutcomeFirstTurnEnded:
+		return "first-turn-ended"
 	}
 	return "unknown"
 }
@@ -634,6 +636,8 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 		NativeRef: adapterproto.NativeRef(sess.Ref()),
 		Process:   a.identity(sess),
 		Frontends: append([]adapterproto.Frontend(nil), a.opts.Frontends...),
+		// The knob stands for a first turn that ended while the daemon had no answer.
+		FirstTurnEnded: adapterproto.TrueOnly(has && o.Kind == OutcomeFirstTurnEnded),
 	})
 }
 

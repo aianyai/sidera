@@ -1,6 +1,9 @@
 package adapterproto
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // maxPromptText bounds the text of a prompt. A prompt is a short wake-up line.
 const maxPromptText = 8192
@@ -86,6 +89,11 @@ var indeterminateCodes = []GroundsCode{GroundsTurnRunning, GroundsRecordUnreadab
 //     (for a runtime that keeps its record on disk, the record is written). It
 //     carries NativeRef and Frontends, the front ends actually set up, which
 //     decide the output budget of recv.
+//     FirstTurnEnded, when set, says the turn the first prompt started was
+//     already over when the adapter answered. It is a fact that stays true, so the
+//     daemon can act on it however late the answer arrives; without it the daemon
+//     infers nothing, and the turn's own end notification reaches it on the
+//     connection that is open.
 //   - Failed: no session will be attached to the channel for this attempt;
 //     Reason says why. Certainly none was created, except for
 //     CreateFailControlUnknown, where a native session or process may remain
@@ -98,9 +106,26 @@ type SessionCreateResult struct {
 	NativeRef NativeRef        `json:"native_ref,omitempty"`
 	Process   *ProcessIdentity `json:"process,omitempty"`
 	Frontends []Frontend       `json:"frontends,omitempty"`
-	Reason    CreateFailure    `json:"reason,omitempty"`
-	Grounds   *Grounds         `json:"grounds,omitempty"`
-	Detail    string           `json:"detail,omitempty"`
+	// FirstTurnEnded is only ever sent as true, and only with a created session.
+	FirstTurnEnded TrueOnly      `json:"first_turn_ended,omitempty"`
+	Reason         CreateFailure `json:"reason,omitempty"`
+	Grounds        *Grounds      `json:"grounds,omitempty"`
+	Detail         string        `json:"detail,omitempty"`
+}
+
+// TrueOnly is a flag whose absence means false: it is written as true or left
+// out, and a reader refuses an explicit false, which would give one fact two
+// spellings. The type makes that rule the decoder's, in one place, wherever a
+// member of the protocol is such a flag.
+type TrueOnly bool
+
+// UnmarshalJSON accepts true and nothing else.
+func (f *TrueOnly) UnmarshalJSON(data []byte) error {
+	if string(data) != "true" {
+		return errors.New("only true is sent; leave the member out for false")
+	}
+	*f = true
+	return nil
 }
 
 // Validate checks the fields the outcome requires and forbids.
@@ -139,10 +164,12 @@ func (r SessionCreateResult) Validate() error {
 		c.ok(r.Reason == "", "reason: only a failure has one")
 		c.ok(r.Grounds == nil, "grounds: only an indeterminate outcome has them")
 	case CreateFailed:
+		c.ok(!bool(r.FirstTurnEnded), "first_turn_ended: only a created session has a first turn")
 		c.ok(r.Reason != "", "reason: a failure says why")
 		c.ok(r.NativeRef == "" && r.Process == nil && len(r.Frontends) == 0, "a failure has no session to describe")
 		c.ok(r.Grounds == nil, "grounds: only an indeterminate outcome has them")
 	case CreateIndeterminate:
+		c.ok(!bool(r.FirstTurnEnded), "first_turn_ended: only a created session has a first turn")
 		c.ok(r.Grounds != nil, "grounds: an indeterminate outcome says why")
 		if r.Grounds != nil {
 			c.field("grounds.code", enumIn(r.Grounds.Code, indeterminateCodes...))

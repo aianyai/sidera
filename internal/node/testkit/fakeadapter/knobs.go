@@ -41,6 +41,9 @@ const (
 	OutcomeError
 	// OutcomeHold: the request waits until ReleaseHeld, then goes its normal way.
 	OutcomeHold
+	// OutcomeFirstTurnEnded: a creation answers created and says that the turn of
+	// the first prompt was already over.
+	OutcomeFirstTurnEnded
 )
 
 // Outcome is one setting of a knob.
@@ -69,7 +72,7 @@ const (
 
 // valid lists the outcome kinds each request takes.
 var validKinds = map[string][]OutcomeKind{
-	forCreate:    {OutcomeFail, OutcomeIndeterminate, OutcomeError, OutcomeHold},
+	forCreate:    {OutcomeFail, OutcomeIndeterminate, OutcomeError, OutcomeHold, OutcomeFirstTurnEnded},
 	forPrompt:    {OutcomeAccepted, OutcomeRefuse, OutcomeError, OutcomeHold},
 	forInterrupt: {OutcomeRequested, OutcomeRefuse, OutcomeNotRunning, OutcomeError, OutcomeHold},
 	forClose:     {OutcomeUnconfirmed, OutcomeError, OutcomeHold},
@@ -207,7 +210,7 @@ func (k *Knobs) next(request string) (Outcome, bool) {
 }
 
 // SetCreate makes every later session.create come to the outcome (OutcomeFail,
-// OutcomeIndeterminate, OutcomeError or OutcomeHold); QueueCreate makes only the
+// OutcomeIndeterminate, OutcomeError, OutcomeHold or OutcomeFirstTurnEnded); QueueCreate makes only the
 // next one. The queue is used before the sticky setting.
 func (k *Knobs) SetCreate(o Outcome) error   { return k.set(forCreate, o) }
 func (k *Knobs) QueueCreate(o Outcome) error { return k.queue(forCreate, o) }

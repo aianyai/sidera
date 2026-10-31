@@ -359,7 +359,7 @@ only says the request was not understood or not allowed.
 | `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions`, `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
 | `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets`, `tool_probes` |
 | `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
-| `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created, failed or indeterminate, with the fields each needs |
+| `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created (with `first_turn_ended?`), failed or indeterminate, with the fields each needs |
 | `checkpoint.put` | A to D | request | `scope` (attempt or session), `id`, `state` (object, at most 16 KiB compact) | none; answered once the state is durable |
 | `prompt.deliver` | D to A | request | `endpoint`, `attempt`, `text` | `stage` accepted, persisted or refused, `reason` with a refusal |
 | `prompt.persisted` | A to D | notification | `endpoint`, `attempt` | |
@@ -583,6 +583,15 @@ with `1001`; so is a checkpoint (scope `attempt`) for an attempt that is not one
 the instance: its creation attempt, the first prompt that follows from it, or the prompt in flight
 of an open session. An attempt that has settled is refused too, because a put for it would leave a
 file that nobody deletes.
+
+The end of the first turn can also fall in a window the daemon did not see: it restarts while a
+creation is unsettled, asks again, and the adapter answers `created` from its stored state after
+the turn is over, so no `turn.ended` will reach the connection. `first_turn_ended` in a `created`
+result says exactly that, the turn the first prompt started was already over when the adapter
+answered; the daemon treats it as the end of that turn. It is a fact that stays true, so it is
+safe whenever the answer arrives, unlike a busy flag that a notification could outrun. It is
+sent as `true` or left out, never as `false`, and only with `created`; without it the daemon
+infers nothing and the turn's own `turn.ended` is expected on the connection.
 
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
 `adapter.start`, holds what the session's tools need to reach the daemon: the token of

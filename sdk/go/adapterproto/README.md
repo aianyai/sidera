@@ -23,6 +23,7 @@ for what each message means and why the protocol is shaped this way.
 | `EnumTables()`, `Patterns()`, `ApplicationCodes()` | The vocabularies the schema is compared with |
 | `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
 | `CodeNodeBusy`, `BusyData`, `BusyReasons()` | The code of a request the node refused before any effect and that may be sent again later, its required data `{reason}` (any reason word is accepted) and the reasons this version of the node sends |
+| `TrueOnly` | A flag that is sent as `true` or omitted; its decoder refuses an explicit `false` |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
 | `MaxAckItems` | The existing limit of 1024 entries in an acknowledgement, shared with other readers of the same protocol values |
 
@@ -31,7 +32,8 @@ for what each message means and why the protocol is shaped this way.
 - **Strict.** `Decode` rejects unknown fields, a field name that differs in
   case, `null`, a missing required field, a repeated key, and an explicit empty
   string, zero, list or object for an optional field (omit it instead). `false`
-  is accepted for a boolean. A pointer field accepts any value of its type,
+  is accepted for a boolean, except for a `TrueOnly` member (`first_turn_ended`),
+  which is written as `true` or left out. A pointer field accepts any value of its type,
   zero included.
 - **Open capability declarations.** The one exception to the unknown-field rule:
   `Capabilities`, `RuntimeCapabilities`, `DirectCapabilities` and

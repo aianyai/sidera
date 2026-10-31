@@ -1087,9 +1087,17 @@ the confirmation then records the first prompt as delivered and unread, and with
 turn end nothing would wake the session again. The engine therefore keeps the end of a turn
 for a creating session endpoint like that of an open one, and `putEndpoint` marks the prompt
 input changed for a session that may be prompted, so the opening judges the unread prompt as
-at a turn end and repeats it. Like the rest of the waiting event this is memory: a restart
-while the session is still being created forgets the end, and an idle session whose first turn
-has not started is not told apart from one whose turn ended.
+at a turn end and repeats it. Like the rest of the waiting event this is memory, and a restart
+loses it, so two facts that are not memory stand in for it. A creation that the restart finds
+unsettled is asked again, and the adapter answers `created` from its stored state; when the
+first turn is already over it says so (`first_turn_ended`), and settling the creation then
+applies `noteTurnEnded` as for a turn end kept during the creation. For a session that is
+open, the result of `adapter.start` lists the turns that are running: a session it reports
+idle is treated once as a turn end (`markStarted`). That is sound because a prompt that was
+delivered always started a turn, so an idle session whose prompt is unread had its turn end
+while the node had no connection to the adapter; and because the prompt rules look at the
+trigger only when a prompt is unread, the extra trigger gives at most the one repeat and
+wakes a session with nothing unread not at all.
 Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
 prompt is sent or nothing waits), when it last called recv, and whether a turn that a prompt
 started may be running: from the dispatch of the prompt until that turn ends or the prompt is

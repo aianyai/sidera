@@ -297,6 +297,7 @@
         "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" },
         "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" },
         "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "types.schema.json#/$defs/Frontend" } },
+        "first_turn_ended": { "const": true, "description": "The turn the first prompt started was already over when the adapter answered. Sent as true or left out, and only with created." },
         "reason": { "$ref": "types.schema.json#/$defs/CreateFailure" },
         "grounds": { "$ref": "types.schema.json#/$defs/Grounds" },
         "detail": { "$ref": "types.schema.json#/$defs/Detail" }
@@ -307,7 +308,7 @@
           "required": ["native_ref", "frontends"]
         },
         {
-          "properties": { "outcome": { "const": "failed" }, "native_ref": false, "process": false, "frontends": false, "grounds": false },
+          "properties": { "outcome": { "const": "failed" }, "native_ref": false, "process": false, "frontends": false, "first_turn_ended": false, "grounds": false },
           "required": ["reason"]
         },
         {
@@ -315,6 +316,7 @@
             "outcome": { "const": "indeterminate" },
             "reason": false,
             "frontends": false,
+            "first_turn_ended": false,
             "grounds": {
               "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"] } }
             }

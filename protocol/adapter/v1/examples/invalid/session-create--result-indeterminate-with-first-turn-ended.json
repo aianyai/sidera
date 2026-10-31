@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "indeterminate with first turn ended",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "indeterminate",
+      "grounds": {
+        "code": "native_unreachable"
+      },
+      "first_turn_ended": true
+    }
+  }
+}
