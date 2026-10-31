@@ -38,10 +38,10 @@ func (e RegistryEntry) confirmed() bool {
 	return e.Current.Alive && e.Current.StartUnix == e.StartUnix
 }
 
-// SessionRecord is what the project directory shows about the session.
+// SessionRecord is what the record directory shows about the session.
 type SessionRecord struct {
 	// Dir is the directory that was searched. It must be the attempt's
-	// project directory: a file that is absent from another directory says
+	// record directory: a file that is absent from another directory says
 	// nothing about the session.
 	Dir string
 	// Exists: <Dir>/<uuid>.jsonl exists.
@@ -120,8 +120,8 @@ func (o Observations) validate(s State) error {
 	}
 	r := o.Record
 	switch {
-	case r.Dir != s.ProjectDir:
-		return fmt.Errorf("%w: session record was looked up in %q, the attempt's directory is %q", ErrInvalidInput, r.Dir, s.ProjectDir)
+	case r.Dir != s.RecordDir:
+		return fmt.Errorf("%w: session record was looked up in %q, the attempt's directory is %q", ErrInvalidInput, r.Dir, s.RecordDir)
 	case r.HasSessionID && !r.Exists:
 		return fmt.Errorf("%w: session file lacks existence but contains the uuid", ErrInvalidInput)
 	case r.HasFirstPrompt && !r.HasSessionID:

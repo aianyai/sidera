@@ -332,7 +332,7 @@ func TestDecideRefusesInvalidInput(t *testing.T) {
 		{"zero first prompt id", mutState(good, func(s *State) { s.FirstPromptID = "" }), okObs, p, at(0)},
 		{"first prompt id in upper case", mutState(good, func(s *State) { s.FirstPromptID = "F47AC10B-58CC-4372-A567-0E02B2C3D479" }), okObs, p, at(0)},
 		{"zero attempt id", mutState(good, func(s *State) { s.AttemptID = "" }), okObs, p, at(0)},
-		{"zero project directory", mutState(good, func(s *State) { s.ProjectDir = "" }), okObs, p, at(0)},
+		{"zero record directory", mutState(good, func(s *State) { s.RecordDir = "" }), okObs, p, at(0)},
 		{"zero stage", mutState(good, func(s *State) { s.Stage = 0 }), okObs, p, at(0)},
 		{"stage beyond failed", mutState(good, func(s *State) { s.Stage = StageFailed + 1 }), okObs, p, at(0)},
 		{"started stage without a recorded process", mutState(good, func(s *State) { s.Process = Process{}; s.Starts = 0 }), okObs, p, at(0)},

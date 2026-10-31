@@ -14,7 +14,7 @@ func TestNewIntent(t *testing.T) {
 	if s.Stage != StageIntent || !s.Process.IsZero() || s.Starts != 0 || s.FailReason != 0 {
 		t.Fatalf("intent = %+v", s)
 	}
-	if s.AttemptID != "attempt-1" || s.SessionID != testSession || s.FirstPromptID != testPrompt || s.ProjectDir != testDir {
+	if s.AttemptID != "attempt-1" || s.SessionID != testSession || s.FirstPromptID != testPrompt || s.RecordDir != testDir {
 		t.Fatalf("intent does not persist what it was given: %+v", s)
 	}
 	for _, r := range []struct {
@@ -28,7 +28,7 @@ func TestNewIntent(t *testing.T) {
 		{"zero session id", "a", "", testPrompt, testDir},
 		{"zero first prompt id", "a", testSession, "", testDir},
 		{"first prompt id in upper case", "a", testSession, "F47AC10B-58CC-4372-A567-0E02B2C3D479", testDir},
-		{"zero project directory", "a", testSession, testPrompt, ""},
+		{"zero record directory", "a", testSession, testPrompt, ""},
 	} {
 		if _, err := NewIntent(r.a, r.id, r.prompt, r.dir); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: err = %v", r.rule, err)

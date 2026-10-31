@@ -1,9 +1,17 @@
 # Claude adapter
 
-How the Claude adapter creates a session, so that a crash at any step leaves
-neither two processes nor two sessions. The adapter lives under
+How the Claude adapter drives Claude Code: how it creates a session so that a
+crash at any step leaves neither two processes nor two sessions, how it starts
+the process of a turn, finds a prompt in the session record, reports the turn's
+events and answers reconciliation. The adapter lives under
 `cmd/sidera-adapter-claude/`, outside the top-level `internal/`, so the core
 cannot import it and contains no product name.
+
+Two directories are told apart throughout. The **working directory** is where
+the agent works: the preset's `project_dir`, the current directory of every turn
+process. The **record directory** is where Claude Code keeps the session files of
+that working directory, one `<uuid>.jsonl` per session; it is derived from the
+working directory (see below) and is not the working directory.
 
 ## What
 
@@ -11,14 +19,14 @@ cannot import it and contains no product name.
 
 One `session.create` for a Claude runtime is one attempt. Before any native
 interface is called, the adapter commits the attempt id, a session uuid
-allocated in advance and the preset's project directory, which is fixed for the
+allocated in advance and the record directory of the session, which is fixed for the
 whole attempt. The first prompt carries an id allocated with the uuid and
 persisted in the intent; the prompt is found in the session record by that id.
 Each later step is committed as it happens:
 
 | Stage | Committed | After a restart, check |
 | ----- | --------- | ---------------------- |
-| intent | attempt id, uuid, project directory | no `<uuid>.jsonl` in the project directory and no process with the uuid on its command line: nothing started, so start |
+| intent | attempt id, uuid, record directory | no `<uuid>.jsonl` in the record directory and no process with the uuid on its command line: nothing started, so start |
 | started | PID and process start time of the turn process | PID alive with the recorded start time: the turn is running, wait and start nothing |
 | uuid seen | the session file contains the uuid | file exists and contains the uuid |
 | ready | the first prompt is in the session record | find the first prompt in the record; only then answer `session.create` |
@@ -48,7 +56,7 @@ normal step and the check after a restart, so there is one set of rules.
   attempt as control unknown. Nothing is started and no process is touched. The
   check comes before readiness: with the first prompt on disk a second writer is
   still a second writer.
-- `--session-id` is used only while `<project dir>/<uuid>.jsonl` does not
+- `--session-id` is used only while `<record dir>/<uuid>.jsonl` does not
   exist. When it exists, `--resume` is used.
 - A PID held with a different start is a reused number: not running, not the
   recorded process.
@@ -88,12 +96,106 @@ its argument vector holds `--session-id <uuid>` or `--resume <uuid>` and its
 executable is the preset's Claude, each launch once (wrapper and ancestor
 processes and the caller's own observers removed); live processes only; start
 times in Unix seconds from the process table; the record looked up in the
-attempt's project directory (`Decide` refuses another one). The argument
+attempt's record directory (`Decide` refuses another one). The argument
 vector of every process of the same user must be readable, and an unreadable
 one is an observation error reported as an error result, never "not running".
 Transitions are committed atomically; `Ready` and `Failed` are persisted before
 `session.create` is answered, never after. `Started` is committed immediately
 after spawning.
+
+### The record directory
+
+The record directory is the base the runtime reports as its projects directory
+(`projectsDirectory` of `claude auth status`, which follows `CLAUDE_CONFIG_DIR`) plus
+the name of the working directory: its real path, with symbolic links resolved, in
+Unicode normal form C, every character that is not an ASCII letter or digit replaced
+by `-` (a character outside the basic plane is two, as the runtime replaces each
+UTF-16 code unit). The runtime shortens a name longer than 200 characters and adds
+a hash; the adapter does not reproduce that: a working directory whose name is
+longer is `preset_invalid` at creation and not usable in a probe.
+
+### The turn process
+
+Every turn of a session is one `claude -p` process, started with:
+
+```
+claude -p (--session-id|--resume) <uuid> --input-format stream-json
+  --output-format stream-json --verbose --strict-mcp-config --mcp-config <file>
+  --permission-mode <mode> --permission-prompts none
+  --allowedTools "Bash(sidera *)" mcp__sidera [--allowedTools <preset rules>]
+  [--model M] [--effort E] --append-system-prompt <adapter text + preset text>
+```
+
+- The prompt is the one line on standard input, a stream-json user message whose
+  `uuid` is the prompt's attempt id. Claude Code writes that uuid as the uuid of
+  the user record in the session file; that is how the prompt is found there. The
+  permission mode and the MCP configuration are given on every launch, because a
+  resumed session does not restore them. With `--permission-prompts none` anything
+  that would ask a person is denied at once. The channel's tools are always allowed,
+  so no permission mode can lock the agent out of the channel. `permission_mode`
+  has no default: loosening permissions is a decision the owner writes in the preset.
+- argv[0] is the configured Claude executable as written. A process is recognised
+  as a turn process of the session when its argv[0] is that path and its arguments
+  hold `--session-id <uuid>` or `--resume <uuid>`; the resolved path of the executable
+  is not used, because after an automatic update a process of the old version has an
+  executable that differs from the link's present target.
+- The environment is the adapter's own without the runtime's credentials, the
+  markers of an enclosing Claude Code session (`CLAUDECODE`, `CLAUDE_PROJECT_DIR`, every
+  `CLAUDE_CODE_*`), the channel's tokens and entries that are not valid UTF-8, then the
+  `tool_access.env` of the session (`SIDERA_TOKEN`, `SIDERA_HOME`) and what the preset
+  derives (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`), with the directory of the
+  `sidera` executable first in `PATH` for the command-line front end.
+  `CLAUDE_CONFIG_DIR` is kept: it decides where the login is. The token is never
+  written to a file or to argv.
+- The MCP configuration of an instance is one file, `{"mcpServers":{"sidera":{"command":
+  "<sidera>","args":["mcp"]}}}`, without a token: the MCP server inherits the
+  environment of the process that starts it, which holds the token.
+- The adapter appends a fixed system prompt that says the session is connected to
+  Sidera and that `recv` in a wake-up notice means the `recv` tool of the `sidera`
+  MCP server or `sidera recv`. Without it a session that has only the
+  command-line front end cannot know.
+- The standard input is a regular file, so that reaching its end closes it and no pipe
+  ties the process to the adapter; standard output and error are files too. They are
+  `<attempt>.in.jsonl`, `.out.jsonl` and `.err.jsonl` in the instance's state directory,
+  under `turns/<session uuid>/`.
+- The process starts in a session of its own (no controlling terminal, a process group
+  of its own that it leads), so a Ctrl-C in the daemon's terminal does not reach it
+  and it outlives the adapter. Its identity is the PID and the start seconds and
+  microseconds of the process table, the latter as the protocol's start key.
+
+### Turn events
+
+A Sidera turn is the life of one turn process. A process can write several `result`
+lines (a resumed session may run a continuation first, and background work can wake the
+session again), all of them belong to the one turn and the last one decides how it ended.
+
+- `turn.started` carries the prompt attempt, which the daemon takes as proof of delivery,
+  so it is sent when the prompt's uuid is first seen in the session record and not when
+  the process starts. A process that ends before the prompt is on disk reports nothing; the
+  daemon finds the prompt absent by reconciling.
+- `prompt.persisted` goes before it for a prompt that `prompt.deliver` answered as
+  accepted.
+- `turn.ended` is sent once, when the process is gone and the turn had started. Its final
+  is `interrupted` if the adapter interrupted the process, `completed` if the last
+  `result` is a success without the error mark, otherwise `failed`, which includes a
+  process with no result at all.
+- The process is looked at before the record is read, so that a process seen as gone has
+  written everything it will.
+- After a restart the adapter picks the turn up from its checkpoint: a turn begun and not
+  ended whose process is gone is ended, a start that was lost may be sent again, and a
+  process that still runs is watched. The daemon tolerates a repeated start or end.
+
+### Reconciliation
+
+`prompt.reconcile` is answered from four facts: the prompt's user record is in the session
+file, the attempt has a checkpoint (the adapter puts it before it starts a process),
+the file could be read, and a turn process of the session runs. A prompt in the file is
+`found`, with the turn `running` while its process runs and otherwise `interrupted`,
+`completed` or `failed` as for `turn.ended`. Without a checkpoint it is `provably_absent`
+(`never_dispatched`). A file that cannot be read, or a running process that may yet write the
+prompt, is `indeterminate` (`record_unreadable`, `turn_running`). Otherwise the writer has
+stopped and the whole file was scanned: `provably_absent`
+(`record_complete_without_attempt`).
 
 ## Why
 
@@ -113,7 +215,7 @@ after spawning.
   resumes. The creation flow resumes only when the first prompt is missing from
   the record, so the "continue" turn that Claude inserts when a resumed session
   ends on an unanswered user message is not triggered by it. The file
-  is looked up in one directory only, which is why the project directory is part
+  is looked up in one directory only, which is why the record directory is part
   of the attempt and `Decide` refuses a record looked up elsewhere.
 - **PID plus start second.** The system reuses PIDs. A PID alone would make a
   recorded process look alive forever when an unrelated process took its number,
@@ -183,6 +285,33 @@ after spawning.
   separately; the first prompt goes with the start, and readiness is its
   appearance in the record.
 
+- **The record directory, not the working directory, is what Claude keys sessions by.** A
+  session is found, resumed and refused as existing by its file in the record directory, so
+  the creation flow and every later look use that directory and none other. It is derived
+  from the real path because the runtime derives it so, and the derivation is deterministic
+  and cheap, while asking the runtime for the directory of a session that does not exist yet
+  is not possible. Rejected: reproducing the runtime's shortening of long names (a path can
+  be shortened, which is cheaper than tracking a rule the runtime does not publish) and
+  looking for the file in every directory of the projects directory (it would find a session
+  by luck and not by the attempt's own directory).
+- **Standard input as a file.** A pipe from the adapter would be closed when the adapter
+  dies and the process would lose its input or its output; a regular file read to its end is
+  the same as a closed input and survives. Output files give a restarted adapter the last
+  `result` of a turn it did not watch.
+- **argv[0] and the uuid recognise the process, not the executable's resolved path.** After
+  an automatic update an old process runs a file that the link no longer points at; a rule
+  by resolved path would lose it and start a second writer.
+- **The turn is the process.** One definition serves both sides: the session is busy
+  exactly while its turn process lives, so the busy state of the daemon and the adapter
+  cannot fork, and a continuation or a background wake that the runtime runs inside the
+  process is part of the turn instead of a turn nobody announced.
+- **`turn.started` waits for the record.** It proves delivery, and the prompt is delivered
+  only when it is durable; the normal wait is a second or two. The alternative, announcing at
+  the start of the process, would confirm a prompt that a crash could still lose.
+- **The record is judged by uuid and type.** Queue operations and attachments carry no prompt
+  and other uuids, and the line is looked for in the raw file, because a later branch of the
+  conversation does not remove it from disk.
+
 ## Where
 
 - `cmd/sidera-adapter-claude/internal/create/state.go`: `State`, stages,
@@ -205,3 +334,12 @@ after spawning.
   the session file, process table and registry, with the adapter killed at every
   crash point, outsiders that appear beside it, and the adapter deciding on after
   every failure).
+- `cmd/sidera-adapter-claude/internal/claudeargs`: the argument vector, environment, user
+  line, MCP configuration, preset and system prompt (`TestArgv`, `TestSanitizeEnv`,
+  `TestEnviron`, `TestUserLine`, `TestParsePreset`).
+- `.../internal/record`: the record directory, the session-file index and the last result
+  of an output stream (`TestSanitize`, `TestDir`, `TestIndex`, `TestLastResult`).
+- `.../internal/turn`: the event state machine, including the pickup after a restart
+  (`TestStep`, `TestRestartAdoption`).
+- `.../internal/reconcile`: the verdicts (`TestDecide`).
+- `.../internal/runtime/proc`: the process table, detached start and signal.

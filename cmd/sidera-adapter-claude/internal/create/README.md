@@ -19,7 +19,7 @@ stored state (`Done`).
 
 | Function | Does |
 | -------- | ---- |
-| `NewIntent(attempt, session, firstPrompt, projectDir)` | The state to commit before any native interface is called. It persists the session uuid and the id the caller puts on the first user message. |
+| `NewIntent(attempt, session, firstPrompt, recordDir)` | The state to commit before any native interface is called. It persists the session uuid and the id the caller puts on the first user message. |
 | `Decide(State, Observations, Params, now)` | The next `Action` with a typed `Reason`. For `ActionRecordProcess` the decision also carries the `Process`; for `ActionWait` a `RecheckBy`; for `ActionControlUnknown` every process seen; for `ActionDone` after a failure the stored `FailReason`. |
 | `State.Started(Process)` | Records a started or found turn process (PID and start second). |
 | `State.UUIDSeen()` | Records that the session file contains the uuid. |
@@ -59,7 +59,7 @@ stored state (`Done`).
   resumed the session by hand). The attempt ends as control unknown and the
   process is never recorded as ours. The registry never makes a process "ours"
   and never decides readiness; it can only reveal a writer that is not ours.
-- Never `--session-id` when `<project dir>/<uuid>.jsonl` exists: that flag fails
+- Never `--session-id` when `<record dir>/<uuid>.jsonl` exists: that flag fails
   on an existing session. Then `--resume` is used. The creation flow resumes
   only when the first prompt is missing, so Claude's automatic "continue" turn,
   which it adds when a resumed session ends on an unanswered user message, is
@@ -112,7 +112,7 @@ stored state (`Done`).
   creation time truncated to seconds), the same source for every start time
   reported and recorded. For a process found through the registry, the start
   reported is the process table's.
-- The session record is looked up in `State.ProjectDir` and `SessionRecord.Dir`
+- The session record is looked up in `State.RecordDir` and `SessionRecord.Dir`
   says so; `Decide` refuses any other directory. The directory is fixed for the
   attempt. The first prompt is searched for by `State.FirstPromptID`, which the
   caller puts on the first user message.
@@ -125,7 +125,7 @@ stored state (`Done`).
   it; the repeated `session.create` after a crash in between gets the same
   answer from the stored state.
 - Zero is never valid input: an empty attempt id, session id, first prompt id,
-  project directory or time, a zero PID or start, a stage of 0 or a non-positive
+  record directory or time, a zero PID or start, a stage of 0 or a non-positive
   parameter makes `Decide` return an error wrapping `ErrInvalidInput` or
   `ErrInvalidParams`. Facts that are absent are zero by definition: a nil
   `Running` or `Registry` means none, `Recorded` is the zero `Lookup` while the

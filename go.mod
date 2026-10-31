@@ -9,9 +9,9 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/sys v0.49.0
+	golang.org/x/text v0.14.0
 )
 
 require (
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/text v0.14.0 // indirect
 )

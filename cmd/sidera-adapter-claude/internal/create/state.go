@@ -96,11 +96,11 @@ type Stage int
 
 const (
 	// StageIntent: the attempt, the session uuid, the first prompt id and the
-	// project directory are committed; no turn process has been recorded.
+	// record directory are committed; no turn process has been recorded.
 	StageIntent Stage = iota + 1
 	// StageStarted: a turn process has been recorded with its PID and start time.
 	StageStarted
-	// StageUUIDSeen: the session record in the project directory contains the uuid.
+	// StageUUIDSeen: the session record in the record directory contains the uuid.
 	StageUUIDSeen
 	// StageReady: the first prompt is in the session record. The caller answers
 	// session.create from this state, and again from it after a crash.
@@ -119,10 +119,12 @@ type State struct {
 	SessionID SessionID
 	// FirstPromptID is the id the caller puts on the first user message.
 	FirstPromptID PromptID
-	// ProjectDir is the preset's project directory. It is fixed for the whole
-	// attempt: the session file is looked for in this directory only.
-	ProjectDir string
-	Stage      Stage
+	// RecordDir is the record directory of the session: the directory Claude
+	// Code keeps its session files in, which is not the working directory. It is
+	// fixed for the whole attempt: the session file is looked for in this
+	// directory only.
+	RecordDir string
+	Stage     Stage
 	// Process is the turn process recorded last; zero until Stage reaches
 	// StageStarted. A later start replaces it.
 	Process Process
@@ -137,8 +139,8 @@ type State struct {
 }
 
 // NewIntent returns the state committed before any native interface is called.
-func NewIntent(attempt AttemptID, session SessionID, firstPrompt PromptID, projectDir string) (State, error) {
-	s := State{AttemptID: attempt, SessionID: session, FirstPromptID: firstPrompt, ProjectDir: projectDir, Stage: StageIntent}
+func NewIntent(attempt AttemptID, session SessionID, firstPrompt PromptID, recordDir string) (State, error) {
+	s := State{AttemptID: attempt, SessionID: session, FirstPromptID: firstPrompt, RecordDir: recordDir, Stage: StageIntent}
 	if err := s.validate(); err != nil {
 		return State{}, err
 	}
@@ -232,8 +234,8 @@ func (s State) validate() error {
 		return fmt.Errorf("%w: session id %q is not a canonical lower-case uuid", ErrInvalidInput, s.SessionID)
 	case !s.FirstPromptID.Valid():
 		return fmt.Errorf("%w: first prompt id %q is not a canonical lower-case uuid", ErrInvalidInput, s.FirstPromptID)
-	case s.ProjectDir == "":
-		return fmt.Errorf("%w: project directory is unset", ErrInvalidInput)
+	case s.RecordDir == "":
+		return fmt.Errorf("%w: record directory is unset", ErrInvalidInput)
 	case s.Stage < StageIntent || s.Stage > StageFailed:
 		return fmt.Errorf("%w: unknown stage %d", ErrInvalidInput, s.Stage)
 	case s.Starts < 0:
