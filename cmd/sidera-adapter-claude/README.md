@@ -39,6 +39,8 @@ library, `sdk/go`, `golang.org/x/sys` and `golang.org/x/text`, and nothing else.
 executable so that the identity answered in `initialize` is read from it. The
 executable is started by the daemon and ends when the daemon closes its input; the
 turn processes it started are detached and run on.
+`pack.go` is the `package` subcommand: it writes the package for one platform the
+manifest lists from a binary built for it.
 
 ## Why this code is not under the top-level `internal/`
 

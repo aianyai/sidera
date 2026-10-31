@@ -3,6 +3,9 @@
 // drives Claude Code sessions as `claude -p` processes that outlive it. The
 // daemon starts it from its package (sidera-adapter.json) and ends it by closing
 // its input; standard error carries its log, which holds no prompt and no token.
+//
+// With the subcommand package it instead writes the adapter package for a
+// platform from a binary built for it.
 package main
 
 import (
@@ -26,7 +29,13 @@ import (
 var manifestJSON []byte
 
 func main() {
-	if err := run(); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "package" {
+		err = packageCommand(os.Args[2:])
+	} else {
+		err = run()
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "sidera-adapter-claude:", err)
 		os.Exit(1)
 	}

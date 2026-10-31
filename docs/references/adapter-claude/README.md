@@ -145,6 +145,21 @@ wait 100 seconds on either front end. The manifest lists only macOS for now. The
 under the instance's `state_dir`, which the daemon provides, so the adapter has no setting for
 them.
 
+### The package
+
+```
+go build -o <binary> ./cmd/sidera-adapter-claude   # with GOOS and GOARCH set
+<binary> package --goos <os> --goarch <arch> --binary <binary> --out <dir>
+sidera adapter install <dir>
+```
+
+writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-claude` through
+`manifest.WritePackage`, which every adapter's `package` shares. The manifest is the one
+built into the executable, with `platforms` narrowed to the platform asked for, since the
+package holds one binary and the installation checks the list. A platform the manifest does
+not list (today anything but `darwin/arm64` and `darwin/amd64`) is refused and nothing is
+written; adding a platform is adding it to the manifest.
+
 ### Creating a session, as the runtime does it
 
 `session.create` is answered `failed` before anything is persisted or started when the preset is
@@ -470,7 +485,8 @@ stopped and the whole file was scanned: `provably_absent`
 - `.../internal/reconcile`: the verdicts (`TestDecide`).
 - `.../internal/runtime/proc`: the process table, detached start and signal (macOS; the others fail with `ErrUnsupported`).
 - `cmd/sidera-adapter-claude/main.go`, `sidera-adapter.json`: the executable and its manifest
-  (`TestManifestAndDeclarationAgree`).
+  (`TestManifestAndDeclarationAgree`); `pack.go`: the `package` subcommand
+  (`TestPackageIsWrittenOnlyForAListedPlatform`).
 - `.../internal/runtime`: the adapter. `app.go` (construction, initialize), `config.go` (instance
   configuration, preset resolution), `create.go` (the creation loop), `deliver.go` (delivery and
   reconciliation), `close.go`, `start.go`, `probe.go` and `probe_mcp.go`, `session.go` (turn launch,

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -71,5 +73,47 @@ func TestManifestAndDeclarationAgree(t *testing.T) {
 	}
 	if !slices.Equal(instanceKeys, []string{"claude_path", "sidera_path"}) {
 		t.Fatalf("instance keys %v", instanceKeys)
+	}
+}
+
+// The package written for a platform the manifest lists is one the daemon reads, with
+// that platform alone and the binary at the entry; a platform it does not list gets
+// no package.
+func TestPackageIsWrittenOnlyForAListedPlatform(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "built")
+	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range [][2]string{{"darwin", "arm64"}, {"darwin", "amd64"}, {"linux", "amd64"}, {"windows", "amd64"}} {
+		t.Run(p[0]+"/"+p[1], func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "pkg")
+			err := writePackage(out, bin, p[0], p[1])
+			if p[0] != "darwin" {
+				if err == nil {
+					t.Fatal("a package was written for a platform the manifest does not list")
+				}
+				if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+					t.Errorf("something was written: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(filepath.Join(out, manifest.FileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m, err := manifest.Parse(raw)
+			if err != nil {
+				t.Fatalf("the manifest is refused: %v", err)
+			}
+			if m.ID != "claude" || len(m.Platforms) != 1 || m.Platforms[0] != (manifest.Platform{OS: p[0], Arch: p[1]}) {
+				t.Errorf("manifest %+v", m)
+			}
+			if got, err := os.ReadFile(filepath.Join(out, "bin", "sidera-adapter-claude")); err != nil || string(got) != "binary" {
+				t.Errorf("binary %q, %v", got, err)
+			}
+		})
 	}
 }
