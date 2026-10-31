@@ -71,7 +71,9 @@ the runs through `Options.Observe`.
   and the catalog evidence of the in-process layer both see the same answer: a listed
   declaration's unreached keys are `Deferred` and do not fail either; a listed
   declaration that a walk reached is `StaleDeferred` and fails both, so the list only
-  shrinks as recipes are written. Delete an entry when its recipe lands.
+  shrinks as recipes are written. The coverage partition of the binary walk leaves a
+  listed declaration's keys unclassified on purpose: no layer is responsible for them
+  yet. Delete an entry when its recipe lands.
 - **No point is skipped silently.** A target that the run never reached fails the
   walk and says which. A scenario whose window has more points than its budget
   fails, so that growth is put in front of a reviewer instead of being sampled

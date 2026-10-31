@@ -10,6 +10,8 @@ import (
 
 // CoveragePartition assigns every declared key to this layer or another layer.
 // Both lists must be duplicate-free, disjoint and together cover the full table.
+// The keys of the declarations NotYetWalked lists need not appear in either: no
+// recipe reaches them, so no layer can be made responsible for them yet.
 // It supplies responsibility only; coverage still comes from this walk's runs.
 type CoveragePartition struct {
 	Required         []fsx.Key
@@ -46,7 +48,7 @@ func coveragePartition(table *txn.Table, input *CoveragePartition, hasScenarios 
 	}
 	var missing []fsx.Key
 	for _, k := range table.Keys() {
-		if classified[k.Key] == "" {
+		if _, deferred := NotYetWalked[k.Tag.Tx]; classified[k.Key] == "" && !deferred {
 			missing = append(missing, k.Key)
 		}
 	}
