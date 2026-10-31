@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+	"time"
 )
 
 var testBinaries Binaries
@@ -17,6 +18,8 @@ var testRoot string
 var fixtureNumber int
 
 func TestMain(m *testing.M) {
+	start := time.Now().UTC()
+	diagnosticInit()
 	wd, err := os.Getwd()
 	if err != nil {
 		panic(err)
@@ -72,7 +75,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		code = 1
 	}
-	os.Exit(code)
+	os.Exit(diagnosticFinish(start, code))
 }
 
 func runRoot(t *testing.T) string {
@@ -85,6 +88,8 @@ func runRoot(t *testing.T) string {
 	}
 	t.Cleanup(func() {
 		if err := os.RemoveAll(root); err != nil {
+			diagnosticCleanup(root, "test-root", nil, nil, err)
+			diagnosticCapture(root)
 			t.Error(err)
 		}
 	})

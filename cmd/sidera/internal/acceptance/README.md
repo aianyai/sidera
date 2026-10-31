@@ -1,5 +1,32 @@
 # Acceptance support
 
+> **Temporary diagnostic branch only.** This branch runs four bounded native
+> runner experiments and exports only typed, allowlisted failure evidence. It
+> cannot establish the formal acceptance guarantee of candidate
+> `b486d9f40fe067c389fed2f6bc0f675cf306901d` and must never be integrated.
+> The two exact reproduction entry points require `acceptance,diagnostic`;
+> original acceptance and full-shard commands keep their original tags and test
+> selection. Each exact target runs at most 30 times with fail-fast. Only a
+> completely successful exact run permits one original full-shard fallback.
+> Windows acceptance and runtime start with their original commands; successful
+> acceptance may repeat only the six fixed original failure tests, at most 30
+> times. Job limits are 40/75/60/65 minutes for Windows acceptance, Windows
+> delivery, macOS management and Windows runtime, respectively (240 total).
+> No retry or automatic follow-up dispatch exists.
+>
+> Private cleanup owners still run their original Close and RemoveAll sequence.
+> Oracle failures project existing ledger and trace evidence before cleanup;
+> removal failures project only material still available after that failure.
+> Missing or truncated material is reported as unavailable. No successful-path
+> filesystem snapshot, additional kill, cleanup retry, raw ledger, credential,
+> response body, process output or complete fixture directory is exported.
+> The only export files are `manifest.json`, `attempts.jsonl`, `boundary.jsonl`,
+> `ledger-projection.jsonl` and `trace-projection.jsonl`. Errors are classified;
+> their original messages remain only in the unchanged test log. Ledger Detail,
+> CWD and LockPath and trace file paths are excluded. Private `diagnostic`-tagged
+> canary tests verify the projection and error-classification boundaries.
+
+
 Support for exercising the built program through its public front ends.
 [`agent/cli`](agent/cli/README.md) implements the layer-neutral fake Agent by
 starting the actual CLI. [`agent/mcp`](agent/mcp/README.md) drives a persistent

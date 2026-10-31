@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"time"
 
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
@@ -95,12 +96,34 @@ func (b *WalkBackend) Run(ctx context.Context, s crashwalk.Scenario, plan crashw
 	if err != nil {
 		return out, err
 	}
-	defer func() { err = errors.Join(err, os.RemoveAll(root)) }()
+	start := time.Now().UTC()
+	var fixture *Fixture
+	var closeErr error
+	defer func() {
+		removeErr := os.RemoveAll(root)
+		if removeErr != nil {
+			diagnosticCleanup(root, "walk-remove", fixture, closeErr, removeErr)
+			diagnosticCapture(root)
+		}
+		err = errors.Join(err, removeErr)
+		diagnosticRun(root, s, b.opts.Seed, plan, out, err, start)
+	}()
 	f, err := newFixture(ctx, root, b.binaries, b.opts, profile)
 	if err != nil {
 		return out, err
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
+	fixture = f
+	defer func() {
+		// Oracle evidence is captured before the original close/remove sequence.
+		if err != nil || len(r.result.Violations) != 0 {
+			diagnosticCapture(root)
+		}
+		closeErr = f.Close()
+		if closeErr != nil {
+			diagnosticCleanup(root, "walk-close", f, closeErr, nil)
+		}
+		err = errors.Join(err, closeErr)
+	}()
 	r.fixture = f
 	switch s := s.(type) {
 	case *WalkScenario:

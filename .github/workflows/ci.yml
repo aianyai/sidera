@@ -1,75 +1,31 @@
 name: CI
+run-name: Diagnostic only - native acceptance feedback
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-    inputs:
-      # How much of the crash walk of the built binary the crash-walk jobs take.
-      # A run that has no input (a push, a pull request) takes full, see below.
-      crashwalk:
-        description: Crash walk mode
-        type: choice
-        options: [full, smoke]
-        default: full
 
-# Nothing here writes to the repository, so the token only ever reads it.
 permissions:
   contents: read
 
-# A newer push to a pull request supersedes that request's older run. Every
-# other run (push to main, manual dispatch) is its own group, named by its run
-# id, so runs on main never cancel, replace or wait for one another and each
-# commit keeps its own verdict. A group holds one running and one pending run,
-# and a newer pending run replaces the older one, so sharing a group per branch
-# would drop the verdict of a commit pushed while another is still running.
+# Each dispatch is independent. This branch has no automatic trigger or retry.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
 
+defaults:
+  run:
+    shell: bash
+
+env:
+  SIDERA_CI_DIAGNOSTIC_EXPORT: ${{ github.workspace }}/.scratch/ci-diagnostic-export
+
+# Four independent jobs cap this experiment at 240 runner-minutes in total.
 jobs:
-  format:
-    name: gofmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: gofmt -l must list nothing
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-  # The same three checks on every platform a node runs on. The race detector
-  # needs cgo and a C compiler; all three hosted images ship one.
-  #
-  # go test stops a package after 10 minutes unless told otherwise; the explicit
-  # limit leaves the job's own timeout room for setup and a readable failure.
-  # The power-loss tests replay a crash on an in-memory file system, so only
-  # Linux runs them; the other platforms skip them by name.
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  windows-acceptance:
+    name: Diagnostic only - windows-acceptance
+    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    runs-on: windows-latest
     timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    defaults:
-      run:
-        shell: bash
-    env:
-      SKIP_TESTS: ${{ matrix.os != 'ubuntu-latest' && '^TestPowerLossClone' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,44 +34,60 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: go vet
-        run: go vet ./... ./sdk/go/...
-      - name: go test
-        run: go test -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
-      - name: go test -race
-        run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
-      # go test prints t.Log output and skip reasons only with -v or on failure.
-      # The platform tests of these two packages log what they measure on the
-      # runner and skip what the runner cannot do, so they run once more, verbosely,
-      # to put those values and reasons in the log. A new package with platform
-      # tests that log or skip must be added here.
-      - name: go test -v (platform packages)
-        run: go test -count=1 -v -timeout 30m -skip "$SKIP_TESTS" ./internal/node/fsx ./internal/node/ipc
-      # One untagged, non-race sample records each platform's real filesystem
-      # costs. These are measurements, not performance thresholds.
-      - name: single-sample benchmarks
+      - name: verify export privacy boundaries
+        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: original Windows acceptance
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
         run: |
-          go test -run '^$' -bench '^BenchmarkFilesystemWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/fsx
-          go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
-          go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
+          set +e
+          go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
+          status=$?
+          printf '{"command":"original Windows acceptance","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: original failure test names must exist
+        run: |
+          names=$(go test -tags acceptance,crashtest,testclock -list '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance)
+          for name in TestRuntimeProfileProbesAcrossGeneration TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe TestUnobservedPreparationLeavesGenerationOneForDaemon TestRealBinaryTargetNeedsMarkerAndAbnormalExit TestBinarySessionBindingRunsSharedRecipeAcrossGeneration TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults; do
+            printf '%s\n' "$names" | grep -Fx "$name"
+          done
+      - name: repeat original Windows acceptance failures
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,crashtest,testclock -run '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance
+        run: |
+          set +e
+          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,crashtest,testclock -run '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance
+          status=$?
+          printf '{"command":"repeat original Windows acceptance failures","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: verify explicit export files
+        if: ${{ always() }}
+        run: |
+          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
+            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
+          done
+          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+      - name: upload typed diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            .scratch/ci-diagnostic-export/manifest.json
+            .scratch/ci-diagnostic-export/attempts.jsonl
+            .scratch/ci-diagnostic-export/boundary.jsonl
+            .scratch/ci-diagnostic-export/ledger-projection.jsonl
+            .scratch/ci-diagnostic-export/trace-projection.jsonl
 
-  # The same checks again with the build tags that select binary-level crash
-  # points and the test clock, which the untagged job never compiles. vet also
-  # sees the acceptance tag, so the files it selects are type-checked on every
-  # platform; the tests behind that tag run in their own jobs, not here.
-  test-tags:
-    name: test with tags (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    defaults:
-      run:
-        shell: bash
-    env:
-      SKIP_TESTS: ${{ matrix.os != 'ubuntu-latest' && '^TestPowerLossClone' || '' }}
+  windows-delivery:
+    name: Diagnostic only - windows-delivery
+    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    runs-on: windows-latest
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,40 +96,58 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: go vet with tags
-        run: go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
-      - name: go test with tags
-        run: go test -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
-      - name: go test -race with tags
-        run: go test -race -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
+      - name: verify export privacy boundaries
+        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: required test must exist
+        run: go test -tags acceptance,diagnostic -list '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestRegisterReplyExactTargetRepro'
+      - name: exact Windows delivery target
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance
+        run: |
+          set +e
+          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance
+          status=$?
+          printf '{"command":"exact Windows delivery target","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: required test must exist
+        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
+      - name: original Windows delivery full shard
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+        run: |
+          set +e
+          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+          status=$?
+          printf '{"command":"original Windows delivery full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: verify explicit export files
+        if: ${{ always() }}
+        run: |
+          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
+            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
+          done
+          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+      - name: upload typed diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            .scratch/ci-diagnostic-export/manifest.json
+            .scratch/ci-diagnostic-export/attempts.jsonl
+            .scratch/ci-diagnostic-export/boundary.jsonl
+            .scratch/ci-diagnostic-export/ledger-projection.jsonl
+            .scratch/ci-diagnostic-export/trace-projection.jsonl
 
-  # The tests that drive built binaries, one job per platform. Their files carry
-  # the acceptance tag, which no other job runs tests with (test-tags only vets
-  # it), so they have their own job, limit and timeout. The outer test also needs
-  # crashtest,testclock to run the tagged process prerequisite regression; child
-  # builds select their own tags, so the plain child stays untagged. The crash
-  # walk is left to the crash-walk jobs; the walk and these tests are told apart by name, and the
-  # walk's test names all start with TestCrashAtEveryCrashPoint.
-  #
-  # The test binary builds the binaries it drives, and builds them with -race
-  # when it is itself built with -race. Only Linux passes -race: the race
-  # detector then watches real processes talking to one another once per run,
-  # on the platform where it is fastest, while on Windows it would slow every
-  # rerun several times over for a platform whose point here is renames and
-  # process handling, not races.
-  acceptance:
-    name: acceptance (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    defaults:
-      run:
-        shell: bash
-    env:
-      RACE: ${{ matrix.os == 'ubuntu-latest' }}
+  macos-management:
+    name: Diagnostic only - macos-management
+    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,48 +156,58 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: go test with the acceptance tag
-        run: go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
+      - name: verify export privacy boundaries
+        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: required test must exist
+        run: go test -tags acceptance,diagnostic -list '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestBinaryManagementFeedbackRepro'
+      - name: exact macOS management target
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance
+        run: |
+          set +e
+          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance
+          status=$?
+          printf '{"command":"exact macOS management target","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: required test must exist
+        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
+      - name: original macOS management full shard
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/2 go test -race=false -count=1 -v -timeout 40m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+        run: |
+          set +e
+          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/2 go test -race=false -count=1 -v -timeout 40m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+          status=$?
+          printf '{"command":"original macOS management full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: verify explicit export files
+        if: ${{ always() }}
+        run: |
+          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
+            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
+          done
+          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+      - name: upload typed diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            .scratch/ci-diagnostic-export/manifest.json
+            .scratch/ci-diagnostic-export/attempts.jsonl
+            .scratch/ci-diagnostic-export/boundary.jsonl
+            .scratch/ci-diagnostic-export/ledger-projection.jsonl
+            .scratch/ci-diagnostic-export/trace-projection.jsonl
 
-  # The crash walk of the built binary: it kills a real process at each crash
-  # point and checks what the restart finds. It is split into shards that run in
-  # parallel, because one platform's whole walk does not fit in a job: shard i of
-  # n takes every n-th run of the walk (SIDERA_CRASHWALK_SHARD), and together the
-  # shards take every run once. The counts and limits below are sized for the
-  # slowest platform's shard, and the log of each run (-v) carries the time of
-  # every rerun, so the next adjustment is made from numbers and not from guesses.
-  #
-  # SIDERA_CRASHWALK is the mode: full takes every crash point, smoke takes one
-  # point per transaction, which makes a quick rerun after a failure. A run that
-  # has no input, such as a push to main, takes full. go test's own limit is set
-  # a few minutes under the job's, so that a hang ends with the goroutine dump of
-  # the test binary and not with the job being killed. -race is passed on Linux
-  # only, for the reason given at the acceptance job.
-  crashwalk:
-    name: crash walk (${{ matrix.os }} ${{ matrix.shard }}/${{ matrix.shards }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.timeout }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {os: ubuntu-latest, shard: 1, shards: 3, timeout: 45, test-timeout: 40m}
-          - {os: ubuntu-latest, shard: 2, shards: 3, timeout: 45, test-timeout: 40m}
-          - {os: ubuntu-latest, shard: 3, shards: 3, timeout: 45, test-timeout: 40m}
-          - {os: macos-latest, shard: 1, shards: 2, timeout: 45, test-timeout: 40m}
-          - {os: macos-latest, shard: 2, shards: 2, timeout: 45, test-timeout: 40m}
-          - {os: windows-latest, shard: 1, shards: 4, timeout: 60, test-timeout: 55m}
-          - {os: windows-latest, shard: 2, shards: 4, timeout: 60, test-timeout: 55m}
-          - {os: windows-latest, shard: 3, shards: 4, timeout: 60, test-timeout: 55m}
-          - {os: windows-latest, shard: 4, shards: 4, timeout: 60, test-timeout: 55m}
-    defaults:
-      run:
-        shell: bash
-    env:
-      RACE: ${{ matrix.os == 'ubuntu-latest' }}
-      SIDERA_CRASHWALK: ${{ inputs.crashwalk || 'full' }}
-      SIDERA_CRASHWALK_SHARD: ${{ matrix.shard }}/${{ matrix.shards }}
-      TEST_TIMEOUT: ${{ matrix.test-timeout }}
+  windows-runtime:
+    name: Diagnostic only - windows-runtime
+    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    runs-on: windows-latest
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -216,67 +216,37 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      # A -run pattern that matches no test passes without running anything, so a
-      # renamed walk would turn this job green and empty. grep exits 1 unless the
-      # list names the walk.
-      - name: the walk must exist
-        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/... | grep '^TestCrashAtEveryCrashPoint'
-      - name: go test crash walk
-        run: go test -race="$RACE" -count=1 -v -timeout "$TEST_TIMEOUT" -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-
-  # sdk/go is published as its own module, so it must build, test and be tidy
-  # without go.work.
-  sdk-standalone:
-    name: sdk/go without go.work
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      GOWORK: "off"
-    defaults:
-      run:
-        working-directory: sdk/go
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: verify export privacy boundaries
+        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: required test must exist
+        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
+      - name: original Windows runtime full shard
+        env:
+          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
+            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=4/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+        run: |
+          set +e
+          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=4/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+          status=$?
+          printf '{"command":"original Windows runtime full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          exit "$status"
+      - name: verify explicit export files
+        if: ${{ always() }}
+        run: |
+          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
+            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
+          done
+          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+      - name: upload typed diagnostic evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
-      - name: go build
-        run: go build ./...
-      - name: go test
-        run: go test ./...
-      - name: go mod tidy -diff
-        run: go mod tidy -diff
-
-  # Every binary and package must build for every platform Sidera ships for,
-  # statically (CGO_ENABLED=0), whichever runner builds it.
-  cross-compile:
-    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {goos: darwin, goarch: arm64}
-          - {goos: darwin, goarch: amd64}
-          - {goos: linux, goarch: amd64}
-          - {goos: linux, goarch: arm64}
-          - {goos: windows, goarch: amd64}
-    env:
-      CGO_ENABLED: "0"
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The five matrix jobs would race to save one identical cache entry.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: go build
-        run: go build ./... ./sdk/go/...
+          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            .scratch/ci-diagnostic-export/manifest.json
+            .scratch/ci-diagnostic-export/attempts.jsonl
+            .scratch/ci-diagnostic-export/boundary.jsonl
+            .scratch/ci-diagnostic-export/ledger-projection.jsonl
+            .scratch/ci-diagnostic-export/trace-projection.jsonl
