@@ -17,6 +17,7 @@ this package is [`reply`](../reply/README.md).
 | ---- | ------- |
 | `Envelope`, `Limits`, `Encode(limits)`, `Decode(data, limits)` | The envelope and its deterministic CBOR form with strict decoding. `Limits` (longest body, most recipients) is a parameter a caller may tighten; a zero value is refused. |
 | `DefaultLimits()` | The protocol values: a body of at most 64 KiB (`MaxBody`) and at most 50 recipients (`MaxRecipients`, read from `adapterproto.MaxRecipients`). |
+| `MaxEncoded()` | The longest encoded envelope any node accepts (the input limit of `DefaultLimits`); the one place a transport takes its request bound from. |
 | `Envelope.ValidateFor(node)`, `RecipientsOn(node)`, `TrimmedFor(node)` | What only the receiving node can check; the sender's trimming of recipients and sequence numbers for one target node. |
 | `Envelope.Digest()` | The request digest the target stores for deduplication. |
 | `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the mapping to `authz.Action` (a control signal's action comes from `adapterreg.ActionOf`), and the mapping to the adapter protocol's control signals. |

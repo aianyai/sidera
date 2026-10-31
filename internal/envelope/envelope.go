@@ -91,6 +91,12 @@ func (l Limits) inputLimit() int {
 	return fixedBytes + l.MaxBody + l.MaxRecipients*perRecipientBytes + MaxEvidence*(record.DefaultMaxInput+16)
 }
 
+// MaxEncoded is the longest encoded envelope any node accepts: the input limit
+// of DefaultLimits. A transport that carries envelopes sizes its request bound
+// from it, so that what the protocol lets a sender send always fits and nothing
+// longer is read.
+func MaxEncoded() int { return DefaultLimits().inputLimit() }
+
 // Envelope is one message as it travels from a sender's node to one target
 // node. The sender is not part of it: the receiving node knows it from the
 // connection. The envelope is not signed; the status reports and control

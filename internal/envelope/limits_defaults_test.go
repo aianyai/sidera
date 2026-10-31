@@ -87,3 +87,11 @@ func TestDefaultLimitsBehaviour(t *testing.T) {
 		requireErr(t, decodeWire(t, messageTo(t, 51), lim), ErrRecipients)
 	})
 }
+
+// MaxEncoded is the input limit of the protocol's own limits, and the largest
+// legal envelope is within it.
+func TestMaxEncoded(t *testing.T) {
+	if got, want := MaxEncoded(), DefaultLimits().inputLimit(); got != want {
+		t.Errorf("MaxEncoded = %d, want %d", got, want)
+	}
+}

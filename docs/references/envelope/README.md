@@ -465,11 +465,16 @@ which may still admit it.
   promise that one message can address every endpoint. Each recipient takes about
   96 bytes on the wire, under 5 KiB for 50, and the body is stored once however
   many recipients there are.
+- **The longest encoded envelope is exported.** An envelope is read within a size
+  derived from its limits, before any parsing. `MaxEncoded` is that size for the
+  protocol values: a transport that carries envelopes sizes its request bound from
+  it ([network](../network/README.md)) instead of repeating the arithmetic, so the
+  bound can never be below an envelope the protocol lets a sender send.
 
 ## Where
 
 - `internal/envelope/envelope.go`: `Envelope`, `Limits`, `DefaultLimits` and the
-  protocol values it returns (`MaxBody`, `MaxRecipients`), `Encode`,
+  protocol values it returns (`MaxBody`, `MaxRecipients`), `MaxEncoded`, `Encode`,
   `Decode`, `ValidateFor`, `TrimmedFor`, `Digest`, `CheckEvidence`; `kind.go`:
   `Kind` and its mappings (a control signal's action is `adapterreg.ActionOf`
   of its signal, so that mapping has one home).
