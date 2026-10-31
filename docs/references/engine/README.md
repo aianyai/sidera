@@ -1021,9 +1021,7 @@ the write that makes the change durable returned (`trust.go`).
   owner's operations on trust call them. A credential is stored with,
   optionally, the certificate of the node at its other end (`trust-credential`: the credential
   is the commit point). A revocation is made with the identity key, which only these steps use
-  (`Keys.IdentitySigner`), and never while the identity is retired; a build with the
-  `netacceptance` tag adds `TestOfferCredential` and `TestInstallCredential`, which sign a credential
-  with that key and run `installCredential`, for tests of two real nodes only. Removing a node from trust is
+  (`Keys.IdentitySigner`), and never while the identity is retired. Removing a node from trust is
   one transaction the engine opens, `trust-local-revoke`: the entry of the removal is the
   commit point, then the revocation of each credential this node holds with the node, then the
   result of the operation; the first removal's time and operation name are kept when it is

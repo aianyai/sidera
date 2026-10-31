@@ -21,7 +21,6 @@ func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "PairingClosed", "PairingFrame", "PairingOpened", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "TrustView", "UnregisterDirect",
 	}
-	allowed = append(allowed, testOnlyMethods...)
 	typ := reflect.TypeOf(&engine.Engine{})
 	var got []string
 	banned := map[reflect.Type]string{

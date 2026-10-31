@@ -57,8 +57,8 @@ fingerprint is made of; the names, the values and the rules of the settings are
 
 A row may instead be a **test row** (`method.test`): the door of the test harness to
 the node it runs in. Test rows are named `test.<something>`, come only from
-`testMethods`, which has rows in a binary built with the `testclock`, `crashtest` or
-`netacceptance` tag (`testmethods.go`) and none otherwise (`testmethods_off.go`), so a shipped binary
+`testMethods`, which has rows in a binary built with the `testclock` or `crashtest`
+tag (`testmethods.go`) and none otherwise (`testmethods_off.go`), so a shipped binary
 answers `method_unknown` for them. A test row is outside the catalogue of
 administrative operations and is not judged by `admin.Authorize`: it is no operation
 of the owner's, has no catalogue entry (the shipped catalogue must have none),
@@ -74,20 +74,8 @@ carries no operation identifier and stores no result.
   `{points: [{key, kind}]}` from the complete table supplied by the daemon through
   the tagged `TestConfig.CrashPoints`; kinds are `normal` or `recovery` and sync
   points are included. `TestConfig` is empty in builds without `crashtest`.
-- `netacceptance` alone enables `test.trust.offer` and `test.trust.credential`
-  (`testnet.go`), the way a test of two real nodes gives them a direct credential
-  before pairing exists. Both take `{node}`, the other end. `test.trust.offer` answers
-  the credential between this node and `node`, signed by this node's identity key and
-  stored nowhere, as `{node, credential, record}` (`credential` is the digest, `record`
-  the hexadecimal wire record). `test.trust.credential` also takes `{record}`: the
-  credential record, which must name this node and `node`; this node adds its own
-  signature when it is missing, keeps the credential through the engine's one step that
-  installs a credential, and answers as above with the record it kept. Each node thus
-  signs with its own key, and the test carries the record between them. The engine side
-  is `engine/testtrust.go`, reached through an interface assertion on the service as
-  `test.quiesce` is.
-- Any tag enables `test.ping`. The tags are independent and combine in any subset: a
-  build with one tag has only that tag's rows.
+- Either tag enables `test.ping`. A crash-test build does not enable clock methods
+  unless it also has `testclock`.
 
 ## Rules
 

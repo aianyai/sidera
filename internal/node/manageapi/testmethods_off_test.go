@@ -1,4 +1,4 @@
-//go:build !testclock && !crashtest && !netacceptance
+//go:build !testclock && !crashtest
 
 package manageapi
 
@@ -12,7 +12,7 @@ func TestAnUntaggedBuildHasNoTestRow(t *testing.T) {
 		t.Fatalf("an untagged build has %d test rows", len(rows))
 	}
 	r := newRig(t)
-	for _, name := range []string{"test.ping", "test.clock.set", "test.quiesce", "test.crashpoints", "test.trust.offer", "test.trust.credential"} {
+	for _, name := range []string{"test.ping", "test.clock.set", "test.quiesce", "test.crashpoints"} {
 		status, out := r.post(name, `{}`)
 		r.wantError(404, "not_found", "method_unknown", status, out)
 	}

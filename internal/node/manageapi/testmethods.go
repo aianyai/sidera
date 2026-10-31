@@ -1,4 +1,4 @@
-//go:build testclock || crashtest || netacceptance
+//go:build testclock || crashtest
 
 package manageapi
 
@@ -9,9 +9,7 @@ import (
 
 // testMethods combines only the rows enabled by their own build tags.
 func testMethods() []*method {
-	rows := append([]*method{testPing}, clockMethods()...)
-	rows = append(rows, crashMethods()...)
-	return append(rows, netMethods()...)
+	return append(append([]*method{testPing}, clockMethods()...), crashMethods()...)
 }
 
 // test.ping answers an empty object with {"pong": true}: a row that proves the

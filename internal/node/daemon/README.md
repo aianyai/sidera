@@ -39,8 +39,7 @@ mapping stays in `apiwire`, and process exit policy stays here.
 The management listener supplies the complete validated transaction table to
 `test.crashpoints` only in `crashtest` builds. The `testclock` clock and quiescence
 methods use the already-injected clock and engine; the daemon reads no test
-process environment. The `netacceptance` rows (`test.trust.*`) need nothing of the
-daemon either: the engine they reach is the one the management listener already holds.
+process environment.
 
 With `crashtest`, `NewCrashObserver(CrashConfig)` takes a record writer, canonical
 target and positive generation. The caller owns the append-only writer. The

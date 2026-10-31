@@ -138,11 +138,13 @@ is not part of this smoke's evidence.
 daemon and waits for public results only, so it works with a node program whose test
 controls are not the fixture's. `TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork`
 (tags `acceptance` and `netacceptance`) starts two of them, each with its own home, port
-and fake adapter, from a program built with `netacceptance,testclock`. It gives each node
-the other's loopback address with the peer identity `network show` reported, installs a
-direct credential between them through `test.trust.offer` and `test.trust.credential` (each
-node signs with its own identity key), and sends a message from an endpoint of one node to
-an endpoint of the other, and a reply back. It asserts that the sender sees `accepted`, that
+and fake adapter, from a program built with `testclock` alone (the `netacceptance` tag only
+keeps the test out of the regular run). It pairs them the way two owners do, with public
+commands only: each node is given the other's contact line from `network show` through
+`network address set`, each runs `trust expect` for the other, and one runs `trust request`
+with a wait. It asserts that each node's `trust list` holds one credential, the same digest
+on both. Over that trust it sends a message from an endpoint of one node to an endpoint of
+the other, and a reply back. It asserts that the sender sees `accepted`, that
 the recipient receives the exact body and acknowledges it, that the sender's pull brings
 the report back (`delivered`), and that each node lists the other as a connected peer with
 its certificate held. It does not assert the transient `queued` state, which the sender may

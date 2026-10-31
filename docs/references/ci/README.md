@@ -59,7 +59,7 @@ pipe and helper-reexecution tests remain available without `acceptance`.
 | --- | ------- | ----------- |
 | `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags`, `acceptance` |
 | `testclock` | the test clock a binary reads from its environment | `test-tags`, `acceptance` |
-| `netacceptance` | the credential rows of the test interface and the test of two real daemons, which reach each other over libp2p on this machine's loopback; the test needs `acceptance` too and is run by hand, with `go test -count=1 -tags acceptance,netacceptance -run TestTwoNodes ./cmd/sidera/internal/acceptance` | `go vet` in `test-tags` |
+| `netacceptance` | the test of two real daemons, which pair with each other and exchange messages over libp2p; it changes nothing in the binaries and only keeps that test out of the regular `acceptance` run. The test needs `acceptance` too and is run by hand, with `go test -count=1 -tags acceptance,netacceptance -run TestTwoNodes ./cmd/sidera/internal/acceptance` | `go vet` in `test-tags` |
 | `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in `acceptance` and `crashwalk` |
 
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start

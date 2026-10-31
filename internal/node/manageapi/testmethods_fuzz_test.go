@@ -1,4 +1,4 @@
-//go:build testclock || crashtest || netacceptance
+//go:build testclock || crashtest
 
 package manageapi
 

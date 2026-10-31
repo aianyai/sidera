@@ -58,7 +58,7 @@ func startPlainNode(ctx context.Context, t *testing.T, root string, binaries Bin
 	t.Cleanup(func() { _, _ = n.p.killAndWait() })
 	t.Cleanup(func() {
 		if t.Failed() {
-			for _, path := range []string{g.stdout, g.stderr} {
+			for _, path := range []string{g.stdout, g.stderr, filepath.Join(f.home, "logs", "daemon.log")} {
 				raw, err := os.ReadFile(path)
 				t.Logf("%s: %s (%v)", filepath.Base(path), raw, err)
 			}

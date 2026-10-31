@@ -9,20 +9,19 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// Two real daemons of this machine, each with its own home and port, reach each
-// other over libp2p on the loopback address and carry a message there and back.
-// A node's clock is a test clock that stands still, so a pull the engine would
+// Two real daemons of this machine, each with its own home and port, pair with
+// each other over libp2p as two owners would, then carry a message there and back
+// over the trust the pairing made. A node's clock is a test clock that stands still, so a pull the engine would
 // make a minute from now is made by moving that clock; every other wait is a poll
 // with a deadline.
 
@@ -38,8 +37,7 @@ var networkBuild struct {
 	err  error
 }
 
-// networkBinary is the node program with the credential rows of the test
-// interface and the test clock, built once.
+// networkBinary is the node program with the test clock, built once.
 func networkBinary(t *testing.T) string {
 	t.Helper()
 	networkBuild.once.Do(func() {
@@ -48,7 +46,7 @@ func networkBinary(t *testing.T) string {
 			ext = ".exe"
 		}
 		networkBuild.path = filepath.Join(testRoot, "net"+ext)
-		args := []string{"build", "-tags", "netacceptance,testclock", "-o", networkBuild.path}
+		args := []string{"build", "-tags", "testclock", "-o", networkBuild.path}
 		if raceEnabled {
 			args = append(args, "-race")
 		}
@@ -90,8 +88,6 @@ type netNode struct {
 	*plainNode
 	env      *environment
 	id       string
-	peerID   string
-	port     string
 	address  string // of its endpoint
 	endpoint string // name of the endpoint in env
 }
@@ -103,26 +99,7 @@ func startNetNode(ctx context.Context, t *testing.T, name string) *netNode {
 	p := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name() + "/" + name, ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default"})
 	n := &netNode{plainNode: p, env: newEnvironment(ctx, p.f), endpoint: name}
 	t.Logf("node %s: daemon pid %d", name, p.p.cmd.Process.Pid)
-	var shown struct {
-		Result struct {
-			Node   string `json:"node"`
-			PeerID string `json:"peer_id"`
-			Listen struct {
-				Configured []string `json:"configured"`
-			} `json:"listen"`
-		} `json:"result"`
-	}
-	n.cli(&shown, "network", "show", "--json")
-	n.id, n.peerID = shown.Result.Node, shown.Result.PeerID
-	for _, addr := range shown.Result.Listen.Configured {
-		if m := regexp.MustCompile(`/tcp/(\d+)$`).FindStringSubmatch(addr); m != nil {
-			n.port = m[1]
-			break
-		}
-	}
-	if n.id == "" || n.peerID == "" || n.port == "" {
-		t.Fatalf("node %s: network show gave %+v", name, shown.Result)
-	}
+	n.id = n.contactLine()[0]
 	var err error
 	if n.address, err = n.env.Direct(name); err != nil {
 		t.Fatal(err)
@@ -145,21 +122,40 @@ func (n *netNode) cli(into any, args ...string) {
 	}
 }
 
-// test calls a test row of the node.
-func (n *netNode) test(method string, params map[string]any) (credential, record string) {
+// contactLine is what the node's owner gives another owner: the node id, then the
+// addresses of the node that another machine can reach.
+func (n *netNode) contactLine() []string {
 	n.t.Helper()
-	raw, err := n.f.Manage(n.ctx, method, manageapi.Request{Params: params})
-	if err != nil {
-		n.t.Fatalf("%s: %v", method, err)
+	var shown struct {
+		Result struct {
+			Contact string `json:"contact"`
+		} `json:"result"`
 	}
-	var out struct {
-		Credential string `json:"credential"`
-		Record     string `json:"record"`
+	n.cli(&shown, "network", "show", "--json")
+	fields := strings.Fields(shown.Result.Contact)
+	if len(fields) < 2 {
+		n.t.Fatalf("node %s has no address to give: contact line %q", n.endpoint, shown.Result.Contact)
 	}
-	if err := resultBody(raw, &out); err != nil {
-		n.t.Fatalf("%s: %v", method, err)
+	return fields
+}
+
+// trusted is the credential this node holds with each node it trusts, by node.
+func (n *netNode) trusted() map[string]string {
+	n.t.Helper()
+	var listed struct {
+		Result struct {
+			Trusted []struct {
+				Node       string `json:"node"`
+				Credential string `json:"credential"`
+			} `json:"trusted"`
+		} `json:"result"`
 	}
-	return out.Credential, out.Record
+	n.cli(&listed, "trust", "list", "--json")
+	held := map[string]string{}
+	for _, t := range listed.Result.Trusted {
+		held[t.Node] = t.Credential
+	}
+	return held
 }
 
 // state is what this node's source record says of a message it sent.
@@ -245,23 +241,22 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	b := startNetNode(ctx, t, "bob")
 	t.Logf("both nodes serve after %s", time.Since(begun).Round(time.Millisecond))
 
-	// Each node learns where the other is: loopback and the other's port, with the
-	// peer identity the other reported. The contact line lists only addresses that
-	// reach other machines, and the test must not depend on a network.
+	// The owners pair the nodes as they would: each gives its node the other's
+	// contact line and the expectation of the other's request, then one asks the
+	// other, which confirms in advance by the expectation, and waits for the pairing
+	// to complete.
 	for _, pair := range [][2]*netNode{{a, b}, {b, a}} {
 		self, other := pair[0], pair[1]
-		var set struct{}
-		self.cli(&set, "network", "address", "set", other.id, fmt.Sprintf("/ip4/127.0.0.1/tcp/%s/p2p/%s", other.port, other.peerID), "--json")
+		contact := other.contactLine()
+		var set, expected struct{}
+		self.cli(&set, append([]string{"network", "address", "set", contact[0]}, append(contact[1:], "--json")...)...)
+		self.cli(&expected, "trust", "expect", contact[0], "--json")
 	}
-
-	// The credential between them is signed by each node with its own identity key
-	// and carried between the nodes here, as pairing will carry it.
-	_, offer := a.test("test.trust.offer", map[string]any{"node": b.id})
-	_, completed := b.test("test.trust.credential", map[string]any{"node": a.id, "record": offer})
-	digestB, _ := b.test("test.trust.credential", map[string]any{"node": a.id, "record": completed})
-	digestA, _ := a.test("test.trust.credential", map[string]any{"node": b.id, "record": completed})
-	if digestA != digestB {
-		t.Fatalf("the nodes keep different credentials: %s and %s", digestA, digestB)
+	var requested struct{}
+	a.cli(&requested, "trust", "request", b.id, "--wait", "10s", "--json")
+	heldByA, heldByB := a.trusted(), b.trusted()
+	if heldByA[b.id] == "" || heldByA[b.id] != heldByB[a.id] || len(heldByA) != 1 || len(heldByB) != 1 {
+		t.Fatalf("the nodes trust %v and %v: want one credential, the same on both", heldByA, heldByB)
 	}
 
 	send := func(from, to *netNode, body string) adapterproto.MessageID {
