@@ -123,7 +123,7 @@ own decision.
 - `internal/node/layout_test.go`:
   - `TestContractPackagesDoNotImportRuntime`: runs `go list -deps -test` for
     every contract package for darwin, linux and windows, each with no tags and
-    with `crashtest,testclock,acceptance`.
+    with `crashtest,testclock,acceptance,netacceptance`.
   - `TestRuntimeReadsTimeOnlyThroughClock`,
     `TestRuntimeTouchesFilesOnlyThroughFsx`,
     `TestRuntimeTakesRandomnessAsReader`: scan every non-test Go file below

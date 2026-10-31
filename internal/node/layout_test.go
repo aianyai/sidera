@@ -153,7 +153,7 @@ func TestContractPackagesDoNotImportRuntime(t *testing.T) {
 	forbidden := []string{module + "/" + runtimeDir, module + "/cmd"}
 
 	for _, goos := range []string{"darwin", "linux", "windows"} {
-		for _, tags := range []string{"", "crashtest,testclock,acceptance"} {
+		for _, tags := range []string{"", "crashtest,testclock,acceptance,netacceptance"} {
 			name := goos + "/tags=" + tags
 			t.Run(name, func(t *testing.T) {
 				env := append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=0")

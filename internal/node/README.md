@@ -100,7 +100,7 @@ that prove the scans themselves detect what they should:
 
 | Test | Rule |
 | ---- | ---- |
-| `TestContractPackagesDoNotImportRuntime` | No contract package, tests included, depends on `internal/node/` or `cmd/`, directly or transitively, on any of darwin, linux and windows, with and without the `crashtest,testclock,acceptance` tags. A platform file or a tagged file can bring in a dependency the default build does not. |
+| `TestContractPackagesDoNotImportRuntime` | No contract package, tests included, depends on `internal/node/` or `cmd/`, directly or transitively, on any of darwin, linux and windows, with and without the `crashtest,testclock,acceptance,netacceptance` tags. A platform file or a tagged file can bring in a dependency the default build does not. |
 | `TestRuntimeReadsTimeOnlyThroughClock` | The clock rule above. |
 | `TestRuntimeTouchesFilesOnlyThroughFsx` | The file rule above. |
 | `TestRuntimeTakesRandomnessAsReader` | The randomness rule above. |

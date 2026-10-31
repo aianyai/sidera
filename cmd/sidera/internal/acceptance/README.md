@@ -132,6 +132,24 @@ It calls no test clock or quiet controls. These are local delivery results;
 the sender's cached status, refreshed by the ordinary one-minute pull interval,
 is not part of this smoke's evidence.
 
+## Two nodes over the network
+
+`startPlainNode` starts one node the way a user does: it initializes a home, starts the
+daemon and waits for public results only, so it works with a node program whose test
+controls are not the fixture's. `TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork`
+(tags `acceptance` and `netacceptance`) starts two of them, each with its own home, port
+and fake adapter, from a program built with `netacceptance,testclock`. It gives each node
+the other's loopback address with the peer identity `network show` reported, installs a
+direct credential between them through `test.trust.offer` and `test.trust.credential` (each
+node signs with its own identity key), and sends a message from an endpoint of one node to
+an endpoint of the other, and a reply back. It asserts that the sender sees `accepted`, that
+the recipient receives the exact body and acknowledges it, that the sender's pull brings
+the report back (`delivered`), and that each node lists the other as a connected peer with
+its certificate held. It does not assert the transient `queued` state, which the sender may
+leave before any poll can see it. The nodes' clocks stand still, so the pull an engine
+makes a minute after a send is made by moving the sender's clock past that interval; all
+other waits are polls with a 30 second deadline. The test is run by hand and by no job.
+
 ## Run-owned adapter inputs
 
 `Options.AdapterInputs` supplies initial `fakeadapter.ExternalInputs` by installed

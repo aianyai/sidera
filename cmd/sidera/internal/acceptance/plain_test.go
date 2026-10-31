@@ -16,23 +16,31 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	root := runRoot(t)
-	binaries := testBinaries
-	binaries.Tagged = binaries.Plain
-	f, err := newFixture(ctx, root, binaries, Options{Seed: t.Name(), ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: true})
+// plainNode is a node started the way a user starts one: the fixture supplies its
+// packages and its process owner, but the daemon is a program whose test controls
+// the fixture cannot rely on, so readiness is judged by public results only.
+type plainNode struct {
+	t   *testing.T
+	ctx context.Context
+	f   *Fixture
+	p   *process
+}
+
+// startPlainNode initializes a home under root, starts its daemon with binaries.Tagged
+// as the node program, and returns when the instance of the profile has passed its
+// probe. The daemon is stopped, and its output logged when the test failed, when the
+// test ends.
+func startPlainNode(ctx context.Context, t *testing.T, root string, binaries Binaries, opts Options, profile fixtureProfile) *plainNode {
+	t.Helper()
+	f, err := newFixture(ctx, root, binaries, opts, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if err := f.Close(); err != nil {
 			t.Error(err)
 		}
-	}()
-	// Reuse the fixture's input packages and process owner. Its tagged Start
-	// requires test controls, so this plain run waits on public results instead.
+	})
 	init, err := f.launch("init", filepath.Join(root, "plain-init.out"), filepath.Join(root, "plain-init.err"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -46,9 +54,9 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.current = g
-	p := g.p
-	defer p.killAndWait()
-	defer func() {
+	n := &plainNode{t: t, ctx: ctx, f: f, p: g.p}
+	t.Cleanup(func() { _, _ = n.p.killAndWait() })
+	t.Cleanup(func() {
 		if t.Failed() {
 			for _, path := range []string{g.stdout, g.stderr} {
 				raw, err := os.ReadFile(path)
@@ -63,29 +71,8 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 				}
 			}
 		}
-	}()
-	wait := func(ready func() (bool, error)) {
-		t.Helper()
-		tick := time.NewTicker(5 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			ok, err := ready()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ok {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-p.done:
-				t.Fatalf("plain daemon exited before its public result: %v", p.err)
-			case <-tick.C:
-			}
-		}
-	}
-	wait(func() (bool, error) {
+	})
+	n.wait(func() (bool, error) {
 		raw, err := f.Manage(ctx, "status", manageapi.Request{})
 		if err != nil {
 			// The public socket need not exist while the process is starting.
@@ -102,13 +89,13 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 	if err := f.bootstrap(ctx); err != nil {
 		t.Fatal(err)
 	}
-	wait(func() (bool, error) {
+	n.wait(func() (bool, error) {
 		instances, err := f.instances(ctx)
 		if err != nil {
 			return false, err
 		}
 		for _, in := range instances {
-			if in.Instance == "chat" && in.Enabled && in.Probe != nil {
+			if in.Instance == profile.instance() && in.Enabled && in.Probe != nil {
 				if in.Probe.State != "pending" && in.Probe.State != "passed" {
 					t.Fatalf("plain adapter probe: %s", in.Probe.State)
 				}
@@ -120,12 +107,57 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 	if err := f.bindRuntimeAddresses(ctx); err != nil {
 		t.Fatal(err)
 	}
+	return n
+}
+
+// wait polls ready until it holds, the test's context ends or the daemon exits.
+func (n *plainNode) wait(ready func() (bool, error)) {
+	n.t.Helper()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		ok, err := ready()
+		if err != nil {
+			n.t.Fatal(err)
+		}
+		if ok {
+			return
+		}
+		select {
+		case <-n.ctx.Done():
+			n.t.Fatal(n.ctx.Err())
+		case <-n.p.done:
+			n.t.Fatalf("plain daemon exited before its public result: %v", n.p.err)
+		case <-tick.C:
+		}
+	}
+}
+
+// stop asks the daemon to stop through its management interface and waits for its
+// normal exit.
+func (n *plainNode) stop() {
+	n.t.Helper()
+	if _, err := n.f.Manage(n.ctx, "daemon.stop", n.f.changeRequest(nil, nil)); err != nil {
+		n.t.Fatal(err)
+	}
+	if err := n.p.wait(n.ctx); err != nil {
+		n.t.Fatalf("plain normal exit: %v", err)
+	}
+}
+
+func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	binaries := testBinaries
+	binaries.Tagged = binaries.Plain
+	n := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name(), ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: true})
+	f, wait := n.f, n.wait
 	e := newEnvironment(ctx, f)
 	if _, err := e.Direct("sender"); err != nil {
 		t.Fatal(err)
 	}
 	sender := e.Agent("sender")
-	_, err = sender.Control(ctx, fakeagent.ControlInput{To: runtimeAddress(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+	_, err := sender.Control(ctx, fakeagent.ControlInput{To: runtimeAddress(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,10 +217,5 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 	if err != nil || len(empty.Page.Messages) != 0 {
 		t.Fatalf("plain CLI after acknowledgement: %+v %v", empty.Page, err)
 	}
-	if _, err := f.Manage(ctx, "daemon.stop", f.changeRequest(nil, nil)); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.wait(ctx); err != nil {
-		t.Fatalf("plain normal exit: %v", err)
-	}
+	n.stop()
 }

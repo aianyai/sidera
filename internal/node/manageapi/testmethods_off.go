@@ -1,4 +1,4 @@
-//go:build !testclock && !crashtest
+//go:build !testclock && !crashtest && !netacceptance
 
 package manageapi
 

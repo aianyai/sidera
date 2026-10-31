@@ -18,7 +18,7 @@ test, the crash walks of `internal/node/store` included.
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
-| `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
+| `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
 | `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
@@ -48,7 +48,7 @@ five platforms are the ones Sidera ships binaries for.
 
 ### Build tags
 
-Three tags select separate concerns. `crashtest` and `testclock` select the
+Four tags select separate concerns. `crashtest` and `testclock` select the
 crash observer, deterministic source, controllable clock and their management
 methods. `acceptance` selects the tests that build and drive real programs,
 including the CLI and MCP tests in `cmd/sidera` and the foreground-process tests
@@ -59,6 +59,7 @@ pipe and helper-reexecution tests remain available without `acceptance`.
 | --- | ------- | ----------- |
 | `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags`, `acceptance` |
 | `testclock` | the test clock a binary reads from its environment | `test-tags`, `acceptance` |
+| `netacceptance` | the credential rows of the test interface and the test of two real daemons, which reach each other over libp2p on this machine's loopback; the test needs `acceptance` too and is run by hand, with `go test -count=1 -tags acceptance,netacceptance -run TestTwoNodes ./cmd/sidera/internal/acceptance` | `go vet` in `test-tags` |
 | `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in `acceptance` and `crashwalk` |
 
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
@@ -386,7 +387,7 @@ go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -
 go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
-go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
+go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...
 go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 

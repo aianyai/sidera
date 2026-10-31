@@ -129,7 +129,8 @@ var _ Config = (*config.Config)(nil)
 // Keys is what the engine asks of the node's keys: the node it is, the network
 // key that signs its status reports, the certificate that says the key is the
 // node's and its encoded record, the identity key's signer, which signs only the
-// revocations of the credentials this node holds, and the statement that retires
+// revocations of the credentials this node holds (and, in a build with the
+// netacceptance tag, the credentials a test gives the node), and the statement that retires
 // the identity, which only the owner's operations use. *keys.Keys is the one
 // implementation. The engine reads the certificate in its loop, which is also
 // where a renewal replaces it.

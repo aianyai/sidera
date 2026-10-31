@@ -398,9 +398,9 @@ A binary built with a test tag has **test rows** besides these: methods named
 quiescence, the crash points). They are outside the catalogue of administrative
 operations and not judged by `admin.Authorize`: they have no catalogue entry, carry
 no operation identifier and store no result, and they exist only in a binary built
-with the `testclock` or `crashtest` tag, which is never shipped; without the tag the
+with the `testclock`, `crashtest` or `netacceptance` tag, which is never shipped; without the tag the
 request is `method_unknown`, which is how a test asserts that the way in is missing.
-`test.ping` exists with either tag. `testclock` adds `test.clock.set` with
+`test.ping` exists with any of them. `testclock` adds `test.clock.set` with
 `{to_ms}` (absolute Unix milliseconds, including rollback) and `test.quiesce`
 with `{expect: {instance: {notifications, held}}, timeout_ms}`. `held` is a
 multiset of request method names. A positive timeout is required. Quiescence
@@ -410,8 +410,15 @@ keeps the counters in a successful HTTP response for the fixture to explain.
 `crashtest` adds `test.crashpoints`, whose `{points: [{key, kind}]}` is the
 complete validated daemon table, sync points included, with `normal` or
 `recovery` kinds. The composition root supplies it through the tagged
-`manageapi.TestConfig`. The tags are independent: `crashtest` alone enables
-neither clock method.
+`manageapi.TestConfig`. `netacceptance` adds `test.trust.offer` and
+`test.trust.credential`, which give two real nodes a direct credential, the one
+the pairing makes in a deployment: both take `{node}`; the first answers the
+credential between this node and `node`, signed with this node's identity key and
+stored nowhere, as `{node, credential, record}` (the digest and the hexadecimal
+wire record); the second also takes `{record}`, adds this node's signature when it
+is missing, keeps the credential and answers the same way. The tags are
+independent: `crashtest` alone enables neither clock method, and `netacceptance`
+neither of the others' rows.
 
 Errors are `{"error":{"category","code","message","details"?}}` in the words of
 `apiwire`, which is the one mapping from what the engine, `config`, `ipc` and the

@@ -1,0 +1,311 @@
+//go:build acceptance && netacceptance
+
+package acceptance
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+// Two real daemons of this machine, each with its own home and port, reach each
+// other over libp2p on the loopback address and carry a message there and back.
+// A node's clock is a test clock that stands still, so a pull the engine would
+// make a minute from now is made by moving that clock; every other wait is a poll
+// with a deadline.
+
+const networkWait = 30 * time.Second
+
+// pullInterval is how far a node's clock is moved to make it pull the reports of
+// the messages it sent; it is the engine's interval and a little more.
+const pullInterval = time.Minute + time.Second
+
+var networkBuild struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// networkBinary is the node program with the credential rows of the test
+// interface and the test clock, built once.
+func networkBinary(t *testing.T) string {
+	t.Helper()
+	networkBuild.once.Do(func() {
+		ext := ""
+		if runtime.GOOS == "windows" {
+			ext = ".exe"
+		}
+		networkBuild.path = filepath.Join(testRoot, "net"+ext)
+		args := []string{"build", "-tags", "netacceptance,testclock", "-o", networkBuild.path}
+		if raceEnabled {
+			args = append(args, "-race")
+		}
+		if out, err := exec.Command("go", append(args, "github.com/aianyai/sidera/cmd/sidera")...).CombinedOutput(); err != nil {
+			networkBuild.err = fmt.Errorf("build: %w: %s", err, out)
+		}
+	})
+	if networkBuild.err != nil {
+		t.Fatal(networkBuild.err)
+	}
+	return networkBuild.path
+}
+
+// until polls ready every 20 ms until it holds, failing the test at the deadline.
+func until(ctx context.Context, t *testing.T, what string, ready func() (bool, error)) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, networkWait)
+	defer cancel()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		ok, err := ready()
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if ok {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("%s: not within %s", what, networkWait)
+		case <-tick.C:
+		}
+	}
+}
+
+// netNode is one daemon of the test with its endpoint.
+type netNode struct {
+	*plainNode
+	env      *environment
+	id       string
+	peerID   string
+	port     string
+	address  string // of its endpoint
+	endpoint string // name of the endpoint in env
+}
+
+func startNetNode(ctx context.Context, t *testing.T, name string) *netNode {
+	t.Helper()
+	binaries := testBinaries
+	binaries.Tagged, binaries.Plain = networkBinary(t), networkBinary(t)
+	p := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name() + "/" + name, ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default"})
+	n := &netNode{plainNode: p, env: newEnvironment(ctx, p.f), endpoint: name}
+	t.Logf("node %s: daemon pid %d", name, p.p.cmd.Process.Pid)
+	var shown struct {
+		Result struct {
+			Node   string `json:"node"`
+			PeerID string `json:"peer_id"`
+			Listen struct {
+				Configured []string `json:"configured"`
+			} `json:"listen"`
+		} `json:"result"`
+	}
+	n.cli(&shown, "network", "show", "--json")
+	n.id, n.peerID = shown.Result.Node, shown.Result.PeerID
+	for _, addr := range shown.Result.Listen.Configured {
+		if m := regexp.MustCompile(`/tcp/(\d+)$`).FindStringSubmatch(addr); m != nil {
+			n.port = m[1]
+			break
+		}
+	}
+	if n.id == "" || n.peerID == "" || n.port == "" {
+		t.Fatalf("node %s: network show gave %+v", name, shown.Result)
+	}
+	var err error
+	if n.address, err = n.env.Direct(name); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// cli runs a command of the program against this node's home and decodes its JSON.
+func (n *netNode) cli(into any, args ...string) {
+	n.t.Helper()
+	cmd := exec.CommandContext(n.ctx, n.f.binaries.Tagged, append([]string{"--home", n.f.home}, args...)...)
+	cmd.Dir = n.f.root
+	var out, diag bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &diag
+	if err := cmd.Run(); err != nil {
+		n.t.Fatalf("%v: %v: %s %s", args, err, &out, &diag)
+	}
+	if err := json.Unmarshal(out.Bytes(), into); err != nil {
+		n.t.Fatalf("%v: %v: %s", args, err, &out)
+	}
+}
+
+// test calls a test row of the node.
+func (n *netNode) test(method string, params map[string]any) (credential, record string) {
+	n.t.Helper()
+	raw, err := n.f.Manage(n.ctx, method, manageapi.Request{Params: params})
+	if err != nil {
+		n.t.Fatalf("%s: %v", method, err)
+	}
+	var out struct {
+		Credential string `json:"credential"`
+		Record     string `json:"record"`
+	}
+	if err := resultBody(raw, &out); err != nil {
+		n.t.Fatalf("%s: %v", method, err)
+	}
+	return out.Credential, out.Record
+}
+
+// state is what this node's source record says of a message it sent.
+func (n *netNode) state(id adapterproto.MessageID) adapterproto.DeliveryState {
+	n.t.Helper()
+	res, err := n.env.Agent(n.endpoint).Status(n.ctx, fakeagent.StatusInput{MessageID: id})
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	if len(res.Recipients) != 1 {
+		n.t.Fatalf("status of %s: %+v", id, res)
+	}
+	return res.Recipients[0].State
+}
+
+// awaitState waits for the message to be in want, and fails at once when it ended
+// in another state.
+func (n *netNode) awaitState(id adapterproto.MessageID, want adapterproto.DeliveryState) {
+	n.t.Helper()
+	until(n.ctx, n.t, fmt.Sprintf("message %s is %s", id, want), func() (bool, error) {
+		switch got := n.state(id); {
+		case got == want:
+			return true, nil
+		case got == adapterproto.DeliveryRejected || got == adapterproto.DeliveryUnknown ||
+			got == adapterproto.DeliveryExpiredUnconfirmed || got == adapterproto.DeliveryClosedUnconfirmed:
+			return false, fmt.Errorf("the message is %s", got)
+		default:
+			return false, nil
+		}
+	})
+}
+
+// awaitReport waits for the report of the message to be pulled back: the node's
+// clock is moved past the pull interval, and again after a second if the pull was
+// not yet scheduled, until the message is delivered.
+func (n *netNode) awaitReport(id adapterproto.MessageID) {
+	n.t.Helper()
+	moves := 0
+	last := time.Now()
+	until(n.ctx, n.t, fmt.Sprintf("the report of %s is pulled back", id), func() (bool, error) {
+		if n.state(id) == adapterproto.DeliveryDelivered {
+			return true, nil
+		}
+		if moves < 3 && time.Since(last) > time.Second {
+			moves++
+			last = time.Now()
+			if err := n.f.SetTime(n.ctx, n.f.Now().Add(pullInterval)); err != nil {
+				return false, err
+			}
+		}
+		return false, nil
+	})
+}
+
+// receive waits for the endpoint's next message, acknowledges it as completed and
+// returns it.
+func (n *netNode) receive(body string) adapterproto.MessageID {
+	n.t.Helper()
+	agent := n.env.Agent(n.endpoint)
+	var got adapterproto.MessageID
+	until(n.ctx, n.t, "a message arrives", func() (bool, error) {
+		page, err := agent.Recv(n.ctx, fakeagent.RecvInput{})
+		if err != nil || len(page.Page.Messages) == 0 {
+			return false, err
+		}
+		if len(page.Page.Messages) != 1 || page.Page.Messages[0].Body != body {
+			return false, fmt.Errorf("received %+v, want one message %q", page.Page.Messages, body)
+		}
+		got = page.Page.Messages[0].ID
+		if _, err := agent.Ack(n.ctx, fakeagent.AckInput{Lease: page.Page.Lease}); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	return got
+}
+
+func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	begun := time.Now()
+	a := startNetNode(ctx, t, "alice")
+	b := startNetNode(ctx, t, "bob")
+	t.Logf("both nodes serve after %s", time.Since(begun).Round(time.Millisecond))
+
+	// Each node learns where the other is: loopback and the other's port, with the
+	// peer identity the other reported. The contact line lists only addresses that
+	// reach other machines, and the test must not depend on a network.
+	for _, pair := range [][2]*netNode{{a, b}, {b, a}} {
+		self, other := pair[0], pair[1]
+		var set struct{}
+		self.cli(&set, "network", "address", "set", other.id, fmt.Sprintf("/ip4/127.0.0.1/tcp/%s/p2p/%s", other.port, other.peerID), "--json")
+	}
+
+	// The credential between them is signed by each node with its own identity key
+	// and carried between the nodes here, as pairing will carry it.
+	_, offer := a.test("test.trust.offer", map[string]any{"node": b.id})
+	_, completed := b.test("test.trust.credential", map[string]any{"node": a.id, "record": offer})
+	digestB, _ := b.test("test.trust.credential", map[string]any{"node": a.id, "record": completed})
+	digestA, _ := a.test("test.trust.credential", map[string]any{"node": b.id, "record": completed})
+	if digestA != digestB {
+		t.Fatalf("the nodes keep different credentials: %s and %s", digestA, digestB)
+	}
+
+	send := func(from, to *netNode, body string) adapterproto.MessageID {
+		sent, err := from.env.Agent(from.endpoint).Send(ctx, fakeagent.SendInput{To: []string{to.address}, Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sent.MessageID
+	}
+
+	began := time.Now()
+	first := send(a, b, "hello bob")
+	a.awaitState(first, adapterproto.DeliveryAccepted)
+	t.Logf("accepted by the other node after %s", time.Since(began).Round(time.Millisecond))
+	received := b.receive("hello bob")
+	a.awaitReport(first)
+	t.Logf("report pulled back after %s", time.Since(began).Round(time.Millisecond))
+
+	reply, err := b.env.Agent(b.endpoint).Reply(ctx, fakeagent.ReplyInput{MessageID: received, Body: "hello alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.awaitState(reply.MessageID, adapterproto.DeliveryAccepted)
+	a.receive("hello alice")
+	b.awaitReport(reply.MessageID)
+
+	var shown struct {
+		Result struct {
+			Peers []struct {
+				Node            string `json:"node"`
+				CertificateHeld bool   `json:"certificate_held"`
+				Connected       bool   `json:"connected"`
+			} `json:"peers"`
+		} `json:"result"`
+	}
+	for _, pair := range [][2]*netNode{{a, b}, {b, a}} {
+		pair[0].cli(&shown, "network", "show", "--json")
+		if peers := shown.Result.Peers; len(peers) != 1 || peers[0].Node != pair[1].id || !peers[0].CertificateHeld || !peers[0].Connected {
+			t.Errorf("node %s sees its peers as %+v", pair[0].endpoint, peers)
+		}
+	}
+	t.Logf("whole exchange took %s", time.Since(began).Round(time.Millisecond))
+
+	for _, n := range []*netNode{a, b} {
+		n.stop()
+	}
+}
