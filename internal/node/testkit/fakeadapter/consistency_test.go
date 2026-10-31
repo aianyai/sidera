@@ -613,7 +613,7 @@ func (a *rawAdapter) handshake(t *testing.T) {
 		"jsonrpc": "2.0", "id": "handshake", "method": "initialize",
 		"params": map[string]any{
 			"protocol": map[string]int{"min": 1, "max": 1}, "daemon": map[string]string{"version": "0.1.0"},
-			"instance":     map[string]string{"id": "fake", "lock_path": filepath.Join(t.TempDir(), "instance.lock")},
+			"instance":     map[string]string{"id": "fake", "lock_path": filepath.Join(t.TempDir(), "instance.lock"), "state_dir": "/state"},
 			"capabilities": map[string]any{},
 		},
 	})

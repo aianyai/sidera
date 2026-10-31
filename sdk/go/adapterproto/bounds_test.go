@@ -54,10 +54,13 @@ func TestStringLengthBounds(t *testing.T) {
 		}},
 		{"register.display_name", 1, 128, false, func(s string) error { return adapterproto.RegisterParams{Key: "k", DisplayName: s}.Validate() }},
 		{"instance.id", 1, 128, false, func(s string) error {
-			return adapterproto.InitializeParams{Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "1"}, Instance: adapterproto.InstanceInfo{ID: s, LockPath: "/l"}}.Validate()
+			return adapterproto.InitializeParams{Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "1"}, Instance: adapterproto.InstanceInfo{ID: s, LockPath: "/l", StateDir: "/state"}}.Validate()
 		}},
 		{"instance.lock_path", 1, 4096, false, func(s string) error {
-			return adapterproto.InitializeParams{Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "1"}, Instance: adapterproto.InstanceInfo{ID: "i", LockPath: s}}.Validate()
+			return adapterproto.InitializeParams{Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "1"}, Instance: adapterproto.InstanceInfo{ID: "i", LockPath: s, StateDir: "/state"}}.Validate()
+		}},
+		{"instance.state_dir", 1, 4096, false, func(s string) error {
+			return adapterproto.InitializeParams{Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "1"}, Instance: adapterproto.InstanceInfo{ID: "i", LockPath: "/l", StateDir: s}}.Validate()
 		}},
 		{"start.node", 1, 128, false, func(s string) error { p := validStart(); p.Node = s; return p.Validate() }},
 		{"start.direct_endpoints.key", 1, 128, false, func(s string) error { p := validStart(); p.DirectEndpoints[0].Key = s; return p.Validate() }},

@@ -24,7 +24,8 @@ type LogOpener interface {
 type Env struct {
 	// Home is the data directory, as an absolute path of the operating system's
 	// file system. The instance lock files are under it, and so are the installed
-	// adapter packages. The host only builds paths from it: it touches no file.
+	// adapter packages and the state directories of the instances. The host builds
+	// paths from it and makes the state directories; it touches no other file.
 	Home string
 	// Source is the configuration.
 	Source Source

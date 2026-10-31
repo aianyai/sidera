@@ -20,7 +20,7 @@ stopped or the host ends. The engine asks for it with `EnsureRunning` and ends i
 with `Stop`; `Start` begins the supervision of every instance enabled in the
 configuration. The supervisor builds what the launcher is told to start from the
 configuration as it is at that pass: the installed adapter of the instance, the
-directory of its installed version, the lock path and a writer onto
+directory of its installed version, the lock path, the state directory and a writer onto
 `adapter-<instance>.log`.
 
 The adapter's standard error goes to that log, one line at a time (a log takes one
@@ -86,6 +86,20 @@ The adapter takes `adapter-<instance>.lock` (`LockPath`) before it answers
 process to free it: a process that cannot be ended is left after `ShutdownWait`, its
 replacement is refused by the lock until it dies, and the pass fails and waits for
 the backoff like any other.
+
+### The state directory
+
+Before every launch the host makes `adapter-state/<instance>` in the data directory,
+and `adapter-state/` itself when it is missing, with `fsx.MakeRoot`: the one function
+that makes a directory only its owner can reach, with the protected access list on
+Windows. A directory that is already there is left as it is, since it holds what the
+adapter put in it and the data directory around it is already owner-only; the supervisors
+of different instances may make `adapter-state/` together, so its existing is no error.
+Only the host makes it, so the adapter never has to know where the data directory is.
+`StateDir(home, instance)` is the one definition, sent in `initialize` and in
+`Instance.StateDir`; a directory that cannot be made fails the pass like a launch that
+failed, and the next pass waits for the backoff. Nothing in it is read, counted or
+removed by the daemon.
 
 ### Requests of the adapter
 

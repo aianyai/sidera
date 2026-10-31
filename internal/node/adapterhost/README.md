@@ -8,12 +8,12 @@ for the protocol itself and
 for the reasons behind the rules below.
 
 This is a runtime package of layer 4 of [`internal/node/README.md`](../README.md):
-it imports the contract packages, `config`, `logfile` and the SDK, and never the
+it imports the contract packages, `config`, `fsx`, `logfile` and the SDK, and never the
 engine. It defines `Engine`, the few things it asks of the engine, and the engine
 defines the interface it asks of the host. Time comes only from the clock it is
-given, and every goroutine it starts ends with the host. It touches no file:
-starting a program is not a file operation, and its own log goes through the
-handle the daemon gives it.
+given, and every goroutine it starts ends with the host. Its one file operation is making the state
+directory of an instance, through `fsx`; starting a program is not a file operation,
+and its own log goes through the handle the daemon gives it.
 
 ## Entry points
 
@@ -25,6 +25,7 @@ handle the daemon gives it.
 | `Host.CreateSession`, `DeliverPrompt`, `Reconcile`, `Interrupt`, `Close`, `NotifyPending` | The calls the engine makes on an adapter. They are the host's half of the interface the engine defines for it. |
 | `Host.Counts` | What the host counts of the connection of an instance, for the question whether the system is quiet. |
 | `LockPath(home, instance)` | The file an instance's adapter locks: the one definition. |
+| `StateDir(home, instance)` | The directory an instance's adapter keeps its state in, `adapter-state/<instance>`: the one definition. The host makes it owner-only before every launch. |
 | `ExecLauncher` | The launcher that runs an adapter as a child process. |
 | `Engine`, `EndpointCalls`, `ObservedCalls` | What the host asks of the engine: the life of a connection, notifications, and the requests an adapter makes. The last two are optional parts the engine takes on as it learns to answer them. |
 | `Notification`, `GoneCause` | A notification of the adapter as the engine receives it, and why an adapter is reported as gone. |

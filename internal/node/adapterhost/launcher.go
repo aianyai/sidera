@@ -23,6 +23,9 @@ type Instance struct {
 	// host sends it in initialize; a launcher that needs it (a fake that is told
 	// where to lock) has it here too.
 	LockPath string
+	// StateDir is the directory the adapter keeps its state in, made by the host
+	// before the launch and sent in initialize like LockPath.
+	StateDir string
 	// Stderr receives what the adapter writes on its standard error, which is its
 	// log: lines, never protocol. It is never nil.
 	Stderr io.Writer

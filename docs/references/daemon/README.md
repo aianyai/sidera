@@ -99,7 +99,7 @@ places and nowhere else:
   layers meet: `var _ engine.Adapters = (*adapterhost.Host)(nil)` is here.
 - **Step 10** starts it with the data directory (`Env.Home`, the absolute path of the
   real directory, which the instance lock files `adapter-<instance>.lock` are in, at
-  its root), the read-only view of the configuration the hooks get (`Env.Source`),
+  its root, and `adapter-state/<instance>/`, which the host makes for each adapter), the read-only view of the configuration the hooks get (`Env.Source`),
   the handle of the logs (`Env.Logs`: each instance's `adapter-<instance>.log`) and
   the engine behind `apiwire.AdapterEngine`, which words the engine's refusals as the
   adapter protocol does. The step waits for `Start`: it returns when each enabled

@@ -17,7 +17,8 @@
       },
       "instance": {
         "id": "work",
-        "lock_path": "/x/lock"
+        "lock_path": "/x/lock",
+        "state_dir": "/x/state"
       }
     }
   }

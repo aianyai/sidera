@@ -95,7 +95,7 @@ func TestInitializeRefusals(t *testing.T) {
 	good := func() map[string]any {
 		return map[string]any{
 			"protocol": map[string]int{"min": 1, "max": 1}, "daemon": map[string]string{"version": "0.1.0"},
-			"instance":     map[string]string{"id": "fake", "lock_path": filepath.Join(t.TempDir(), "i.lock")},
+			"instance":     map[string]string{"id": "fake", "lock_path": filepath.Join(t.TempDir(), "i.lock"), "state_dir": "/state"},
 			"capabilities": map[string]any{},
 		}
 	}
@@ -1203,7 +1203,7 @@ func TestPipeProcessIsAProcessTheAdapterHostCanSupervise(t *testing.T) {
 	var raw json.RawMessage
 	if err := d.Call(ctx, adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol: adapterproto.SupportedRange(), Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: filepath.Join(t.TempDir(), "i.lock")},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: filepath.Join(t.TempDir(), "i.lock"), StateDir: "/state"},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	}, &raw); err != nil {
 		t.Fatal(err)

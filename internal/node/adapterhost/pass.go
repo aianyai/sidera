@@ -50,6 +50,7 @@ func (s *supervisor) instance() (Instance, error) {
 				Adapter:  a,
 				Dir:      filepath.Join(env.Home, filepath.FromSlash(config.AdapterVersionDir(a.ID, a.Version))),
 				LockPath: LockPath(env.Home, s.id),
+				StateDir: StateDir(env.Home, s.id),
 			}, nil
 		}
 	}
@@ -63,6 +64,9 @@ func (s *supervisor) connect() (*conn, error) {
 	h := s.h
 	inst, err := s.instance()
 	if err != nil {
+		return nil, err
+	}
+	if err := makeStateDir(h.env.Home, s.id); err != nil {
 		return nil, err
 	}
 	logw := s.openLog()
@@ -96,7 +100,7 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	sent := adapterproto.InitializeParams{
 		Protocol:     adapterproto.SupportedRange(),
 		Daemon:       adapterproto.DaemonInfo{Version: h.version},
-		Instance:     adapterproto.InstanceInfo{ID: s.id, LockPath: inst.LockPath},
+		Instance:     adapterproto.InstanceInfo{ID: s.id, LockPath: inst.LockPath, StateDir: inst.StateDir},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	}
 	var init adapterproto.InitializeResult

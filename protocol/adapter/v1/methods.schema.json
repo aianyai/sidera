@@ -72,11 +72,12 @@
         },
         "instance": {
           "type": "object",
-          "required": ["id", "lock_path"],
+          "required": ["id", "lock_path", "state_dir"],
           "additionalProperties": false,
           "properties": {
             "id": { "type": "string", "minLength": 1, "maxLength": 128 },
-            "lock_path": { "type": "string", "minLength": 1, "maxLength": 4096 }
+            "lock_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "state_dir": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "An absolute directory only the owner can reach, made by the daemon for this instance and stable across restarts." }
           }
         }
       }

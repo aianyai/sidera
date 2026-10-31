@@ -12,7 +12,8 @@
     },
     "instance": {
       "id": "work",
-      "lock_path": "C:\\Users\\dev\\AppData\\Local\\sidera\\adapters\\work\\instance.lock"
+      "lock_path": "C:\\Users\\dev\\AppData\\Local\\sidera\\adapters\\work\\instance.lock",
+      "state_dir": "C:\\Users\\dev\\AppData\\Local\\sidera\\adapter-state\\work"
     },
     "capabilities": {}
   }

@@ -199,7 +199,7 @@ func (a *procAdapter) initialize() {
 	var res adapterproto.InitializeResult
 	if err := a.call(adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol: adapterproto.SupportedRange(), Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: a.f.lock},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: a.f.lock, StateDir: "/state"},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	}, &res); err != nil {
 		a.f.t.Fatalf("initialize: %v", err)

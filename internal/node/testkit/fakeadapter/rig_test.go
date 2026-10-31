@@ -443,7 +443,7 @@ func (r *rig) initialize() adapterproto.InitializeResult {
 	r.mustCall(adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol:     adapterproto.SupportedRange(),
 		Daemon:       adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: r.t.TempDir() + "/instance.lock"},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: r.t.TempDir() + "/instance.lock", StateDir: "/state"},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	}, &res)
 	return res
@@ -534,7 +534,7 @@ func (r *rig) initializeAt(path string) error {
 	_, err := r.call(adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol:     adapterproto.SupportedRange(),
 		Daemon:       adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: path},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: path, StateDir: "/state"},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	})
 	return err

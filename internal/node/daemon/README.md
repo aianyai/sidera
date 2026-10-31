@@ -60,7 +60,8 @@ is read here and no test tooling is imported.
   start take the same five steps; `RequestStop` runs it once.
 - **The adapter host is wired by field, not by hook.** `Config.AdapterHost` is given to
   the engine (only when not nil), started at step 10 with `Env.Home` the absolute data
-  directory (the instance lock files `adapter-<instance>.lock` are at its root),
+  directory (the instance lock files `adapter-<instance>.lock` are at its root, and the host makes
+  `adapter-state/<instance>/` under it),
   `Env.Source` the configuration view the hooks get, `Env.Logs` the daemon's log handle
   and the engine behind `apiwire.AdapterEngine`; step 10 ends when each instance has
   answered `adapter.start` or been judged offline, and the `Adapters` hook runs after

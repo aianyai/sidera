@@ -12,7 +12,8 @@
     },
     "instance": {
       "id": "work",
-      "lock_path": "/home/dev/.local/state/sidera/adapters/work/instance.lock"
+      "lock_path": "/home/dev/.local/state/sidera/adapters/work/instance.lock",
+      "state_dir": "/home/dev/.local/state/sidera/adapter-state/work"
     },
     "capabilities": {}
   }

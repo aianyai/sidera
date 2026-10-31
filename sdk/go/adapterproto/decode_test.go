@@ -251,7 +251,7 @@ func FuzzDecodeMessages(f *testing.F) {
 		`{"sessions":[]}`, `{"outcome":"created","native_ref":"n","frontends":["cli"]}`, `{"stage":"refused","reason":"busy"}`,
 		`{"lease":"` + lease1 + `","messages":[],"more":0}`, `{"page":{"lease":"` + lease1 + `","messages":[],"more":0}}`,
 		`{"verdict":"found","turn":{"ref":"t","state":"running"},"grounds":{"code":"attempt_in_record"}}`,
-		`{"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"w","lock_path":"/l"}}`,
+		`{"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"w","lock_path":"/l","state_dir":"/s"}}`,
 		`{"conditions":[]}`, `{"request_id":3}`, `{"request_id":"x"}`, `{"scope":"session","id":"e","state":{}}`,
 		`{"recipients":[],"control_reply":{"signal":"session.create","outcome":"failed","reason":"node_endpoint_limit"}}`,
 		`{"recipients":[{"to":"a","state":"queued"}],"control_reply":{"signal":"session.close","outcome":"closed"}}`,
@@ -364,7 +364,7 @@ func TestCapabilitiesAreOpen(t *testing.T) {
 	})
 
 	t.Run("the daemon declares its own capabilities in initialize", func(t *testing.T) {
-		const rest = `"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"work","lock_path":"/x/lock"}`
+		const rest = `"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"work","lock_path":"/x/lock","state_dir":"/x/state"}`
 		var p adapterproto.InitializeParams
 		if err := adapterproto.Decode([]byte(`{`+rest+`,"capabilities":{}}`), &p); err != nil {
 			t.Fatalf("empty daemon capabilities: %v", err)
@@ -384,7 +384,7 @@ func TestCapabilitiesAreOpen(t *testing.T) {
 		}
 		b, err := adapterproto.Encode(adapterproto.InitializeParams{
 			Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
-			Instance: adapterproto.InstanceInfo{ID: "work", LockPath: "/x/lock"}})
+			Instance: adapterproto.InstanceInfo{ID: "work", LockPath: "/x/lock", StateDir: "/state"}})
 		if err != nil || !strings.Contains(string(b), `"capabilities":{}`) {
 			t.Fatalf("the daemon's capabilities are always sent, even empty: %s (%v)", b, err)
 		}

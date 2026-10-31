@@ -51,7 +51,8 @@ a `ProcessLauncher` in the program.
   answers `initialize` and answers `1011` when it cannot, so that a hung old process
   and its replacement never control sessions at once. The lock is the standard
   library's only (`flock` on Unix, a handle opened without sharing on Windows) and
-  dies with the process.
+  dies with the process. It decodes `instance.state_dir` with the rest of the parameters
+  and keeps nothing in it.
 - **An attempt is idempotent.** The same creation attempt is the same session,
   whatever the number of retries; the same attempt with other parameters is `1005`.
   The same prompt attempt is delivered once, and answered the same; with other text

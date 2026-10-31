@@ -14,7 +14,7 @@ func TestInitializeParamsRules(t *testing.T) {
 		return adapterproto.InitializeParams{
 			Protocol: adapterproto.Range{Min: 1, Max: 1},
 			Daemon:   adapterproto.DaemonInfo{Version: "0.1.0"},
-			Instance: adapterproto.InstanceInfo{ID: "work", LockPath: "/state/lock"},
+			Instance: adapterproto.InstanceInfo{ID: "work", LockPath: "/state/lock", StateDir: "/state"},
 		}
 	}, []row[adapterproto.InitializeParams]{
 		{"protocol range is validated", func(p *adapterproto.InitializeParams) { p.Protocol = adapterproto.Range{Min: 3, Max: 2} }, "protocol", true},
@@ -27,6 +27,8 @@ func TestInitializeParamsRules(t *testing.T) {
 		{"lock path required", func(p *adapterproto.InitializeParams) { p.Instance.LockPath = "" }, "instance.lock_path", false},
 		{"lock path at the limit", func(p *adapterproto.InitializeParams) { p.Instance.LockPath = repeat("p", 4096) }, "", false},
 		{"lock path over the limit", func(p *adapterproto.InitializeParams) { p.Instance.LockPath = repeat("p", 4097) }, "instance.lock_path", false},
+		{"state dir required", func(p *adapterproto.InitializeParams) { p.Instance.StateDir = "" }, "instance.state_dir", false},
+		{"state dir over the limit", func(p *adapterproto.InitializeParams) { p.Instance.StateDir = repeat("p", 4097) }, "instance.state_dir", false},
 		{"lengths count characters, not bytes", func(p *adapterproto.InitializeParams) { p.Instance.ID = repeat("é", 128) }, "", false},
 	})
 }

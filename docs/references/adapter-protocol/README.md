@@ -352,7 +352,7 @@ only says the request was not understood or not allowed.
 
 | Method | Direction | Kind | Params | Result |
 | ------ | --------- | ---- | ------ | ------ |
-| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`), `capabilities` (the daemon's own, empty for now) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
+| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`, `state_dir`), `capabilities` (the daemon's own, empty for now) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
 | `ping` | both | request | none | none |
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | none | none |
@@ -592,6 +592,18 @@ answered; the daemon treats it as the end of that turn. It is a fact that stays 
 safe whenever the answer arrives, unlike a busy flag that a notification could outrun. It is
 sent as `true` or left out, never as `false`, and only with `created`; without it the daemon
 infers nothing and the turn's own `turn.ended` is expected on the connection.
+
+**The state directory.** `instance.state_dir` in `initialize` is an absolute path of the
+operating system's file system: a directory of the instance, `adapter-state/<instance>` in the
+daemon's data directory, that the daemon has made, reachable only by its owner, before it
+started the adapter. The adapter keeps there what must outlive its process and belongs to the
+instance: a socket, a log, a state file. The path is the same after every restart of the adapter
+and of the daemon, so it is also where a lock or a socket that a restarted adapter must find
+again lives. The daemon never reads or writes inside it, removes nothing from it and does not
+count its size; what the adapter leaves there is the adapter's to clean. The directory exists
+for the life of the instance's configuration, not of one process: it is not removed when the
+adapter stops. It is a path the adapter is given, not a place it chooses, because the layout of
+the data directory is the daemon's.
 
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
 `adapter.start`, holds what the session's tools need to reach the daemon: the token of

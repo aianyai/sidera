@@ -56,13 +56,21 @@ type InstanceInfo struct {
 	// initialize, so that a hung old process and its replacement never control
 	// sessions at once. The lock is released when the process dies.
 	LockPath string `json:"lock_path"`
+	// StateDir is an absolute path of the operating system's file system: a
+	// directory only the owner can reach, which the daemon made for this instance
+	// before it started the adapter and never reads or writes. It is where the
+	// adapter keeps what must outlive the process and belongs to the instance: a
+	// socket, a log, a state file. It stays the same across restarts of the
+	// adapter and of the daemon.
+	StateDir string `json:"state_dir"`
 }
 
-// Validate checks both fields.
+// Validate checks the three fields.
 func (i InstanceInfo) Validate() error {
 	var c checker
 	c.field("id", strLen(i.ID, 1, MaxIdentLen))
 	c.field("lock_path", strLen(i.LockPath, 1, maxPathLen))
+	c.field("state_dir", strLen(i.StateDir, 1, maxPathLen))
 	return c.err
 }
 

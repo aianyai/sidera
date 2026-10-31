@@ -28,7 +28,7 @@ func TestAnInitializeThatRunsAfterTheAdapterWasReleasedTakesNoLock(t *testing.T)
 	params, err := json.Marshal(adapterproto.InitializeParams{
 		Protocol:     adapterproto.SupportedRange(),
 		Daemon:       adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: path},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: path, StateDir: "/state"},
 		Capabilities: adapterproto.DaemonCapabilities{},
 	})
 	if err != nil {

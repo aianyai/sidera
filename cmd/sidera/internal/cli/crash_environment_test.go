@@ -127,7 +127,7 @@ func runCrashEnvironmentHelper(t *testing.T, dir string) {
 	var initialized adapterproto.InitializeResult
 	if err := p.Call(ctx, adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol: adapterproto.SupportedRange(), Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
-		Instance: adapterproto.InstanceInfo{ID: "fake", LockPath: filepath.Join(dir, "instance.lock")},
+		Instance: adapterproto.InstanceInfo{ID: "fake", LockPath: filepath.Join(dir, "instance.lock"), StateDir: "/state"},
 	}, &initialized); err != nil {
 		t.Fatal(err)
 	}
