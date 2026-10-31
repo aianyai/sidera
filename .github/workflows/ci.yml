@@ -1,5 +1,5 @@
 name: CI
-run-name: Diagnostic only - native acceptance feedback
+run-name: Diagnostic only - fixed native acceptance samples
 
 on:
   workflow_dispatch:
@@ -19,13 +19,13 @@ defaults:
 env:
   SIDERA_CI_DIAGNOSTIC_EXPORT: ${{ github.workspace }}/.scratch/ci-diagnostic-export
 
-# Four independent jobs cap this experiment at 240 runner-minutes in total.
+# Four fixed native jobs: at most 150 samples and 40 runner-minutes.
 jobs:
   windows-acceptance:
     name: Diagnostic only - windows-acceptance
-    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,34 +34,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+      - name: build fixed batch classifier
+        run: |
+          mkdir -p .scratch
+          go build -o .scratch/native-rate.exe ./.github/native-rate
       - name: verify export privacy boundaries
-        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: original Windows acceptance
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
-        run: |
-          set +e
-          go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
-          status=$?
-          printf '{"command":"original Windows acceptance","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
-      - name: original failure test names must exist
-        run: |
-          names=$(go test -tags acceptance,crashtest,testclock -list '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance)
-          for name in TestRuntimeProfileProbesAcrossGeneration TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe TestUnobservedPreparationLeavesGenerationOneForDaemon TestRealBinaryTargetNeedsMarkerAndAbnormalExit TestBinarySessionBindingRunsSharedRecipeAcrossGeneration TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults; do
-            printf '%s\n' "$names" | grep -Fx "$name"
-          done
-      - name: repeat original Windows acceptance failures
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,crashtest,testclock -run '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance
-        run: |
-          set +e
-          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,crashtest,testclock -run '^(TestRuntimeProfileProbesAcrossGeneration|TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe|TestUnobservedPreparationLeavesGenerationOneForDaemon|TestRealBinaryTargetNeedsMarkerAndAbnormalExit|TestBinarySessionBindingRunsSharedRecipeAcrossGeneration|TestBinaryDomainCallbacksPreserveClockFailureAndRejectFSFaults)$' ./cmd/sidera/internal/acceptance
-          status=$?
-          printf '{"command":"repeat original Windows acceptance failures","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
+        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: exact test must exist
+        id: required
+        run: go test -timeout 90s -tags acceptance,crashtest,testclock -list '^TestUnobservedPreparationLeavesGenerationOneForDaemon$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestUnobservedPreparationLeavesGenerationOneForDaemon'
+      - name: fixed default batch of 20
+        id: default
+        run: bash .github/native-rate/batch.sh acceptance 20 default
+      - name: independent confirmation batch of 10
+        if: ${{ !cancelled() && steps.default.outputs.qualifies == 'true' }}
+        run: bash .github/native-rate/batch.sh acceptance 10 default
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
@@ -85,9 +72,9 @@ jobs:
 
   windows-delivery:
     name: Diagnostic only - windows-delivery
-    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -96,32 +83,31 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+      - name: build fixed batch classifier
+        run: |
+          mkdir -p .scratch
+          go build -o .scratch/native-rate.exe ./.github/native-rate
       - name: verify export privacy boundaries
-        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: required test must exist
-        run: go test -tags acceptance,diagnostic -list '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestRegisterReplyExactTargetRepro'
-      - name: exact Windows delivery target
+        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: exact test must exist
+        id: required
+        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestRegisterReplyExactTargetRepro'
+      - name: fixed default batch of 20
+        id: default
+        run: bash .github/native-rate/batch.sh delivery 20 default
+      - name: fixed GOMAXPROCS=1 batch of 20
+        id: cpu1
+        if: ${{ !cancelled() && steps.required.outcome == 'success' && steps.default.outputs.qualifies == 'false' }}
+        run: bash .github/native-rate/batch.sh delivery 20 1
+      - name: fixed GOMAXPROCS=2 batch of 20
+        id: cpu2
+        if: ${{ !cancelled() && steps.required.outcome == 'success' && steps.default.outputs.qualifies == 'false' }}
+        run: bash .github/native-rate/batch.sh delivery 20 2
+      - name: independent confirmation of first qualifying condition
+        if: ${{ !cancelled() && (steps.default.outputs.qualifies == 'true' || steps.cpu1.outputs.qualifies == 'true' || steps.cpu2.outputs.qualifies == 'true') }}
         env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance
-        run: |
-          set +e
-          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance
-          status=$?
-          printf '{"command":"exact Windows delivery target","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
-      - name: required test must exist
-        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
-      - name: original Windows delivery full shard
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-        run: |
-          set +e
-          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-          status=$?
-          printf '{"command":"original Windows delivery full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
+          SELECTED_SCHEDULE: ${{ steps.default.outputs.qualifies == 'true' && 'default' || steps.cpu1.outputs.qualifies == 'true' && '1' || '2' }}
+        run: bash .github/native-rate/batch.sh delivery 10 "$SELECTED_SCHEDULE"
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
@@ -145,9 +131,9 @@ jobs:
 
   macos-management:
     name: Diagnostic only - macos-management
-    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -156,32 +142,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+      - name: build fixed batch classifier
+        run: |
+          mkdir -p .scratch
+          go build -o .scratch/native-rate.exe ./.github/native-rate
       - name: verify export privacy boundaries
-        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: required test must exist
-        run: go test -tags acceptance,diagnostic -list '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestBinaryManagementFeedbackRepro'
-      - name: exact macOS management target
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance
-        run: |
-          set +e
-          go test -race=false -count=30 -failfast -v -timeout 10m -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance
-          status=$?
-          printf '{"command":"exact macOS management target","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
-      - name: required test must exist
-        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
-      - name: original macOS management full shard
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/2 go test -race=false -count=1 -v -timeout 40m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-        run: |
-          set +e
-          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=2/2 go test -race=false -count=1 -v -timeout 40m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-          status=$?
-          printf '{"command":"original macOS management full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
+        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: exact test must exist
+        id: required
+        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestBinaryManagementFeedbackRepro'
+      - name: fixed default batch of 20
+        id: default
+        run: bash .github/native-rate/batch.sh management 20 default
+      - name: independent confirmation batch of 10
+        if: ${{ !cancelled() && steps.default.outputs.qualifies == 'true' }}
+        run: bash .github/native-rate/batch.sh management 10 default
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
@@ -203,11 +178,11 @@ jobs:
             .scratch/ci-diagnostic-export/ledger-projection.jsonl
             .scratch/ci-diagnostic-export/trace-projection.jsonl
 
-  windows-runtime:
-    name: Diagnostic only - windows-runtime
-    if: ${{ github.ref == 'refs/heads/codex/f7b-ci-feedback' }}
+  windows-maintenance:
+    name: Diagnostic only - windows-maintenance
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
     runs-on: windows-latest
-    timeout-minutes: 65
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -216,20 +191,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: verify export privacy boundaries
-        run: go test -count=1 -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: required test must exist
-        run: go test -tags acceptance -list '^TestCrashAtEveryCrashPointPreservesInvariants$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestCrashAtEveryCrashPointPreservesInvariants'
-      - name: original Windows runtime full shard
-        env:
-          SIDERA_CI_DIAGNOSTIC_COMMAND: >-
-            SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=4/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+      - name: build fixed batch classifier
         run: |
-          set +e
-          SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=4/4 go test -race=false -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
-          status=$?
-          printf '{"command":"original Windows runtime full shard","exit_code":%d}\n' "$status" >> "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
-          exit "$status"
+          mkdir -p .scratch
+          go build -o .scratch/native-rate.exe ./.github/native-rate
+      - name: verify export privacy boundaries
+        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
+      - name: exact test must exist
+        id: required
+        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestManagementMaintenanceExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestManagementMaintenanceExactTargetRepro'
+      - name: fixed default batch of 20
+        id: default
+        run: bash .github/native-rate/batch.sh maintenance 20 default
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
