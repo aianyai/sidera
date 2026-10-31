@@ -147,8 +147,15 @@ on both. Over that trust it sends a message from an endpoint of one node to an e
 the other, and a reply back. It asserts that the sender sees `accepted`, that
 the recipient receives the exact body and acknowledges it, that the sender's pull brings
 the report back (`delivered`), and that each node lists the other as a connected peer with
-its certificate held. It does not assert the transient `queued` state, which the sender may
-leave before any poll can see it. The nodes' clocks stand still, so the pull an engine
+its certificate held. A session of the first node, started through the runtime adapter that only this node
+has (`createSession`; a direct endpoint has no access to `peers` and `directory`), then lists
+the node itself and the other as `self` and `direct` trust, both connected, and reads the
+other node's directory to find its one endpoint. After the first owner runs `trust remove`
+for the other, a message to it stays `queued` while the node retries; once the clock has
+been moved past the two minutes of failed contact, the sender's endpoint receives the
+notice that the target is not reachable, `peers` lists only the node itself, and a
+directory read of the removed node is `unavailable` with `directory_unavailable`. It does not assert the transient `queued` state of the first
+message, which the sender may leave before any poll can see it. The nodes' clocks stand still, so the pull an engine
 makes a minute after a send is made by moving the sender's clock past that interval; all
 other waits are polls with a 30 second deadline. The test is run by hand and by no job.
 

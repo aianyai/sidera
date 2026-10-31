@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +23,7 @@ import (
 
 // Two real daemons of this machine, each with its own home and port, pair with
 // each other over libp2p as two owners would, then carry a message there and back
-// over the trust the pairing made. A node's clock is a test clock that stands still, so a pull the engine would
+// over the trust the pairing made, show each other to an agent, and part again. A node's clock is a test clock that stands still, so a pull the engine would
 // make a minute from now is made by moving that clock; every other wait is a poll
 // with a deadline.
 
@@ -92,11 +94,14 @@ type netNode struct {
 	endpoint string // name of the endpoint in env
 }
 
-func startNetNode(ctx context.Context, t *testing.T, name string) *netNode {
+// startNetNode starts a daemon whose direct endpoint is called name. With runtime
+// the node also has an adapter that starts sessions, so that the test can call the
+// agent methods a direct endpoint has no access to.
+func startNetNode(ctx context.Context, t *testing.T, name string, runtime bool) *netNode {
 	t.Helper()
 	binaries := testBinaries
 	binaries.Tagged, binaries.Plain = networkBinary(t), networkBinary(t)
-	p := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name() + "/" + name, ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default"})
+	p := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name() + "/" + name, ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: runtime})
 	n := &netNode{plainNode: p, env: newEnvironment(ctx, p.f), endpoint: name}
 	t.Logf("node %s: daemon pid %d", name, p.p.cmd.Process.Pid)
 	n.id = n.contactLine()[0]
@@ -210,6 +215,42 @@ func (n *netNode) awaitReport(id adapterproto.MessageID) {
 	})
 }
 
+// awaitUnreachableNotice waits for the node's notice to the endpoint that the
+// message cannot reach its target. The node makes it after two minutes of failed
+// contact on its own clock, which stands still, so the clock is moved past a
+// minute at a time, at most five times and so never past the message's deadline of
+// ten minutes.
+func (n *netNode) awaitUnreachableNotice(id adapterproto.MessageID) {
+	n.t.Helper()
+	agent := n.env.Agent(n.endpoint)
+	moves := 0
+	last := time.Now()
+	until(n.ctx, n.t, fmt.Sprintf("the notice that %s is unreachable", id), func() (bool, error) {
+		page, err := agent.Recv(n.ctx, fakeagent.RecvInput{})
+		if err != nil {
+			return false, err
+		}
+		if len(page.Page.Messages) > 0 {
+			if _, err := agent.Ack(n.ctx, fakeagent.AckInput{Lease: page.Page.Lease}); err != nil {
+				return false, err
+			}
+			for _, m := range page.Page.Messages {
+				if strings.Contains(m.Body, "unreachable: the target is not reachable") && strings.Contains(m.Body, string(id)) {
+					return true, nil
+				}
+			}
+		}
+		if moves < 5 && time.Since(last) > time.Second {
+			moves++
+			last = time.Now()
+			if err := n.f.SetTime(n.ctx, n.f.Now().Add(pullInterval)); err != nil {
+				return false, err
+			}
+		}
+		return false, nil
+	})
+}
+
 // receive waits for the endpoint's next message, acknowledges it as completed and
 // returns it.
 func (n *netNode) receive(body string) adapterproto.MessageID {
@@ -237,8 +278,8 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	begun := time.Now()
-	a := startNetNode(ctx, t, "alice")
-	b := startNetNode(ctx, t, "bob")
+	a := startNetNode(ctx, t, "alice", true)
+	b := startNetNode(ctx, t, "bob", false)
 	t.Logf("both nodes serve after %s", time.Since(begun).Round(time.Millisecond))
 
 	// The owners pair the nodes as they would: each gives its node the other's
@@ -300,6 +341,44 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	}
 	t.Logf("whole exchange took %s", time.Since(began).Round(time.Millisecond))
 
+	// Alice's session reads what the node shows an agent of the nodes around it: the
+	// node itself and the one it trusts, connected, and the endpoints the other
+	// node lets it see.
+	session := sessionAgentFor(a.env, a.createSession(a.env, a.env.Agent(a.endpoint)))
+	peers, err := session.Peers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPeers := []fakeagent.PeerNode{{Node: a.id, Self: true, Trust: "self", Connected: true}, {Node: b.id, Trust: "direct", Connected: true}}
+	if !slices.Equal(peers.Nodes, wantPeers) {
+		t.Errorf("peers = %+v, want %+v", peers.Nodes, wantPeers)
+	}
+	directory, err := session.Directory(ctx, fakeagent.DirectoryInput{Node: b.id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(directory.Endpoints) != 1 || directory.Endpoints[0].Address != b.address || directory.NextCursor != "" {
+		t.Errorf("directory of bob = %+v, want its one endpoint %s", directory, b.address)
+	}
+
+	// Alice removes bob from its trust, and bob is not told. A message to it then
+	// cannot be delivered: it stays queued while alice keeps trying until its
+	// deadline, and after two minutes of failed contact alice's endpoint is told that
+	// the target is not reachable. A directory read of bob is unavailable at once.
+	var removed struct{}
+	a.cli(&removed, "trust", "remove", b.id, "--json")
+	lost := send(a, b, "hello again bob")
+	a.awaitUnreachableNotice(lost)
+	if peers, err := session.Peers(ctx); err != nil || !slices.Equal(peers.Nodes, wantPeers[:1]) {
+		t.Errorf("peers after the removal = %+v, %v, want only the node itself", peers.Nodes, err)
+	}
+	var refused *fakeagent.Error
+	if _, err := session.Directory(ctx, fakeagent.DirectoryInput{Node: b.id}); !errors.As(err, &refused) || refused.Code != "directory_unavailable" {
+		t.Errorf("directory of the node removed from trust: %v, want directory_unavailable", err)
+	}
+	if got := a.state(lost); got != adapterproto.DeliveryQueued {
+		t.Errorf("the message to the node removed from trust is %s, want queued while it is retried", got)
+	}
 	for _, n := range []*netNode{a, b} {
 		n.stop()
 	}

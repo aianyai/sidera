@@ -145,25 +145,18 @@ func (n *plainNode) stop() {
 	}
 }
 
-func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	binaries := testBinaries
-	binaries.Tagged = binaries.Plain
-	n := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name(), ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: true})
-	f, wait := n.f, n.wait
-	e := newEnvironment(ctx, f)
-	if _, err := e.Direct("sender"); err != nil {
-		t.Fatal(err)
-	}
-	sender := e.Agent("sender")
-	_, err := sender.Control(ctx, fakeagent.ControlInput{To: runtimeAddress(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+// createSession has the node's runtime adapter start a session at the request of
+// sender, a direct endpoint of the node, and waits until the node lists exactly one
+// open session of the instance. It returns the endpoint of that session.
+func (n *plainNode) createSession(e *environment, sender fakeagent.Agent) string {
+	n.t.Helper()
+	_, err := sender.Control(n.ctx, fakeagent.ControlInput{To: runtimeAddress(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 	if err != nil {
-		t.Fatal(err)
+		n.t.Fatal(err)
 	}
 	var endpoint string
-	wait(func() (bool, error) {
-		raw, err := f.Manage(ctx, "endpoints.list", manageapi.Request{})
+	n.wait(func() (bool, error) {
+		raw, err := n.f.Manage(n.ctx, "endpoints.list", manageapi.Request{})
 		if err != nil {
 			return false, err
 		}
@@ -178,7 +171,7 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 				continue
 			}
 			if endpoint != "" {
-				t.Fatal("plain creation exposed more than one open session")
+				n.t.Fatal("plain creation exposed more than one open session")
 			}
 			address, err := ident.ParseAddress(ep.Address)
 			if err != nil {
@@ -188,6 +181,22 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 		}
 		return endpoint != "", nil
 	})
+	return endpoint
+}
+
+func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	binaries := testBinaries
+	binaries.Tagged = binaries.Plain
+	n := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name(), ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: true})
+	f, wait := n.f, n.wait
+	e := newEnvironment(ctx, f)
+	if _, err := e.Direct("sender"); err != nil {
+		t.Fatal(err)
+	}
+	sender := e.Agent("sender")
+	endpoint := n.createSession(e, sender)
 	a := sessionAgentFor(e, endpoint)
 	me, err := a.Me(ctx)
 	if err != nil || me.Kind != "session" {
