@@ -25,10 +25,17 @@ func fixture(t *testing.T) (*Fixture, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
-	f, err := NewFixture(ctx, runRoot(t), testBinaries, Options{Seed: t.Name()})
+	var f *Fixture
+	root := runRootAfterRemove(t, func(root string, err error) {
+		if f != nil {
+			f.wcl.afterRemove(root, err)
+		}
+	})
+	f, err := NewFixture(ctx, root, testBinaries, Options{Seed: t.Name()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.wcl.enable()
 	t.Cleanup(func() {
 		if err := f.Close(); err != nil {
 			t.Error(err)

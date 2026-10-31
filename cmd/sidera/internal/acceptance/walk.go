@@ -380,7 +380,11 @@ func (r *binaryRun) runScript(ctx context.Context, s *WalkScenario) error {
 		}
 		r.violation(scenario.Check(log, recipe.Script.Expect))
 		if recipe.Check != nil {
-			r.violation(recipe.Check(env))
+			checkErr := recipe.Check(env)
+			if checkErr != nil {
+				mfObserveCheck(r.plan, s.Name(), env)
+			}
+			r.violation(checkErr)
 		}
 		// Domain checks may query the serving daemon. Stop only after judging the
 		// completed script; Stop excludes its own cleanup writes from the trace.

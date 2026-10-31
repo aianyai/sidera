@@ -1,54 +1,61 @@
 # Acceptance support
 
-> **Temporary diagnostic branch only.** This branch runs four bounded native
-> runner experiments and exports only typed, allowlisted failure evidence. It
-> cannot establish the formal acceptance guarantee of candidate
-> `b486d9f40fe067c389fed2f6bc0f675cf306901d` and must never be integrated.
-> Three private exact target entry points require `acceptance,diagnostic`.
-> Windows acceptance selects only the unchanged
-> `TestUnobservedPreparationLeavesGenerationOneForDaemon`, with its original
-> `acceptance,crashtest,testclock` tags. Four native jobs each have a 10-minute
-> limit; every Go test command has a 90-second timeout. There is no full-shard
-> fallback, fail-fast, retry or automatic follow-up dispatch.
+> **Temporary diagnostic branch only; never merge.** This branch provides two
+> independent native observations, not a product fix or a formal acceptance gate.
+> Only manual `workflow_dispatch` on `codex/f7b-native-observation` runs them;
+> there are no inputs, automatic triggers, retries, sampling loops or full walks.
+> Each job has a 10-minute limit (20 runner-minutes total); every Go test command
+> has a 90-second timeout and uses `-race=false`. Exact-list guards require the
+> selected entry points before any observation.
 >
-> macOS management and Windows acceptance each take 20 fixed samples. At least
-> 10 same-symptom failures permit one independent process with 10 samples;
-> at least 5 same-symptom failures confirm that practical selection threshold.
-> Windows delivery starts with the same default batch. Only if default is below
-> threshold does it also take 20 samples each with inherited `GOMAXPROCS=1` and
-> `GOMAXPROCS=2`. The first qualifying condition, in default/1/2 order, gets one
-> independent 10-sample confirmation. Every batch preserves its original nonzero
-> status while allowing the explicitly preplanned subsequent batch to run.
-> Missing tests, setup failures, other failures and incomplete samples are
-> reported separately; timeout and missing samples cannot qualify a batch.
+> Windows first runs explicit privacy and scope canaries, lists
+> `TestDiagnosticWCLCalibration` and
+> `TestUnobservedPreparationLeavesGenerationOneForDaemon`, and runs calibration
+> once. Only successful calibration permits one execution of that unchanged
+> original cleanup test with `acceptance,diagnostic,crashtest,testclock` and
+> `SIDERA_CI_DIAGNOSTIC_WCL_OBSERVER=1`. Calibration is unverified until it runs
+> on native Windows. Its owned helper opens a private file without delete sharing,
+> confirms the sharing violation and its PID plus creation time in Restart
+> Manager, then closes the file while staying alive and confirms that identity
+> disappears from the resource list before exiting normally.
 >
-> Windows maintenance takes only one fixed 20-sample command at
-> `management-maintenance`, generation 1 `clock-high-water/commit#2`, using the
-> original seed, 66-point recipe, clean recording, budget and original oracle.
-> Fixed clean/main start lines identify its active invocation. A Go timeout
-> stops the remaining samples and retains the native goroutine dump. A main
-> invocation waiting in `waitProbes` / `Start` / `runScript` with a generation-2
-> Start argument is only a waiting-boundary candidate; target reach is unknown
-> without a returned result, not inferred from that stack. Clean or generation-1
-> waits leave target association unproven. No watchdog or internal probe exists.
-> The total maximum is 150 exact samples and 40 runner-minutes. These experiments
-> establish neither a shared cause nor completed minimization; 20 red samples
-> alone do not complete reproduction and reduction. The small classifier under
-> `.github/native-rate` uses Go's built-in JSON events, prints original output
-> only to the CI console, and emits static per-attempt classifications and counts.
-> The existing manifest records the actual command for each process and arm.
+> The Windows probe captures a confirmed fixture adapter identity before cleanup;
+> that identity capture can perturb scheduling. Original Close, RemoveAll and
+> assertion order remain, including the original failed verdict and exit status.
+> After the first failed RemoveAll, only its exact adapter JSONL file under that
+> fixture root may be registered with Restart Manager. `resource_users` records
+> PID plus creation FILETIME associations, not proof of a blocking handle;
+> `handle_owner` remains unknown. Missing files, empty lists, query failures and
+> incomplete lists do not prove absence of a leak. Only a matching owned identity
+> may be observed through its already-held process handle for up to 10 seconds;
+> external resource users are never opened or waited on. That 10-second bound
+> covers process waiting, not Restart Manager calls: those APIs have no separate
+> deadline and rely on the outer Go 90-second timeout. Only StartSession,
+> RegisterResources for one file, GetList and EndSession are used; no RmShutdown,
+> RmRestart, download, EULA acceptance, external-process operation or RemoveAll
+> retry is added.
 >
-> Private cleanup owners still run their original Close and RemoveAll sequence.
-> Oracle failures project existing ledger and trace evidence before cleanup;
-> removal failures project only material still available after that failure.
-> Missing or truncated material is reported as unavailable. No successful-path
-> filesystem snapshot, additional kill, cleanup retry, raw ledger, credential,
-> response body, process output or complete fixture directory is exported.
-> The only export files are `manifest.json`, `attempts.jsonl`, `boundary.jsonl`,
-> `ledger-projection.jsonl` and `trace-projection.jsonl`. Errors are classified;
-> their original messages remain only in the unchanged test log. Ledger Detail,
-> CWD and LockPath and trace file paths are excluded. Private `diagnostic`-tagged
-> canary tests verify the projection and error-classification boundaries.
+> macOS runs explicit privacy and scope canaries, lists the original
+> `TestBinaryManagementFeedbackRepro`, then runs it once with
+> `acceptance,diagnostic` and `SIDERA_CI_DIAGNOSTIC_MF_OBSERVER=1`. Only the existing
+> management-instance generation-1 `source-update/out.write#4` recipe is observed,
+> after its original Check fails and before its original Stop. There is no time
+> advance or extra quiet boundary. The read-only scan is not frozen or atomic;
+> fixture logical Now, pending feedback At and notice state times are projected
+> when available, while the merge window remains unavailable. The private model's
+> view of a notice remains unknown. The original oracle and error are preserved;
+> a passing run establishes wiring only, not a reproduced failure or a fix.
+>
+> Typed allowlisted stdout records use only `[DEBUG-wcl]` and `[DEBUG-mf]`; no
+> product API, artifact schema or raw log persistence is added. Original stdout
+> and errors stay in the existing CI console. The only uploaded files remain
+> `manifest.json`, `attempts.jsonl`, `boundary.jsonl`, `ledger-projection.jsonl`
+> and `trace-projection.jsonl`. Raw ledger, credentials, freeform bodies, process
+> output, native app/service names and full fixture directories are excluded.
+> Explicit diagnostic canary selectors exclude calibration and helper execution.
+> The previous disposable batch classifier is removed; unused existing exact
+> target entry points remain unchanged. These observations establish neither a
+> shared cause nor completed minimization and do not run the other failure families.
 
 
 Support for exercising the built program through its public front ends.

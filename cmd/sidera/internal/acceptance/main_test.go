@@ -18,6 +18,9 @@ var testRoot string
 var fixtureNumber int
 
 func TestMain(m *testing.M) {
+	if diagnosticWCLHelperProcess() {
+		return
+	}
 	start := time.Now().UTC()
 	diagnosticInit()
 	wd, err := os.Getwd()
@@ -80,6 +83,11 @@ func TestMain(m *testing.M) {
 
 func runRoot(t *testing.T) string {
 	t.Helper()
+	return runRootAfterRemove(t, nil)
+}
+
+func runRootAfterRemove(t *testing.T, afterRemove func(string, error)) string {
+	t.Helper()
 	fixtureNumber++
 	root := filepath.Join(testRoot, strconv.Itoa(fixtureNumber))
 	err := os.Mkdir(root, 0o700)
@@ -87,10 +95,14 @@ func runRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
+		err := os.RemoveAll(root)
+		if err != nil {
 			diagnosticCleanup(root, "test-root", nil, nil, err)
 			diagnosticCapture(root)
 			t.Error(err)
+		}
+		if afterRemove != nil {
+			afterRemove(root, err)
 		}
 	})
 	return root

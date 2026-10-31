@@ -1,5 +1,5 @@
 name: CI
-run-name: Diagnostic only - fixed native acceptance samples
+run-name: Diagnostic only - native failure observations
 
 on:
   workflow_dispatch:
@@ -19,11 +19,11 @@ defaults:
 env:
   SIDERA_CI_DIAGNOSTIC_EXPORT: ${{ github.workspace }}/.scratch/ci-diagnostic-export
 
-# Four fixed native jobs: at most 150 samples and 40 runner-minutes.
+# Two independent, single-observation jobs: at most 20 runner-minutes.
 jobs:
-  windows-acceptance:
-    name: Diagnostic only - windows-acceptance
-    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
+  windows-cleanup:
+    name: Diagnostic only - Windows cleanup observation
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-observation' }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -34,87 +34,31 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: build fixed batch classifier
+      - name: verify explicit privacy and scope canaries
+        run: go test -race=false -count=1 -timeout 90s -tags diagnostic -run '^(TestDiagnosticExportAllowlist|TestDiagnosticTruncatedMaterialIsUnavailable|TestDiagnosticWCLProjectionExcludesNativeNamesAndErrorText|TestDiagnosticWCLRemovalScopeUsesOnlyExactFixtureAdapterPath|TestMFObserverDisabledDoesNotInspect|TestMFObserverProjectionAllowlist)$' ./cmd/sidera/internal/acceptance
+      - name: exact calibration and original test must exist
         run: |
-          mkdir -p .scratch
-          go build -o .scratch/native-rate.exe ./.github/native-rate
-      - name: verify export privacy boundaries
-        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: exact test must exist
-        id: required
-        run: go test -timeout 90s -tags acceptance,crashtest,testclock -list '^TestUnobservedPreparationLeavesGenerationOneForDaemon$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestUnobservedPreparationLeavesGenerationOneForDaemon'
-      - name: fixed default batch of 20
-        id: default
-        run: bash .github/native-rate/batch.sh acceptance 20 default
-      - name: independent confirmation batch of 10
-        if: ${{ !cancelled() && steps.default.outputs.qualifies == 'true' }}
-        run: bash .github/native-rate/batch.sh acceptance 10 default
-      - name: verify explicit export files
-        if: ${{ always() }}
-        run: |
-          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
-            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
-          done
-          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
-      - name: upload typed diagnostic evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
-          retention-days: 3
-          if-no-files-found: error
-          path: |
-            .scratch/ci-diagnostic-export/manifest.json
-            .scratch/ci-diagnostic-export/attempts.jsonl
-            .scratch/ci-diagnostic-export/boundary.jsonl
-            .scratch/ci-diagnostic-export/ledger-projection.jsonl
-            .scratch/ci-diagnostic-export/trace-projection.jsonl
-
-  windows-delivery:
-    name: Diagnostic only - windows-delivery
-    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
-      - name: build fixed batch classifier
-        run: |
-          mkdir -p .scratch
-          go build -o .scratch/native-rate.exe ./.github/native-rate
-      - name: verify export privacy boundaries
-        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: exact test must exist
-        id: required
-        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestRegisterReplyExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestRegisterReplyExactTargetRepro'
-      - name: fixed default batch of 20
-        id: default
-        run: bash .github/native-rate/batch.sh delivery 20 default
-      - name: fixed GOMAXPROCS=1 batch of 20
-        id: cpu1
-        if: ${{ !cancelled() && steps.required.outcome == 'success' && steps.default.outputs.qualifies == 'false' }}
-        run: bash .github/native-rate/batch.sh delivery 20 1
-      - name: fixed GOMAXPROCS=2 batch of 20
-        id: cpu2
-        if: ${{ !cancelled() && steps.required.outcome == 'success' && steps.default.outputs.qualifies == 'false' }}
-        run: bash .github/native-rate/batch.sh delivery 20 2
-      - name: independent confirmation of first qualifying condition
-        if: ${{ !cancelled() && (steps.default.outputs.qualifies == 'true' || steps.cpu1.outputs.qualifies == 'true' || steps.cpu2.outputs.qualifies == 'true') }}
+          names=$(go test -race=false -timeout 90s -tags acceptance,diagnostic,crashtest,testclock -list '^(TestDiagnosticWCLCalibration|TestUnobservedPreparationLeavesGenerationOneForDaemon)$' ./cmd/sidera/internal/acceptance)
+          printf '%s\n' "$names" | grep -Fx 'TestDiagnosticWCLCalibration'
+          printf '%s\n' "$names" | grep -Fx 'TestUnobservedPreparationLeavesGenerationOneForDaemon'
+      - name: calibrate Restart Manager once
         env:
-          SELECTED_SCHEDULE: ${{ steps.default.outputs.qualifies == 'true' && 'default' || steps.cpu1.outputs.qualifies == 'true' && '1' || '2' }}
-        run: bash .github/native-rate/batch.sh delivery 10 "$SELECTED_SCHEDULE"
+          SIDERA_CI_DIAGNOSTIC_WCL_OBSERVER: '1'
+          SIDERA_CI_DIAGNOSTIC_COMMAND: "go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic,crashtest,testclock -run '^TestDiagnosticWCLCalibration$' ./cmd/sidera/internal/acceptance"
+        run: go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic,crashtest,testclock -run '^TestDiagnosticWCLCalibration$' ./cmd/sidera/internal/acceptance
+      - name: observe original cleanup test once after successful calibration
+        env:
+          SIDERA_CI_DIAGNOSTIC_WCL_OBSERVER: '1'
+          SIDERA_CI_DIAGNOSTIC_COMMAND: "go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic,crashtest,testclock -run '^TestUnobservedPreparationLeavesGenerationOneForDaemon$' ./cmd/sidera/internal/acceptance"
+        run: go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic,crashtest,testclock -run '^TestUnobservedPreparationLeavesGenerationOneForDaemon$' ./cmd/sidera/internal/acceptance
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
-          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
-            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
-          done
           test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/boundary.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/ledger-projection.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/trace-projection.jsonl"
       - name: upload typed diagnostic evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -130,8 +74,8 @@ jobs:
             .scratch/ci-diagnostic-export/trace-projection.jsonl
 
   macos-management:
-    name: Diagnostic only - macos-management
-    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
+    name: Diagnostic only - macOS management observation
+    if: ${{ github.ref == 'refs/heads/codex/f7b-native-observation' }}
     runs-on: macos-latest
     timeout-minutes: 10
     steps:
@@ -142,74 +86,23 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: build fixed batch classifier
-        run: |
-          mkdir -p .scratch
-          go build -o .scratch/native-rate.exe ./.github/native-rate
-      - name: verify export privacy boundaries
-        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: exact test must exist
-        id: required
-        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestBinaryManagementFeedbackRepro'
-      - name: fixed default batch of 20
-        id: default
-        run: bash .github/native-rate/batch.sh management 20 default
-      - name: independent confirmation batch of 10
-        if: ${{ !cancelled() && steps.default.outputs.qualifies == 'true' }}
-        run: bash .github/native-rate/batch.sh management 10 default
+      - name: verify explicit privacy and scope canaries
+        run: go test -race=false -count=1 -timeout 90s -tags diagnostic -run '^(TestDiagnosticExportAllowlist|TestDiagnosticTruncatedMaterialIsUnavailable|TestDiagnosticWCLProjectionExcludesNativeNamesAndErrorText|TestDiagnosticWCLRemovalScopeUsesOnlyExactFixtureAdapterPath|TestMFObserverDisabledDoesNotInspect|TestMFObserverProjectionAllowlist)$' ./cmd/sidera/internal/acceptance
+      - name: exact original test must exist
+        run: go test -race=false -timeout 90s -tags acceptance,diagnostic -list '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestBinaryManagementFeedbackRepro'
+      - name: observe original management target once
+        env:
+          SIDERA_CI_DIAGNOSTIC_MF_OBSERVER: '1'
+          SIDERA_CI_DIAGNOSTIC_COMMAND: "go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance"
+        run: go test -race=false -count=1 -v -timeout 90s -tags acceptance,diagnostic -run '^TestBinaryManagementFeedbackRepro$' ./cmd/sidera/internal/acceptance
       - name: verify explicit export files
         if: ${{ always() }}
         run: |
-          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
-            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
-          done
           test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
-      - name: upload typed diagnostic evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: diagnostic-${{ github.run_id }}-${{ github.job }}-${{ github.run_attempt }}
-          retention-days: 3
-          if-no-files-found: error
-          path: |
-            .scratch/ci-diagnostic-export/manifest.json
-            .scratch/ci-diagnostic-export/attempts.jsonl
-            .scratch/ci-diagnostic-export/boundary.jsonl
-            .scratch/ci-diagnostic-export/ledger-projection.jsonl
-            .scratch/ci-diagnostic-export/trace-projection.jsonl
-
-  windows-maintenance:
-    name: Diagnostic only - windows-maintenance
-    if: ${{ github.ref == 'refs/heads/codex/f7b-native-rate' }}
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
-      - name: build fixed batch classifier
-        run: |
-          mkdir -p .scratch
-          go build -o .scratch/native-rate.exe ./.github/native-rate
-      - name: verify export privacy boundaries
-        run: go test -count=1 -timeout 90s -tags diagnostic -run '^TestDiagnostic' ./cmd/sidera/internal/acceptance
-      - name: exact test must exist
-        id: required
-        run: go test -timeout 90s -tags acceptance,diagnostic -list '^TestManagementMaintenanceExactTargetRepro$' ./cmd/sidera/internal/acceptance | grep -Fx 'TestManagementMaintenanceExactTargetRepro'
-      - name: fixed default batch of 20
-        id: default
-        run: bash .github/native-rate/batch.sh maintenance 20 default
-      - name: verify explicit export files
-        if: ${{ always() }}
-        run: |
-          for name in manifest.json attempts.jsonl boundary.jsonl ledger-projection.jsonl trace-projection.jsonl; do
-            test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/$name"
-          done
-          test -s "$SIDERA_CI_DIAGNOSTIC_EXPORT/manifest.json"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/attempts.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/boundary.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/ledger-projection.jsonl"
+          test -f "$SIDERA_CI_DIAGNOSTIC_EXPORT/trace-projection.jsonl"
       - name: upload typed diagnostic evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

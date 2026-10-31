@@ -78,6 +78,7 @@ type Fixture struct {
 	bootstrapNext  int
 
 	runtimeAddresses map[string]string
+	wcl              diagnosticWCLObserver
 }
 
 func NewFixture(ctx context.Context, root string, binaries Binaries, opts Options) (*Fixture, error) {

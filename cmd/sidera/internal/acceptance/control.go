@@ -129,5 +129,6 @@ func (f *Fixture) Adapter(ctx context.Context, name string) (fakeadapter.Control
 	if err != nil {
 		return nil, err
 	}
+	f.wcl.capture(c.Hello(), name)
 	return fakeadapter.RemoteKnobs{Conn: c}, nil
 }
