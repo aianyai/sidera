@@ -47,6 +47,16 @@ func (c *command) managementResult(raw []byte) error {
 		}
 		delete(result, "reminders")
 	}
+	// A contact line is shown on a line of its own, first, so that it can be copied
+	// whole and given to another owner.
+	if contact, ok := result["contact"].(string); ok {
+		if contact != "" {
+			if _, err := fmt.Fprintln(c.Stdout, contact); err != nil {
+				return err
+			}
+		}
+		delete(result, "contact")
+	}
 	w := tabwriter.NewWriter(c.Stdout, 0, 2, 2, ' ', 0)
 	if err := humanFields(w, "", result); err != nil {
 		return err

@@ -26,7 +26,7 @@ func TestTransactionsAreValid(t *testing.T) {
 		kinds[d.Name] = d.Kind
 	}
 	want := map[string]txn.Kind{
-		"node-set": txn.Normal, "presets-change": txn.Normal, "endpoint-set": txn.Normal,
+		"node-set": txn.Normal, "network-set": txn.Normal, "presets-change": txn.Normal, "endpoint-set": txn.Normal,
 		"adapter-enable": txn.Normal, "adapter-disable": txn.Normal,
 		"adapter-stage": txn.Normal, "adapter-unstage": txn.Normal,
 		"adapter-gc": txn.Recovery,
@@ -44,7 +44,7 @@ func TestTransactionsAreValid(t *testing.T) {
 			t.Errorf("key %v: %v", k.Key, err)
 		}
 	}
-	for _, role := range []string{config.RoleDir, config.RoleNode, config.RolePolicy, config.RolePresets, config.RoleInstances,
+	for _, role := range []string{config.RoleDir, config.RoleNode, config.RolePolicy, config.RolePresets, config.RoleInstances, config.RoleNetworkConfig,
 		config.RoleEndpointIDs, config.RoleBackup, config.RoleRevocation, config.RoleStale, config.RoleVersion, config.RoleCurrent, config.RoleOld} {
 		if !fsx.ValidName(role) {
 			t.Errorf("role %q is not a valid name", role)
@@ -67,6 +67,8 @@ func TestEveryDeclaredCrashPointIsReached(t *testing.T) {
 	ensureState(t, rg.mem)
 
 	_, err := c.SetNodeSettings(request(1, 3), []byte(`{"reply_permission": false}`), result(new([]config.Node), `{}`))
+	must(err)
+	_, err = c.SetListen(request(7, 2), []string{"/ip4/0.0.0.0/tcp/1"}, result(new([]config.Network), `{}`))
 	must(err)
 	_, err = c.AddPreset(request(2, 2), "scratch", []byte(`{"local_sources": "deny"}`), result(new([]config.Presets), `{}`))
 	must(err)

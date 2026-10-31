@@ -25,6 +25,7 @@ type state struct {
 	policy      PolicyFile
 	presets     Presets
 	instances   Instances
+	network     Network
 	endpointIDs map[string]EndpointIDs
 	backup      *Backup
 	revocations []keptRevocation
@@ -56,7 +57,7 @@ type Config struct {
 // document of its kind or breaks a rule makes Load return a *FileError that
 // names it, and nothing is written. The files are read in a fixed order, so
 // with several wrong ones the owner is shown the first: the directories, then
-// node.json, policy.json, presets.json, instances.json, the endpoint-id files
+// node.json, policy.json, presets.json, instances.json, network.json, the endpoint-id files
 // by name, revocation-backup.json, the revocation records by name, and the
 // adapters by id. Only when everything is valid does the repair run, which
 // removes what an interrupted installation left among the adapters.
@@ -148,6 +149,12 @@ func readState(r fsx.Reader) (state, error) {
 		return st, err
 	}
 	if st.instances, err = DecodeInstances(data); err != nil {
+		return st, err
+	}
+	if data, err = readFile(r, NetworkPath, KindNetwork); err != nil {
+		return st, err
+	}
+	if st.network, err = DecodeNetwork(data); err != nil {
 		return st, err
 	}
 
@@ -334,7 +341,7 @@ func (c *Config) Adapters() []Adapter {
 func (c *Config) LastOperations() []Operation {
 	st := c.read()
 	var out []Operation
-	for _, op := range []*Operation{st.node.LastOperation, st.policy.LastOperation, st.presets.LastOperation, st.instances.LastOperation} {
+	for _, op := range []*Operation{st.node.LastOperation, st.policy.LastOperation, st.presets.LastOperation, st.instances.LastOperation, st.network.LastOperation} {
 		if op != nil {
 			out = append(out, *cloneOperation(op))
 		}

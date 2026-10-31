@@ -108,6 +108,13 @@ func FuzzDecodeInstances(f *testing.F) {
 	})
 }
 
+func FuzzDecodeNetwork(f *testing.F) {
+	seeds(f, goldenNetwork, initNetwork, `{"format":1,"version":1,"listen":[],"peers":{}}`)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		roundTrip(t, data, config.DecodeNetwork, config.Network.Encode)
+	})
+}
+
 func FuzzDecodeEndpointIDs(f *testing.F) {
 	seeds(f, goldenEndpointIDs, `{"format":1,"direct":{"a":"`+ep2Text+`"}}`)
 	f.Fuzz(func(t *testing.T, data []byte) {

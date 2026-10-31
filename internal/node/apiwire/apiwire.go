@@ -362,6 +362,8 @@ func fromChange(c *config.ChangeError) *Error {
 		return New(CategoryConflict, "instance_adapter_mismatch", "the instance belongs to another adapter").named(c)
 	case config.ChangeEndpointUnknown:
 		return New(CategoryNotFound, "endpoint_unknown", "there is no such endpoint of the instance").named(c)
+	case config.ChangePeerUnknown:
+		return New(CategoryNotFound, "peer_unknown", "no address is kept for this node").named(c)
 	case config.ChangeAdapterNotInstalled:
 		return New(CategoryNotFound, "adapter_unknown", "the adapter is not installed").named(c)
 	case config.ChangeAdapterInUse:

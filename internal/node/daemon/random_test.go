@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
 // Observe the public Init and Start contracts, including the reader hooks receive.
@@ -26,7 +27,11 @@ func TestTemporaryRandomnessIsOwnedByTheConfiguredFilesystem(t *testing.T) {
 		semantic := seeded(31)
 		temporary := &countingRandom{source: seeded(32)}
 		clk := clocktest.NewFake(t0)
-		cfg := daemon.Config{Home: newHome(t), Clock: clk, Rand: semantic}
+		port, err := harness.FreePort()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := daemon.Config{Home: newHome(t), Clock: clk, Rand: semantic, InitPort: port}
 		switch mode {
 		case "shared":
 			cfg.TempRand = semantic

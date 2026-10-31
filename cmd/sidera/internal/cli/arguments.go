@@ -13,6 +13,7 @@ type commandArguments struct {
 	query      queryFlags
 	recv       receiveFlags
 	management managementFlags
+	init       initFlags
 }
 
 func arguments(args []string) *commandArguments {
@@ -29,6 +30,8 @@ func arguments(args []string) *commandArguments {
 		out.query.add(out.flags, path[0])
 	case "recv":
 		out.recv.add(out.flags)
+	case "init":
+		out.init.add(out.flags)
 	default:
 		out.management.add(out.flags, name)
 	}
@@ -48,16 +51,28 @@ func commandPath(args []string) []string {
 			continue
 		}
 		path = append(path, a)
-		if len(path) == 2 {
+		if len(path) == threeWordLength(path) {
 			break
 		}
-		switch a {
-		case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock":
-		default:
-			return path
+		if len(path) == 1 {
+			switch a {
+			case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network":
+			default:
+				return path
+			}
 		}
 	}
 	return path
+}
+
+// threeWordLength is how many words name the command that begins path: the
+// commands under `network address` and `network listen` take a third, every other
+// takes at most two.
+func threeWordLength(path []string) int {
+	if len(path) >= 2 && path[0] == "network" && (path[1] == "address" || path[1] == "listen") {
+		return 3
+	}
+	return 2
 }
 
 func takesValue(f *flag.Flag) bool {

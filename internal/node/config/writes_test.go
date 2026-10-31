@@ -20,6 +20,7 @@ func TestExportedWriteListsAreTheDocumentedOnes(t *testing.T) {
 			{Role: "policy", Op: txn.OpReplace, Optional: true},
 			{Role: "presets", Op: txn.OpReplace, Optional: true},
 			{Role: "instances", Op: txn.OpReplace, Optional: true},
+			{Role: "network-config", Op: txn.OpReplace, Optional: true},
 		}},
 		"endpoint ids": {[]txn.Write{config.EndpointIDsWrite()}, []txn.Write{{Role: "ids", Op: txn.OpReplace, Optional: true}}},
 		"backup":       {[]txn.Write{config.BackupWrite()}, []txn.Write{{Role: "backup", Op: txn.OpReplace}}},

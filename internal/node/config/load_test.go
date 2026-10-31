@@ -112,6 +112,13 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"instance endpoint queue time that wraps around a duration", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 18446744074`), config.KindInstances, config.FileInvalid, "max_queue_s"},
 		{"instance endpoint negative backlog", config.InstancesPath, edit(goldenInstances, `"backlog_limit": 400`, `"backlog_limit": -1`), config.KindInstances, config.FileInvalid, "backlog_limit"},
 
+		// network.json
+		{"network missing", config.NetworkPath, "", config.KindNetwork, config.FileMissing, ""},
+		{"network not json", config.NetworkPath, `{"format":`, config.KindNetwork, config.FileMalformed, ""},
+		{"network of a format this node does not read", config.NetworkPath, edit(goldenNetwork, `"format": 1`, `"format": 2`), config.KindNetwork, config.FileInvalid, "format"},
+		{"network listen address of a relay", config.NetworkPath, edit(goldenNetwork, `"/ip4/0.0.0.0/tcp/7744"`, `"/p2p-circuit"`), config.KindNetwork, config.FileInvalid, "listen[0]"},
+		{"network peer that is not a node", config.NetworkPath, edit(goldenNetwork, `"`+node2Text+`"`, `"node1abc"`), config.KindNetwork, config.FileInvalid, "peers.node1abc"},
+
 		// endpoint-ids
 		{"endpoint ids not json", config.EndpointIDsPath("example"), "{", config.KindEndpointIDs, config.FileMalformed, ""},
 		{"endpoint ids runtime that is not an id", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"runtime": "`+ep1Text+`"`, `"runtime": "ep1x"`), config.KindEndpointIDs, config.FileInvalid, "runtime"},
@@ -250,7 +257,7 @@ func TestFirstInvalidFileInFixedOrderIsNamed(t *testing.T) {
 	putTree(t, rg.mem, tree)
 	_, err := config.Load(rg.w)
 	if fe := fileError(t, err); fe.Path != config.PresetsPath {
-		t.Errorf("named %q, want %q: node, policy, presets, instances, endpoint ids, backup, revocations, adapters", fe.Path, config.PresetsPath)
+		t.Errorf("named %q, want %q: node, policy, presets, instances, network, endpoint ids, backup, revocations, adapters", fe.Path, config.PresetsPath)
 	}
 }
 
@@ -289,6 +296,10 @@ func TestValidTreeLoads(t *testing.T) {
 		t.Errorf("instances = %+v", inst)
 	}
 
+	if n := c.Network(); n.Version != 2 || len(n.Listen) != 2 || len(n.Peers[mustNode(t, node2Text)]) != 2 || n.LastOperation == nil {
+		t.Errorf("network = %+v", n)
+	}
+
 	ids := c.EndpointIDs("example")
 	if ids.Runtime != ep1 || ids.Direct["notes"] != mustEndpoint(t, ep2Text) {
 		t.Errorf("endpoint ids = %+v", ids)
@@ -313,8 +324,8 @@ func TestValidTreeLoads(t *testing.T) {
 	if len(ads) != 1 || ads[0].ID != "example" || ads[0].Version != "1.0.0" || ads[0].Manifest.ID != "example" {
 		t.Errorf("adapters = %+v", ads)
 	}
-	if got := len(c.LastOperations()); got != 1 {
-		t.Errorf("last operations = %d, want the one of node.json", got)
+	if got := len(c.LastOperations()); got != 2 {
+		t.Errorf("last operations = %d, want the ones of node.json and network.json", got)
 	}
 }
 

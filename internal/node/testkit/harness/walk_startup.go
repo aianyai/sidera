@@ -86,8 +86,12 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 	}
 	disk := fsxtest.NewMem()
 	clk := clocktest.NewFake(DefaultStart)
+	port, err := FreePort()
+	if err != nil {
+		return err
+	}
 	if s.Operation == StartupStart {
-		if _, err := daemon.Init(ctx, daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}}); err != nil {
+		if _, err := daemon.Init(ctx, daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}, InitPort: port}); err != nil {
 			return err
 		}
 		clk.Advance(s.StartAfter)
@@ -108,7 +112,7 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 		g.openWindow()
 		startCtx, cancel := context.WithCancel(ctx)
 		a := &startupAttempt{generation: g, disk: disk, cut: newCutoff(disk), cancel: cancel}
-		cfg := daemon.Config{Home: home, FS: a.cut, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed + uint64(g.gen))}, Observer: a}
+		cfg := daemon.Config{Home: home, FS: a.cut, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed + uint64(g.gen))}, Observer: a, InitPort: port}
 		if s.Operation == StartupInit {
 			done, e := keys.Initialized(disk)
 			err = e

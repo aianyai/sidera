@@ -39,6 +39,7 @@ layer.
 | `H.Records` | A read-only scan of the records on the disk. |
 | `H.Faults`, `H.Disk`, `H.Config`, `H.Engine`, `H.Log`, `H.Ctx` | The fault wrapper the running process writes through, its disk, configuration, engine, log (what the engine and the adapter host logged) and the test's context. |
 | `H.Runtime`, `H.RuntimeAddr`, `H.RuntimeOf`, `H.RuntimeAddrOf` | The controller of the fake runtime of an adapter made with `AdapterOptions.Runtime` (`scenario.ErrNotAvailable` without), and the address of the runtime endpoint of the instance, the target of a session creation. The first two are `Instance`'s; the others take the name of any instance of the fixture. |
+| `FreePort` | A port for a test's `init` to make the node listen on. A daemon listens where `network.json` says and the default port is one per machine, so every test that starts a daemon passes its own (`daemon.Config.InitPort`, or `init --port` for a process). The port is picked below the system's range for outgoing connections and probed for TCP and UDP. |
 | `ProgramTable`, `MakeLayout`, `Mount`, `SeedNode`, `AdapterAdmission`, `RandReader`, `LogCapture`, `NoLeaks`, `DefaultStart`, `NodeID`, `Instance` | The building blocks the fixture is made of, exported so that a test of a package that needs a node but not the fixture (the engine's own tests) makes it the same way. |
 
 ## Run-owned adapter inputs

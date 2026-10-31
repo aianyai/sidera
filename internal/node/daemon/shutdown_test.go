@@ -302,7 +302,8 @@ func TestAFatalStorageErrorEndsTheDaemonWithTheExitCodeOfAnIOError(t *testing.T)
 	home := newHome(t)
 	mem := fsxtest.NewMem()
 	mkSocketDirs(t, home)
-	if _, err := daemon.Init(context.Background(), memConfig(home, clk, mem)); err != nil {
+	initCfg := memConfig(home, clk, mem)
+	if _, err := daemon.Init(context.Background(), initCfg); err != nil {
 		t.Fatal(err)
 	}
 	faulty := fsxtest.NewFaulty(t, mem)
@@ -335,6 +336,7 @@ func TestAFatalStorageErrorEndsTheDaemonWithTheExitCodeOfAnIOError(t *testing.T)
 	if !stoppedAdapters {
 		t.Error("the adapters were not stopped after the fatal error")
 	}
+	wantNotListening(t, initCfg.InitPort, "after the fatal error")
 	if rule.Hits() == 0 {
 		t.Fatal("the injected fault was never hit")
 	}

@@ -55,13 +55,13 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
 | 5 | certificate | The certificate is renewed when it has ten days or less left, when it has expired, or when an earlier renewal was interrupted; never while the clock is in doubt (the pause step 4 found is respected: a certificate that is due waits, and the log says so). The judgement is the engine's (`engine.SignRefusalOf`), the same one the hourly check is handed; at this step no identity is retired, because step 3 refused it. | this package, `keys`, `engine` |
-| 6 | scan | The engine's first recovery entry: `state/` is scanned, damaged files are quarantined, the recovery rules run until none has work, the view is built. The loopback is set as the engine's transport, with no knobs, before the loop starts. The periodic tasks are registered. | `engine`, `transport` |
+| 6 | scan | The engine's first recovery entry: `state/` is scanned, damaged files are quarantined, the recovery rules run until none has work, the view is built. The network is built, with the network key taken from the keys once, before the loop exists, and the address book of `network.json`: its host does not listen yet. The router is set as the engine's transport (a call to this node goes to the loopback, made with no knobs; a call to another node goes to the network) and the network is the layer the engine pushes its membership to. The periodic tasks are registered. | `engine`, `transport`, `network` |
 | 7 | trust | Hook `TrustSync`: synchronisation of revocations and the trust graph, the gate of vouchers. Empty for a node of one machine. | later stage |
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
 | 9 | agent-probe | Open the Agent listener in probe-only mode, accepting only the one-use probe credential; then run hook `AgentProbeOnly`. | this package, `agentapi` |
 | 10 | adapters | The adapter host (`Config.AdapterHost`, when set) starts the enabled adapter instances and the step waits until each has answered `adapter.start` or been judged offline; then hook `Adapters` runs, for what else starts here. | `adapterhost`, `apiwire` |
 | 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the outbound worker goes on over the loopback. After step 10 on purpose: step 11 asks the connected adapters about creations, closes and interrupts, releases and prompts, and the busy state they reported is used to renew leases after serving. Until step 12 the engine's schedule holds back the ticks, the feedback and the looks at source records that fell due, so none of them runs before the adapters have reported. | `engine` |
-| 15 | serve | The engine serves, then the Agent server enables endpoint methods; hook `AgentServe` runs afterward. | this package, `agentapi` |
+| 15 | serve | The engine serves, then the Agent server enables endpoint methods; hook `AgentServe` runs afterward; last, the network opens its listeners on the addresses `network.json` lists. An address that cannot be opened (a port in use) fails the start, and the error names the address. | this package, `agentapi`, `network` |
 
 A hook runs inside its step, in the state of the engine the step needs (before the
 loop exists at step 7, recovering at 9 and 10, running at 15) and is given an `Env`:
@@ -136,7 +136,7 @@ of a start that failed; a step with nothing to stop is logged and does nothing.
 | Step | Name | What happens |
 | ---- | ---- | ------------ |
 | 1 | refuse | The engine refuses what comes from outside (`unavailable/shutting_down`). |
-| 2 | interfaces | Both management and Agent HTTP servers stop taking connections and wait for active requests within the grace; remaining connections close on expiry. Their serving goroutines are joined, then hook `StopInterfaces` stops other interfaces. |
+| 2 | interfaces | Both management and Agent HTTP servers stop taking connections and wait for active requests within the grace; remaining connections close on expiry. In parallel with them the network stops listening, closes its connections and waits for its goroutines. Their serving goroutines are joined, then hook `StopInterfaces` stops other interfaces. |
 | 3 | adapters | The adapter host shuts the adapters down (`Config.AdapterHost`, when set), within the grace; then hook `StopAdapters`. Native sessions are separate processes and are not affected. |
 | 4 | engine | The loop ends after its command, and every goroutine of the engine is waited for. |
 | 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. If the engine has not ended within the grace, it may still be writing: the lock and the log are kept until the process exits, the line says so, and `Wait` returns `ErrEngineNotStopped`. |
@@ -159,7 +159,8 @@ from any goroutine, any number of times; the shutdown runs once.
 instance lock, which it takes first, so it cannot run beside a daemon or another
 init: the root only the owner can reach, the layout of every owner, the keys, the
 certificate, the self-revocation, the clock record, the default configuration (one
-preset, `default`, open to local sources) and, last, `keys/init.rec`. It never
+preset, `default`, open to local sources, and `network.json` listening on
+`Config.InitPort`, default 7744) and, last, `keys/init.rec`. It never
 overwrites. A file that is there and valid is kept byte for byte; one that is there
 and not valid stops it, naming it. An init that was interrupted is finished by
 running it again, and one that finished is refused (`ErrAlreadyInitialized`) with
@@ -379,6 +380,10 @@ The methods the daemon has:
 | `node.show` | `OpRead`; no params | `{"node","version","settings":{…}}`, the settings as `node.json` holds them |
 | `node.set` | `OpChangeNodeSettings`; params `{"settings":{…patch}}`, carries the expected version | `{"settings":{…},"version"}`; a patch is judged whole by `config`: `invalid_argument/config_invalid` (with the path), `empty_patch`, and `conflict/version_conflict` with the current version |
 | `endpoints.set` | `OpChangeEndpointSettings`; params `{"endpoint","settings":{…patch}}`, carries the expected version of the instances | `{"endpoint","settings":{…},"version"}`, the settings the owner has given the endpoint, those left to the node default not among them; an endpoint the node does not have is `endpoint_unknown` |
+| `network.show` | `OpRead`; no params | `{"node","peer_id","version","listen":{"configured":[…],"actual":[…]},"contact","peers":[{"node","addresses":[…],"certificate_held","connected"}]}`. `version` is that of `network.json`, the one a change names. `listen.configured` is the list in the file and `listen.actual` the addresses the listeners are open on now (the two differ after a change that waits for a restart). `contact` is the line one owner gives another: `<node id> <multiaddr>…`, the actual listen addresses that are neither loopback nor link-local, an unspecified `0.0.0.0` or `::` expanded into the machine's interface addresses of its family, each ending in `/p2p/<peer id>`; it is the empty string when the node has no address to give (it listens nowhere or only on loopback). `peers` are the nodes of the address book and those whose certificate is held, by node id: `addresses` are the ones the owner entered (empty for a node known only by its certificate), `certificate_held` says that a certificate was accepted from it, `connected` that a member connection to it is up |
+| `network.address.set` | `OpChangeNodeSettings`; params `{"node","addresses":[…]}`, carries the expected version of `network.json` | `{"node","addresses":[…],"version"}`, the addresses as kept (written in the form the multiaddr library prints, repeats dropped); they replace those of the node and take effect at once. While no certificate is held for the node, one address must end in `/p2p/<peer id>`; once one is held, every `/p2p/` must be that certificate's peer. A breach of a rule of an address, or of that rule, is `invalid_argument/config_invalid` with `details.path` (`addresses[1]`, or `addresses` for the list) and `details.reason` |
+| `network.address.remove` | `OpChangeNodeSettings`; params `{"node"}`, carries the expected version of `network.json` | `{"node","version"}`; a node with no address in the book is `not_found/peer_unknown` |
+| `network.listen.set` | `OpChangeNodeSettings`; params `{"addresses":[…]}` (required; empty means the node does not listen), carries the expected version of `network.json` | `{"listen":[…],"version","restart_required":true}`: the listeners open once, at the end of the start, so the list is kept and takes effect with the next start; `listen.actual` of `network.show` does not change until then |
 | `adapters.install` | `OpInstallAdapter`; params `{"source": "<absolute path of the package directory>"}` | `{"adapter":{"id","version"},"already_current"?}`. The daemon copies the package outside the loop and judges the copy; a directory it cannot read, or a directory or file inside the package, is `invalid_argument/source_unreadable` (with `details.path`, the place inside the package, when that is where the fault is), a manifest that does not parse or a package that lacks its program `invalid_argument/config_invalid`, a package for another platform `refused/platform_unsupported`, an upgrade of an adapter with an enabled instance, or a disabled one whose process is still ending, `conflict/adapter_in_use` (the message holds for both; `details.name` is `instances.<name>` and `details.reason` says whether that instance is enabled or its process is still ending), a second installation while one is copied `conflict/install_in_progress` (the message says that this installation is still in progress when the request is the one being copied, and that another is being installed otherwise). The same request again answers with its stored result and writes nothing. The version that is already installed, in another request, writes only its result, and the result says `"already_current":true` (the member is left out when the installation replaced something) |
 | `adapters.list` | `OpRead`; no params | `{"version","adapters":[{id,version}],"instances":[{instance,adapter,enabled,probe?:{state,at?,frontends:[{preset,frontend}]}}]}`. `version` is that of the instances. `probe` is there for an enabled instance only: `pending` until the adapter has reported and each token issued for the probe is presented or expired, `passed`, or `failed`; `frontends` are those whose token the node saw presented |
 | `adapters.enable` | `OpEnableAdapter`; params `{"adapter","instance"?,"config"?}`, carries the expected version of the instances | `{"instance","enabled":true,"version"}`. The instance is named after the adapter when the request leaves it out; `config` is for a new instance and an instance that exists takes none (`conflict/instance_exists`); an adapter that is not installed is `not_found/adapter_unknown`; an instance of another adapter `conflict/instance_adapter_mismatch`. The host is asked to run the instance after the commit; whether it came up is read from `adapters.list` |
@@ -429,7 +434,7 @@ explicit idempotency key may create another message. A refusal for an
 invalid argument with no detail is `malformed_request`. The text of an error nobody
 expected is logged and never sent. Some words belong to the owner's operations alone:
 `not_found/alert_unknown`; `invalid_argument/empty_patch`, `node_mismatch`,
-`digest_mismatch` and `source_unreadable`; `conflict/install_in_progress`;
+`digest_mismatch` and `source_unreadable`; `not_found/peer_unknown`; `conflict/install_in_progress`;
 `refused/platform_unsupported`; and `unavailable/identity_retired`, which is what
 anything that would sign is told between the retirement and the end of the daemon.
 
@@ -510,6 +515,19 @@ interface: a sandbox must deny the socket to an agent.
 - **The signal is taken before the start.** A signal during the start would
   otherwise end the process with the lock held and a socket left behind, and between
   two steps is the only place the start can stop without leaving a step half done.
+- **The network is built at step 6 and listens at step 15.** The engine and the network
+  are made with each other as their node (the network calls the engine's handler, the
+  engine pushes its membership to the network), so neither exists before the other and
+  the composition root, which imports both, converts between their two `Membership`
+  types. The host is built, not listening, at step 6 so that the node can dial from
+  the moment the loop runs; the listeners open last, after every hook of step 15, so
+  no other node reaches a node that does not serve yet. A port in use fails the start
+  naming the address, and what had begun is shut down like any failed start: a node
+  that cannot be reached is not one the owner should believe is running. The network
+  key is taken from the keys once, before the loop exists, because the keys are not
+  safe for concurrent use. The network closes at shutdown step 2 beside the HTTP
+  servers: it stops taking connections from other nodes before the adapters and the
+  engine go, and its close waits for every goroutine the network started.
 - **The shutdown is one path.** An orderly stop, a fatal failure and a start that
   failed all take the same five steps, so the order is tested once and a step cannot
   be skipped on one road. The lock is the last thing let go.
@@ -536,6 +554,10 @@ interface: a sandbox must deny the socket to an agent.
   `TestShutdownStopsTheAdaptersAtStepThree`, `TestAFatalFailureStillStopsTheAdapters`,
   `TestANodeWithoutAnAdapterHostStartsNoAdapter`: fake adapters in the test process,
   started by the one launcher the engine-layer fixture also uses (`harness`).
+- Tests of the network's place in the start and the shutdown (`network_test.go`):
+  `TestTheNetworkListensOnlyAfterTheNodeServesAndStopsWithTheInterfaces`,
+  `TestAStartOnAPortInUseFailsNamingTheAddressAndLeavesNothingRunning`, and the check that
+  the fatal path closes it in `TestAFatalStorageErrorEndsTheDaemonWithTheExitCodeOfAnIOError`.
 - Tests of the daemon: `TestSecondDaemonOnSameHomeRefused`,
   `TestInitOnTheHomeOfARunningDaemonIsRefused`,
   `TestStartupStepsRunInSpecifiedOrder`,
@@ -565,6 +587,7 @@ interface: a sandbox must deny the socket to an agent.
   `TestAHookCanListenOnAnAddressOfThisHomeWithTheLockItIsGiven`,
   `TestAReplayedManagementOperationReturnsTheStoredResultAndAReusedIdentifierIsRefused`.
 - Tests of init and the layout: `TestInitMakesTheDataDirectoryWithItsLayoutKeysAndConfiguration`,
+  `TestInitWritesTheListenPortItIsGiven`,
   `TestInitRefusesAnInitializedHomeAndChangesNothing`,
   `TestInitTakesTheInstanceLockAndLetsItGo`,
   `TestInitRefusesAPathTheSocketsCannotUseBeforeMakingAnything`,

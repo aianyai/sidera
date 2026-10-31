@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 )
 
@@ -396,7 +398,11 @@ func TestRealBinaryPlainRejectsControlsAndIgnoresTestEnvironment(t *testing.T) {
 	env := processEnv(map[string]string{"SIDERA_TEST_SEED": "plain", "SIDERA_TEST_CLOCK_START_MS": "invalid", "SIDERA_CRASH_GEN": "invalid", "SIDERA_CRASH_RECORD": record, "SIDERA_CRASH_AT": "not-a-point"})
 	var nodes []string
 	for _, dir := range []string{home, filepath.Join(root, "independent")} {
-		init := exec.CommandContext(ctx, testBinaries.Plain, "--json", "--home", dir, "init")
+		port, err := harness.FreePort()
+		if err != nil {
+			t.Fatal(err)
+		}
+		init := exec.CommandContext(ctx, testBinaries.Plain, "--json", "--home", dir, "init", "--port", strconv.Itoa(port))
 		init.Env = env
 		output, err := init.CombinedOutput()
 		if err != nil {

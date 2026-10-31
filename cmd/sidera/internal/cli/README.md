@@ -20,12 +20,15 @@ and its bound values. A local value stays attached, including a body spelled
 - `message.go`: message and control flags; one body source for send and reply.
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: human results; structured results use the shared JSON encoder.
-- `local.go`: initialization and foreground daemon composition.
+- `local.go`: initialization (with its `--port` flag, judged by
+  `config.ValidatePort`) and foreground daemon composition.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request
-  for a single resend after an unknown outcome.
-- `manage_output.go`: complete JSON responses and human settings and lists.
+  for a single resend after an unknown outcome; the commands `network address set|remove`
+  and `network listen set` have three words, which `commandPath` discovers.
+- `manage_output.go`: complete JSON responses and human settings and lists; a `contact`
+  line of a result is printed first, on a line of its own, so that it can be copied.
 - `export.go`: verified online export, the precise missing-daemon offline
   fallback, and writing a new private copy through `fsx.CreatePrivateFile`.
 - `help.go`: usage, purpose and example for every command.
@@ -48,7 +51,7 @@ outcome is sent again, at most once, with the same request. A version conflict i
 reported to the caller. `--json` writes the complete response, preserving
 `operation_id` and `replayed`; human change output also lists those fields.
 A human unknown-outcome error prints the retained identifier from its error
-details. Human adapter-enable output explains that probing continues in the
+details. A human `network listen set` says that a restart is needed. Human adapter-enable output explains that probing continues in the
 background and directs the owner to `sidera adapter list`.
 
 With `--out`, JSON export reports only the digest and supplied file path under

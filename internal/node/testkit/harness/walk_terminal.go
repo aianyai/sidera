@@ -94,7 +94,11 @@ func runTerminal(ctx context.Context, t *walkTest, s *TerminalWalkScenario, r *w
 	}
 	disk := fsxtest.NewMem()
 	clk := clocktest.NewFake(DefaultStart)
-	if _, err := daemon.Init(ctx, daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}}); err != nil {
+	port, err := FreePort()
+	if err != nil {
+		return err
+	}
+	if _, err := daemon.Init(ctx, daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}, InitPort: port}); err != nil {
 		return err
 	}
 	k, err := keys.Load(txn.New(disk, ProgramTable(t), nil))

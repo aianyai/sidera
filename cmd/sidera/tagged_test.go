@@ -11,12 +11,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
 func TestTaggedProcessPrerequisites(t *testing.T) {
@@ -50,7 +52,11 @@ func TestTaggedProcessPrerequisites(t *testing.T) {
 		initNode := func(binary, home string, environment []string) string {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, binary, "--json", "--home", home, "init")
+			port, err := harness.FreePort()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(ctx, binary, "--json", "--home", home, "init", "--port", strconv.Itoa(port))
 			cmd.Env = environment
 			out, err := cmd.CombinedOutput()
 			if err != nil {

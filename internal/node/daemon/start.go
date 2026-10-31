@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/network"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -217,7 +218,10 @@ func (d *Daemon) openPackage(dir string) (fsx.Reader, error) {
 // loop exists: damaged files are quarantined, the rules of recovery run until none
 // has work, and the engine builds its view. The periodic tasks are registered
 // here, before the loop starts, and the clock state is the one the loop also runs
-// at once when it finds the clock set back. The loopback is set here as well.
+// at once when it finds the clock set back. The transport and the network are set
+// here as well: the network's host is built, with the address book of the
+// configuration, and listens on nothing until step 15, so the node can dial from
+// the moment the loop runs and no other node can reach it before it serves.
 func (d *Daemon) stepScan(ctx context.Context) error {
 	deps := engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.clockPausedSince,
@@ -232,11 +236,12 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 		return err
 	}
 	d.engine = e
-	// The one transport of a node of one machine is the loopback, and it is made
-	// here with no knobs: they are faults for tests, and the product has none to
-	// arm. Without a transport every send and every session creation would fail
-	// inside the engine. It is set before the loop starts, as the engine requires.
-	if err := e.SetTransport(transport.NewLoopback(d.keys.Node(), e, nil)); err != nil {
+	// The transport is the router: a call to this node goes to the loopback, which
+	// is made with no knobs (they are faults for tests, and the product has none to
+	// arm), and a call to another node goes to the network. Without a transport
+	// every send and every session creation would fail inside the engine. It is
+	// set before the loop starts, as the engine requires.
+	if err := d.startNetwork(e); err != nil {
 		return err
 	}
 	if err := AddClockState(e, d.keys); err != nil {
@@ -255,6 +260,37 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 	}
 	d.log.Info("state scanned", "passes", rep.Passes, "endpoints", rep.Endpoints, "unfinished", rep.Unfinished)
 	return nil
+}
+
+// startNetwork builds the network of the node and hands it to the engine as its
+// transport and as the layer it pushes its membership to. The network key is taken
+// from the keys once, here, before the loop exists, because the keys are not safe
+// for concurrent use. The network is kept on the daemon from the moment it exists,
+// so a step that fails later closes it with the rest.
+func (d *Daemon) startNetwork(e *engine.Engine) error {
+	self := d.keys.Node()
+	net, err := network.New(network.Config{Key: d.keys.NetworkPrivateKey(), Clock: d.cfg.Clock, Log: d.log})
+	if err != nil {
+		return err
+	}
+	d.net = net
+	if err := net.SetAddressBook(d.cfgd.Network().Peers); err != nil {
+		return err
+	}
+	net.SetNode(e)
+	if err := e.SetTransport(network.NewRouter(self, transport.NewLoopback(self, e, nil), net)); err != nil {
+		return err
+	}
+	return e.SetNetwork(engineNetwork{net})
+}
+
+// engineNetwork is the network as the engine asks for it. The engine and the
+// network each define their own Membership, with the same fields, so that neither
+// imports the other; the composition root, which imports both, converts.
+type engineNetwork struct{ *network.Network }
+
+func (n engineNetwork) SetMembership(m engine.Membership) error {
+	return n.Network.SetMembership(network.Membership(m))
 }
 
 // Step 7: the place of the synchronisation of revocations and of the trust graph,
@@ -342,11 +378,19 @@ func (d *Daemon) stepAdapters(ctx context.Context) error {
 // begin and the end of each.
 func (d *Daemon) stepRecoverDelivery(ctx context.Context) error { return d.engine.RecoverDelivery(ctx) }
 
-// Step 15: the engine serves, and the Agent interface switches to full service.
+// Step 15: the engine serves, the Agent interface switches to full service, and
+// the network opens its listeners. The listeners come last, after the hook of the
+// step, so that no other node reaches a node that does not serve yet. An address that cannot be opened (a port
+// in use) fails the start, and the error names it. The list is read before the
+// engine serves: it is the one the configuration had when the start came here.
 func (d *Daemon) stepServe(ctx context.Context) error {
+	listen := d.cfgd.Network().Listen
 	d.engine.Serve()
 	d.agent.EnableMethods()
-	return run(ctx, d.cfg.Attach.AgentServe, d)
+	if err := run(ctx, d.cfg.Attach.AgentServe, d); err != nil {
+		return err
+	}
+	return d.net.Listen(listen)
 }
 
 // run calls a hook, if there is one.

@@ -30,7 +30,7 @@ type InitReport struct {
 
 // Init makes a data directory: the root that only the owner can reach, the layout
 // of every owner, the keys, the certificate, the self-revocation, the clock
-// record, the default configuration, and last the marker that says it finished.
+// record, the default configuration (the listen port is cfg.InitPort), and last the marker that says it finished.
 //
 // It takes the instance lock first, so it cannot run beside a daemon or another
 // init, and lets it go when it is done. It never overwrites: a file that is there
@@ -98,7 +98,7 @@ func Init(ctx context.Context, cfg Config) (InitReport, error) {
 	if err != nil {
 		return InitReport{}, err
 	}
-	cplan, err := config.PlanInit(r)
+	cplan, err := config.PlanInit(r, config.InitOptions{Port: cfg.InitPort})
 	if err != nil {
 		return InitReport{}, err
 	}

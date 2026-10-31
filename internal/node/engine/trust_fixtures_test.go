@@ -122,10 +122,40 @@ func (p peerNode) credentialWith(own record.Signer, onlyPeer bool) store.Credent
 	return store.CredentialRecord{Digest: rec.Digest(), Record: rec}
 }
 
-// fakeNetwork records the snapshots the engine pushes.
+// fakeNetwork records what the engine pushes: the snapshots of the facts and the
+// address books. checkErr is what it says of every address check, and connected
+// the nodes it says are connected.
 type fakeNetwork struct {
-	mu    sync.Mutex
-	snaps []engine.Membership
+	mu        sync.Mutex
+	snaps     []engine.Membership
+	books     []map[ident.NodeID][]string
+	checkErr  error
+	connected map[ident.NodeID]bool
+}
+
+func (n *fakeNetwork) SetAddressBook(book map[ident.NodeID][]string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.books = append(n.books, book)
+	return nil
+}
+
+func (n *fakeNetwork) CheckAddresses(ident.NodeID, []string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.checkErr
+}
+
+func (n *fakeNetwork) PeerID() string        { return "peer-id" }
+func (n *fakeNetwork) ListenAddrs() []string { return []string{"/ip4/0.0.0.0/tcp/7744"} }
+func (n *fakeNetwork) ContactAddrs() []string {
+	return []string{"/ip4/10.0.0.9/tcp/7744/p2p/peer-id"}
+}
+
+func (n *fakeNetwork) addressBooks() []map[ident.NodeID][]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]map[ident.NodeID][]string(nil), n.books...)
 }
 
 func (n *fakeNetwork) SetMembership(m engine.Membership) error {
@@ -135,7 +165,11 @@ func (n *fakeNetwork) SetMembership(m engine.Membership) error {
 	return nil
 }
 
-func (n *fakeNetwork) Connected(ident.NodeID) bool { return false }
+func (n *fakeNetwork) Connected(node ident.NodeID) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.connected[node]
+}
 
 func (n *fakeNetwork) snapshots() []engine.Membership {
 	n.mu.Lock()

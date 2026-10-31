@@ -29,6 +29,21 @@ func changes(t testing.TB) []change {
 			n, err := c.SetNodeSettings(req, []byte(`{"reply_permission": false}`), result(&seen, `{"changed":"node"}`))
 			return n.Version, n.LastOperation, err
 		}},
+		{"network listen", config.NetworkPath, 2, func(c *config.Config, req config.Request, _ config.OpenEndpoints) (admin.Version, *config.Operation, error) {
+			var seen []config.Network
+			n, err := c.SetListen(req, []string{"/ip4/0.0.0.0/tcp/1"}, result(&seen, `{"changed":"network"}`))
+			return n.Version, n.LastOperation, err
+		}},
+		{"network peer set", config.NetworkPath, 2, func(c *config.Config, req config.Request, _ config.OpenEndpoints) (admin.Version, *config.Operation, error) {
+			var seen []config.Network
+			n, err := c.SetPeerAddresses(req, mustNode(t, node1Text), []string{"/ip4/10.0.0.1/tcp/1"}, result(&seen, `{"changed":"network"}`))
+			return n.Version, n.LastOperation, err
+		}},
+		{"network peer remove", config.NetworkPath, 2, func(c *config.Config, req config.Request, _ config.OpenEndpoints) (admin.Version, *config.Operation, error) {
+			var seen []config.Network
+			n, err := c.RemovePeer(req, mustNode(t, node2Text), result(&seen, `{"changed":"network"}`))
+			return n.Version, n.LastOperation, err
+		}},
 		{"preset add", config.PresetsPath, 2, func(c *config.Config, req config.Request, _ config.OpenEndpoints) (admin.Version, *config.Operation, error) {
 			var seen []config.Presets
 			p, err := c.AddPreset(req, "extra", []byte(`{"local_sources": "allow"}`), result(&seen, `{"changed":"presets"}`))

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
 // process owns exactly one Wait, installed as soon as Start succeeds. Output
@@ -69,7 +71,17 @@ func (f *Fixture) launch(command, stdout, stderr string, values map[string]strin
 		return nil, err
 	}
 	defer errout.Close()
-	cmd := exec.Command(f.binaries.Tagged, "--home", f.home, command)
+	args := []string{"--home", f.home, command}
+	if command == "init" {
+		// A port of its own: the default is one per machine, and test packages run
+		// daemons side by side.
+		port, err := harness.FreePort()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--port", strconv.Itoa(port))
+	}
+	cmd := exec.Command(f.binaries.Tagged, args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = f.root, out, errout
 	cmd.Env = processEnv(values)
 	cmd.WaitDelay = 5 * time.Second

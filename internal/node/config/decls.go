@@ -10,11 +10,13 @@ const (
 	// RoleDir creates the directories of config/ (init).
 	RoleDir = "dir"
 	// RoleNode, RolePolicy, RolePresets and RoleInstances replace the file of
-	// that name.
-	RoleNode      = "node"
-	RolePolicy    = "policy"
-	RolePresets   = "presets"
-	RoleInstances = "instances"
+	// that name; RoleNetworkConfig replaces network.json (the role "network" is
+	// the network key of keys, in the same transaction).
+	RoleNode          = "node"
+	RolePolicy        = "policy"
+	RolePresets       = "presets"
+	RoleInstances     = "instances"
+	RoleNetworkConfig = "network-config"
 	// RoleEndpointIDs replaces the endpoint-id file of one instance.
 	RoleEndpointIDs = "ids"
 	// RoleBackup replaces revocation-backup.json.
@@ -47,6 +49,7 @@ func InitWrites() []txn.Write {
 		{Role: RolePolicy, Op: txn.OpReplace, Optional: true},
 		{Role: RolePresets, Op: txn.OpReplace, Optional: true},
 		{Role: RoleInstances, Op: txn.OpReplace, Optional: true},
+		{Role: RoleNetworkConfig, Op: txn.OpReplace, Optional: true},
 	}
 }
 
@@ -101,6 +104,11 @@ var (
 	endpointSet = &txn.Decl{Name: "endpoint-set", Kind: txn.Normal, Writes: []txn.Write{
 		{Role: RoleInstances, Op: txn.OpReplace},
 	}}
+	// networkSet changes network.json: the listen addresses or the address book,
+	// with the operation that did it.
+	networkSet = &txn.Decl{Name: "network-set", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: RoleNetworkConfig, Op: txn.OpReplace},
+	}}
 	// adapterEnable enables an instance, creating it when it is new.
 	adapterEnable = &txn.Decl{Name: "adapter-enable", Kind: txn.Normal, Writes: []txn.Write{
 		{Role: RoleInstances, Op: txn.OpReplace},
@@ -133,5 +141,5 @@ var (
 // Transactions lists the transactions this package runs itself. The composition
 // root puts them in the table of the program.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{nodeSet, presetsChange, endpointSet, adapterEnable, adapterDisable, adapterStage, adapterUnstage, adapterGC}
+	return []*txn.Decl{nodeSet, networkSet, presetsChange, endpointSet, adapterEnable, adapterDisable, adapterStage, adapterUnstage, adapterGC}
 }

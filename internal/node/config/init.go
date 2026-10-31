@@ -22,8 +22,16 @@ type initFile struct {
 	data []byte
 }
 
+// InitOptions are the choices of the owner that `init` writes into the files it
+// makes.
+type InitOptions struct {
+	// Port is the port network.json makes the node listen on; zero is
+	// DefaultListenPort.
+	Port int
+}
+
 // InitPlan is what `init` has to do on the side of config/. `init` never
-// overwrites: for each of the four files it writes, a file that is missing is
+// overwrites: for each of the five files it writes, a file that is missing is
 // written with the defaults, one that exists and is valid stays as the owner
 // left it, and one that exists and is not valid makes the plan fail, naming
 // the file, so that the owner decides what becomes of it.
@@ -33,8 +41,17 @@ type InitPlan struct {
 }
 
 // PlanInit checks what is on disk and decides what is missing. It only reads, so
-// when it fails nothing has been written.
-func PlanInit(r fsx.Reader) (*InitPlan, error) {
+// when it fails nothing has been written. A port that cannot be listened on is
+// refused even when network.json exists and will be kept: the owner asked for
+// something that cannot be done.
+func PlanInit(r fsx.Reader, opts InitOptions) (*InitPlan, error) {
+	if opts.Port == 0 {
+		opts.Port = DefaultListenPort
+	}
+	listen, err := DefaultListen(opts.Port)
+	if err != nil {
+		return nil, err
+	}
 	p := &InitPlan{}
 	for _, dir := range LayoutDirs() {
 		info, err := r.Stat(dir)
@@ -71,6 +88,9 @@ func PlanInit(r fsx.Reader) (*InitPlan, error) {
 		{RoleInstances, InstancesPath, KindInstances,
 			func(b []byte) error { _, err := DecodeInstances(b); return err },
 			func() ([]byte, error) { return Instances{Version: 1, Items: map[string]Instance{}}.Encode() }},
+		{RoleNetworkConfig, NetworkPath, KindNetwork,
+			func(b []byte) error { _, err := DecodeNetwork(b); return err },
+			func() ([]byte, error) { return Network{Version: 1, Listen: listen}.Encode() }},
 	}
 	for _, d := range defaults {
 		data, err := r.ReadFile(d.path)
@@ -106,7 +126,7 @@ func (p *InitPlan) MakeDirs(tx *txn.Tx) error {
 }
 
 // WriteFiles writes the files that are missing, in the order node, policy,
-// presets, instances, each under its role.
+// presets, instances, network, each under its role.
 func (p *InitPlan) WriteFiles(tx *txn.Tx) error {
 	for _, f := range p.files {
 		if err := tx.Replace(f.role, f.path, f.data, fsx.ModePrivate); err != nil {

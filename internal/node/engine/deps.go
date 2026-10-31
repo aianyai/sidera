@@ -91,6 +91,7 @@ type Config interface {
 	RevocationSet() *revocation.Set
 	EndpointSettings(instance string, id ident.EndpointID) config.EndpointSettings
 	Presets() config.Presets
+	Network() config.Network
 	Adapters() []config.Adapter
 	EndpointIDs(instance string) config.EndpointIDs
 	RuntimeID(instance string, rnd io.Reader) (config.IDChange, error)
@@ -103,6 +104,10 @@ type Config interface {
 	SetNodeSettings(req config.Request, patch []byte, result config.ResultFunc[config.Node]) (config.Node, error)
 	SetEndpointSettings(req config.Request, instance string, endpoint ident.EndpointID, patch []byte,
 		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+
+	SetListen(req config.Request, listen []string, result config.ResultFunc[config.Network]) (config.Network, error)
+	SetPeerAddresses(req config.Request, node ident.NodeID, addrs []string, result config.ResultFunc[config.Network]) (config.Network, error)
+	RemovePeer(req config.Request, node ident.NodeID, result config.ResultFunc[config.Network]) (config.Network, error)
 
 	AddPreset(req config.Request, name string, preset []byte, result config.ResultFunc[config.Presets]) (config.Presets, error)
 	RemovePreset(req config.Request, name string, result config.ResultFunc[config.Presets]) (config.Presets, error)

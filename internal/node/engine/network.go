@@ -21,6 +21,20 @@ type Network interface {
 	// Connected says whether the node has a connection now. It only reads and
 	// does not wait.
 	Connected(node ident.NodeID) bool
+	// SetAddressBook replaces the addresses the network dials a node on. The
+	// engine pushes the whole book after every durable change of it.
+	SetAddressBook(book map[ident.NodeID][]string) error
+	// CheckAddresses judges addresses the owner enters for a node, by the rule
+	// that depends on the certificate held for it. The error is a
+	// *config.FieldError that names the offending address.
+	CheckAddresses(node ident.NodeID, addrs []string) error
+	// PeerID is the identifier of the node's network key that a contact line
+	// names after /p2p/; ListenAddrs are the addresses the listeners are open on;
+	// ContactAddrs are those a person can hand to another node, each ending in
+	// /p2p/<peer id>. They only read.
+	PeerID() string
+	ListenAddrs() []string
+	ContactAddrs() []string
 }
 
 // Membership is the snapshot of what the network layer needs to judge a peer: the

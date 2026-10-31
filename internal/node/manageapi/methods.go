@@ -114,6 +114,7 @@ func defaultMethods() (map[string]*method, error) {
 		status, alertsList, alertsAck,
 		identityExportRevocation, identityConfirmBackup, identityRetire, clockClearRollback,
 		nodeShow, nodeSet,
+		networkShow, networkAddressSet, networkAddressRemove, networkListenSet,
 		adaptersInstall, adaptersList, adaptersEnable, adaptersDisable,
 		presetsList, presetsAdd, presetsRemove,
 		endpointsList, endpointsClose, endpointsSet, daemonStop, operationResult,

@@ -11,7 +11,8 @@ applies.
 
 This is a runtime package of layer 5 of [`internal/node/README.md`](../README.md).
 It imports the contract packages `ident`, `nodeproto`, `preauth` and `record`,
-`transport` and `clock`, and the networking library. It imports neither `engine`
+`transport` and `clock`, `config` (for the one definition of an address and the error that
+names it), and the networking library. It imports neither `engine`
 nor `daemon`: it defines `Node`, which the engine implements, and `Router`, which
 the engine calls through its own interface. It reads time only through the
 injected clock (calls and dials are bounded by contexts, which run on the real
@@ -27,6 +28,8 @@ clock), touches no file and takes no randomness of its own.
 | `Network.Listen(addrs)`, `ListenAddrs`, `PeerID` | Open the listeners (the address is in the error when one cannot open); where they are open; the identifier a contact line names after `/p2p/`. |
 | `Network.SetMembership(Membership)` | The snapshot of the node's own certificate, the facts of a decision and the held certificates; decides live connections again and closes those that no longer keep. |
 | `Network.SetAddressBook(map)` | The multiaddrs of each node, with `/p2p/<peer id>` unless a held certificate gives the peer. |
+| `Network.CheckAddresses(node, addrs)` | The rule for addresses the owner enters: judged by `config.ValidatePeerAddress`, then one must name the peer while no certificate is held, and every `/p2p/` must be the held certificate's peer once one is. The error is a `*config.FieldError` with the path of the address. |
+| `Network.ContactAddrs()` | The addresses to give another owner: the open listeners, unspecified ones expanded into the interfaces' addresses, no loopback or link-local, each ending in `/p2p/<peer id>`. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback; whether a member connection to a node is up. |
 | `NewRouter(self, loopback, remote)`, `Router` | The transport the engine calls: this node's calls to the loopback, every other node's to the remote client. |
 

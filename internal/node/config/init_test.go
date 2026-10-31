@@ -50,7 +50,7 @@ const (
 // runInit is the init transaction as the initialisation entry composes it: the
 // configuration side, and the rest of init, which is a single write here.
 func runInit(rg *rig) error {
-	plan, err := config.PlanInit(rg.w.Reader())
+	plan, err := config.PlanInit(rg.w.Reader(), config.InitOptions{})
 	if err != nil {
 		return err
 	}
@@ -82,6 +82,7 @@ func TestInitWritesTheDefaults(t *testing.T) {
 		config.NodePath:      initNode,
 		config.PresetsPath:   initPresets,
 		config.InstancesPath: initInstances,
+		config.NetworkPath:   initNetwork,
 	} {
 		if got[p] != want {
 			t.Errorf("%s =\n%s\nwant\n%s", p, got[p], want)
@@ -108,6 +109,46 @@ func TestInitWritesTheDefaults(t *testing.T) {
 	if n := c.Node(); n.Version != 1 || n.LastOperation != nil {
 		t.Errorf("node = %+v", n)
 	}
+	if n := c.Network(); n.Version != 1 || n.LastOperation != nil || len(n.Listen) != 2 || len(n.Peers) != 0 {
+		t.Errorf("network = %+v", n)
+	}
+}
+
+// The listen port is the owner's choice and is fixed: the addresses carry it, and
+// a port that cannot be listened on is refused before anything is written, even
+// when network.json exists and would be kept.
+func TestInitWritesTheListenPortItIsGiven(t *testing.T) {
+	rg := newRig(t)
+	plan, err := config.PlanInit(rg.w.Reader(), config.InitOptions{Port: 9000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := rg.w.Begin(testInit)
+	defer tx.Close()
+	if err := plan.MakeDirs(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.WriteFiles(tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Replace("marker", "init-marker", []byte("init"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/ip4/0.0.0.0/tcp/9000", "/ip4/0.0.0.0/udp/9000/quic-v1"}
+	if got := rg.load().Network().Listen; !reflect.DeepEqual(got, want) {
+		t.Errorf("listen = %v, want %v", got, want)
+	}
+
+	for _, port := range []int{-1, 65536} {
+		rg := newRig(t)
+		putTree(t, rg.mem, validTree(t))
+		if _, err := config.PlanInit(rg.w.Reader(), config.InitOptions{Port: port}); err == nil {
+			t.Errorf("port %d was accepted", port)
+		}
+	}
 }
 
 // init never overwrites a file that exists and is valid: whatever the owner put
@@ -118,11 +159,13 @@ func TestInitNeverOverwritesExistingConfig(t *testing.T) {
 	handPresets := `{"format":1,"version":7,"presets":{"mine":{"local_sources":"deny"}}}`
 	handInstances := `{ "format": 1, "version": 9, "instances": { } }`
 	handPolicy := `{"format":1,"version":3,"rules":[]}`
+	handNetwork := `{"format":1,"version":4,"listen":[],"peers":{}}`
 	existing := map[string]string{
 		config.NodePath:      customNode,
 		config.PolicyPath:    handPolicy,
 		config.PresetsPath:   handPresets,
 		config.InstancesPath: handInstances,
+		config.NetworkPath:   handNetwork,
 	}
 
 	for path, content := range existing {
@@ -136,7 +179,7 @@ func TestInitNeverOverwritesExistingConfig(t *testing.T) {
 			if snap[path] != content {
 				t.Errorf("%s was rewritten:\n%s\nwant\n%s", path, snap[path], content)
 			}
-			for _, other := range []string{config.NodePath, config.PolicyPath, config.PresetsPath, config.InstancesPath} {
+			for _, other := range []string{config.NodePath, config.PolicyPath, config.PresetsPath, config.InstancesPath, config.NetworkPath} {
 				if _, ok := snap[other]; !ok {
 					t.Errorf("%s was not written", other)
 				}
@@ -144,7 +187,7 @@ func TestInitNeverOverwritesExistingConfig(t *testing.T) {
 			rg.load()
 		})
 	}
-	t.Run("all four exist", func(t *testing.T) {
+	t.Run("all five exist", func(t *testing.T) {
 		rg := newRig(t)
 		putTree(t, rg.mem, existing)
 		before := snapshot(t, rg.mem)
@@ -201,6 +244,7 @@ func TestInitRefusesAnInvalidExistingFileNamingIt(t *testing.T) {
 		{"policy with a rule authz refuses", config.PolicyPath, strings.Replace(goldenPolicy, `"action": "see"`, `"action": "relay.reserve"`, 1)},
 		{"presets without the statement", config.PresetsPath, `{"format":1,"version":1,"presets":{"x":{}}}`},
 		{"instances not json", config.InstancesPath, "nope"},
+		{"network with a relay address", config.NetworkPath, strings.Replace(goldenNetwork, `"/ip4/0.0.0.0/tcp/7744"`, `"/p2p-circuit"`, 1)},
 		{"an empty file", config.NodePath, ""},
 	}
 	for _, r := range rows {

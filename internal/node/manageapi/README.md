@@ -35,7 +35,11 @@ The rows are in `methods.go` (`endpoints.list`, `endpoints.close`,
 `daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
 `alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
 `identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and
-`methods_settings.go` (`node.show`, `node.set`, `endpoints.set`) and
+`methods_settings.go` (`node.show`, `node.set`, `endpoints.set`),
+`methods_network.go` (`network.show`, `network.address.set|remove`, `network.listen.set`:
+the version is that of `network.json`, given by `network.show` and named by a change as
+the expected version, as for `node.set`; the rule for an address is `config`'s and the
+network's, judged by the engine, so a row only words the params and the result) and
 `methods_adapters.go` (`adapters.install|list|enable|disable`,
 `presets.list|add|remove`). The words of each
 result, and of the reminders, are the interface's: the engine says which reminder
@@ -162,7 +166,9 @@ routing, size, response, logging and shutdown tests live in `localhttp`. `testme
 rows and an untagged one has none. `methods_owner_test.go` the rows of the owner (the
 operation each is authorized as, the strict reading of their params, the commands and
 the fingerprint of a patch, the stop after a retirement, and the golden answers of
-`status`, `alerts.list`, `node.show` and the export); `fuzz_test.go` fuzzes the one
+`status`, `alerts.list`, `node.show` and the export, and the network rows: the view as
+the interface words it, the fingerprint of equal writes and the refusals of the engine
+on the wire); `fuzz_test.go` fuzzes the one
 entry that reads a request, for every method the table has: it never panics, and
 what it accepts is canonical. `methods_adapters_test.go` the rows for adapters and
 presets: the operation each is authorized as (a preset is added as loosening and

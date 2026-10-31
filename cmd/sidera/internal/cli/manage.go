@@ -67,9 +67,15 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	if err := c.managementResult(raw); err != nil {
 		return err
 	}
-	if !c.json && plan.method == "adapters.enable" {
-		_, err := fmt.Fprintln(c.Stdout, "enabled, probing in progress; see sidera adapter list")
-		return err
+	if !c.json {
+		switch plan.method {
+		case "adapters.enable":
+			_, err := fmt.Fprintln(c.Stdout, "enabled, probing in progress; see sidera adapter list")
+			return err
+		case "network.listen.set":
+			_, err := fmt.Fprintln(c.Stdout, "restart the daemon for the new listen addresses to take effect")
+			return err
+		}
 	}
 	return nil
 }
@@ -96,7 +102,13 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	if len(args) < 2 {
 		return plan, usage(group + " needs a subcommand; use --help")
 	}
-	action := args[1]
+	action, rest := args[1], args[2:]
+	if group == "network" && (action == "address" || action == "listen") {
+		if len(args) < 3 {
+			return plan, usage("network " + action + " needs a subcommand; use --help")
+		}
+		action, rest = action+" "+args[2], args[3:]
+	}
 	f := c.arguments.flags
 	o := &c.arguments.management
 	var versioned bool
@@ -153,6 +165,23 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.change = true
 		plan.versionMethod = "node.show"
 		versioned = true
+	case "network show":
+		plan.method = "network.show"
+	case "network address set":
+		plan.method = "network.address.set"
+		plan.change = true
+		plan.versionMethod = "network.show"
+		versioned = true
+	case "network address remove":
+		plan.method = "network.address.remove"
+		plan.change = true
+		plan.versionMethod = "network.show"
+		versioned = true
+	case "network listen set":
+		plan.method = "network.listen.set"
+		plan.change = true
+		plan.versionMethod = "network.show"
+		versioned = true
 	case "identity export-revocation":
 		plan.method = "identity.export_revocation"
 	case "identity confirm-backup":
@@ -167,7 +196,7 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	default:
 		return plan, usage("unknown command: " + group + " " + action)
 	}
-	p, err := parse(f, args[2:])
+	p, err := parse(f, rest)
 	if err != nil {
 		return plan, err
 	}
@@ -190,6 +219,18 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	case "endpoints.set":
 		if len(p) < 2 {
 			return plan, usage("endpoint set needs an address and field=json assignments")
+		}
+		want = len(p)
+	case "network.address.set":
+		if len(p) < 2 {
+			return plan, usage("network address set needs a node and at least one multiaddr")
+		}
+		want = len(p)
+	case "network.address.remove":
+		want = 1
+	case "network.listen.set":
+		if len(p) < 1 {
+			return plan, usage("network listen set needs at least one multiaddr")
 		}
 		want = len(p)
 	}
@@ -240,6 +281,12 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 			return plan, err
 		}
 		plan.params["endpoint"], plan.params["settings"] = p[0], patch
+	case "network.address.set":
+		plan.params["node"], plan.params["addresses"] = p[0], p[1:]
+	case "network.address.remove":
+		plan.params["node"] = p[0]
+	case "network.listen.set":
+		plan.params["addresses"] = p
 	case "node.set":
 		patch, err := assignments(p)
 		if err != nil {
@@ -316,7 +363,8 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.BoolVar(&o.yes, "yes", false, "confirm permanent retirement")
 	}
 	switch name {
-	case "preset add", "preset remove", "adapter enable", "adapter disable", "endpoint set", "node set":
+	case "preset add", "preset remove", "adapter enable", "adapter disable", "endpoint set", "node set",
+		"network address set", "network address remove", "network listen set":
 		f.Uint64Var(&o.version, "expected-version", 0, "version the change is based on")
 	}
 }

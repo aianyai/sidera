@@ -1,8 +1,9 @@
 # config
 
 The configuration the node's owner edits: node settings, the access policy,
-presets, adapter instances with their endpoint settings, the stable endpoint
-ids, the revocation records the node keeps, and the installed adapter packages.
+presets, adapter instances with their endpoint settings, where the node listens
+and the addresses of other nodes, the stable endpoint ids, the revocation
+records the node keeps, and the installed adapter packages.
 Read
 [../../../docs/references/configuration/README.md](../../../docs/references/configuration/README.md)
 for the file formats, the reasons and what the tests prove.
@@ -17,14 +18,15 @@ declared here or in the package that composes it. It reads no clock.
 | Name | Purpose |
 | ---- | ------- |
 | `Load(w)` | Reads and checks all of `config/`, then repairs the adapter directory. Returns a `*Config`, or a `*FileError` that names the file that is wrong. |
-| `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state, manifests of `Adapters` included: nothing a caller changes reaches the configuration or another caller. |
+| `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `Network`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state, manifests of `Adapters` included: nothing a caller changes reaches the configuration or another caller. |
 | `NodeSettings.ArchiveRetention()` | The retention of the archive as a duration: the one conversion of `archive_retention_days`. |
 | `NodeSettings.WireJSON()`, `EndpointOverride.WireJSON()`, `Preset.WireJSON()` | The settings and presets as the owner's commands show them: the compact object the file holds (under `"settings"`, or the preset's own document), with the names `node set`, `endpoint set` and `preset add` take, so the names are written once. |
-| `SetNodeSettings`, `AddPreset`, `RemovePreset`, `EnableAdapter`, `DisableAdapter`, `SetEndpointSettings` | The versioned changes. A `Request` names the operation by `admin.RequestKey`, which only `admin.KeyFor` should make, so the person and the id cannot be put together wrongly. Each checks the version the request names, validates, records the operation and its result in the file it changes, in the same replacement, and returns the new state. Refusals are `*ChangeError` with a typed `ChangeReason`. |
+| `ValidateListen`, `ValidatePeerAddress`, `ValidatePort`, `DefaultListen` | The one definition of what a listen address and an address entered for a peer may be, and of the port `init` is given. The file's decoder and every change of it use them; the management layer reuses them. |
+| `SetNodeSettings`, `AddPreset`, `RemovePreset`, `EnableAdapter`, `DisableAdapter`, `SetEndpointSettings`, `SetListen`, `SetPeerAddresses`, `RemovePeer` | The versioned changes. A `Request` names the operation by `admin.RequestKey`, which only `admin.KeyFor` should make, so the person and the id cannot be put together wrongly. Each checks the version the request names, validates, records the operation and its result in the file it changes, in the same replacement, and returns the new state. Refusals are `*ChangeError` with a typed `ChangeReason`. |
 | `RuntimeID`, `DirectID`, `PrepareBackup`, `PrepareRevocation`, `PlanInstall`, `PutEndpointIDs`, `PutBackup`, `PutRevocation`, `Install.Point` | Write functions for transactions of other packages. The prepare steps (`RuntimeID` and `DirectID` encode the ids they mint, `PrepareBackup`, `PrepareRevocation` and `PlanInstall` check and encode) run before `Begin`; the put steps take a `*txn.Tx` and the prepared value, write under an exported role, can fail only as a write of the transaction does, and return an `AfterCommit` that the caller calls once `Commit` returned nil. |
 | `StageAdapter`, `Unstage`, `PlanInstall`, `Install` | The installation of an adapter package: copy it next to the versions, drop it, plan the writes that make it current. |
 | `AdapterGCWork(r)` | The garbage of the adapter directory as a pure function of the disk: what the repair removes, and what a clean run must leave empty. |
-| `PlanInit(r)`, `InitPlan` | The configuration side of `init`: what is missing, refusing an invalid file that exists. |
+| `PlanInit(r, InitOptions)`, `InitPlan` | The configuration side of `init`: what is missing, refusing an invalid file that exists. `InitOptions.Port` is the port `network.json` listens on (zero is `DefaultListenPort`). |
 | `Decode…`/`Encode` of every file, `DecodePreset`, `DecodeNodePatch`, `DecodeEndpointPatch` | The strict decoders and the canonical encoders; the management layer decodes what it receives with these and with nothing else. |
 | `InitWrites()`, `EndpointIDsWrite()`, `BackupWrite()`, `RevocationWrite()`, `InstallWrites()`, `InstallOldWrite()` | The writes this package contributes to the transactions its composers declare, in the order they are made; a composer builds its `Decl` from them, as from `keys.InitWrites()`, and adds its own writes around them. |
 | `Transactions()`, the `Role…` constants, `LayoutDirs()`, the path helpers | The static declarations, the roles other packages compose, and where things live. |
@@ -116,7 +118,14 @@ declared here or in the package that composes it. It reads no clock.
   the repair removes it. So does it remove staging directories and version
   directories the pointer does not name. `AdapterGCWork` is that list and is the
   only definition of it.
-- **`init` never overwrites.** For each of the four files it writes, a missing
+- **An address is judged in one place.** `network.json` holds multiaddrs, and
+  what a listen address or a peer address may be is `ValidateListen` and
+  `ValidatePeerAddress`: direct TCP or QUIC addresses with an ip or dns host, a
+  fixed port, and for a peer an optional `/p2p/<peer id>`; no relay circuit. The
+  decoder, the encoder and the changes call them, so a file and a request are
+  refused for the same reasons. The package imports `go-multiaddr` and
+  `go-libp2p/core/peer` for this and for nothing else.
+- **`init` never overwrites.** For each of the five files it writes, a missing
   one is written with the defaults, a valid one stays byte for byte, an invalid
   one makes the plan fail naming the file.
 - **A directory missing from `config/` refuses startup**, naming it: it is the
@@ -155,7 +164,7 @@ The prompt turns and the endpoint defaults are not here: they are
   (`RoleBackup`), `identity-retire` (`RoleRevocation`), `adapter-install`
   (`RoleStale`, `RoleVersion`, `RoleCurrent`, `RoleOld` in this order, the
   current pointer being the commit point), `init` (`RoleDir`, `RoleNode`,
-  `RolePolicy`, `RolePresets`, `RoleInstances`).
+  `RolePolicy`, `RolePresets`, `RoleInstances`, `RoleNetworkConfig`).
 - Do every check and encoding a cross-owner transaction needs before `Begin`:
   `RuntimeID` or `DirectID`, `PrepareBackup`, `PrepareRevocation` and
   `PlanInstall` return the error of a value that cannot be written, while the
@@ -200,5 +209,5 @@ per kind of file and failure), `preset_test.go` (the statement about local
 sources), `version_test.go` (expected versions), `writable_test.go` (nothing is written that its decoder refuses), `settings_test.go` (settings
 delegate to their owners), `crash_test.go` (every transaction from every crash
 state, a crash during the repair, `init` crashing), `clean_test.go` (a clean run
-leaves no recovery work), `init_test.go` and `golden_test.go`. `fuzz_test.go` has
+leaves no recovery work), `network_test.go` (the address rules, the file's bounds, its changes), `init_test.go` and `golden_test.go`. `fuzz_test.go` has
 one fuzz target for each decoder.

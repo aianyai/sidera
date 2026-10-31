@@ -146,6 +146,7 @@ func TestEveryRefusedChangeOfTheConfigurationHasItsWordsOnTheWire(t *testing.T) 
 		config.ChangeAdapterNotInstalled:     {"not_found", "adapter_unknown"},
 		config.ChangeAdapterInUse:            {"conflict", "adapter_in_use"},
 		config.ChangeNothingToChange:         {"invalid_argument", "empty_patch"},
+		config.ChangePeerUnknown:             {"not_found", "peer_unknown"},
 	}
 	seen := 0
 	for r := config.ChangeReason(1); r.String() != "unknown"; r++ {

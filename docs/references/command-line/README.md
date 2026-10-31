@@ -18,7 +18,7 @@ arguments, purpose and one example.
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Create the private data directory, keys and default configuration through `daemon.Init`; print the node, home and a reminder to export and back up the self-revocation outside the device. |
+| `init [--port <n>]` | Create the private data directory, keys and default configuration through `daemon.Init`; `--port` (default 7744, 1 to 65535; 0 and anything else is a usage error before anything is made) is the port `config/network.json` makes the node listen on, for TCP and QUIC; print the node, home and a reminder to export and back up the self-revocation outside the device. |
 | `daemon` | Run the composition root in the foreground with the executable adapter launcher; the daemon owns signal handling and orderly shutdown. |
 | `me` | Read the authenticated session's address, declaration and front-end limits. |
 | `declare [--paused=<bool>] [--refuse-multi-recipient=<bool>] [--restrict-senders=<bool>] [--accept-from <addr>,...] [--hidden=<bool>]` | Send only the fields explicitly supplied; `--accept-from=` clears the list. |
@@ -40,6 +40,9 @@ arguments, purpose and one example.
 | `endpoint list [--instance <name>]` / `endpoint close <addr>` | Read endpoints, including closed ones, or close an endpoint. |
 | `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings. |
 | `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. |
+| `network show` | Show where the node listens, the contact line, the addresses kept for other nodes and which of them are connected. |
+| `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
+| `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted. |
 | `identity export-revocation [--out <new-file>]` | Export the self-revocation and its digest; optionally write the verified raw record to a new private file. |
 | `identity confirm-backup <digest>` | Confirm an offline backup by the digest printed on export. |
 | `identity retire --node <id> --yes` | Retire this identity permanently and stop the daemon; omitting `--yes` is usage error 2. |
@@ -67,7 +70,7 @@ Preset and instance config documents likewise remain raw JSON, so the shared
 client checks their encoding and the configuration owner validates their rules.
 
 When a versioned command omits `--expected-version`, the CLI reads it from
-`node.show`, `presets.list` or `adapters.list` before issuing the change. Endpoint
+`node.show`, `network.show`, `presets.list` or `adapters.list` before issuing the change. Endpoint
 settings use the instances collection version from `adapters.list`. An explicit
 version, including zero, is sent unchanged. A conflict is returned to the caller;
 it does not trigger another read or a different change.
@@ -82,6 +85,38 @@ never retries.
 Installation only resolves the package directory and names it to the daemon.
 The daemon's existing package reader owns the regular-file checks and bounded
 reads, as described in [configuration](../configuration/README.md).
+
+### Network commands
+
+`network show` prints, in human form, the **contact line** on a line of its own before
+anything else, so that it can be copied whole: `<node id> <multiaddr>…`, the addresses
+the node listens on that another machine can reach (an unspecified `0.0.0.0` or `::`
+is expanded into the machine's interface addresses, loopback and link-local ones are
+left out), each ending in `/p2p/<peer id>`. The owner of another node enters it with
+`network address set <node id> <multiaddr>…`, which is how a node learns where
+another can be reached; the same is done on the other node in the other direction.
+No line is printed when the node has no address to give. The rest of the human output
+is the common field listing: `listen.configured` (the list in `network.json`),
+`listen.actual` (what the listeners are open on now), `node`, `peer_id`, the table of
+`peers` (`addresses`, `certificate_held`, `connected`) and `version`. `--json` prints
+the whole response, whose `result` is the object documented for `network.show` in the
+[daemon reference](../daemon/README.md#the-management-interface).
+
+`network address set` takes the node id and one or more multiaddrs; `network address
+remove` the node id; `network listen set` one or more multiaddrs (an empty listen
+list is possible only by hand or through the management interface, so a mistaken
+command cannot silently stop the node from listening). Each is a versioned change of
+`network.json`, read from `network.show` when `--expected-version` is omitted. A
+listen change prints, in human form, that the daemon must be restarted for it to take
+effect. Refusals are in the words of every change: a multiaddr that breaks the rules
+of an address, or the rule that ties addresses to the certificate held for the node
+(while none is held one address must end in `/p2p/<peer id>`; once one is held every
+`/p2p/` must be its peer), is `invalid_argument/config_invalid` (exit 3) with the path
+of the address (`addresses[1]`) and the reason; removing a node that has no address is
+`not_found/peer_unknown` (exit 5); a stale version is `conflict/version_conflict`
+(exit 6). A missing node or address is usage error 2 before anything is sent. The
+commands under `network address` and `network listen` have a third word, which the
+command discovery recognises, so their flags and help are their own.
 
 Enabling an adapter returns before background startup and probing finish. Human
 output says `enabled, probing in progress; see sidera adapter list`; that list

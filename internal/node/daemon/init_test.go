@@ -68,7 +68,7 @@ func TestInitMakesTheDataDirectoryWithItsLayoutKeysAndConfiguration(t *testing.T
 			t.Errorf("the data directory: %v, %v; want 0700", info, err)
 		}
 		for _, f := range []string{"keys/identity.key", "keys/network.key", "keys/network.cert", "keys/network-serial",
-			"keys/self-revocation.rec", "keys/clock.rec", "keys/init.rec", "config/node.json", "config/policy.json", "config/presets.json", "config/instances.json"} {
+			"keys/self-revocation.rec", "keys/clock.rec", "keys/init.rec", "config/node.json", "config/policy.json", "config/presets.json", "config/instances.json", "config/network.json"} {
 			info, err := os.Stat(filepath.Join(home, f))
 			if err != nil || info.Mode().Perm() != 0o600 {
 				t.Errorf("%s: %v, %v; want a file of mode 0600", f, info, err)
@@ -442,13 +442,36 @@ func TestTheLayoutRuleHasNoWorkOnAHomeThatInitMade(t *testing.T) {
 	}
 }
 
+// The port the owner names is the one network.json makes the node listen on.
+func TestInitWritesTheListenPortItIsGiven(t *testing.T) {
+	c := config(newHome(t), clocktest.NewFake(t0))
+	c.InitPort = 7801
+	if _, err := daemon.Init(context.Background(), c); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.Home, "config", "network.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"/ip4/0.0.0.0/tcp/7801"`, `"/ip4/0.0.0.0/udp/7801/quic-v1"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("network.json lacks %s:\n%s", want, data)
+		}
+	}
+	bad := config(newHome(t), clocktest.NewFake(t0))
+	bad.InitPort = 70000
+	if _, err := daemon.Init(context.Background(), bad); err == nil {
+		t.Error("init accepted a port that cannot be listened on")
+	}
+}
+
 // An owner who deletes keys/ to start the identity afresh and runs init again gets
 // a new identity, and keeps everything of the configuration: the settings, the
 // presets and the instances are the owner's decisions and are not rewritten.
 func TestInitAfterTheOwnerDeletedKeysMakesANewIdentityAndKeepsTheConfiguration(t *testing.T) {
 	c, clk := initialized(t)
 	first := nodeOf(t, c)
-	cfgFiles := []string{"node.json", "policy.json", "presets.json", "instances.json"}
+	cfgFiles := []string{"node.json", "policy.json", "presets.json", "instances.json", "network.json"}
 	before := map[string][]byte{}
 	for _, f := range cfgFiles {
 		b, err := os.ReadFile(filepath.Join(c.Home, "config", f))

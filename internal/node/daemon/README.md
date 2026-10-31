@@ -22,6 +22,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
 | `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the configuration and of what of the keys no renewal changes, the instance lock's assertion, the engine, the logs), and a task on a period. |
 | `Config.Rand`, `Config.TempRand`, `Config.FS` | Node randomness, optional independent temporary-name randomness for daemon-opened OS filesystems, and an optional caller-owned filesystem. |
+| `Config.InitPort` | The port `init` writes into `network.json`; zero is `config.DefaultListenPort`. A daemon listens where the file says. |
 | `Config.AdapterHost` | The adapter host (`*adapterhost.Host`), or nil for a node that starts no adapter. Given to the engine at step 6, started at step 10 and shut down at step 3 of the shutdown. |
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
@@ -78,11 +79,21 @@ is read here and no test tooling is imported.
   `fsx.OpenOS` of the directory the owner named, handed over as a reader: the package
   is on the machine's own file system, whatever file system the data directory is on,
   and the engine, which touches no file of its own, asks for a reader and copies from it.
-- **The engine's transport is the loopback, made here with no knobs.** Step 6 sets
-  `transport.NewLoopback(node, engine, nil)` before the loop starts, because the
-  transport needs the engine as its handler and so cannot exist before it. The
-  knobs are faults for tests: the product has no way to arm one. Without this call
-  every send and every session creation would fail inside the engine.
+- **The engine's transport is the router, made here with no knobs.** Step 6 sets
+  `network.NewRouter(node, transport.NewLoopback(node, engine, nil), network)` before
+  the loop starts, because the transport needs the engine as its handler and so cannot
+  exist before it. The knobs of the loopback are faults for tests: the product has no
+  way to arm one. Without this call every send and every session creation would fail
+  inside the engine.
+- **The network is built at step 6, listens at step 15 and closes at shutdown step 2.**
+  Step 6 takes the network key from the keys once (they are not safe for concurrent
+  use), builds the host, which listens on nothing, gives it the engine as its node and
+  the address book of `network.json`, and gives the engine the network as the layer it
+  pushes its membership to; the two `Membership` types have the same fields, and this
+  package converts. Step 15 opens the listeners of `network.json` after the hooks, and
+  a port in use fails the start naming the address. Shutdown step 2 closes the network
+  beside the two HTTP servers, on the fatal path as well. A change of the listen list
+  takes effect with the next start: the listeners open once.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
 - **The certificate is renewed at step 5 and every hour in the loop, never when the
@@ -151,6 +162,6 @@ the death of the engine); `interrupt_test.go` the lock kept under an engine that
 not ended, a stop that races with a failed start, a context or a signal during the
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
 process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
-`random_test.go` the default shared stream, independent temporary draws and caller-owned filesystem reader through Init and Start recovery; `env_test.go` what a hook is given; `agent_test.go` the real Agent listener in probe-only and full-service startup, and its removal at shutdown; `logging_test.go` the deferred log handler;
+`network_test.go` the listeners (open only after the node serves, closed at shutdown, a port in use fails the start naming the address); `random_test.go` the default shared stream, independent temporary draws and caller-owned filesystem reader through Init and Start recovery; `env_test.go` what a hook is given; `agent_test.go` the real Agent listener in probe-only and full-service startup, and its removal at shutdown; `logging_test.go` the deferred log handler;
 `sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
 resent through the whole daemon.

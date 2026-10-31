@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -32,4 +34,70 @@ func TestGlobalFlagsUseTheRegisteredLocalArity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The commands under `network address` and `network listen` have three words:
+// discovery names them whole (so their flags are registered), and their plans send
+// the method with the node and the addresses as params, reading the version from
+// network.show.
+func TestNetworkCommandsHaveThreeWordsAndPlanTheirMethods(t *testing.T) {
+	const node = "node1abc"
+	for _, tc := range []struct {
+		args    []string
+		path    []string
+		method  string
+		params  map[string]any
+		usage   bool
+		changes bool
+	}{
+		{args: []string{"network", "show"}, path: []string{"network", "show"}, method: "network.show"},
+		{args: []string{"network", "address", "set", node, "/ip4/10.0.0.1/tcp/7744", "/ip4/10.0.0.2/tcp/7744"}, path: []string{"network", "address", "set"},
+			method: "network.address.set", changes: true,
+			params: map[string]any{"node": node, "addresses": []string{"/ip4/10.0.0.1/tcp/7744", "/ip4/10.0.0.2/tcp/7744"}}},
+		{args: []string{"--home", "h", "network", "address", "remove", node, "--expected-version", "3"}, path: []string{"network", "address", "remove"},
+			method: "network.address.remove", changes: true, params: map[string]any{"node": node}},
+		{args: []string{"network", "listen", "set", "/ip4/0.0.0.0/tcp/7745"}, path: []string{"network", "listen", "set"},
+			method: "network.listen.set", changes: true, params: map[string]any{"addresses": []string{"/ip4/0.0.0.0/tcp/7745"}}},
+		{args: []string{"network", "address", "set", node}, path: []string{"network", "address", "set"}, usage: true},
+		{args: []string{"network", "address", "remove"}, path: []string{"network", "address", "remove"}, usage: true},
+		{args: []string{"network", "address"}, path: []string{"network", "address"}, usage: true},
+		{args: []string{"network", "listen", "set"}, path: []string{"network", "listen", "set"}, usage: true},
+		{args: []string{"network", "show", "extra"}, path: []string{"network", "show"}, usage: true},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			if got := commandPath(tc.args); !reflect.DeepEqual(got, tc.path) {
+				t.Fatalf("command path %q, want %q", got, tc.path)
+			}
+			c := command{Config: Config{Getenv: func(string) string { return "" }}}
+			c.arguments = arguments(tc.args)
+			rest, err := c.globals(tc.args, c.arguments.flags)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := c.managementPlan(rest)
+			var u *usageError
+			if tc.usage {
+				if !errors.As(err, &u) {
+					t.Fatalf("error %v, want a usage error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.method != tc.method || plan.change != tc.changes || !reflect.DeepEqual(plan.params, orEmpty(tc.params)) {
+				t.Errorf("plan %+v, want %s with %v", plan, tc.method, tc.params)
+			}
+			if tc.changes && plan.versionMethod != "network.show" {
+				t.Errorf("the version is read from %q, want network.show", plan.versionMethod)
+			}
+		})
+	}
+}
+
+func orEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
 }

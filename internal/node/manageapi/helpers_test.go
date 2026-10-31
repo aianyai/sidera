@@ -82,6 +82,13 @@ type fakeService struct {
 	// adapters and presets are what the reads of the adapters and the presets answer.
 	adapters engine.AdapterList
 	presets  config.Presets
+	network  engine.NetworkView
+}
+
+func (f *fakeService) NetworkView(context.Context) (engine.NetworkView, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.network, nil
 }
 
 func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) {

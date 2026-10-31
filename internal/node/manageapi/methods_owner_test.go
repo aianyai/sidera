@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,10 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 		{"clock.clear_rollback", admin.OpClearClockRollback, true, false},
 		{"node.show", admin.OpRead, false, false},
 		{"node.set", admin.OpChangeNodeSettings, true, true},
+		{"network.show", admin.OpRead, false, false},
+		{"network.address.set", admin.OpChangeNodeSettings, true, true},
+		{"network.address.remove", admin.OpChangeNodeSettings, true, true},
+		{"network.listen.set", admin.OpChangeNodeSettings, true, true},
 		{"endpoints.set", admin.OpChangeEndpointSettings, true, true},
 		{"adapters.install", admin.OpInstallAdapter, true, false},
 		{"adapters.list", admin.OpRead, false, false},
@@ -85,6 +90,10 @@ func TestTheParamsOfTheOwnersMethodsAreReadStrictly(t *testing.T) {
 		{"a node that is not an identifier", "identity.retire", `{"operation_id":"` + id + `","params":{"node":"here"}}`, "params.node"},
 		{"an endpoint that is not an address", "endpoints.set", `{"operation_id":"` + id + `","expected_version":1,"params":{"endpoint":"x","settings":{"backlog_limit":3}}}`, "params.endpoint"},
 		{"settings that are absent", "node.set", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.settings"},
+		{"a node that is not an identifier", "network.address.set", `{"operation_id":"` + id + `","expected_version":1,"params":{"node":"here","addresses":["/ip4/10.0.0.1/tcp/7744"]}}`, "params.node"},
+		{"addresses of the wrong type", "network.address.set", `{"operation_id":"` + id + `","expected_version":1,"params":{"node":"` + ownNode.String() + `","addresses":"/ip4/10.0.0.1/tcp/7744"}}`, "params.addresses"},
+		{"a node to remove that is not an identifier", "network.address.remove", `{"operation_id":"` + id + `","expected_version":1,"params":{"node":"here"}}`, "params.node"},
+		{"a listen list that is absent", "network.listen.set", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.addresses"},
 		{"settings that are absent for an endpoint", "endpoints.set", `{"operation_id":"` + id + `","expected_version":1,"params":{"endpoint":"` + addressOf(1) + `"}}`, "params.settings"},
 		{"a member of the clear that is not there", "clock.clear_rollback", `{"operation_id":"` + id + `","params":{"force":true}}`, "params.force"},
 		{"a member of the retirement that is not there", "identity.retire", `{"operation_id":"` + id + `","params":{"node":"` + ownNode.String() + `","yes":true}}`, "params.yes"},
@@ -341,5 +350,87 @@ func TestNodeShowAndTheExportAnswerFromTheEngine(t *testing.T) {
 	r.wantError(400, "invalid_argument", "malformed_request", status, out)
 	if n := len(r.svc.calls()); n != 0 {
 		t.Errorf("a read reached Execute %d times", n)
+	}
+}
+
+// The network methods: the show words the view of the engine as the interface
+// documents it, with the contact line made of the node and the addresses the
+// network gives and empty when there are none; a write sends the engine the node
+// and the addresses in one fingerprint however the members are ordered, and the
+// refusals of the engine reach the wire in the words of every other change.
+func TestTheNetworkMethodsWordTheViewAndTheChanges(t *testing.T) {
+	r := newRig(t)
+	peer, err := ident.NodeIDFromBytes([]byte(strings.Repeat("\x07", ident.NodeIDLen)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.svc.network = engine.NetworkView{
+		Config:    config.Network{Version: 5, Listen: []string{"/ip4/0.0.0.0/tcp/7744"}},
+		PeerID:    "12D3KooWpeer",
+		Listening: []string{"/ip4/0.0.0.0/tcp/7744"},
+		Contact:   []string{"/ip4/10.0.0.9/tcp/7744/p2p/12D3KooWpeer"},
+		Peers:     []engine.NetworkPeer{{Node: peer, Addresses: []string{"/ip4/10.0.0.1/tcp/7744"}, CertificateHeld: true, Connected: true}, {Node: ownNode}},
+	}
+	status, out := r.post("network.show", `{}`)
+	want := `{"result":{"node":"` + ownNode.String() + `","peer_id":"12D3KooWpeer","version":5,` +
+		`"listen":{"configured":["/ip4/0.0.0.0/tcp/7744"],"actual":["/ip4/0.0.0.0/tcp/7744"]},` +
+		`"contact":"` + ownNode.String() + ` /ip4/10.0.0.9/tcp/7744/p2p/12D3KooWpeer",` +
+		`"peers":[{"node":"` + peer.String() + `","addresses":["/ip4/10.0.0.1/tcp/7744"],"certificate_held":true,"connected":true},` +
+		`{"node":"` + ownNode.String() + `","addresses":[],"certificate_held":false,"connected":false}]}}`
+	if status != 200 || strings.TrimSpace(string(out)) != want {
+		t.Errorf("%d\n%s\nwant\n%s", status, out, want)
+	}
+	r.svc.network = engine.NetworkView{}
+	if _, out := r.post("network.show", `{}`); !strings.Contains(string(out), `"contact":"","peers":[]`) {
+		t.Errorf("a node that listens nowhere: %s", out)
+	}
+
+	body := func(id byte, params string) string {
+		return `{"operation_id":"` + opID(id) + `","expected_version":5,"params":` + params + `}`
+	}
+	addrs := `["/ip4/10.0.0.1/tcp/7744","/ip4/10.0.0.2/tcp/7744"]`
+	send := func(id byte, method, params string) engine.ManagementCommand {
+		t.Helper()
+		before := len(r.svc.calls())
+		if status, out := r.post(method, body(id, params)); status != 200 {
+			t.Fatalf("%s answered %d %s", method, status, out)
+		}
+		calls := r.svc.calls()
+		if len(calls) != before+1 {
+			t.Fatalf("%d commands, want %d", len(calls), before+1)
+		}
+		return calls[before]
+	}
+	set1 := send(1, "network.address.set", `{"node":"`+peer.String()+`","addresses":`+addrs+`}`)
+	set2 := send(2, "network.address.set", `{ "addresses" : `+addrs+`, "node" : "`+peer.String()+`" }`)
+	other := send(3, "network.address.set", `{"node":"`+peer.String()+`","addresses":["/ip4/10.0.0.1/tcp/7744"]}`)
+	if set1.Name != "network.address.set" || set1.Expected != 5 || set1.Operation.Admin().Kind != admin.OpChangeNodeSettings {
+		t.Errorf("the command is %+v", set1)
+	}
+	if set1.Fingerprint != set2.Fingerprint || set1.Fingerprint == other.Fingerprint {
+		t.Error("equal requests differ in fingerprint, or different ones do not")
+	}
+	if c := send(4, "network.listen.set", `{"addresses":[]}`); c.Name != "network.listen.set" || c.Expected != 5 {
+		t.Errorf("an empty listen list is a change of its own: %+v", c)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		err      error
+		status   int
+		code     string
+		category string
+	}{
+		{"an address the rule refuses", &config.ChangeError{Reason: config.ChangeInvalid, Field: "addresses[1]", Err: errors.New("the rule")}, 400, "config_invalid", "invalid_argument"},
+		{"a stale version", &config.ChangeError{Reason: config.ChangeVersionConflict, Current: 6}, 409, "version_conflict", "conflict"},
+		{"a node that has no address", &config.ChangeError{Reason: config.ChangePeerUnknown, Field: peer.String()}, 404, "peer_unknown", "not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.svc.execute = func(context.Context, engine.ManagementCommand) (engine.StoredResult, error) {
+				return engine.StoredResult{}, tc.err
+			}
+			status, out := r.post("network.address.remove", body(9, `{"node":"`+peer.String()+`"}`))
+			r.wantError(tc.status, tc.category, tc.code, status, out)
+		})
 	}
 }

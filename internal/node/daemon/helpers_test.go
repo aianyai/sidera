@@ -25,6 +25,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -81,7 +82,13 @@ func (l *lockedReader) Read(p []byte) (int, error) {
 
 // config is the configuration of a daemon over home with a test clock.
 func config(home string, clk *clocktest.Fake) daemon.Config {
-	return daemon.Config{Home: home, Clock: clk, Rand: seeded(1)}
+	// A port of its own: the default is one per machine, and the packages of a test
+	// run start daemons side by side.
+	port, err := harness.FreePort()
+	if err != nil {
+		panic(err)
+	}
+	return daemon.Config{Home: home, Clock: clk, Rand: seeded(1), InitPort: port}
 }
 
 // initialized makes a data directory with init and returns its configuration.

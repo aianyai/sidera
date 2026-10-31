@@ -208,7 +208,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return c.local(ctx, args)
 	}
 	switch args[0] {
-	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock":
+	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network":
 		return c.manage(ctx, args)
 	case "status":
 		if len(args) == 1 {

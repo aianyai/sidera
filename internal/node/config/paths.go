@@ -12,6 +12,7 @@ const (
 	PolicyPath     = Dir + "/policy.json"
 	PresetsPath    = Dir + "/presets.json"
 	InstancesPath  = Dir + "/instances.json"
+	NetworkPath    = Dir + "/network.json"
 	EndpointIDsDir = Dir + "/endpoint-ids"
 	BackupPath     = Dir + "/revocation-backup.json"
 	RevocationsDir = Dir + "/revocations"

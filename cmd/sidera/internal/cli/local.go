@@ -2,11 +2,22 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 )
+
+// initFlags are the flags of init.
+type initFlags struct {
+	port int
+}
+
+func (o *initFlags) add(f *flag.FlagSet) {
+	f.IntVar(&o.port, "port", config.DefaultListenPort, "port the node listens on, for TCP and QUIC")
+}
 
 type daemonError struct{ err error }
 
@@ -27,6 +38,10 @@ func (c *command) local(ctx context.Context, args []string) error {
 	}
 	cfg := daemon.Config{Home: c.home, Clock: clk, Rand: c.random, TempRand: c.tempRandom, Observer: c.observer, Version: c.Version}
 	if args[0] == "init" {
+		if err := config.ValidatePort(c.arguments.init.port); err != nil {
+			return usage("--port: " + err.Error())
+		}
+		cfg.InitPort = c.arguments.init.port
 		r, err := daemon.Init(ctx, cfg)
 		if err != nil {
 			return &daemonError{err}

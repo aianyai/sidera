@@ -18,6 +18,7 @@ const (
 	KindPolicy
 	KindPresets
 	KindInstances
+	KindNetwork
 	KindEndpointIDs
 	KindBackup
 	KindRevocation
@@ -31,6 +32,7 @@ var kindNames = [...]string{
 	KindPolicy:          "policy",
 	KindPresets:         "presets",
 	KindInstances:       "instances",
+	KindNetwork:         "network",
 	KindEndpointIDs:     "endpoint ids",
 	KindBackup:          "revocation backup",
 	KindRevocation:      "revocation record",
@@ -159,6 +161,8 @@ const (
 	ChangeAdapterInUse
 	// ChangeNothingToChange: a patch that names no setting.
 	ChangeNothingToChange
+	// ChangePeerUnknown: removing a node that has no address in the book.
+	ChangePeerUnknown
 )
 
 var changeNames = [...]string{
@@ -173,6 +177,7 @@ var changeNames = [...]string{
 	ChangeAdapterNotInstalled:     "adapter_not_installed",
 	ChangeAdapterInUse:            "adapter_in_use",
 	ChangeNothingToChange:         "nothing_to_change",
+	ChangePeerUnknown:             "peer_unknown",
 }
 
 // String names the reason.
@@ -192,7 +197,8 @@ type ChangeError struct {
 	// preset (ChangePresetExists, ChangePresetUnknown), the instance
 	// (ChangeInstanceUnknown, ChangeInstanceExists, ChangeInstanceAdapterMismatch),
 	// the adapter (ChangeAdapterNotInstalled), "instances.<name>" for
-	// ChangeAdapterInUse and the endpoint id for ChangeEndpointUnknown. It is
+	// ChangeAdapterInUse and the endpoint id for ChangeEndpointUnknown and the node id for
+	// ChangePeerUnknown. It is
 	// empty for ChangeVersionConflict and ChangeNothingToChange.
 	Field string
 	// Current is the current version of the collection, for

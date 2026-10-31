@@ -81,6 +81,7 @@ func TestChangeRefusesToWrapTheVersion(t *testing.T) {
 		config.NodePath:      `"version": 3,`,
 		config.PresetsPath:   `"version": 2,`,
 		config.InstancesPath: `"version": 4,`,
+		config.NetworkPath:   `"version": 2,`,
 	} {
 		if !strings.Contains(tree[file], from) {
 			t.Fatalf("%s lacks %s", file, from)

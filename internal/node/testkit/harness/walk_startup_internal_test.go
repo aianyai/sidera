@@ -71,7 +71,11 @@ func TestAStartupWalkCanceledDuringPeriodicWorkReclaimsItsDaemon(t *testing.T) {
 	}
 	disk := fsxtest.NewMem()
 	clk := clocktest.NewFake(DefaultStart)
-	cfg := daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}}
+	port, err := FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := daemon.Config{Home: home, FS: disk, Clock: clk, Rand: &startupRandom{r: RandReader(keySeed)}, InitPort: port}
 	if _, err := daemon.Init(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}

@@ -15,4 +15,5 @@ var NotYetWalked = map[string]string{
 	"trust-local-clear":  "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"peer-cert":          "not yet walked by the acceptance recipes; the scenario rows of the store cover it",
 	"trust-local-revoke": "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"network-set":        "the network configuration write is not yet walked by the acceptance recipes",
 }

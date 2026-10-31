@@ -78,6 +78,12 @@ func (d *Daemon) shutdown(fatal bool) {
 				warn("the Agent interface ended", <-d.agentServed)
 			})
 		}
+		if d.net != nil {
+			// It stops listening, closes every connection and waits for its own
+			// goroutines, which the library bounds itself: the context is not
+			// taken, as the grace is the interfaces' own.
+			interfaces.Go(func() { warn("the network did not close", d.net.Close()) })
+		}
 		interfaces.Wait()
 		if d.agentBegan && d.cfg.Attach.StopInterfaces != nil {
 			warn("the Agent interface", d.cfg.Attach.StopInterfaces(ctx))

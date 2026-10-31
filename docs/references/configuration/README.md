@@ -2,7 +2,8 @@
 
 What the owner of a node decides, and where it is kept: the node settings, the
 access policy, the presets, the adapter instances with the settings of their
-endpoints, the endpoint ids that must outlive the run-time state, the revocation
+endpoints, where the node listens and the addresses of other nodes, the
+endpoint ids that must outlive the run-time state, the revocation
 records the node keeps, and the installed adapter packages. All of it is JSON
 (or the bytes of a signed record) under `config/` of the data directory, owned
 by one package, [`internal/node/config`](../../../internal/node/config/README.md),
@@ -22,6 +23,7 @@ config/
   policy.json                the access policy; version, last_operation
   presets.json               every preset; one version for the whole set
   instances.json             every adapter instance and its endpoint settings; one version
+  network.json               where the node listens and the addresses of other nodes; version, last_operation
   endpoint-ids/<instance>.json   the ids of an instance's runtime and direct endpoints
   revocation-backup.json     the owner's confirmation that the self-revocation is kept offline
   revocations/<digest>.rec   revocation records the node keeps (record wire bytes)
@@ -33,6 +35,7 @@ config/
 | File | Written by | Version |
 | ---- | ---------- | ------- |
 | `node.json`, `presets.json`, `instances.json` | `init`; then only management requests (`node set`, `preset add|remove`, `adapter enable|disable`, `endpoint set`) | one integer each, from 1, for the whole file |
+| `network.json` | `init`; then only management requests (the listen list and the address book) | one integer, from 1, for the whole file |
 | `policy.json` | `init`; the owner by hand while the node is stopped (no command changes it yet) | one integer, from 1 |
 | `endpoint-ids/<instance>.json` | the daemon, when an instance's runtime endpoint or a direct endpoint key is first seen | none |
 | `revocation-backup.json` | `identity confirm-backup` | none |
@@ -260,6 +263,56 @@ back when the endpoint is registered again, and keep their settings) nor open
 now; the caller says which are open. A setting for an endpoint that is neither
 is refused when it is made, because the next write would drop it.
 
+### `network.json`
+
+```json
+{
+  "format": 1,
+  "version": 2,
+  "listen": ["/ip4/0.0.0.0/tcp/7744", "/ip4/0.0.0.0/udp/7744/quic-v1"],
+  "peers": {
+    "node1…": ["/ip4/192.168.1.20/tcp/7744/p2p/12D3KooW…", "/dns4/node2.example.org/udp/7744/quic-v1"]
+  }
+}
+```
+
+`listen` is where the node accepts connections from other nodes; `peers` is the
+address book: for each node the addresses the owner entered for reaching it. Both
+are required. An empty `listen` is valid and means the node does not listen (it
+can still dial); `peers` may be empty.
+
+- **One definition of an address.** `ValidateListen` and `ValidatePeerAddress`
+  are the only place that says what an address may be, for the file and for every
+  change: `/<host>/tcp/<port>` or `/<host>/udp/<port>/quic-v1`, with an `ip4`,
+  `ip6`, `dns`, `dns4` or `dns6` host and a port from 1 to 65535. A peer address
+  may end in `/p2p/<peer id>`, which must be a libp2p peer identifier; a listen
+  address names no peer. `/p2p-circuit` and every other protocol is refused: the
+  owner states direct addresses only, and a relay circuit would name a third
+  node. Port 0 is refused: it asks the system for any port, which no one else can
+  know.
+- **Bounds.** At most 16 addresses in a list and at most 256 bytes in an address,
+  the limits of an address list in a pairing record, so an address the book holds
+  can be offered in one. The count is judged on what was written, before repeats
+  are dropped.
+- **Node ids** are the text form of a node id, and a node listed has at least one
+  address: removing the last one is removing the node.
+- **Normalised text.** An address is written as the multiaddr library prints it
+  (`/ip6/0:0:0:0:0:0:0:1/tcp/9` becomes `/ip6/::1/tcp/9`), repeats are dropped,
+  and the addresses of a list keep the order in which each first appears, since
+  the order is the owner's to choose and nothing depends on it. `peers` is sorted
+  by node id like every map of config.
+- The address book is the owner's decision, so it is in `config/` and not in
+  `state/`: deleting `state/` must not lose it. Addresses learned later are
+  state, not configuration.
+
+`init` writes the listen list for a port: `/ip4/0.0.0.0/tcp/<port>` and
+`/ip4/0.0.0.0/udp/<port>/quic-v1`, and no peers. The port is fixed: a port of 0
+is refused. The default, `DefaultListenPort`, is 7744.
+
+Port 7744 is registered with IANA as `raqmon-pdu` ("RAQMON PDU", RFC 4712, TCP and UDP). It is kept as a provisional default: a clash needs a RAQMON protocol on the same machine, and `init --port` chooses another. Two nodes on one machine need two ports for the same reason.
+
+Both lists are changed only by a management request: the address book takes effect at once (the engine gives the network the whole book after the write is durable), the listen list at the next start, because the listeners open once, at the end of the start.
+
 ### `endpoint-ids/<instance>.json`
 
 ```json
@@ -367,6 +420,7 @@ change writes nothing and builds no result.
 | `invalid` | a value is malformed or breaks a rule (with its path) |
 | `nothing_to_change` | a patch that names no setting |
 | `preset_exists`, `preset_unknown` | adding a name that is taken, removing one that is not there |
+| `peer_unknown` | removing a node that has no address in the book |
 | `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there; an existing instance given a configuration; an existing instance of another adapter |
 | `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; upgrading an adapter with an enabled instance |
 | `endpoint_unknown` | a setting for an endpoint that is neither stable nor open |
@@ -379,7 +433,7 @@ returns into `last_operation`.
 ### Start
 
 `Load` checks, in this fixed order: the directories of `config/` (a missing one
-is named), `node.json`, `policy.json`, `presets.json`, `instances.json`, the
+is named), `node.json`, `policy.json`, `presets.json`, `instances.json`, `network.json`, the
 endpoint-id files by name, the confirmation, the revocation records by name, and
 the adapters by id. The first file that is missing where it must exist, cannot
 be read, is not a valid document of its kind, breaks a rule or has a name that
@@ -404,11 +458,12 @@ configuration, so a stray file cannot be taken for it.
 
 ### `init`
 
-`init` writes the directories of `config/` that are missing and the four files
-`node.json`, `policy.json`, `presets.json` and `instances.json`, all at
-version 1, with no `last_operation`: the settings are the defaults above, the
-policy is `authz.DefaultPolicy()`, there is one preset, `default`, and no
-instance. For each of the four files: if it is missing it is written; if it
+`init` writes the directories of `config/` that are missing and the five files
+`node.json`, `policy.json`, `presets.json`, `instances.json` and `network.json`,
+all at version 1, with no `last_operation`: the settings are the defaults above, the
+policy is `authz.DefaultPolicy()`, there is one preset, `default`, no instance,
+and `network.json` listens on the port the owner gave (`sidera init --port`,
+default 7744) with no peers. For each of the five files: if it is missing it is written; if it
 exists and is valid it is left byte for byte, however the owner laid it out; if
 it exists and is not valid, `init` fails and names it, and writes nothing. The
 reason is that the keys can be deleted and `init` run again while `config/` is
@@ -423,6 +478,7 @@ Each is declared as data; the table of the program is built from
 | Transaction | Kind | Writes in order (`P` is preparation, `O` optional, `M` many) | Commit point |
 | ----------- | ---- | ------------------------------------------------------------ | ------------ |
 | `node-set` | normal | `node` replace | `node.json` rename |
+| `network-set` | normal | `network-config` replace | `network.json` rename |
 | `presets-change` | normal | `presets` replace | `presets.json` rename |
 | `endpoint-set`, `adapter-enable`, `adapter-disable` | normal | `instances` replace | `instances.json` rename |
 | `adapter-stage` | normal | `parent` mkdir (P, O, M), `stage` mkdir (P), `subdir` mkdir (P, O, M), `file` replace (P, M) | none: all preparation |
@@ -435,7 +491,8 @@ under those roles: `direct-register` and `runtime-admit` (`ids`, then the
 endpoint record), `backup-confirm` (`backup`, then the result), `identity-retire`
 (`revocation`, then the result), `adapter-install` (`stale`, `version`,
 `current`, the result, `old`) and `init` (`dir`, `node`, `policy`, `presets`,
-`instances`, then the rest of `init`).
+`instances`, `network-config`, then the rest of `init`). The role of `network.json`
+is `network-config` because `network` is the network key in the same transaction.
 
 **Crash states.** Every transaction of `config` is either a single replacement,
 which a restart finds old or new and nothing between, or preparation that a
@@ -462,6 +519,13 @@ On a run without a crash there is no recovery work at any quiet point:
 `AdapterGCWork` is empty, and so is the cleanup of temporary names.
 
 ## Why
+
+**A listen change waits for a restart.** The listeners are opened once, after the node serves, and an address that cannot be opened fails the start and names it. Changing them while running would mean closing and opening sockets under live connections, and a port in use found then would leave a node that no longer listens anywhere it said it would; failing at a start, where the owner is looking, is cheaper and the answer of the change says `restart_required`.
+
+**`network.json` is a file of its own.** `node.json` holds scalar settings that
+are all required and changed by merging a patch; the address book is a map the
+owner changes entry by entry, so it has its own version and its own transaction,
+and a change of an address never conflicts with a change of a setting.
 
 **JSON, edited by hand while stopped, read strictly.** The files are the owner's
 decisions, so they must be readable and editable without a tool; the same format
@@ -602,9 +666,9 @@ endpoints and not to others for a reason nobody remembers.
 | What | Where |
 | ---- | ----- |
 | Types, paths, errors, the roles and declarations | `internal/node/config/types.go`, `paths.go`, `errors.go`, `decls.go` |
-| Strict decoders and canonical encoders | `node.go`, `policy.go`, `presets.go`, `instances.go`, `files.go`, `wire.go` |
+| Strict decoders and canonical encoders | `node.go`, `policy.go`, `presets.go`, `instances.go`, `network.go`, `files.go`, `wire.go` |
 | Loading, accessors | `config.go` |
-| Versioned changes, write functions for other packages | `change.go` |
+| Versioned changes, write functions for other packages | `change.go`; the changes of `network.json` (`SetListen`, `SetPeerAddresses`, `RemovePeer`) and the address rules are in `network.go` |
 | Adapter packages, the repair and its predicate | `adapters.go` (`AdapterGCWork`, `StageAdapter`, `Unstage`, `PlanInstall`) |
 | `init` | `init.go` |
 | An invalid file refuses startup, one row per file and failure | `TestInvalidFileRefusesStartupAndNamesTheFile`, `TestMissingDirectoryRefusesStartupAndNamesIt`, `TestFirstInvalidFileInFixedOrderIsNamed`, `TestWrongTypeIsNamedByItsPath` |
@@ -618,6 +682,7 @@ endpoints and not to others for a reason nobody remembers.
 | The retention and its bound | `TestArchiveRetention`, `TestNodeSettingRanges` |
 | A clean run leaves no recovery work | `TestCleanScenariosLeaveNoConfigRecoveryWork` |
 | `init` | `TestInitWritesTheDefaults`, `TestInitNeverOverwritesExistingConfig`, `TestInitRefusesAnInvalidExistingFileNamingIt` |
+| The address rules, the file's bounds, its changes | `TestAddressRules`, `TestNetworkFileRules`, `TestGoldenNetwork`, `TestEncodeNetworkRefusesWhatTheDecoderRefuses`, `TestNetworkChanges`, `TestInitWritesTheListenPortItIsGiven` |
 | Golden files | `TestGoldenNode`, `TestGoldenPolicy`, `TestGoldenPresets`, `TestGoldenInstances`, `TestGoldenEndpointIDs`, `TestGoldenBackup`, `TestGoldenAdapterCurrent` |
 | No write path outside `txn` | `TestConfigHoldsNoWritableFileSystem` |
 | Decoders on any input | `FuzzDecode…` in `fuzz_test.go`, one for each decoder |

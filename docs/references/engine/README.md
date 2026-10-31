@@ -240,6 +240,7 @@ wire stay with the interface.
 | `RetireIdentityOp` | the self-revocation the keys verified is kept as a revocation under `config/revocations/`; nothing is signed from the commit on; the daemon is asked to stop | `state/admin/`, `identity-retire` |
 | `AcknowledgeAlertOp` | the alert is marked | `state/admin/`, `alert-ack` (the store's) |
 | `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
+| `SetPeerAddressesOp`, `RemovePeerOp`, `SetListenOp` | the addresses of a node replaced or removed, or the listen list replaced, in `network.json`, a versioned change judged by `config`; an address set is first judged by the network's rule (below). The new address book is pushed to the network after the write of an address change; the listen list takes effect at the next start | the `last_operation` of `network.json` |
 | `InstallAdapterOp` | a package is copied outside the loop, the copy is judged, and the loop renames it to its version and replaces the pointer that makes it current | `state/admin/`, the last-but-one write of `adapter-install`, or alone in `adapter-install-current` |
 | `EnableAdapterOp`, `DisableAdapterOp` | the instance is made (or turned on) or turned off in `instances.json`; then the host is asked to run or stop it | the `last_operation` of `instances.json` |
 | `AddPresetOp`, `RemovePresetOp` | a preset is added from its document or removed, in `presets.json`; adding is judged as loosening and removing as narrowing; then the instances that run are restarted to be given the presets | the `last_operation` of `presets.json` |
@@ -266,7 +267,9 @@ while the confirmation on disk is not of the statement this node holds, and has 
 record of its own. `ExportRevocation` is the one thing of the interface that is
 neither a read of the loop nor stored: the statement does not change while the node
 runs, and its result is not stored because the statement can retire the node.
-`NodeSettings` reads `node.json` in the loop, with the version a change names.
+`NodeSettings` reads `node.json` in the loop, with the version a change names. `NetworkView` reads `network.json` the same way and adds what the network and the engine know: the node's peer identifier, the addresses the listeners are open on, the contact addresses, and for each node of the address book or with a held certificate its addresses, whether the engine holds its certificate and whether a member connection is up.
+
+The addresses of `SetPeerAddressesOp` are judged by `Network.CheckAddresses` before anything is written, because the rule depends on the certificate held for the node and the network is the layer that derives peer identifiers from certificates: while none is held one address must name the peer, and once one is held every `/p2p/` must be its peer. A refusal is made a `config.ChangeInvalid` change with the path of the address, so it reaches the owner in the words of every other invalid value; it is judged before the version is compared, which `config` does for its own rules, and with no network the rule is not judged.
 
 **Installing an adapter package.** The copy of a package takes as long as the package
 is large and the loop must not wait for it, so `InstallAdapterOp` has work outside the
@@ -922,7 +925,7 @@ the write that makes the change durable returned (`trust.go`).
   done again, and done again after a crash it writes what is missing. Clearing the removal
   (`trust-local-clear`) restores nothing that was revoked: the credentials revoked with the
   removal stay revoked, and the node is trusted again only through a new credential.
-- **The network.** The engine defines `Network` (`SetMembership`, `Connected`) and its own
+- **The network.** The engine defines `Network` (`SetMembership`, `Connected`, and for the owner's network commands `SetAddressBook`, `CheckAddresses`, `PeerID`, `ListenAddrs` and `ContactAddrs`) and its own
   `Membership`, which has the fields of the network layer's type and none other, so the
   composition root converts between them as they are; the engine imports nothing of the
   network package. `SetNetwork` is called before `Start`; no network means nothing is pushed.
@@ -1696,6 +1699,7 @@ reproducible).
 | A peer's certificate is kept, its serial only moves forward, and its reports verify only then | `trust.go` (`planPeer`, `NotePeerCertificate`), `signing.go` (`acceptedKey`) | `TestAPeerCertificateIsKeptAndItsSerialOnlyMovesForward` |
 | A node with a credential is let in, and stops when the credential is revoked or the node removed; the view is built from verified records | `trust.go`, `inbound.go` (`evaluate`) | `TestATrustedNodeIsLetInAndStopsWhenItsCredentialIsRevokedOrTheNodeRemoved`, `TestTheTrustViewIsBuiltFromVerifiedRecordsOfTheDisk` |
 | The network is given a snapshot at the start, after each change of the facts and after a renewal of the certificate | `network.go`, `engine.go` (`Start`, `fire`) | `TestTheNetworkIsGivenAFreshSnapshotWhenTheFactsChange`, `TestTheNetworkIsGivenTheRenewedCertificate` |
+| The address book is pushed after a durable change of it only, and the view tells what the network and the engine know | `operations_network.go` | `TestNetworkChangesPushTheAddressBookOnlyAfterADurableChange` |
 | The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |

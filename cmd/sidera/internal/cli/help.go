@@ -24,11 +24,15 @@ var helpEntries = map[string]helpEntry{
 	"endpoint set":               {"endpoint set <address> <field>=<json> ... [--expected-version <n>]", "Change endpoint settings using the instances collection version.", "sidera endpoint set <address> max_queue_s=1800 backlog_limit=200"},
 	"node show":                  {"node show", "Show node settings and their version.", "sidera node show --json"},
 	"node set":                   {"node set <field>=<json> ... [--expected-version <n>]", "Change node settings; non-JSON assignment values are strings.", "sidera node set node_queue_limit=20000 reply_permission=false"},
+	"network show":               {"network show", "Show where the node listens, the line to give another owner so they can reach this node, the addresses kept for other nodes and which are connected.", "sidera network show --json"},
+	"network address set":        {"network address set <node> <multiaddr> ... [--expected-version <n>]", "Replace the addresses kept for a node. Until a certificate of the node is held, one address must end in /p2p/<peer id>; once held, every /p2p/ must be the certificate's.", "sidera network address set <node> /ip4/192.168.1.20/tcp/7744/p2p/<peer-id>"},
+	"network address remove":     {"network address remove <node> [--expected-version <n>]", "Remove the addresses kept for a node.", "sidera network address remove <node>"},
+	"network listen set":         {"network listen set <multiaddr> ... [--expected-version <n>]", "Replace the addresses the node listens on; the daemon has to be restarted for it to take effect.", "sidera network listen set /ip4/0.0.0.0/tcp/7745 /ip4/0.0.0.0/udp/7745/quic-v1"},
 	"identity export-revocation": {"identity export-revocation [--out <new-file>]", "Export the self-revocation for offline backup; --out writes the verified raw record privately.", "sidera identity export-revocation --out self-revocation.rec"},
 	"identity confirm-backup":    {"identity confirm-backup <digest>", "Confirm that the exported statement is kept outside this device.", "sidera identity confirm-backup <digest>"},
 	"identity retire":            {"identity retire --node <id> --yes", "Permanently retire this node's identity and stop the daemon.", "sidera identity retire --node <id> --yes"},
 	"clock clear-rollback":       {"clock clear-rollback", "Accept the current wall clock and clear the rollback pause.", "sidera clock clear-rollback"},
-	"init":                       {"init", "Create the node's private data directory and identity.", "sidera init --home ~/.sidera"},
+	"init":                       {"init [--port <n>]", "Create the node's private data directory and identity; the node will listen on the port (default 7744).", "sidera init --home ~/.sidera --port 7744"},
 	"daemon":                     {"daemon", "Run the node in the foreground.", "sidera daemon"},
 	"me":                         {"me", "Show this session's address, declaration and tool limits.", "sidera me --json"},
 	"declare":                    {"declare [--paused=<bool>] [--refuse-multi-recipient=<bool>] [--restrict-senders=<bool>] [--accept-from <addr>,...] [--hidden=<bool>]", "Change only the declaration fields you provide.", "sidera declare --paused=false"},
@@ -43,7 +47,7 @@ var helpEntries = map[string]helpEntry{
 	"probe":                      {"probe", "Present SIDERA_PROBE_TOKEN for the CLI front end.", "sidera probe --json"},
 }
 
-var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "mcp", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
+var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "mcp", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "network show", "network address set", "network address remove", "network listen set", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
 
 func (c *command) printHelp(args []string) error {
 	if len(args) == 0 {
@@ -58,10 +62,11 @@ func (c *command) printHelp(args []string) error {
 		}
 		return nil
 	}
+	// The longest of the first one to three words that names a command.
 	key := args[0]
-	if len(args) > 1 {
-		if _, ok := helpEntries[key+" "+args[1]]; ok {
-			key += " " + args[1]
+	for n := 2; n <= min(len(args), 3); n++ {
+		if _, ok := helpEntries[strings.Join(args[:n], " ")]; ok {
+			key = strings.Join(args[:n], " ")
 		}
 	}
 	var selected []string

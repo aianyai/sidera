@@ -166,6 +166,15 @@ func crashCases(t *testing.T) []crashCase {
 			state: versionState(func(c *config.Config) admin.Version { return c.Node().Version }, 3),
 		},
 		{
+			name: "network-set",
+			disk: treeDisk,
+			run: func(t *testing.T, rg *rig, c *config.Config) error {
+				_, err := c.SetPeerAddresses(request(1, 2), mustNode(t, node1Text), []string{"/ip4/10.0.0.1/tcp/1"}, result(new([]config.Network), `{"ok":true}`))
+				return err
+			},
+			state: versionState(func(c *config.Config) admin.Version { return c.Network().Version }, 2),
+		},
+		{
 			name: "presets-change/add",
 			disk: treeDisk,
 			run: func(t *testing.T, rg *rig, c *config.Config) error {

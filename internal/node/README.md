@@ -25,7 +25,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 2 | `txn` | `fsx` |
 | 2 | `recfile` | the standard library only: the framing of a record file (first line, checksum, file name), shared by the owners of records |
 | 2 | `logfile` | `fsx`: the restricted handle that writes and rotates the logs under `logs/`, which are not crash points; the daemon's log and the adapter hosts' go through it |
-| 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
+| 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time; `config` also imports `go-multiaddr` and `go-libp2p/core/peer`, only to judge the addresses of `network.json` |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
 | 5 | `network` | layers 0 to 4 and the networking library (`go-libp2p`, `go-multiaddr`, `quic-go` and `go-multistream`): the libp2p host, the gate, the certificate exchange and the remote transport; it imports neither `engine` nor `daemon`, and reaches the engine through the `Node` interface it defines |

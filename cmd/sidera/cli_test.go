@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	cliagent "github.com/aianyai/sidera/cmd/sidera/internal/acceptance/agent/cli"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -617,6 +619,34 @@ func TestAgentCommandsPreservePatchesAndFormatHumanResults(t *testing.T) {
 	}
 }
 
+// --port is the port network.json makes the node listen on; a port that cannot
+// be listened on is a usage error before anything is made.
+func TestInitTakesTheListenPort(t *testing.T) {
+	parent, err := os.MkdirTemp("", "ci-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(parent) })
+	home := filepath.Join(parent, "node")
+	for _, bad := range []string{"0", "65536", "-1", "http"} {
+		out, err := exec.Command(binary(t), "--home", home, "init", "--port", bad).CombinedOutput()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 2 || !strings.HasPrefix(string(out), "error: ") {
+			t.Errorf("init --port %s: %v %q, want a usage error", bad, err, out)
+		}
+	}
+	if _, err := os.Stat(home); err == nil {
+		t.Fatal("a refused init made the data directory")
+	}
+	if out, err := exec.Command(binary(t), "--home", home, "init", "--port=7801").CombinedOutput(); err != nil {
+		t.Fatalf("init --port: %v %s", err, out)
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config", "network.json"))
+	if err != nil || !strings.Contains(string(data), "/ip4/0.0.0.0/tcp/7801") || !strings.Contains(string(data), "/ip4/0.0.0.0/udp/7801/quic-v1") {
+		t.Errorf("network.json: %v\n%s", err, data)
+	}
+}
+
 func TestInitPrintsIdentityAndBackupInstructions(t *testing.T) {
 	parent, err := os.MkdirTemp("", "ci-")
 	if err != nil {
@@ -829,6 +859,75 @@ func TestManagementVersionedSettingsAndPresets(t *testing.T) {
 	}
 }
 
+// The network commands: show gives the version the changes name, the contact
+// line first in the human form, an address set or removed is a versioned change,
+// a listen change says that a restart is needed, and a node that has no address
+// cannot be removed.
+func TestManagementNetworkCommands(t *testing.T) {
+	n := newNode(t)
+	n.management()
+	node, err := ident.NodeIDFromBytes([]byte(strings.Repeat("\x07", ident.NodeIDLen)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := node.String()
+	// The engine of this node has no network, so the rule that depends on the
+	// certificate held is not judged here; the syntax is.
+	const addr = "/ip4/10.0.0.1/tcp/7744"
+
+	code, out, diag := n.run(session{}, "network", "show", "--json")
+	var shown struct {
+		Result struct {
+			Version uint64 `json:"version"`
+			Peers   []any  `json:"peers"`
+			Listen  struct {
+				Configured []string `json:"configured"`
+			} `json:"listen"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &shown); code != 0 || err != nil || shown.Result.Version == 0 || len(shown.Result.Peers) != 0 || len(shown.Result.Listen.Configured) != 2 {
+		t.Fatalf("network show: %d %q %q %v", code, out, diag, err)
+	}
+
+	code, out, diag = n.run(session{}, "network", "address", "set", peer, addr, "--json")
+	var set struct {
+		Result struct {
+			Node      string   `json:"node"`
+			Addresses []string `json:"addresses"`
+			Version   uint64   `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &set); code != 0 || err != nil || set.Result.Node != peer || len(set.Result.Addresses) != 1 || set.Result.Version != shown.Result.Version+1 {
+		t.Fatalf("network address set: %d %q %q %v", code, out, diag, err)
+	}
+	code, out, _ = n.run(session{}, "network", "address", "set", peer, addr, "--expected-version", fmt.Sprint(shown.Result.Version), "--json")
+	if code != 6 || !strings.Contains(out, `"current_version"`) {
+		t.Fatalf("stale version: %d %q", code, out)
+	}
+	code, out, diag = n.run(session{}, "network", "show")
+	if code != 0 || diag != "" || !strings.Contains(out, addr) {
+		t.Fatalf("network show: %d %q %q", code, out, diag)
+	}
+	if code, out, _ = n.run(session{}, "network", "address", "set", peer, "nonsense", "--json"); code != 3 || !strings.Contains(out, "addresses[0]") {
+		t.Fatalf("an address that is not a multiaddr: %d %q", code, out)
+	}
+	code, out, diag = n.run(session{}, "network", "listen", "set", "/ip4/0.0.0.0/tcp/7801")
+	if code != 0 || diag != "" || !strings.Contains(out, "restart") {
+		t.Fatalf("network listen set: %d %q %q", code, out, diag)
+	}
+	if code, out, _ = n.run(session{}, "network", "address", "remove", peer, "--json"); code != 0 {
+		t.Fatalf("network address remove: %d %q", code, out)
+	}
+	if code, out, _ = n.run(session{}, "network", "address", "remove", peer, "--json"); code != 5 || !strings.Contains(out, "peer_unknown") {
+		t.Fatalf("removing a node that has no address: %d %q", code, out)
+	}
+	for _, args := range [][]string{{"network", "address", "set", peer}, {"network", "listen", "set"}, {"network", "address"}, {"network", "address", "remove"}} {
+		if code, _, diag := n.run(session{}, args...); code != 2 || !strings.HasPrefix(diag, "error: ") {
+			t.Errorf("%v: %d %q, want a usage error", args, code, diag)
+		}
+	}
+}
+
 func TestManagementUnknownOutcomeResendsOnlyTheFrozenRequest(t *testing.T) {
 	for _, mode := range []struct {
 		name      string
@@ -993,7 +1092,13 @@ func startDaemon(t *testing.T) (string, <-chan error) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
-	code, out, diag := runHome(t, home, "init", "--json")
+	// A port of its own: the default is one per machine, and test packages run
+	// daemons side by side.
+	port, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, diag := runHome(t, home, "init", "--json", "--port", fmt.Sprint(port))
 	if code != 0 {
 		t.Fatalf("init: %d %q %q", code, out, diag)
 	}

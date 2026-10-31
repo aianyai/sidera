@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/nodeproto"
 	"github.com/aianyai/sidera/internal/preauth"
@@ -581,5 +582,72 @@ func TestRouter(t *testing.T) {
 	r.QueryDirectory(ctx, other.id, endpointOf(1), transport.DirectoryRequest{})
 	if got := strings.Join(remote.calls, ","); got != "send,pull,directory" || len(handler.origins) != 3 {
 		t.Fatalf("remote calls = %q, handler saw %d", got, len(handler.origins))
+	}
+}
+
+// TestCheckAddresses is the rule for the addresses entered for a node: without a
+// held certificate one of them names the peer; with one, every /p2p/ is the peer
+// of the certificate's key and a bare address is fine. The error names the path
+// of the offending address.
+func TestCheckAddresses(t *testing.T) {
+	clk := newClock()
+	a := newPeerNode(t, clk, 0x11, 0x91)
+	b := newPeerNode(t, clk, 0x12, 0x92)
+	c := newPeerNode(t, clk, 0x13, 0x93)
+	a.start(false, nil)
+	b.start(true, nil)
+	c.start(true, nil)
+	const bare = "/ip4/10.0.0.2/tcp/7744"
+	named := func(n *peerNode) string { return bare + "/p2p/" + n.net.PeerID() }
+
+	cases := []struct {
+		name      string
+		held      bool
+		addrs     []string
+		wantField string // empty: accepted
+	}{
+		{"not held, one names the peer", false, []string{bare, named(b)}, ""},
+		{"not held, none names it", false, []string{bare}, "addresses"},
+		{"not held, nothing", false, nil, "addresses"},
+		{"not held, a bad address", false, []string{"nonsense"}, "addresses[0]"},
+		{"held, bare", true, []string{bare}, ""},
+		{"held, the certificate's peer", true, []string{named(b), bare}, ""},
+		{"held, another peer", true, []string{bare, named(c)}, "addresses[1]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := a.membership(1, tc.held, b)
+			if err := a.net.SetMembership(m); err != nil {
+				t.Fatal(err)
+			}
+			err := a.net.CheckAddresses(b.id, tc.addrs)
+			var fe *config.FieldError
+			switch {
+			case tc.wantField == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case tc.wantField != "" && (!errors.As(err, &fe) || fe.Field != tc.wantField):
+				t.Fatalf("error %v, want a field error at %q", err, tc.wantField)
+			}
+		})
+	}
+}
+
+// TestContactAddrsListNoLoopbackAndEndInThePeer: a node listening on loopback has
+// no address to give, and one listening on every interface gives the addresses of
+// the machine's interfaces, each ending in its peer identifier.
+func TestContactAddrsListNoLoopbackAndEndInThePeer(t *testing.T) {
+	clk := newClock()
+	n := newPeerNode(t, clk, 0x11, 0x91)
+	n.start(true, nil)
+	if got := n.net.ContactAddrs(); len(got) != 0 {
+		t.Fatalf("a node on loopback gives %v", got)
+	}
+	if err := n.net.Listen([]string{"/ip4/0.0.0.0/tcp/0"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range n.net.ContactAddrs() {
+		if strings.HasPrefix(a, "/ip4/127.") || strings.HasPrefix(a, "/ip4/0.0.0.0") || !strings.HasSuffix(a, "/p2p/"+n.net.PeerID()) {
+			t.Errorf("contact address %s", a)
+		}
 	}
 }

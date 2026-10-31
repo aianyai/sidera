@@ -18,7 +18,7 @@ func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
 		"Ack", "Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
 		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
-		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NodeSettings", "NotePeerCertificate", "OperationResult", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
+		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})

@@ -275,6 +275,7 @@ func validTree(t testing.TB) map[string]string {
 		config.PolicyPath:                              goldenPolicy,
 		config.PresetsPath:                             goldenPresets,
 		config.InstancesPath:                           goldenInstances,
+		config.NetworkPath:                             goldenNetwork,
 		config.EndpointIDsPath("example"):              goldenEndpointIDs,
 		config.BackupPath:                              strings.Replace(goldenBackup, "%s", digest.String(), 1),
 		config.RevocationPath(digest):                  string(revData),

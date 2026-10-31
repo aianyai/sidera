@@ -27,6 +27,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/logfile"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/network"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/revocation"
 )
@@ -96,6 +97,10 @@ type Config struct {
 	// step runs. Nil is none. It is the seam of the crash tests; the daemon never
 	// installs one of its own.
 	Observer txn.Observer
+	// InitPort is the port init writes into network.json as the one the node
+	// listens on; zero is config.DefaultListenPort. Only init reads it: a daemon
+	// listens where network.json says.
+	InitPort int
 	// Engine are the parameters of the engine; zero fields take its defaults.
 	Engine engine.Params
 	// AdapterHost is the host that runs the adapter instances the owner enabled.
@@ -240,6 +245,7 @@ type Daemon struct {
 	cfgd        *config.Config
 	keys        *keys.Keys
 	engine      *engine.Engine
+	net         *network.Network
 	manage      *manageapi.Server
 	served      chan error // Serve of the management interface has returned
 	agent       *agentapi.Server

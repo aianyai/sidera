@@ -282,7 +282,7 @@ func initConfig(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	if err != nil {
 		t.Fatalf("harness: keys.PlanInit: %v", err)
 	}
-	plan, err := config.PlanInit(w.Reader())
+	plan, err := config.PlanInit(w.Reader(), config.InitOptions{})
 	if err != nil {
 		t.Fatalf("harness: PlanInit: %v", err)
 	}
