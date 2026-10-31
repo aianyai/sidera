@@ -98,6 +98,10 @@ type pairingDriver struct {
 	// requests are the owner's requests for a pairing that are not answered yet; see
 	// pairing_request.go.
 	requests map[admin.RequestKey]*pairingRequestInFlight
+	// recoverDue says the state machine's Recover has not run since the node
+	// started, because the node might not sign then; the first tick that may sign
+	// runs it.
+	recoverDue bool
 }
 
 // openPairing builds the state machine from the scan and recovers it. A stored
@@ -119,15 +123,34 @@ func (e *Engine) openPairing(sc *store.Scan) error {
 	if e.d.Keys == nil {
 		return nil // no identity key to sign with: the node runs no pairing
 	}
-	next, acts, err := st.Recover(e.pairingWorld(), e.d.Clock.Now())
+	e.pairing.recoverDue = true
+	if e.signRefusal() != 0 {
+		return nil // Recover may sign: it runs at the first tick that may
+	}
+	return e.recoverPairing(e.d.Clock.Now())
+}
+
+// recoverPairing runs the state machine's Recover and carries out what it asks for.
+// It signs (it stores the revocation of a signature that may have left the node),
+// so it is called only while the node may sign.
+func (e *Engine) recoverPairing(now time.Time) error {
+	next, acts, err := e.pairing.state.Recover(e.pairingWorld(), now)
 	if err != nil {
 		return fmt.Errorf("engine: recovering the pairing state: %w", err)
 	}
-	return e.pairingPerform(next, acts, nil)
+	if err := e.pairingPerform(next, acts, nil); err != nil {
+		return err
+	}
+	e.pairing.recoverDue = false
+	return nil
 }
 
 // pairingWorld is what the state machine reads of the node, made fresh for every
-// call. No authorized persons and no actors are given: the management interface is
+// call. It holds the identity signer whenever the node has keys, so the engine, not
+// the world, keeps the node from signing while signRefusal says it may not: every
+// entry that can make the state machine sign (a request for a pairing, the rejection
+// of one, an incoming stream and its frames, a result fetch, a tick, the recovery)
+// asks canSign or signRefusal before it calls the state machine. No authorized persons and no actors are given: the management interface is
 // the local owner's alone, whom no list judges.
 //
 // Stored is not set, on purpose. The replay check of a management request has one
@@ -154,14 +177,15 @@ func (e *Engine) pairingWorld() pairing.World {
 // ---------------------------------------------------------------------------
 // Carrying out the actions
 
-// pairingActionKind says when in a list an action may come.
+// pairingActionKind says whether an action changes what is durable or reaches
+// something outside.
 type pairingActionKind uint8
 
 const (
-	// actionPersist changes what is durable: it is carried out first, in order, and
-	// its failure ends the call.
+	// actionPersist changes what is durable: it is carried out before the state is
+	// taken, in the order of the list, and its failure ends the call.
 	actionPersist pairingActionKind = iota + 1
-	// actionIO reaches something outside: it is carried out after every persist.
+	// actionIO reaches something outside: it is carried out after the state is taken.
 	actionIO
 )
 
@@ -177,32 +201,26 @@ func pairingActionKindOf(a pairing.Action) (pairingActionKind, error) {
 }
 
 // pairingPerform carries out what a call of the state machine returned, and is the
-// one place that decides in what order. The persists run first, in order, each its
-// own write; only when all of them are durable is the next state taken and are the
-// frames sent, the streams closed, the fetches asked for and the notices told. A
-// frame follows the persist that made it safe to send, and the state never runs
-// ahead of the disk.
+// one place that decides in what order. The persists run first, in the order of the
+// list, each its own write; only when all of them are durable is the next state
+// taken and are the frames sent, the streams closed, the fetches asked for and the
+// notices told, in the order of the list. A frame follows the persist that made it
+// safe to send, and the state never runs ahead of the disk.
 //
-// A persist after an I/O action in the list breaks what the state machine's
-// callers rely on (that a persist is never made to wait for a send it does not
-// precede). Such a list is refused before anything is done, and it is not put in
-// order: reordering would hide that the state machine and the engine disagree.
+// The state machine lets a list interleave the two (a tick that expires two
+// requests asks for a persist and a notice for each), and the I/O actions wait for
+// every persist of the list, not only the ones before them. That is safe because no
+// persist records that an earlier I/O action was done: a persist that a frame, a
+// close or a fetch must follow always comes before it in the list, and what a
+// persist keeps does not depend on a notice or a frame having gone out. A list is
+// refused whole, before anything is done, only when it holds an action the engine
+// does not know.
 //
 // peer is the accepted certificate of the connection the call ran on, which a
 // credential is stored with; nil when the call ran on none.
 func (e *Engine) pairingPerform(next pairing.State, acts []pairing.Action, peer *peerCertificate) error {
-	sawIO := false
-	for i, a := range acts {
-		kind, err := pairingActionKindOf(a)
-		if err != nil {
-			e.log.Error("a list of pairing actions is refused; nothing was done", "error", err.Error())
-			return err
-		}
-		switch {
-		case kind == actionIO:
-			sawIO = true
-		case sawIO:
-			err := fmt.Errorf("engine: the pairing returned a persist (%T, action %d) after an action that reaches outside", a, i)
+	for _, a := range acts {
+		if _, err := pairingActionKindOf(a); err != nil {
 			e.log.Error("a list of pairing actions is refused; nothing was done", "error", err.Error())
 			return err
 		}
@@ -388,6 +406,12 @@ func (e *Engine) pairingFetched(now time.Time, c *cmdPairingFetched) error {
 	if c.err != nil {
 		e.log.Debug("a pairing fetch failed", "pairing", hex.EncodeToString(c.id[:]), "error", c.err.Error())
 	}
+	if err := e.canSign(); err != nil {
+		// The answer is dropped, as a failed exchange is: the next tick that may sign
+		// asks again.
+		e.log.Debug("a pairing fetch answer is dropped: the node may not sign", "pairing", hex.EncodeToString(c.id[:]), "error", err.Error())
+		return nil
+	}
 	var peer *peerCertificate
 	if c.err == nil {
 		peer = c.peer.certificate()
@@ -492,8 +516,8 @@ var errPairingSession = errors.New("engine: no such pairing session")
 
 // pairingOpened registers a target session and lets the state machine time it.
 func (e *Engine) pairingOpened(now time.Time, peer PairingPeer, stream PairingStream) (pairing.SessionID, error) {
-	if e.d.Keys == nil {
-		return 0, errNoKeys
+	if err := e.canSign(); err != nil {
+		return 0, err
 	}
 	e.pairing.last++
 	sid := e.pairing.last
@@ -517,12 +541,15 @@ func (e *Engine) pairingFrame(now time.Time, sid pairing.SessionID, frame []byte
 	if s == nil {
 		return errPairingSession
 	}
-	err := e.pairingCall(s.peer.certificate(), func(w pairing.World) (pairing.State, []pairing.Action, error) {
-		if s.side == sideTarget {
-			return e.pairing.state.TargetReceive(w, s.peer.Conn, sid, frame, e.randomReader(), now)
-		}
-		return e.pairing.state.InitiatorReceive(w, sid, frame, now)
-	})
+	err := e.canSign()
+	if err == nil {
+		err = e.pairingCall(s.peer.certificate(), func(w pairing.World) (pairing.State, []pairing.Action, error) {
+			if s.side == sideTarget {
+				return e.pairing.state.TargetReceive(w, s.peer.Conn, sid, frame, e.randomReader(), now)
+			}
+			return e.pairing.state.InitiatorReceive(w, sid, frame, now)
+		})
+	}
 	if err != nil {
 		e.log.Warn("a pairing frame could not be handled; the stream is closed", "session", uint64(sid), "error", err.Error())
 		s.stream.Close()
@@ -553,15 +580,17 @@ func (e *Engine) pairingClosed(now time.Time, sid pairing.SessionID) error {
 // ---------------------------------------------------------------------------
 // Time
 
-// pairingBusy says whether time alone may change something of a pairing: a stream
-// is open, a request waits for its owner, or an initiator's request has not ended.
+// pairingBusy says whether time alone may change something of a pairing: the
+// recovery is due, a stream is open, a request waits for its owner, or an
+// initiator's request has not ended. While the node may not sign nothing is, since
+// the tick does not run.
 // Records that have ended wait for the next tick that anything else causes to be
 // removed; none is scheduled for them.
 func (e *Engine) pairingBusy() bool {
-	if e.d.Keys == nil {
-		return false
+	if e.d.Keys == nil || e.signRefusal() != 0 {
+		return false // a tick of a node that may not sign does nothing; see pairingTick
 	}
-	if len(e.pairing.sessions) > 0 {
+	if e.pairing.recoverDue || len(e.pairing.sessions) > 0 {
 		return true
 	}
 	for _, r := range e.pairing.state.Initiators() {
@@ -589,16 +618,38 @@ func (e *Engine) pairingSchedule(now time.Time) {
 	e.sched.remove(pairingTickKey)
 }
 
-// pairingTick runs the state machine's Tick and carries out its actions, then
-// schedules the next. A failure is logged and tried again after the retry
-// backoff: it does not stop the loop unless the storage failed for good.
+// pairingResume is called when the node may sign again after a pause of its clock:
+// the tick that was not scheduled meanwhile is due at once.
+func (e *Engine) pairingResume(now time.Time) {
+	if e.pairingBusy() {
+		e.sched.set(pairingTickKey, now)
+	}
+}
+
+// pairingTick runs the state machine's Recover, when it is still due, and its
+// Tick, and carries out their actions, then schedules the next. Both may sign (a
+// revocation, the credential of a confirmed request) and Tick is the time rules
+// that a clock in doubt cannot judge, so while the node may not sign neither is
+// called and nothing is scheduled; pairingResume brings the tick back. A failure is
+// logged and tried again after the retry backoff: it does not stop the loop unless
+// the storage failed for good.
 func (e *Engine) pairingTick(now time.Time) error {
 	if e.d.Keys == nil {
 		return nil
 	}
-	err := e.pairingCall(nil, func(w pairing.World) (pairing.State, []pairing.Action, error) {
-		return e.pairing.state.Tick(w, e.randomReader(), now)
-	})
+	if e.signRefusal() != 0 {
+		e.sched.remove(pairingTickKey)
+		return nil
+	}
+	var err error
+	if e.pairing.recoverDue {
+		err = e.recoverPairing(now)
+	}
+	if err == nil {
+		err = e.pairingCall(nil, func(w pairing.World) (pairing.State, []pairing.Action, error) {
+			return e.pairing.state.Tick(w, e.randomReader(), now)
+		})
+	}
 	if err != nil {
 		e.log.Error("the pairing tick failed; it is tried again", "error", err.Error())
 		if e.pairingBusy() {

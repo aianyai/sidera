@@ -801,6 +801,7 @@ func (e *Engine) clearRollback(now time.Time) {
 	for _, name := range e.order {
 		e.sched.set(schedKey{schedPeriodic, name}, now)
 	}
+	e.pairingResume(now)
 	e.promptsDirty = true
 	e.noteBlockedAll()
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/credential"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
+	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
@@ -37,10 +38,14 @@ func (s *fakePairingStream) done() []string {
 	return slices.Clone(s.log)
 }
 
-// The persists of a list of actions come first and in order, then the rest, and a
-// list that has a persist after something that reaches outside is refused whole:
-// nothing is written and nothing is sent.
-func TestPairingActionsArePerformedInOrderOrNotAtAll(t *testing.T) {
+// The persists of a list of actions are made durable in order before anything of the
+// list reaches outside, and what reaches outside is then done in the order of the
+// list, wherever the persists stood among it: the state machine's lists interleave
+// them (a tick that ends two requests gives a persist and a notice for each, a
+// recovery a credential, a record, a notice and a revocation), and a list of that
+// shape is performed and does not wedge the node. Only a list with an action the
+// engine does not know is refused whole.
+func TestPairingActionsAreStoredFirstAndThenSentInOrder(t *testing.T) {
 	limits, err := pairing.NewLimits([]time.Time{t0}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -69,11 +74,22 @@ func TestPairingActionsArePerformedInOrderOrNotAtAll(t *testing.T) {
 		}, false, true, false, nil},
 		{"a persist after a send", func(sid pairing.SessionID) []pairing.Action {
 			return []pairing.Action{pairing.Send{Session: sid, Frame: []byte("a")}, pairing.PersistLimits{Limits: limits}}
-		}, true, false, false, nil},
-		{"a persist between a persist and a close", func(sid pairing.SessionID) []pairing.Action {
+		}, false, true, false, []string{"send a"}},
+		// The shape of a tick that ends two requests: a persist and a notice for each.
+		{"a persist, a notice, a persist and a notice", func(sid pairing.SessionID) []pairing.Action {
 			return []pairing.Action{
-				pairing.PersistLimits{Limits: limits}, pairing.Close{Session: sid}, pairing.PersistExpectations{Expectations: expectations},
+				pairing.PersistLimits{Limits: limits}, pairing.Notify{}, pairing.PersistExpectations{Expectations: expectations}, pairing.Notify{},
+				pairing.Send{Session: sid, Frame: []byte("a")},
 			}
+		}, false, true, true, []string{"send a"}},
+		// The shape of a recovery: persists, a notice, and a persist that follows it.
+		{"persists, a notice and a persist after it", func(sid pairing.SessionID) []pairing.Action {
+			return []pairing.Action{
+				pairing.PersistLimits{Limits: limits}, pairing.Notify{}, pairing.Close{Session: sid}, pairing.PersistExpectations{Expectations: expectations},
+			}
+		}, false, true, true, []string{"close"}},
+		{"an action the engine does not know", func(sid pairing.SessionID) []pairing.Action {
+			return []pairing.Action{pairing.PersistLimits{Limits: limits}, pairing.Send{Session: sid, Frame: []byte("a")}, nil}
 		}, true, false, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +120,36 @@ func TestPairingActionsArePerformedInOrderOrNotAtAll(t *testing.T) {
 				t.Errorf("the stream saw %q, want %q", got, tc.wantStream)
 			}
 		})
+	}
+}
+
+// While the node may not sign (its clock is paused) it starts no pairing and takes no
+// incoming stream, with the refusal the rest of the engine gives for it; once the
+// owner clears the pause both go on.
+func TestPairingIsRefusedWhileSigningIsRefused(t *testing.T) {
+	net := &fakeNetwork{}
+	r := trustRig(t, withNetwork(net))
+	if err := r.keys.SaveClock(nodekeys.ClockState{HighWater: t0, RollbackPausedSince: t0}); err != nil {
+		t.Fatal(err)
+	}
+	r.paused = true
+	e := r.start()
+	ctx := context.Background()
+	peer := newPeerNode(t, 3)
+
+	_, err := e.Execute(ctx, requestCommand(0x91, peer.node))
+	wantRefusal(t, err, engine.ReasonClockRollback, "")
+	stream := &fakePairingStream{}
+	_, err = e.PairingOpened(ctx, engine.PairingPeer{}, stream)
+	wantRefusal(t, err, engine.ReasonClockRollback, "")
+
+	if _, err := e.Execute(ctx, clearCommand(0x92, "clear")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Execute(ctx, requestCommand(0x93, peer.node))
+	wantRefusal(t, err, engine.ReasonNodeUnreachable, "") // asked for the node, which the fake network cannot reach
+	if _, err := e.PairingOpened(ctx, engine.PairingPeer{}, stream); err != nil {
+		t.Errorf("PairingOpened after the pause was cleared: %v", err)
 	}
 }
 

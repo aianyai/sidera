@@ -929,7 +929,8 @@ the write that makes the change durable returned (`trust.go`).
   restore is a damaged disk and fails the entry, as an inconsistent scan does), and every call
   returns the next value, which the loop adopts only after the call's persists are durable.
   The `World` is made fresh for every call from the engine's own sources: the default
-  parameters, the identity signer of the keys, the revocation set, `trustView()` (whose
+  parameters, the identity signer of the keys (which the engine reaches only while it may
+  sign: see below), the revocation set, `trustView()` (whose
   `Local` is this node, as the state machine requires), no authorized persons and no
   stored results. The `World` has no `Stored` on purpose: the replay check of a
   management request has one home, the table of stored results that `Execute` reads
@@ -940,6 +941,19 @@ the write that makes the change durable returned (`trust.go`).
   and not a replay check. Randomness is
   `Deps.Rand`. A node without keys has no identity key to sign with and runs no pairing:
   nothing is recovered or ticked and a stream is refused.
+- **Pairing signs only where the engine may sign.** `SignRefusalOf` is the one judgement of
+  signing (a retired identity, a paused clock), and every entry that can make the state machine
+  sign asks it first, through `canSign` or `signRefusal`, and never judges again: a request for
+  a pairing is refused with that reason (`takeRequest`), an incoming stream is refused
+  (`PairingOpened`) and an open one is closed at its next frame (`pairingFrame`), the answer of
+  a result fetch is dropped as a failed exchange is (the exchange is asked for again once the
+  node may sign), and `Recover` and `Tick` are not called. `Tick` is the time rules (deadlines,
+  expiries, retention) that a clock in doubt cannot judge, and `Recover` and the withdrawals and
+  endings it makes may store a revocation, so both wait as a whole: a node that starts unable
+  to sign keeps `recoverDue` and runs `Recover` at the first tick that may sign, and while it may
+  not sign the pairing tick is not scheduled (`pairingBusy` is false). Clearing the pause of the
+  clock (`clearRollback`) schedules the tick again (`pairingResume`). A retired identity never
+  signs again, so nothing resumes.
 - **The actions of a call are performed by one function, `pairingPerform`, in one order.** The
   persist actions (`Persist...`, `Delete...`, `StoreCredential`, `StoreRevocation`) run first,
   in the order given, each as its own write (a credential through `installCredential`, a
@@ -947,11 +961,15 @@ the write that makes the change durable returned (`trust.go`).
   and the actions that reach outside performed, in order: `Send`, `Close`, `FetchRequest`
   and `Notify` (logged at info with the kind, the pairing identifier and the remote node). A
   frame is therefore never sent before the persist that made it safe, and the state never runs
-  ahead of the disk. A persist that comes after an action that reaches outside is not
-  something the state machine produces and no caller can order correctly by guessing, so the
-  whole list is checked before anything is done: such a list is refused with nothing written
-  and nothing sent, logged at error level, and never silently put in order, which would hide
-  that the two disagree. A session that the engine no longer holds is skipped for a `Send` or
+  ahead of the disk. The state machine's lists interleave the two kinds (a tick that ends two
+  requests gives a persist and a notice for each; a recovery a credential, a record, a notice
+  and a revocation), and the engine performs such a list as it does any other: the actions that
+  reach outside wait for every persist of the list, not only the ones before them. That is safe
+  because no persist records that an earlier action that reaches outside was done (a persist
+  that a frame, a close or a fetch has to follow comes before it in the list, and none keeps a
+  fact such as "sent" or "told" that recovery would rely on), so the delay changes nothing the
+  disk says. A list is refused whole, with nothing written and nothing sent and logged at error
+  level, only when it holds an action the engine does not know. A session that the engine no longer holds is skipped for a `Send` or
   a `Close`. A `StoreCredential` is stored with the accepted certificate of the connection the
   call ran on (the stream's, or the fetch's), and with none when the call ran on none
   (the recovery, a tick).
@@ -1021,7 +1039,7 @@ the write that makes the change durable returned (`trust.go`).
   owner's operations on trust call them. A credential is stored with,
   optionally, the certificate of the node at its other end (`trust-credential`: the credential
   is the commit point). A revocation is made with the identity key, which only these steps use
-  (`Keys.IdentitySigner`), and never while the identity is retired. Removing a node from trust is
+  (`Keys.IdentitySigner`; the pairing reaches it through its `World`, which the engine guards as described above), and never while the identity is retired. Removing a node from trust is
   one transaction the engine opens, `trust-local-revoke`: the entry of the removal is the
   commit point, then the revocation of each credential this node holds with the node, then the
   result of the operation; the first removal's time and operation name are kept when it is
@@ -1803,7 +1821,8 @@ reproducible).
 | A node with a credential is let in, and stops when the credential is revoked or the node removed; the view is built from verified records | `trust.go`, `inbound.go` (`evaluate`) | `TestATrustedNodeIsLetInAndStopsWhenItsCredentialIsRevokedOrTheNodeRemoved`, `TestTheTrustViewIsBuiltFromVerifiedRecordsOfTheDisk` |
 | The network is given a snapshot at the start, after each change of the facts and after a renewal of the certificate | `network.go`, `engine.go` (`Start`, `fire`) | `TestTheNetworkIsGivenAFreshSnapshotWhenTheFactsChange`, `TestTheNetworkIsGivenTheRenewedCertificate` |
 | The address book is pushed after a durable change of it only, and the view tells what the network and the engine know | `operations_network.go` | `TestNetworkChangesPushTheAddressBookOnlyAfterADurableChange` |
-| The actions of a pairing call run persists first and in order, then the rest; a persist after an action that reaches outside refuses the whole list | `pairing.go` (`pairingPerform`) | `TestPairingActionsArePerformedInOrderOrNotAtAll` |
+| The actions of a pairing call run persists first and in order, then the rest, however the list interleaves them; a list with an unknown action is refused whole | `pairing.go` (`pairingPerform`) | `TestPairingActionsAreStoredFirstAndThenSentInOrder` |
+| A pairing is not started, taken in or timed while the node may not sign, and goes on when the pause is cleared | `pairing.go` (`pairingTick`, `pairingResume`, `recoverPairing`, `pairingOpened`, `pairingFrame`), `pairing_request.go` (`takeRequest`), `engine.go` (`clearRollback`) | `TestPairingIsRefusedWhileSigningIsRefused` |
 | An owner's request for a pairing stores its result with the saved request, a refusal alone, and a resend after the answer dials nothing | `pairing_request.go` (`persistRequested`, `endUnsaved`), `pairing.go` (`pairingPerform`) | `TestARequestForAPairingStoresItsResultWithTheSavedRequest`, `TestARequestThatIsRefusedOrNotAnsweredStoresTheRightThing`, `TestARequestForAPairingRecoversFromACrashAtEveryPoint` |
 | The owner's operations on trust store their results, a refusal stores nothing, and each recovers from a crash at every point | `operations_trust.go`, `transactions.go` (`trust-expect`, `trust-forget`, `trust-clear`, `trust-result`) | `TestTrustOperationsStoreTheirResultsAndRefusalsStoreNothing`, `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | A result fetch asked for while the node starts is held until the second recovery entry has ended | `pairing.go` (`pairingFetchRequested`, `openPairingFetches`), `recovery.go` (`recoverLoopback`) | `TestPairingFetchIsHeldUntilTheNodeHasStarted` |

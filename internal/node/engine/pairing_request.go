@@ -113,10 +113,12 @@ func (c *cmdRequest) run(e *Engine, now time.Time) {
 // is started that answers the command, and the loop does not.
 func (e *Engine) takeRequest(c *cmdRequest) error {
 	node, hints := c.op.pairingTarget()
-	switch {
-	case e.d.Keys == nil:
-		return errNoKeys
-	case e.net == nil:
+	// A pairing ends in a signature, so one is not started while the node may not
+	// sign.
+	if err := e.canSign(); err != nil {
+		return err
+	}
+	if e.net == nil {
 		// Without a network there is nothing to reach the node over.
 		return refuse(ReasonNodeUnreachable)
 	}

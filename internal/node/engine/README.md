@@ -481,9 +481,10 @@ delivery to a session: when it is judged and how the verdict is recorded.
   network layer judged a member; the engine adds no member check of its own.
 - **The pairing's actions are performed in one place, in one order.** `pairingPerform` runs the
   persist actions first, in order, each its own write, and only then adopts the state and performs
-  what reaches outside (frames, closes, fetches, notices); a list with a persist after one of
-  those is refused whole, never reordered. The fetches wait for the end of the second recovery
-  entry. See the engine reference for the reasons.
+  what reaches outside (frames, closes, fetches, notices), whatever way the state machine
+  interleaves them; only a list with an action the engine does not know is refused whole. The
+  fetches wait for the end of the second recovery entry. Every entry that can make the pairing
+  sign asks `canSign` or `signRefusal` first. See the engine reference for the reasons.
 - **A pull is answered for the recipients it names, from the records the target
   holds.** For each recipient the pull names, the target gives the signed report of
   its record, or lists the recipient in `NoRecord` when it holds none for the
