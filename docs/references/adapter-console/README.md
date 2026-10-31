@@ -14,10 +14,14 @@ One program, `sidera-adapter-console`, is both halves.
 
 - **The adapter** (`serve`) is what the daemon starts, from the `entry.args` of the
   package manifest. It declares `direct: {max_endpoints: 8}` and no runtime, so it
-  has no presets and no session endpoints. In `adapter.start` it registers a direct
-  endpoint with the key `owner`; the same key is the same endpoint, so the address
-  is the same after every restart of the adapter and of the daemon. It then serves
-  the local control channel.
+  has no presets and no session endpoints. In `adapter.start` it opens the local
+  control channel and answers; right after, it registers a direct endpoint with the
+  key `owner`; the same key is the same endpoint, so the address is the same after
+  every restart of the adapter and of the daemon. The registration is not part of
+  the answer to `adapter.start` because the daemon holds `endpoint.*` requests until
+  it is running (see [adapter-protocol](../adapter-protocol/README.md)); the adapter
+  retries it with a growing pause, and until it is done every local request is
+  refused with an error saying the owner endpoint is not registered yet.
 - **The client** is every other command. It finds the control channel of the
   instance, sends one request and prints the answer.
 
@@ -129,6 +133,11 @@ sidera adapter enable console
   adapter keeps the senders of what `recv` showed it. After a restart the map is
   empty and a reply asks for `--to`, which is printed by `recv`; persisting it would
   add state to repair for a case a person fixes with one flag.
+- **Registration follows the start.** On a restart of the daemon, `adapter.start` is
+  answered before the daemon runs, and the daemon serves `endpoint.register` only
+  once it runs; registering inside the start would wait out the host's handshake
+  timeout at every restart. Refusing local requests for the moment in between is
+  better than answering with an address that is not there.
 - **The address is `<node>/<endpoint>`.** The adapter gets the node text in
   `adapter.start` and the endpoint in the result of `endpoint.register`; the
   protocol calls both opaque, and the console writes an address from them the way
@@ -154,6 +163,7 @@ sidera adapter enable console
   `pack.go` (the manifest and `package`).
 - Tests: `TestCommandsBecomeTheEndpointCallTheyName` (command to request),
   `TestStartRegistersTheOwnerEndpointAndWhoamiNamesIt`,
+  `TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered`,
   `TestNewSendsTheControlSignalAndPollsForTheReply`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
   `TestReplyGoesToTheSenderSeenInRecv` (the adapter over pipes against a stand-in

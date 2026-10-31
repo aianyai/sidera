@@ -22,6 +22,9 @@ for `sidera adapter install` (see the reference for the three commands).
   third-party adapter would; it never imports the daemon's packages, so
   the layout of the data directory is spelled once, in `internal/console/paths.go`,
   from the adapter-host reference.
+- `adapter.start` is answered without waiting on any `endpoint.*` request: the daemon
+  serves them only once it is running. The owner endpoint is registered after the
+  answer (`registerOwner`), and `dispatch` refuses local requests until it is.
 - `internal/console` holds the adapter's identity (`AdapterID`, `Version`) once; the
   manifest and `initialize` both read it.
 - A change to the commands, the local protocol or the control channel updates the

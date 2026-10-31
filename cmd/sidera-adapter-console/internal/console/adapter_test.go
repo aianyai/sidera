@@ -34,6 +34,10 @@ type daemon struct {
 	recvs    []adapterproto.RecvParams
 	acks     []adapterproto.AckParams
 
+	// registerGate, when set, holds every endpoint.register until it is closed,
+	// as the daemon does until it is running.
+	registerGate chan struct{}
+
 	pages        []adapterproto.RecvPage // handed out one per recv; then an empty page
 	statusAnswer func(n int) adapterproto.MessageStatusResult
 }
@@ -74,7 +78,14 @@ func newHarness(t *testing.T, d *daemon) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Handle(adapterproto.MethodEndpointRegister, func(_ context.Context, raw json.RawMessage) (any, error) {
+	p.Handle(adapterproto.MethodEndpointRegister, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		if d.registerGate != nil {
+			select {
+			case <-d.registerGate:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		d.register = append(d.register, decode[adapterproto.RegisterParams](raw))
@@ -151,7 +162,22 @@ func newHarness(t *testing.T, d *daemon) *harness {
 	}, &adapterproto.StartResult{})
 
 	h.client = &client{env: Env{Stdout: h.out, Stderr: h.errOut, Stdin: strings.NewReader("")}, dir: dir, dial: dialLocal}
+	if d.registerGate == nil {
+		h.waitRegistered()
+	}
 	return h
+}
+
+// waitRegistered waits until the adapter has registered the owner endpoint, which
+// it does after it answered adapter.start.
+func (h *harness) waitRegistered() {
+	h.t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if h.run("whoami") == exitOK {
+			return
+		}
+	}
+	h.t.Fatalf("the owner endpoint was not registered: stderr %q", h.errOut.String())
 }
 
 // run parses and executes a client command against the adapter.
@@ -177,6 +203,22 @@ func TestStartRegistersTheOwnerEndpointAndWhoamiNamesIt(t *testing.T) {
 	}
 	if code := h.run("whoami"); code != exitOK || strings.TrimSpace(h.out.String()) != nodeName+"/"+ownerEndpoint {
 		t.Fatalf("whoami: exit %d, output %q, stderr %q", code, h.out.String(), h.errOut.String())
+	}
+}
+
+// The daemon serves endpoint.register only once it is running, which is after it
+// has the answer to adapter.start: the answer must not wait for the registration.
+func TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered(t *testing.T) {
+	d := &daemon{registerGate: make(chan struct{})}
+	h := newHarness(t, d) // fails if adapter.start waits for endpoint.register
+
+	if code := h.run("whoami"); code != exitFailed || !strings.Contains(h.errOut.String(), "not registered yet") {
+		t.Errorf("whoami while starting: exit %d, stderr %q, want a refusal saying the endpoint is not registered yet", code, h.errOut.String())
+	}
+	close(d.registerGate)
+	h.waitRegistered()
+	if got := strings.TrimSpace(h.out.String()); got != nodeName+"/"+ownerEndpoint {
+		t.Errorf("whoami after registration: %q", got)
 	}
 }
 

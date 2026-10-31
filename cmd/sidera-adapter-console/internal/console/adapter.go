@@ -22,6 +22,13 @@ import (
 // (adapterproto.MaxWaitSeconds) included.
 const requestTimeout = (adapterproto.MaxWaitSeconds + 30) * time.Second
 
+// The pause between attempts to register the owner endpoint grows from the first
+// to the second.
+const (
+	registerRetryMin = 200 * time.Millisecond
+	registerRetryMax = 5 * time.Second
+)
+
 // serve runs the adapter role over the streams of the daemon until it closes them.
 func serve(ctx context.Context, r io.Reader, w io.WriteCloser, log *slog.Logger) error {
 	app := newAdapter(log)
@@ -70,20 +77,15 @@ func (a *adapter) Initialize(_ context.Context, conn *adapterkit.Conn, instance 
 	return nil
 }
 
-// Start registers the owner endpoint and opens the control channel. The endpoint
-// is the same one after every restart, and the daemon keeps what it received while
-// the adapter was down.
+// Start opens the control channel and begins registering the owner endpoint, and
+// answers without waiting for the registration: the daemon serves endpoint.*
+// requests only once it is running, and it is not running while it waits for this
+// answer, so waiting here would stall every restart of the daemon until the
+// handshake times out. Until the registration completes, local requests are
+// refused as starting.
 func (a *adapter) Start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
-	reg, err := a.conn.Register(ctx, adapterproto.RegisterParams{
-		Key:         endpointKey,
-		DisplayName: "Owner console",
-		Description: "The node owner's console: messages for the owner wait here until sidera-adapter-console recv shows them.",
-	})
-	if err != nil {
-		return adapterproto.StartResult{}, err
-	}
 	a.mu.Lock()
-	a.node, a.endpoint = p.Node, reg.Endpoint
+	a.node = p.Node
 	listening := a.listener != nil
 	a.mu.Unlock()
 	if !listening {
@@ -95,8 +97,40 @@ func (a *adapter) Start(ctx context.Context, p adapterproto.StartParams) (adapte
 		a.listener = l
 		a.mu.Unlock()
 		go a.accept(l)
+		go a.registerOwner()
 	}
 	return a.Base.Start(ctx, p)
+}
+
+// registerOwner registers the owner endpoint, retrying with a growing pause until
+// it succeeds or the adapter stops. The endpoint is the same one after every
+// restart, and the daemon keeps what it received while the adapter was down. The
+// daemon holds the request until it is running, so a long wait is not a failure.
+func (a *adapter) registerOwner() {
+	pause := registerRetryMin
+	for {
+		reg, err := a.conn.Register(a.ctx, adapterproto.RegisterParams{
+			Key:         endpointKey,
+			DisplayName: "Owner console",
+			Description: "The node owner's console: messages for the owner wait here until sidera-adapter-console recv shows them.",
+		})
+		if err == nil {
+			a.mu.Lock()
+			a.endpoint = reg.Endpoint
+			a.mu.Unlock()
+			return
+		}
+		if a.ctx.Err() != nil {
+			return
+		}
+		a.log.Warn("registering the owner endpoint", "error", err, "retry_in", pause)
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-time.After(pause):
+		}
+		pause = min(2*pause, registerRetryMax)
+	}
 }
 
 // Shutdown closes the control channel; the process ends when the daemon closes the
@@ -185,6 +219,9 @@ func (a *adapter) dispatch(ctx context.Context, req request) response {
 	a.mu.Lock()
 	node, endpoint := a.node, a.endpoint
 	a.mu.Unlock()
+	if endpoint == "" {
+		return fail(errors.New("the adapter is starting and the owner endpoint is not registered yet: try again in a moment"))
+	}
 	resp := response{Node: node}
 	switch req.Op {
 	case opWhoami:

@@ -637,6 +637,16 @@ refused. Each one is reported with `native_request.handled`; `disposition` is
 registers endpoints with `endpoint.register`, identified by a key it chooses; the
 same key always gets the same endpoint. It reads with `endpoint.recv`, which
 returns the `RecvPage` that `handoff` prints, and settles with `endpoint.ack`.
+The daemon serves the `endpoint.*` requests of an adapter only once it is running, and
+it is not running while it waits for the answer to `adapter.start` (a restart of the
+daemon waits for every adapter to answer it before it runs). An adapter therefore
+never waits for an `endpoint.*` request, `endpoint.register` included, while it answers
+`adapter.start`: it answers first and registers afterwards, from work that does not
+hold the answer. A request made in the meantime is held until the daemon runs, not
+refused, so an adapter that waited for it would stall the start of the daemon until
+the host's handshake timeout ends the connection and starts it again. The endpoints an
+adapter registered before are listed in `direct_endpoints` of `adapter.start`, so it
+knows them without a request.
 A message on a page, or a part of one, has a body that is not empty, as the
 envelope requires of every message: no node can hand out an empty one, so the
 schema (`minLength: 1`) and `PageMessage.Validate` refuse a page that holds it
