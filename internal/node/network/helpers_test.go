@@ -103,7 +103,7 @@ func (f *fakeNode) QueryDirectory(ctx context.Context, from transport.Origin, se
 	return h(ctx, from, sender, req)
 }
 
-func (f *fakeNode) NotePeerCertificate(ctx context.Context, cert record.Verified[record.NetworkKeyCertificate], seen record.SerialSeen) error {
+func (f *fakeNode) NotePeerCertificate(ctx context.Context, cert record.Verified[record.NetworkKeyCertificate], _ record.Record, seen record.SerialSeen) error {
 	f.mu.Lock()
 	f.notes = append(f.notes, seen)
 	block, err := f.noteBlock, f.noteErr

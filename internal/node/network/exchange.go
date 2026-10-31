@@ -194,7 +194,7 @@ func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, 
 		if seen.Node.IsZero() {
 			seen = record.SerialSeenOf(d.NodeCertificate)
 		}
-		if err := node.NotePeerCertificate(ctx, d.NodeCertificate, seen); err != nil {
+		if err := node.NotePeerCertificate(ctx, d.NodeCertificate, ex.Record, seen); err != nil {
 			n.log.Warn("the engine did not take a member's certificate", "peer", e.conn.RemotePeer(), "err", err)
 			return n.settleRefusal(e, refused)
 		}

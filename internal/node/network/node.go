@@ -18,9 +18,11 @@ type Node interface {
 	// NotePeerCertificate hands over the certificate a member's exchange
 	// presented, before the connection becomes a member's, so that the engine
 	// can keep it as the node's accepted certificate when its serial is not
-	// below the stored one. seen is the serial state to store when it is higher.
-	// An error closes the connection.
-	NotePeerCertificate(ctx context.Context, cert record.Verified[record.NetworkKeyCertificate], seen record.SerialSeen) error
+	// below the stored one. rec is the signed record cert was verified from:
+	// the engine stores the record, since a verified certificate does not carry
+	// the signature that checking it again needs. seen is the serial state to
+	// store when it is higher. An error closes the connection.
+	NotePeerCertificate(ctx context.Context, cert record.Verified[record.NetworkKeyCertificate], rec record.Record, seen record.SerialSeen) error
 
 	// RefusalReason returns the name of the refusal reason in err's chain, as
 	// the answer of a call carries it, and false when err is not a refusal of
