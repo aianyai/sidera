@@ -98,6 +98,10 @@ func TestTheCommandsOfTrust(t *testing.T) {
 			t.Errorf("%s: command %+v, fingerprint %x want %x", tc.method, c, c.Fingerprint, want)
 		}
 	}
+	rejected := send(13, "trust.reject", `{"pairing_id":"`+strings.Repeat("ab", 32)+`"}`)
+	if rejected.Name != "trust.reject" || rejected.Operation.Admin().Kind != admin.OpRejectTrustRequest {
+		t.Errorf("trust.reject: command %+v, want the operation that rejects a trust request", rejected)
+	}
 	const hint = "/ip4/10.0.0.1/tcp/7744"
 	omitted := send(10, "trust.request", `{"node":"`+peer+`"}`)
 	empty := send(11, "trust.request", `{"node":"`+peer+`","addresses":[]}`)
@@ -115,13 +119,15 @@ func TestTheCommandsOfTrust(t *testing.T) {
 // list, and a request that was refused has no identifier and no code but says why.
 func TestTheResultsOfTrust(t *testing.T) {
 	initiator, target, transcript := pairingParties(t)
-	_ = initiator
 	peer := target.Node()
 	saved := pairing.InitiatorRecord{Transcript: transcript, ReceivedAt: t0, ExpiresAt: t0.Add(5 * time.Minute), Status: pairing.InitiatorActive}
 	confirmed := saved
 	confirmed.Confirmation, confirmed.Signature = &pairing.Confirmation{}, &record.Record{}
 	complete := saved
 	complete.Status = pairing.InitiatorComplete
+	withdrawing := saved
+	withdrawing.Status = pairing.InitiatorWithdrawing
+	rejectedIncoming := pairing.TargetRecord{Transcript: transcript, ReceivedAt: t0, ExpiresAt: t0.Add(5 * time.Minute), Status: pairing.TargetRejected, Rejection: pairing.WithdrawDeclined}
 	id, code := pairingIDText(saved.ID()), saved.Display().Code.String()
 	if len(id) != 64 || len(code) != 7 || code[3] != ' ' {
 		t.Fatalf("the identifier %q and the code %q are not in the forms of the interface", id, code)
@@ -155,6 +161,12 @@ func TestTheResultsOfTrust(t *testing.T) {
 		}, `{"node":"` + peer.String() + `","revoked_credentials":["` + digestText + `"]}`},
 		{"a removal that revoked nothing", func() ([]byte, error) { return removedResult(engine.NodeRemoved{Node: peer, Already: true}) },
 			`{"node":"` + peer.String() + `","revoked_credentials":[]}`},
+		{"a request this node held, rejected", func() ([]byte, error) {
+			return rejectedResult(engine.PairingRejected{Incoming: &rejectedIncoming})
+		}, `{"pairing_id":"` + id + `","node":"` + initiator.Node().String() + `","status":"rejected"}`},
+		{"a request this node started, withdrawn", func() ([]byte, error) {
+			return rejectedResult(engine.PairingRejected{Outgoing: &withdrawing})
+		}, `{"pairing_id":"` + id + `","node":"` + peer.String() + `","status":"withdrawing"}`},
 		{"taking a node back", func() ([]byte, error) {
 			return clearedResult(engine.NodeCleared{Node: peer, NewPairingRequired: true})
 		}, `{"node":"` + peer.String() + `","new_pairing_required":true}`},

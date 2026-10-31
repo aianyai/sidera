@@ -29,6 +29,8 @@ func TestTrustCommandsPlanTheirMethods(t *testing.T) {
 	}{
 		{args: []string{"trust", "expect", node}, method: "trust.expect", params: map[string]any{"node": node}, changes: true},
 		{args: []string{"trust", "forget", node}, method: "trust.forget", params: map[string]any{"node": node}, changes: true},
+		{args: []string{"trust", "reject", "ab12"}, method: "trust.reject", params: map[string]any{"pairing_id": "ab12"}, changes: true},
+		{args: []string{"trust", "reject"}, usage: true},
 		{args: []string{"trust", "remove", node}, method: "trust.remove", params: map[string]any{"node": node}, changes: true},
 		{args: []string{"trust", "clear", node}, method: "trust.clear", params: map[string]any{"node": node}, changes: true},
 		{args: []string{"trust", "list"}, method: "trust.list"},
@@ -197,8 +199,9 @@ type nopCloser struct{ io.Writer }
 func (nopCloser) Close() error { return nil }
 
 // A request the target refused ends the command with the exit code of a refusal and
-// prints no code; one that is answered prints the code to compare before anything
-// else, and with no wait the command ends there.
+// prints no code; one that is answered prints the code before anything else, says
+// that trust is complete when both nodes expect each other and how to cancel the
+// request, and with no wait the command ends there.
 func TestTheAnswerToARequestForAPairing(t *testing.T) {
 	var out bytes.Buffer
 	c := command{Config: Config{Stdout: nopCloser{&out}}}
@@ -209,7 +212,7 @@ func TestTheAnswerToARequestForAPairing(t *testing.T) {
 	}
 	err = c.awaitPairing(context.Background(), nil,
 		[]byte(`{"operation_id":"00000000000000000000000000000001","replayed":false,"result":{"pairing_id":"p1","node":"n1","status":"awaiting_target","code":"482 019"}}`), 0)
-	if err != nil || !strings.HasPrefix(out.String(), "Verification code: 482 019\n") {
+	if err != nil || !strings.HasPrefix(out.String(), "Verification code: 482 019\n") || !strings.Contains(out.String(), "`sidera trust reject p1`") {
 		t.Errorf("an answer: %v, printed %q", err, out.String())
 	}
 }

@@ -247,6 +247,7 @@ wire stay with the interface.
 | `SetPeerAddressesOp`, `RemovePeerOp`, `SetListenOp` | the addresses of a node replaced or removed, or the listen list replaced, in `network.json`, a versioned change judged by `config`; an address set is first judged by the network's rule (below). The new address book is pushed to the network after the write of an address change; the listen list takes effect at the next start | the `last_operation` of `network.json` |
 | `InstallAdapterOp` | a package is copied outside the loop, the copy is judged, and the loop renames it to its version and replaces the pointer that makes it current | `state/admin/`, the last-but-one write of `adapter-install`, or alone in `adapter-install-current` |
 | `ExpectNodeOp`, `ForgetNodeOp` | the pairing's list of expectations replaced (a node the owner means to pair with is entered, or deleted); the state machine's own refusal is the answer when the node is itself or invalid, or has no expectation to forget | `state/admin/`, the last write of `trust-expect` and `trust-forget`, with the list |
+| `RejectPairingOp` | the request is ended at its owner's decision: one the node holds as a target is rejected, one it started is withdrawn, with the revocation of a signature that may have left stored first; a request that is not there or no longer waits is an invalid argument naming `pairing_id`; refused while the node may not sign | `state/admin/`, the last write of `trust-reject`, with the record of the request |
 | `RequestPairingOp` | the node is dialed from a worker and the online segment of a pairing is started on the stream; the answer comes when the segment ends (below) | `state/admin/`, the last write of `trust-request` with the saved request, or alone in `trust-result` for a target's refusal |
 | `RemoveNodeOp`, `ClearNodeOp` | a node is removed from this node's trust with the revocation of the credentials held with it (`trust-local-revoke`), or taken back (`trust-clear`: the removal of the entry, then the result; a node that was not removed stores its result alone in `trust-result`) | `state/admin/`, the last write of each |
 | `EnableAdapterOp`, `DisableAdapterOp` | the instance is made (or turned on) or turned off in `instances.json`; then the host is asked to run or stop it | the `last_operation` of `instances.json` |
@@ -1014,6 +1015,21 @@ the write that makes the change durable returned (`trust.go`).
   is `ReasonPairingInProgress` and `ResultFull` (the list of expectations is at its cap) is
   `ReasonExpectationsFull`. A disposition that is not an execution at all is a
   disagreement with the loop's own authorization and fails loudly.
+- **Rejecting a request is one operation for both sides.** `RejectPairingOp` calls the state
+  machine's `Reject` with the reason `declined`, which it authorizes as rejecting a trust
+  request (the operation's `Admin()` is that entry, as `trust.forget`'s is). It is refused
+  first while the node may not sign (`canSign`), since the withdrawal of a request this node
+  started may store a revocation. A result of `ResultNotFound`, `ResultWrongState` (the
+  request ended, or was confirmed already) and `ResultExpired` is `ReasonInvalidArgument`
+  naming `pairing_id`, and stores nothing. Otherwise the revocation the withdrawal asks for
+  is stored first (idempotent: a crash before the transaction leaves a request the resend
+  rejects again), then the request's record, which is either a target's or an initiator's,
+  and the result are one transaction (`trust-reject`; the record is the commit point), the
+  state is taken after it is durable, and the notices are told. A crash between the record
+  and the result leaves the request ended without its result, and the resend is refused as a
+  request that no longer waits, as a resend of `trust.forget` is. An initiator's withdrawal is
+  carried to the target by the next result exchange, which the tick that is scheduled after
+  the transaction asks for.
 - **A request for a pairing is answered when its online segment ends.** `RequestPairingOp` is
   not run by the loop but started (`pairing_request.go`): the loop looks the request up in
   the stored results (a request done before is answered without dialing), refuses one whose
@@ -1824,6 +1840,7 @@ reproducible).
 | The actions of a pairing call run persists first and in order, then the rest, however the list interleaves them; a list with an unknown action is refused whole | `pairing.go` (`pairingPerform`) | `TestPairingActionsAreStoredFirstAndThenSentInOrder` |
 | A pairing is not started, taken in or timed while the node may not sign, and goes on when the pause is cleared | `pairing.go` (`pairingTick`, `pairingResume`, `recoverPairing`, `pairingOpened`, `pairingFrame`), `pairing_request.go` (`takeRequest`), `engine.go` (`clearRollback`) | `TestPairingIsRefusedWhileSigningIsRefused` |
 | An owner's request for a pairing stores its result with the saved request, a refusal alone, and a resend after the answer dials nothing | `pairing_request.go` (`persistRequested`, `endUnsaved`), `pairing.go` (`pairingPerform`) | `TestARequestForAPairingStoresItsResultWithTheSavedRequest`, `TestARequestThatIsRefusedOrNotAnsweredStoresTheRightThing`, `TestARequestForAPairingRecoversFromACrashAtEveryPoint` |
+| Rejecting a request ends it on either side, stores the record and the result in one transaction, refuses a request that is not there or no longer waits, and recovers from a crash at every point | `operations_trust.go` (`RejectPairingOp`), `transactions.go` (`trust-reject`) | `TestRejectingARequestEndsItOnEitherSide`, `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | The owner's operations on trust store their results, a refusal stores nothing, and each recovers from a crash at every point | `operations_trust.go`, `transactions.go` (`trust-expect`, `trust-forget`, `trust-clear`, `trust-result`) | `TestTrustOperationsStoreTheirResultsAndRefusalsStoreNothing`, `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | A result fetch asked for while the node starts is held until the second recovery entry has ended | `pairing.go` (`pairingFetchRequested`, `openPairingFetches`), `recovery.go` (`recoverLoopback`) | `TestPairingFetchIsHeldUntilTheNodeHasStarted` |
 | The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |

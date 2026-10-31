@@ -622,14 +622,14 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations. The table holds 70 declarations (txn 2, config 9, keys 2,
-store 42, engine 13 and daemon 2), and the suite has fixtures for 53 of them: the
-seventeen of the trust and peer records, the pairing records, the owner's operations
+owners' declarations. The table holds 71 declarations (txn 2, config 9, keys 2,
+store 42, engine 14 and daemon 2), and the suite has fixtures for 53 of them: the
+eighteen of the trust and peer records, the pairing records, the owner's operations
 on trust and the network configuration (`trust-credential`, `trust-revocation`,
 `trust-local-clear`, `peer-cert`, `pairing-target-put`, `pairing-target-delete`,
 `pairing-initiator-put`, `pairing-initiator-delete`, `pairing-limits`,
 `pairing-expectations`, `trust-local-revoke`, `trust-expect`, `trust-forget`,
-`trust-request`, `trust-clear`, `trust-result`, `network-set`) have none yet, and
+`trust-reject`, `trust-request`, `trust-clear`, `trust-result`, `network-set`) have none yet, and
 until they do their sub-benchmarks of an unfiltered run fail. It runs one named sub-benchmark per declaration,
 including Recovery declarations. Every selected declaration must have a fixture
 and at least one nonempty successful commit through its owner's existing entry point on
@@ -866,7 +866,10 @@ with the operation's result: `PreparePairingExpectations` before it begins, then
 `trust-forget`), not here. A request the initiator started is written the same way
 with the result of the owner's request for it, in the engine's `trust-request`
 (`PreparePairingInitiator`, then `PutPairingInitiator` with `RolePairingInitiator`
-and `PutAdminResult` with `RoleResult`); a target's refusal, which saves no request,
+and `PutAdminResult` with `RoleResult`); a request the owner rejected, which is a
+target's record (`PreparePairingTarget`, `PutPairingTarget` with `RolePairingTarget`)
+or an initiator's, is written the same way with the result, in the engine's
+`trust-reject`, whose two record roles are each optional; a target's refusal, which saves no request,
 and the clearing of a node that was not removed store their result alone
 (`trust-result`). Tests: the
 scenarios of the six declarations in `TestEveryTransactionConvergesFromEveryCrashState`,

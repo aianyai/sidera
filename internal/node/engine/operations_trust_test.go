@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/revocation"
 	"github.com/aianyai/sidera/internal/trust"
@@ -30,14 +32,14 @@ func encodeExpected(n engine.NodeExpected) ([]byte, error) {
 
 func expectCommand(b byte, node ident.NodeID) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf("expect" + node.String()), Name: "trust.expect",
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("expect" + node.String()), Name: "trust.expect",
 		Operation: engine.ExpectNodeOp(node, encodeExpected),
 	}
 }
 
 func forgetCommand(b byte, node ident.NodeID) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf("forget" + node.String()), Name: "trust.forget",
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("forget" + node.String()), Name: "trust.forget",
 		Operation: engine.ForgetNodeOp(node, func(n ident.NodeID) ([]byte, error) {
 			return []byte(`{"node":"` + n.String() + `","forgotten":true}`), nil
 		}),
@@ -53,14 +55,14 @@ func encodeCleared(c engine.NodeCleared) ([]byte, error) {
 
 func clearCommandOf(b byte, node ident.NodeID) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf("clear" + node.String()), Name: "trust.clear",
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("clear" + node.String()), Name: "trust.clear",
 		Operation: engine.ClearNodeOp(node, encodeCleared),
 	}
 }
 
 func removeCommand(b byte, node ident.NodeID) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf("remove" + node.String()), Name: "trust.remove",
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("remove" + node.String()), Name: "trust.remove",
 		Operation: engine.RemoveNodeOp(node, func(r engine.NodeRemoved) ([]byte, error) { return []byte(`{}`), nil }),
 	}
 }
@@ -135,6 +137,108 @@ func TestTrustOperationsStoreTheirResultsAndRefusalsStoreNothing(t *testing.T) {
 	wantCleared(0x67, peer.node, false) // not removed any more: nothing to clear
 	if !hasResult(r.scan(), requestKey(0x67)) || r.commits("trust-result") != 1 {
 		t.Errorf("clearing a node that was not removed: result %v, %d result-only commits, want one", hasResult(r.scan(), requestKey(0x67)), r.commits("trust-result"))
+	}
+}
+
+func encodeRejected(p engine.PairingRejected) ([]byte, error) {
+	if p.Incoming != nil {
+		id := p.Incoming.ID()
+		return []byte(`{"id":"` + hex.EncodeToString(id[:]) + `","status":"` + p.Incoming.Status.String() + `"}`), nil
+	}
+	id := p.Outgoing.ID()
+	return []byte(`{"id":"` + hex.EncodeToString(id[:]) + `","status":"` + p.Outgoing.Status.String() + `"}`), nil
+}
+
+func rejectCommand(b byte, id pairing.ID) engine.ManagementCommand {
+	return engine.ManagementCommand{
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("reject" + hex.EncodeToString(id[:])), Name: "trust.reject",
+		Operation: engine.RejectPairingOp(id, encodeRejected),
+	}
+}
+
+// Rejecting a request ends it whichever side of the pairing the node is: a request
+// it holds as a target is rejected, one it started is withdrawn (and a signature
+// that may have left is revoked), the record and the result are one transaction, a
+// request that is not there or no longer waits is an invalid argument that stores
+// nothing, and the same rejection sent again is answered from the stored result.
+func TestRejectingARequestEndsItOnEitherSide(t *testing.T) {
+	peer := newPeerNode(t, 3)
+	for _, tc := range []struct {
+		name    string
+		seed    func(t *testing.T, r *rig) pairing.ID
+		status  string
+		revoked int
+		check   func(t *testing.T, sc *store.Scan, id pairing.ID)
+	}{
+		{"a request held as a target", func(t *testing.T, r *rig) pairing.ID {
+			rec := pendingTargetRecord(t, r, peer, 10)
+			if err := r.st.PairingTargetPut(rec); err != nil {
+				t.Fatal(err)
+			}
+			return rec.ID()
+		}, "rejected", 0, func(t *testing.T, sc *store.Scan, id pairing.ID) {
+			if len(sc.PairingTargets) != 1 || sc.PairingTargets[0].ID() != id || sc.PairingTargets[0].Status != pairing.TargetRejected {
+				t.Errorf("target records %+v, want the request rejected", sc.PairingTargets)
+			}
+		}},
+		{"a request started and waiting for its owner", func(t *testing.T, r *rig) pairing.ID {
+			rec := waitingInitiatorRecord(t, r, peer, 20)
+			if err := r.st.PairingInitiatorPut(rec); err != nil {
+				t.Fatal(err)
+			}
+			return rec.ID()
+		}, "withdrawing", 0, func(t *testing.T, sc *store.Scan, id pairing.ID) {
+			if len(sc.PairingInitiators) != 1 || sc.PairingInitiators[0].Status != pairing.InitiatorWithdrawing || sc.PairingInitiators[0].Reason != pairing.WithdrawDeclined {
+				t.Errorf("initiator records %+v, want the request withdrawn as declined", sc.PairingInitiators)
+			}
+		}},
+		{"a request started whose signature has left", func(t *testing.T, r *rig) pairing.ID {
+			rec := signedInitiatorRecord(t, r, peer)
+			if err := r.st.PairingInitiatorPut(rec); err != nil {
+				t.Fatal(err)
+			}
+			return rec.ID()
+		}, "withdrawing", 1, func(t *testing.T, sc *store.Scan, id pairing.ID) {
+			if len(sc.PairingInitiators) != 1 || sc.PairingInitiators[0].Status != pairing.InitiatorWithdrawing {
+				t.Errorf("initiator records %+v, want the request withdrawn", sc.PairingInitiators)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := trustRig(t, withNetwork(&fakeNetwork{}))
+			id := tc.seed(t, r)
+			e := r.start()
+			cmd := rejectCommand(0x81, id)
+			res, err := e.Execute(context.Background(), cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := `{"id":"` + hex.EncodeToString(id[:]) + `","status":"` + tc.status + `"}`; string(res.Result) != want {
+				t.Errorf("result %s, want %s", res.Result, want)
+			}
+			sc := r.scan()
+			tc.check(t, sc, id)
+			if stored, ok := r.adminResultOf(sc, cmd); !ok || string(stored.Result) != string(res.Result) {
+				t.Errorf("the stored result is %q (found %v), want the answer", stored.Result, ok)
+			}
+			if len(sc.CredRevocations) != tc.revoked || r.commits("trust-reject") != 1 {
+				t.Errorf("%d revocations and %d reject transactions, want %d and one", len(sc.CredRevocations), r.commits("trust-reject"), tc.revoked)
+			}
+			again, err := e.Execute(context.Background(), cmd)
+			if err != nil || !again.Replayed || string(again.Result) != string(res.Result) {
+				t.Errorf("the rejection sent again: %+v, %v; want the stored result", again, err)
+			}
+			// Another rejection of a request that has ended, or of one that is not there,
+			// is refused and stores nothing.
+			for i, unknown := range []pairing.ID{id, {0xee}} {
+				other := rejectCommand(byte(0x82+i), unknown)
+				_, err = e.Execute(context.Background(), other)
+				wantRefusal(t, err, engine.ReasonInvalidArgument, "pairing_id")
+				if hasResult(r.scan(), other.Key) {
+					t.Errorf("a refused rejection stored a result")
+				}
+			}
+		})
 	}
 }
 
@@ -267,7 +371,7 @@ func encodeRequested(p engine.PairingRequested) ([]byte, error) {
 
 func requestCommand(b byte, node ident.NodeID) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf("request" + node.String()), Name: "trust.request",
+		Actor: admin.LocalOwner(), Key: requestKey(b), Fingerprint: fingerprintOf("request" + node.String()), Name: "trust.request",
 		Operation: engine.RequestPairingOp(node, nil, encodeRequested),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -83,6 +84,56 @@ func forgottenResult(node ident.NodeID) ([]byte, error) {
 		Node      string `json:"node"`
 		Forgotten bool   `json:"forgotten"`
 	}{node.String(), true})
+}
+
+// trust.reject: end a request for a pairing that this node's owner does not want,
+// whether the node holds it as a target or started it. A request the node started
+// is withdrawn, and the other node learns of it with the next exchange.
+var trustReject = &method{
+	name: "trust.reject", op: admin.Operation{Kind: admin.OpRejectTrustRequest},
+	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			PairingID string `json:"pairing_id"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		id, err := parsePairingID(p.PairingID)
+		if err != nil {
+			return nil, err
+		}
+		return &plan{canonical: canonical(struct {
+			PairingID string `json:"pairing_id"`
+		}{pairingIDText(id)}), operation: engine.RejectPairingOp(id, rejectedResult)}, nil
+	},
+}
+
+// parsePairingID reads a pairing identifier as pairingIDText writes it.
+func parsePairingID(s string) (pairing.ID, error) {
+	d, err := parseDigest(s, "params.pairing_id")
+	if err != nil {
+		return pairing.ID{}, apiwire.Malformed("the value is not a pairing identifier: 64 lower-case hexadecimal digits", "params.pairing_id")
+	}
+	return pairing.ID(d), nil
+}
+
+// rejectedResult words the rejection of a request: the request as it is now, in the
+// fields and the status names trust.list gives it.
+func rejectedResult(r engine.PairingRejected) ([]byte, error) {
+	out := struct {
+		PairingID string `json:"pairing_id"`
+		Node      string `json:"node"`
+		Status    string `json:"status"`
+	}{}
+	switch {
+	case r.Incoming != nil:
+		out.PairingID, out.Node, out.Status = pairingIDText(r.Incoming.ID()), r.Incoming.Display().Remote.String(), targetStatusName(*r.Incoming)
+	case r.Outgoing != nil:
+		out.PairingID, out.Node, out.Status = pairingIDText(r.Outgoing.ID()), r.Outgoing.Display().Remote.String(), initiatorStatusName(*r.Outgoing)
+	default:
+		return nil, errors.New("manageapi: a rejection that names no request")
+	}
+	return json.Marshal(out)
 }
 
 // trust.request: ask a node for a pairing, dialing the addresses given for this

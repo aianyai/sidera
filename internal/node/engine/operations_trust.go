@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -29,10 +30,10 @@ type trustOp struct{ kind admin.OpKind }
 func (o trustOp) Admin() admin.Operation { return admin.Operation{Kind: o.kind} }
 func (trustOp) stops() bool              { return false }
 
-// pairingRequest is who asks and under which identifier, for the state machine:
-// the management interface is the local owner's alone, and the key was made for it.
+// pairingRequest is who asks and under which identifier, for the state machine: the
+// actor the management interface made for the request.
 func (x *opRun) pairingRequest() pairing.Request {
-	return pairing.Request{Actor: admin.LocalOwner(), ID: x.key.ID}
+	return pairing.Request{Actor: x.actor, ID: x.key.ID}
 }
 
 // pairingRefusal turns what the state machine said of a command into the refusal of
@@ -171,6 +172,129 @@ func (e *Engine) changeExpectations(x *opRun, decl *txn.Decl, result func(next p
 		return nil, err
 	}
 	e.pairing.state = next
+	return body, nil
+}
+
+// ---------------------------------------------------------------------------
+// Rejecting a request
+
+// PairingRejected is what rejecting a request did, for the result to say: the
+// request as it is now, which is one this node holds as a target or one it started.
+type PairingRejected struct {
+	// Incoming is the request this node held as a target and rejected; nil when the
+	// request was this node's own.
+	Incoming *pairing.TargetRecord
+	// Outgoing is the request this node started and withdrew; nil when the request
+	// was one it held as a target.
+	Outgoing *pairing.InitiatorRecord
+}
+
+// RejectPairingOp is the operation that ends a request for a pairing because its
+// owner does not want it: a request this node holds as a target is rejected, and one
+// it started is withdrawn, which the other node learns with the next exchange of the
+// result. It is authorized as the state machine authorizes it, as rejecting a trust
+// request. A request that no longer waits is refused like one that is not there.
+// The node may not sign while its clock or identity is in doubt, and withdrawing a
+// request may store a revocation, so the operation is refused then. encode makes
+// the result; it runs in the loop and must not wait.
+func RejectPairingOp(id pairing.ID, encode func(PairingRejected) ([]byte, error)) Operation {
+	return &rejectPairingOp{trustOp{admin.OpRejectTrustRequest}, id, encode}
+}
+
+type rejectPairingOp struct {
+	trustOp
+	id     pairing.ID
+	encode func(PairingRejected) ([]byte, error)
+}
+
+func (o *rejectPairingOp) run(e *Engine, x *opRun) ([]byte, error) {
+	if err := e.canSign(); err != nil {
+		return nil, err
+	}
+	next, out, acts, err := e.pairing.state.Reject(e.pairingWorld(), x.pairingRequest(), o.id, pairing.WithdrawDeclined, x.now)
+	if err != nil {
+		return nil, err
+	}
+	if out.Disposition == pairing.DispositionExecuted {
+		switch out.Result {
+		case pairing.ResultNotFound, pairing.ResultWrongState, pairing.ResultExpired:
+			return nil, invalidArgument("pairing_id", fmt.Errorf("the pairing refused it as %s", out.Result))
+		}
+	}
+	if err := e.pairingRefusal(out, "pairing_id"); err != nil {
+		return nil, err
+	}
+	return e.persistRejection(x, o, next, acts)
+}
+
+// persistRejection stores the rejected request and the result in one transaction
+// and then adopts the state and tells what the state machine says to tell. A
+// revocation that a withdrawal makes is stored first, as the state machine orders:
+// it is idempotent, so a crash before the transaction leaves a request the resend
+// rejects again.
+func (e *Engine) persistRejection(x *opRun, o *rejectPairingOp, next pairing.State, acts []pairing.Action) ([]byte, error) {
+	var rejected PairingRejected
+	var notices []pairing.Action
+	for _, a := range acts {
+		switch a := a.(type) {
+		case pairing.StoreRevocation:
+			if err := e.pairingPersist(a, nil); err != nil {
+				return nil, err
+			}
+		case pairing.PersistTarget:
+			rec := a.Record
+			rejected.Incoming = &rec
+		case pairing.PersistInitiator:
+			rec := a.Record
+			rejected.Outgoing = &rec
+		case pairing.Notify:
+			notices = append(notices, a)
+		default:
+			return nil, fmt.Errorf("engine: rejecting a request returned %T, which it cannot", a)
+		}
+	}
+	if (rejected.Incoming == nil) == (rejected.Outgoing == nil) {
+		return nil, errors.New("engine: rejecting a request must persist exactly one request")
+	}
+	body, err := o.encode(rejected)
+	if err != nil {
+		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)
+	}
+	pr, err := store.PrepareAdminResult(x.record(body))
+	if err != nil {
+		return nil, err
+	}
+	tx := e.d.Writer.Begin(&declTrustReject)
+	defer tx.Close()
+	if rec := rejected.Incoming; rec != nil {
+		prepared, err := store.PreparePairingTarget(*rec)
+		if err != nil {
+			return nil, err
+		}
+		if err := store.PutPairingTarget(tx, store.RolePairingTarget, prepared); err != nil {
+			return nil, err
+		}
+	} else {
+		prepared, err := store.PreparePairingInitiator(*rejected.Outgoing)
+		if err != nil {
+			return nil, err
+		}
+		if err := store.PutPairingInitiator(tx, store.RolePairingInitiator, prepared); err != nil {
+			return nil, err
+		}
+	}
+	if err := store.PutAdminResult(tx, store.RoleResult, pr); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	e.pairing.state = next
+	for _, n := range notices {
+		e.pairingIO(n)
+	}
+	// A withdrawal is told to the target by the next exchange, which a tick asks for.
+	e.pairingSchedule(x.now)
 	return body, nil
 }
 

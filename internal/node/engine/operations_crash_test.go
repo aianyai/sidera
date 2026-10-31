@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"testing"
@@ -70,6 +71,9 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 		}
 		return string(b)
 	}
+	rejected := func(id pairing.ID, status string) string {
+		return `{"id":"` + hex.EncodeToString(id[:]) + `","status":"` + status + `"}`
+	}
 	cleared := func(*rig) string {
 		b, _ := encodeCleared(engine.NodeCleared{Node: peer.node})
 		return string(b)
@@ -122,6 +126,32 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 			first:  func(*rig) string { return `{"node":"` + peer.node.String() + `","forgotten":true}` },
 			again:  func(*rig) string { return "" },
 			effect: func(_ *rig, sc *store.Scan) bool { return len(sc.PairingExpectations) == 0 },
+		},
+		{
+			name: "rejecting a request held as a target", txs: []string{"trust-reject"}, refusedAgain: true,
+			setup: func(r *rig) { r.seedRecord(store.PairingTargetRecord{Record: pendingTargetRecord(t, r, peer, 10)}) },
+			cmd: func(f *rig) engine.ManagementCommand {
+				return rejectCommand(120, pendingTargetRecord(t, f, peer, 10).ID())
+			},
+			first: func(f *rig) string { return rejected(pendingTargetRecord(t, f, peer, 10).ID(), "rejected") },
+			again: func(*rig) string { return "" },
+			effect: func(_ *rig, sc *store.Scan) bool {
+				return len(sc.PairingTargets) == 1 && sc.PairingTargets[0].Status == pairing.TargetRejected
+			},
+		},
+		{
+			name: "withdrawing a request that was started", txs: []string{"trust-reject"}, refusedAgain: true,
+			setup: func(r *rig) {
+				r.seedRecord(store.PairingInitiatorRecord{Record: waitingInitiatorRecord(t, r, peer, 20)})
+			},
+			cmd: func(f *rig) engine.ManagementCommand {
+				return rejectCommand(121, waitingInitiatorRecord(t, f, peer, 20).ID())
+			},
+			first: func(f *rig) string { return rejected(waitingInitiatorRecord(t, f, peer, 20).ID(), "withdrawing") },
+			again: func(*rig) string { return "" },
+			effect: func(_ *rig, sc *store.Scan) bool {
+				return len(sc.PairingInitiators) == 1 && sc.PairingInitiators[0].Status == pairing.InitiatorWithdrawing
+			},
 		},
 		{
 			name: "clearing a node that was removed", txs: []string{"trust-clear"},

@@ -42,7 +42,7 @@ the expected version, as for `node.set`; the rule for an address is `config`'s a
 network's, judged by the engine, so a row only words the params and the result) and
 `methods_adapters.go` (`adapters.install|list|enable|disable`,
 `presets.list|add|remove`) and
-`methods_trust.go` (`trust.expect|forget|request|list|remove|clear`: no version; the rules for a node
+`methods_trust.go` (`trust.expect|forget|reject|request|list|remove|clear`: no version; the rules for a node
 and for a pairing are the engine's and `pairing`'s, so a row only reads the node, checks the form of
 the dial hints of `trust.request` and words the result; the one function that names the state of
 an initiator record and the one for a target record are here and serve both `trust.list` and
@@ -88,8 +88,10 @@ carries no operation identifier and stores no result.
 - **The order of a request.** Method (404), verb (405), `admin.Authorize` against
   the catalogue, the body (at most 1 MiB), the strict decode of the envelope and
   the params, `admin.ValidateRequest`, then the engine: a read is answered, a
-  request that changes state is one `Execute` command with the key
-  `admin.KeyFor(owner, id)`, the fingerprint and the expected version. The replay
+  request that changes state is one `Execute` command with the actor, the key
+  `admin.KeyFor(owner, id)`, the fingerprint and the expected version. The actor is
+  the one that was authorized: the engine makes none of its own, so what it judges
+  by who asks (the pairing) takes it from the command. The replay
   check, the version check and the storing of the result are the engine's and are
   not made here.
 - **A row is authorized as what it runs as.** Authorization uses the row's `op`

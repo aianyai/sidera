@@ -97,7 +97,7 @@ func (c *command) awaitPairing(ctx context.Context, client *manageapi.Client, ra
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintf(c.Stdout, "Verification code: %s\nCompare it with the code on the screen of %s and confirm there.\n", answer.Code, answer.Node); err != nil {
+		if _, err := fmt.Fprintf(c.Stdout, "Verification code: %s\nThe code is for information: trust is complete when both nodes expect each other (`sidera trust expect`).\nTo cancel a request that is stuck, run `sidera trust reject %s`.\n", answer.Code, answer.PairingID); err != nil {
 			return err
 		}
 		if err := c.managementResult(raw); err != nil {
@@ -151,8 +151,8 @@ func waitForPairing(ctx context.Context, answer pairingAnswer, wait time.Duratio
 		case status != "":
 			return &failure{fmt.Sprintf("the pairing %s with %s (code %s) ended as %s; see `sidera trust list`", answer.PairingID, answer.Node, answer.Code, status)}
 		case waited >= wait:
-			return &failure{fmt.Sprintf("the pairing %s with %s is not complete after %s; compare the code %s with the owner of %s and confirm there, or run `sidera trust list` later",
-				answer.PairingID, answer.Node, wait, answer.Code, answer.Node)}
+			return &failure{fmt.Sprintf("the pairing %s with %s (code %s) is not complete after %s; trust is complete when both nodes expect each other, so check `sidera trust list` on both, or cancel it with `sidera trust reject %s`",
+				answer.PairingID, answer.Node, answer.Code, wait, answer.PairingID)}
 		}
 		if err := sleep(ctx, pairingPollInterval); err != nil {
 			return err

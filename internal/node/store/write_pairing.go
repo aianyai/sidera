@@ -116,6 +116,30 @@ func PutPairingExpectations(tx *txn.Tx, role string, p PreparedPairingExpectatio
 	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
 }
 
+// PreparedPairingTarget is a request the target holds, encoded for a transaction
+// another package opens, as PreparedPairingExpectations is.
+type PreparedPairingTarget struct{ f file }
+
+// PreparePairingTarget validates and encodes the record of a request the target
+// holds. It does no I/O.
+func PreparePairingTarget(r pairing.TargetRecord) (PreparedPairingTarget, error) {
+	f, err := recordFile(PairingDir, PairingTargetRecord{r})
+	if err != nil {
+		return PreparedPairingTarget{}, err
+	}
+	return PreparedPairingTarget{f}, nil
+}
+
+// PutPairingTarget writes the prepared record in a transaction another package
+// opened, under the role the declaration gives it (RolePairingTarget by
+// convention). It panics for a value PreparePairingTarget did not return.
+func PutPairingTarget(tx *txn.Tx, role string, p PreparedPairingTarget) error {
+	if p.f.path == "" {
+		panic("store: PutPairingTarget of a value PreparePairingTarget did not return")
+	}
+	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
+}
+
 // PreparedPairingInitiator is a request the initiator started, encoded for a
 // transaction another package opens, as PreparedPairingExpectations is.
 type PreparedPairingInitiator struct{ f file }

@@ -44,6 +44,7 @@ arguments, purpose and one example.
 | `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
 | `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted. |
 | `trust expect <node>` / `trust forget <node>` | Enter or delete the expectation for a node: the owner means to pair with it, which stands for a confirmation made in advance. |
+| `trust reject <pairing_id>` | End a request for a pairing that is stuck or unwanted: reject one this node holds, or withdraw one it started. The identifier is in `trust list`. |
 | `trust request <node> [<multiaddr> ...] [--wait <duration>]` | Ask a node for a pairing, dialing the multiaddrs for this request only; prints the verification code and waits for the pairing to complete (default `--wait 10s`, `0` does not wait). |
 | `trust list` | List the nodes trusted, the expectations, the requests held and those started, and the nodes removed from trust. |
 | `trust remove <node>` / `trust clear <node>` | Remove a node from this node's trust (the other node is not told), or take a removed node back. |
@@ -148,12 +149,22 @@ expectation for `trust forget` is `invalid_argument/malformed_request` (exit 3, 
 `locally_revoked`), one line for each entry, and `none` for an empty section; times
 are written as the interface gives them.
 
+Two nodes pair by the owner of each entering an expectation for the other, so the order
+is: each side runs `trust expect <the other node>` first, then one side runs `trust
+request <the other node>`. A request that reaches a node that does not expect the
+requester waits for its owner, and no command confirms it: the owner either enters the
+expectation too (which does not apply to a request already waiting) and asks again, or
+ends the request with `trust reject <pairing_id>`; the same command withdraws a request
+this node started that waits for an expectation on its own side.
+
 `trust request` is answered by the node when the online segment of the pairing ends,
 which can take most of a minute. A refusal by the target is a successful answer with
 `status` `refused`; the command turns it into the error `refused/pairing_refused`
 (exit 7, with `details.node` and `details.refusal`) and prints no code. Otherwise it
-prints, first and on a line of its own, `Verification code: <code>`, which the owner
-compares with the screen of the other node, then the fields of the answer. `--wait` is
+prints, first and on a line of its own, `Verification code: <code>`, which is
+informational, then two lines that say trust is complete when both nodes expect each
+other and that a request that is stuck is cancelled with `sidera trust reject
+<pairing_id>`, then the fields of the answer. `--wait` is
 the client's alone and is not sent: unless it is `0` (or the answer is already
 `complete`), the command then reads `trust.list` at once and every 500 ms until the
 node is trusted or the outgoing request with the answer's `pairing_id` is `complete`,
@@ -161,9 +172,10 @@ and prints `paired with <node>`. The time waited is counted as the intervals sle
 A request that ends otherwise (its state is `rejected`, `expired`, `cancelled`,
 `unknown`, `gave_up`, `withdrawing` or `withdrawn`) stops the wait, and a wait that runs out
 ends the command, each with exit code 1 and a message that names the node, the pairing
-identifier and the code; the message for a wait that ran out says to compare the code
-with the other node's owner and confirm there, or to run `sidera trust list` later. The
-pairing itself goes on either way. With `--json` the answer is printed as soon as it
+identifier and the code; the message for a wait that ran out says that trust is complete
+when both nodes expect each other, so the owner is to check `sidera trust list` on both,
+or cancel the request with `sidera trust reject <pairing_id>`. The pairing itself goes on
+either way. With `--json` the answer is printed as soon as it
 arrives and the wait changes only the exit code.
 
 Enabling an adapter returns before background startup and probing finish. Human

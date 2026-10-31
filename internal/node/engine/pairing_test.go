@@ -153,6 +153,59 @@ func TestPairingIsRefusedWhileSigningIsRefused(t *testing.T) {
 	}
 }
 
+// transcriptBetween is the transcript of a request between the node of the rig and
+// the peer, with the node as the initiator or as the target. salt makes the identifier
+// of one request differ from another's.
+func transcriptBetween(t *testing.T, r *rig, peer peerNode, nodeInitiates bool, salt byte) pairing.Transcript {
+	t.Helper()
+	own := partyOf(t, r.keys.Certificate(), r.keys.NetworkSigner().Public())
+	other := partyOf(t, peer.certificate(1).Cert, peer.networkSigner(1).Public())
+	terms := pairing.Terms{Protocol: "/sidera/pairing/test", Initiator: own, Target: other, CreatedAt: t0, NotAfter: t0.Add(24 * time.Hour)}
+	if !nodeInitiates {
+		terms.Initiator, terms.Target = other, own
+	}
+	nA, nB := pairing.Nonce{salt}, pairing.Nonce{salt + 1}
+	commitment, err := terms.Commit(nA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript, err := pairing.Open(terms, commitment, nB, nA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return transcript
+}
+
+// waitingInitiatorRecord is a request the node started that waits for its owner.
+func waitingInitiatorRecord(t *testing.T, r *rig, peer peerNode, salt byte) pairing.InitiatorRecord {
+	t.Helper()
+	return pairing.InitiatorRecord{
+		Transcript: transcriptBetween(t, r, peer, true, salt), ReceivedAt: t0, ExpiresAt: t0.Add(5 * time.Minute), Status: pairing.InitiatorActive,
+	}
+}
+
+// signedInitiatorRecord is a request the node started that its owner confirmed: the
+// node signed it and released the signature, so it waits for the target's answer.
+func signedInitiatorRecord(t *testing.T, r *rig, peer peerNode) pairing.InitiatorRecord {
+	t.Helper()
+	rec := waitingInitiatorRecord(t, r, peer, 1)
+	signed, err := record.Seal(credential.Descriptor, rec.Transcript.Credential(), r.keys.IdentitySigner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Confirmation = &pairing.Confirmation{Method: pairing.ConfirmedByCode, By: pairing.LocalAuthor(), Operation: admin.OperationID{1}, At: t0}
+	rec.Signature, rec.Released = &signed, true
+	return rec
+}
+
+// pendingTargetRecord is a request the peer made of the node that waits for its owner.
+func pendingTargetRecord(t *testing.T, r *rig, peer peerNode, salt byte) pairing.TargetRecord {
+	t.Helper()
+	return pairing.TargetRecord{
+		Transcript: transcriptBetween(t, r, peer, false, salt), ReceivedAt: t0, ExpiresAt: t0.Add(5 * time.Minute), Status: pairing.TargetPending,
+	}
+}
+
 // partyOf is the end of a pairing that the certificate and the key of a connection
 // make.
 func partyOf(t *testing.T, cert record.Verified[record.NetworkKeyCertificate], key ident.PublicKey) pairing.Party {
@@ -171,34 +224,10 @@ func TestPairingFetchIsHeldUntilTheNodeHasStarted(t *testing.T) {
 	net := &fakeNetwork{}
 	r := newRig(t, 10, withKeys(), withNetwork(net))
 	peer := newPeerNode(t, 3)
-	remote := peer.certificate(1)
 
 	// The initiator's request is confirmed, signed and released: what it waits for
 	// is the target's answer, which the first tick asks for.
-	terms := pairing.Terms{
-		Protocol:  "/sidera/pairing/test",
-		Initiator: partyOf(t, r.keys.Certificate(), r.keys.NetworkSigner().Public()),
-		Target:    partyOf(t, remote.Cert, peer.networkSigner(1).Public()),
-		CreatedAt: t0, NotAfter: t0.Add(24 * time.Hour),
-	}
-	nA, nB := pairing.Nonce{1}, pairing.Nonce{2}
-	commitment, err := terms.Commit(nA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	transcript, err := pairing.Open(terms, commitment, nB, nA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signed, err := record.Seal(credential.Descriptor, transcript.Credential(), r.keys.IdentitySigner())
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := pairing.InitiatorRecord{
-		Transcript: transcript, ReceivedAt: t0, ExpiresAt: t0.Add(5 * time.Minute), Status: pairing.InitiatorActive,
-		Confirmation: &pairing.Confirmation{Method: pairing.ConfirmedByCode, By: pairing.LocalAuthor(), Operation: admin.OperationID{1}, At: t0},
-		Signature:    &signed, Released: true,
-	}
+	rec := signedInitiatorRecord(t, r, peer)
 	if err := r.st.PairingInitiatorPut(rec); err != nil {
 		t.Fatal(err)
 	}

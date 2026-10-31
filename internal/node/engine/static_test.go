@@ -68,7 +68,7 @@ func TestTheEngineDeclaresTheTransactionsOfTwoOwnersItOpens(t *testing.T) {
 		got = append(got, d.Name)
 	}
 	sort.Strings(got)
-	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit", "trust-clear", "trust-expect", "trust-forget", "trust-local-revoke", "trust-request", "trust-result"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit", "trust-clear", "trust-expect", "trust-forget", "trust-local-revoke", "trust-reject", "trust-request", "trust-result"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("engine.Transactions = %v, want %v", got, want)
 	}
 }

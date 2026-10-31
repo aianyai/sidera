@@ -193,7 +193,7 @@ func runManagement(e scenario.Env, node *engine.Engine, q recipes.ManagementRequ
 	if err != nil {
 		return recipes.ManagementOutcome{}, err
 	}
-	cmd := engine.ManagementCommand{Key: admin.KeyFor(admin.LocalOwner(), q.ID), Fingerprint: sha256.Sum256(fingerprint), Expected: q.Expected, Name: name, Operation: operation}
+	cmd := engine.ManagementCommand{Actor: admin.LocalOwner(), Key: admin.KeyFor(admin.LocalOwner(), q.ID), Fingerprint: sha256.Sum256(fingerprint), Expected: q.Expected, Name: name, Operation: operation}
 	result, err := node.Execute(e.Ctx(), cmd)
 	var conflict *config.ChangeError
 	if errors.As(err, &conflict) && conflict.Reason == config.ChangeVersionConflict {

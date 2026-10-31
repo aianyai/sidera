@@ -187,7 +187,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string, m *m
 
 	// KeyFor only for an actor that Authorize allowed, as the rules ask.
 	res, err := s.cfg.Service.Execute(r.Context(), engine.ManagementCommand{
-		Key: admin.KeyFor(actor, d.id), Fingerprint: d.fingerprint, Expected: d.expected,
+		Actor: actor, Key: admin.KeyFor(actor, d.id), Fingerprint: d.fingerprint, Expected: d.expected,
 		Name: name, Operation: d.plan.operation,
 	})
 	if err != nil {

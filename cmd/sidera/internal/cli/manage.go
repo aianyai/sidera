@@ -198,6 +198,9 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	case "trust forget":
 		plan.method = "trust.forget"
 		plan.change = true
+	case "trust reject":
+		plan.method = "trust.reject"
+		plan.change = true
 	case "trust request":
 		plan.method = "trust.request"
 		plan.change = true
@@ -245,7 +248,7 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		}
 		want = len(p)
 		plan.wait = o.wait
-	case "trust.expect", "trust.forget", "trust.remove", "trust.clear":
+	case "trust.expect", "trust.forget", "trust.reject", "trust.remove", "trust.clear":
 		want = 1
 	case "alerts.ack", "presets.add", "presets.remove", "adapters.install", "adapters.enable", "adapters.disable", "endpoints.close", "identity.confirm_backup":
 		want = 1
@@ -323,6 +326,8 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.params["node"], plan.params["addresses"] = p[0], p[1:]
 	case "network.address.remove":
 		plan.params["node"] = p[0]
+	case "trust.reject":
+		plan.params["pairing_id"] = p[0]
 	case "trust.expect", "trust.forget", "trust.remove", "trust.clear":
 		plan.params["node"] = p[0]
 	case "trust.request":

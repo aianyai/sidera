@@ -854,6 +854,7 @@ var engineWalks = map[string]string{
 	"trust-local-revoke":      "TestARemovalFromTrustRecoversFromACrashAtEveryPoint",
 	"trust-expect":            "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"trust-forget":            "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
+	"trust-reject":            "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"trust-clear":             "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"trust-result":            "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"trust-request":           "TestARequestForAPairingRecoversFromACrashAtEveryPoint",

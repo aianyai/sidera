@@ -57,8 +57,11 @@ type Operation interface {
 
 // ManagementCommand is one side-effecting management request.
 type ManagementCommand struct {
-	// Key is where the result is filed: admin.KeyFor(actor, id) of an actor that
-	// admin.Authorize allowed.
+	// Actor is who asks, as the management interface made it and admin.Authorize
+	// allowed it. The engine never makes an actor of its own: an operation that
+	// needs one (the pairing judges who may confirm or reject a request) takes this.
+	Actor admin.Actor
+	// Key is where the result is filed: admin.KeyFor(Actor, id).
 	Key admin.RequestKey
 	// Fingerprint is the digest of the whole request. The same key with the same
 	// fingerprint is a resend; with another fingerprint, a reuse of the identifier.
@@ -90,6 +93,7 @@ type StoredResult struct {
 // opRun is what an operation is told of the command that runs it.
 type opRun struct {
 	now         time.Time
+	actor       admin.Actor
 	key         admin.RequestKey
 	fingerprint admin.Fingerprint
 	expected    admin.Version
@@ -175,7 +179,7 @@ func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, erro
 	if res, answered, err := e.replayOf(c); answered {
 		return res, err
 	}
-	x := &opRun{now: now, key: c.Key, fingerprint: c.Fingerprint, expected: c.Expected, name: c.Name}
+	x := &opRun{now: now, actor: c.Actor, key: c.Key, fingerprint: c.Fingerprint, expected: c.Expected, name: c.Name}
 	result, err := c.Operation.run(e, x)
 	if err != nil {
 		return StoredResult{}, err

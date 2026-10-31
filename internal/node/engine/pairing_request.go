@@ -211,7 +211,7 @@ func (e *Engine) requestStarted(now time.Time, c *cmdRequestStarted) {
 	node, hints := req.op.pairingTarget()
 	e.pairing.sessions[req.sid] = &pairingSession{side: sideInitiator, stream: c.stream, peer: c.peer}
 	req.live = true
-	next, out, acts, err := e.pairing.state.Initiate(e.pairingWorld(), c.peer.Conn, req.sid, pairing.Request{Actor: admin.LocalOwner(), ID: req.cmd.Key.ID},
+	next, out, acts, err := e.pairing.state.Initiate(e.pairingWorld(), c.peer.Conn, req.sid, pairing.Request{Actor: req.cmd.Actor, ID: req.cmd.Key.ID},
 		pairing.Initiation{Target: node, Addresses: hints}, e.randomReader(), now)
 	if err == nil {
 		err = e.pairingRefusal(out, "addresses")
@@ -368,7 +368,7 @@ func (e *Engine) endUnsaved(end requestEnding) {
 // under.
 func (e *Engine) requestResult(end *requestEnding) ([]byte, *opRun, error) {
 	c := end.req.cmd
-	x := &opRun{now: e.d.Clock.Now(), key: c.Key, fingerprint: c.Fingerprint, name: c.Name}
+	x := &opRun{now: e.d.Clock.Now(), actor: c.Actor, key: c.Key, fingerprint: c.Fingerprint, name: c.Name}
 	result, err := end.req.op.result(end.saved, end.refusal)
 	if err != nil {
 		return nil, nil, fmt.Errorf("engine: the result of %s: %w", c.Name, err)

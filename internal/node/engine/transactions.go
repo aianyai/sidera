@@ -121,6 +121,13 @@ var (
 		{Role: store.RolePairingInitiator, Op: txn.OpReplace},
 		{Role: store.RoleResult, Op: txn.OpReplace},
 	}}
+	// trust-reject: the record of the request the owner rejected, which is either
+	// one the node holds as a target or one it started, and the result.
+	declTrustReject = txn.Decl{Name: "trust-reject", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingTarget, Op: txn.OpReplace, Optional: true},
+		{Role: store.RolePairingInitiator, Op: txn.OpReplace, Optional: true},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
 	// trust-clear: the removal of the entry of a node removed from trust, made
 	// durable, and the result.
 	declTrustClear = txn.Decl{Name: "trust-clear", Kind: txn.Normal, Writes: []txn.Write{
@@ -142,5 +149,5 @@ var (
 // owner.
 func Transactions() []*txn.Decl {
 	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent, &declTrustLocalRevoke,
-		&declTrustExpect, &declTrustForget, &declTrustRequest, &declTrustClear, &declTrustResult}
+		&declTrustExpect, &declTrustForget, &declTrustRequest, &declTrustReject, &declTrustClear, &declTrustResult}
 }
