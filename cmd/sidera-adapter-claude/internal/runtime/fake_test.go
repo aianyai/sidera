@@ -1,0 +1,422 @@
+package runtime
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/record"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+// world is the whole outside of the adapter, in memory: the process table, the
+// launcher, the file system, the programs it runs and the daemon. Every part of
+// the runtime reaches the world through an interface, so a flow runs against it
+// as against the real one, without a process or a Claude.
+type world struct {
+	t  *testing.T
+	mu sync.Mutex
+
+	files map[string][]byte
+	procs map[int]*fakeProc
+	next  int
+
+	launches  []proc.Launch
+	signals   []int
+	puts      []string // "scope/id" in order
+	checkpts  map[string]json.RawMessage
+	events    []string
+	order     []string // checkpoint puts and events, in the order they happened
+	failPutIf func(scope adapterproto.CheckpointScope, id string, n int) bool
+	putCount  int
+
+	// onLaunch runs after a process was started, with the world unlocked.
+	onLaunch func(w *world, p *fakeProc, l proc.Launch)
+	// onInterrupt runs when a process is interrupted.
+	onInterrupt func(w *world, p *fakeProc)
+	loggedIn    bool
+}
+
+type fakeProc struct {
+	pid       int
+	args      []string
+	env       []string
+	startUnix int64
+	alive     bool
+	launch    proc.Launch
+}
+
+func newWorld(t *testing.T) *world {
+	return &world{t: t, files: map[string][]byte{}, procs: map[int]*fakeProc{}, next: 1000, checkpts: map[string]json.RawMessage{}, loggedIn: true}
+}
+
+// --- proc.Table, proc.Launcher, proc.Signaller ---
+
+func (w *world) info(p *fakeProc) proc.Info {
+	return proc.Info{PID: p.pid, Alive: p.alive, StartUnix: p.startUnix, StartMicro: int64(p.pid)}
+}
+
+func (w *world) Lookup(pid int) (proc.Info, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if p, ok := w.procs[pid]; ok {
+		return w.info(p), nil
+	}
+	return proc.Info{PID: pid}, nil
+}
+
+func (w *world) Snapshot() (proc.Snapshot, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var s proc.Snapshot
+	for _, p := range w.procs {
+		e := proc.Entry{Info: w.info(p)}
+		if p.alive {
+			e.Args = p.args
+		}
+		s = append(s, e)
+	}
+	return s, nil
+}
+
+func (w *world) Start(l proc.Launch) (proc.Started, error) {
+	w.mu.Lock()
+	w.next++
+	p := &fakeProc{pid: w.next, args: slices.Clone(l.Argv), env: slices.Clone(l.Env), startUnix: time.Now().Unix(), alive: true, launch: l}
+	w.procs[p.pid] = p
+	w.launches = append(w.launches, l)
+	hook := w.onLaunch
+	info := w.info(p)
+	w.mu.Unlock()
+	if hook != nil {
+		go hook(w, p, l)
+	}
+	return proc.Started{Info: info, PGID: p.pid, Done: make(chan error)}, nil
+}
+
+func (w *world) Interrupt(pid int) error {
+	w.mu.Lock()
+	w.signals = append(w.signals, pid)
+	p, hook := w.procs[pid], w.onInterrupt
+	w.mu.Unlock()
+	if hook != nil && p != nil {
+		go hook(w, p)
+	}
+	return nil
+}
+
+// exit ends a process; its output stream is what it wrote.
+func (w *world) exit(p *fakeProc, out string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	p.alive = false
+	w.files[p.launch.Stdout] = []byte(out)
+}
+
+func (w *world) aliveCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := 0
+	for _, p := range w.procs {
+		if p.alive {
+			n++
+		}
+	}
+	return n
+}
+
+// --- Files ---
+
+func (w *world) Open(path string, offset int64) (io.ReadCloser, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	b, ok := w.files[path]
+	if !ok {
+		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
+	}
+	if int(offset) > len(b) {
+		offset = int64(len(b))
+	}
+	return io.NopCloser(bytes.NewReader(slices.Clone(b[offset:]))), nil
+}
+
+func (w *world) WriteFile(path string, data []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.files[path] = slices.Clone(data)
+	return nil
+}
+
+func (w *world) RealDir(path string) (string, error) {
+	if strings.Contains(path, "missing") {
+		return "", &fs.PathError{Op: "stat", Path: path, Err: fs.ErrNotExist}
+	}
+	return path, nil
+}
+
+// appendRecord adds lines to a session file.
+func (w *world) appendRecord(path string, lines ...string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, l := range lines {
+		w.files[path] = append(w.files[path], l+"\n"...)
+	}
+}
+
+// --- Runner ---
+
+func (w *world) Run(_ context.Context, c Command) (CommandResult, error) {
+	switch {
+	case slices.Equal(c.Argv[1:], []string{"--version"}):
+		return CommandResult{Stdout: []byte("2.1.316 (Claude Code)\n")}, nil
+	case slices.Equal(c.Argv[1:], []string{"auth", "status"}):
+		if !w.loggedIn {
+			return CommandResult{Stdout: []byte(`{"loggedIn":false}`), ExitCode: 1}, nil
+		}
+		out, _ := json.Marshal(map[string]any{"loggedIn": true, "authMethod": "claude.ai", "projectsDirectory": projectsDir})
+		return CommandResult{Stdout: out}, nil
+	case slices.Equal(c.Argv[1:], []string{"probe"}):
+		if !slices.Contains(c.Env, "SIDERA_PROBE_TOKEN="+token) {
+			return CommandResult{ExitCode: 2, Stderr: []byte("no probe token")}, nil
+		}
+		return CommandResult{}, nil
+	}
+	return CommandResult{}, fmt.Errorf("unexpected command %q", c.Argv)
+}
+
+// --- Daemon ---
+
+func (w *world) CheckpointPut(_ context.Context, p adapterproto.CheckpointPutParams) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.putCount++
+	if w.failPutIf != nil && w.failPutIf(p.Scope, p.ID, w.putCount) {
+		return errors.New("the daemon is gone")
+	}
+	key := string(p.Scope) + "/" + p.ID
+	w.order = append(w.order, "put "+key)
+	w.puts = append(w.puts, key)
+	w.checkpts[key] = p.State
+	return nil
+}
+
+func (w *world) event(format string, args ...any) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	e := fmt.Sprintf(format, args...)
+	w.events = append(w.events, e)
+	w.order = append(w.order, e)
+}
+
+func (w *world) PromptPersisted(_ context.Context, p adapterproto.PromptPersistedParams) error {
+	w.event("persisted %s", p.Attempt)
+	return nil
+}
+
+func (w *world) TurnStarted(_ context.Context, p adapterproto.TurnStartedParams) error {
+	if err := p.Validate(); err != nil {
+		w.t.Errorf("an invalid turn.started: %v", err)
+	}
+	w.event("started %s", p.Attempt)
+	return nil
+}
+
+func (w *world) TurnEnded(_ context.Context, p adapterproto.TurnEndedParams) error {
+	if err := p.Validate(); err != nil {
+		w.t.Errorf("an invalid turn.ended: %v", err)
+	}
+	w.event("ended %s %s", p.Turn, p.Final)
+	return nil
+}
+
+func (w *world) Availability(context.Context, adapterproto.AvailabilityParams) error { return nil }
+
+func (w *world) eventList() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.events)
+}
+
+// waitEvents waits until the daemon was told the events, in order.
+func (w *world) waitEvents(want ...string) {
+	w.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := w.eventList(); slices.Equal(got, want) {
+			return
+		} else if time.Now().After(deadline) {
+			w.t.Fatalf("events\n got %q\nwant %q", got, want)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// --- the adapter built on the world ---
+
+// absPath is an absolute path of this platform.
+func absPath(elem ...string) string {
+	return filepath.Join(append([]string{filepath.VolumeName(os.TempDir()) + string(filepath.Separator)}, elem...)...)
+}
+
+var (
+	projectsDir = absPath("claude", "projects")
+	workDir     = absPath("work", "dir")
+	recordDir   = func() string { d, _ := record.Dir(projectsDir, workDir); return d }()
+	stateDir    = absPath("state")
+	siderPath   = absPath("bin", "sidera")
+	claudePath  = absPath("bin", "claude")
+)
+
+// newApp builds the adapter on the world and takes it through initialize and
+// start with one preset, "dev". A test may call Start again for a restart.
+func newApp(t *testing.T, w *world, sessions ...adapterproto.SessionAttach) (*App, adapterproto.StartResult) {
+	t.Helper()
+	app := New(Options{
+		Environ: []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=leak", "SIDERA_TOKEN=leak"},
+		LookPath: func(file string) (string, error) {
+			switch file {
+			case "claude":
+				return claudePath, nil
+			case "sidera":
+				return siderPath, nil
+			}
+			return "", errors.New("not found")
+		},
+		Table: w, Launcher: w, Signaller: w, Files: w, Runner: w,
+		PollInterval: 2 * time.Millisecond, CloseWait: 2 * time.Second,
+	})
+	t.Cleanup(app.stop)
+	app.daemon, app.instance = w, adapterproto.InstanceInfo{ID: "claude", LockPath: filepath.Join(stateDir, "lock"), StateDir: stateDir}
+	return app, startApp(t, app, sessions...)
+}
+
+func startApp(t *testing.T, app *App, sessions ...adapterproto.SessionAttach) adapterproto.StartResult {
+	t.Helper()
+	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	res, err := app.Start(context.Background(), adapterproto.StartParams{
+		Node: "n", RuntimeEndpoint: "runtime", Config: adapterproto.ConfigValues{},
+		Presets: []adapterproto.PresetConfig{
+			{Name: "dev", Config: adapterproto.ConfigValues{
+				"project_dir": raw(workDir), "permission_mode": raw("dontAsk"), "background_wait_ms": raw(1000),
+			}},
+			{Name: "gone", Config: adapterproto.ConfigValues{"project_dir": raw(workDir + "-missing"), "permission_mode": raw("plan")}},
+			{Name: "bad", Config: adapterproto.ConfigValues{"project_dir": raw(workDir), "permission_mode": raw("yolo")}},
+		},
+		Sessions: sessions, DirectEndpoints: []adapterproto.DirectAttach{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// ids are valid attempt identifiers: UUID version 4.
+const (
+	attempt1 = "11111111-1111-4111-8111-111111111111"
+	prompt1  = "22222222-2222-4222-8222-222222222222"
+	attempt2 = "33333333-3333-4333-8333-333333333333"
+	prompt2  = "44444444-4444-4444-8444-444444444444"
+)
+
+// toolHome is SIDERA_HOME in the tool access of the sessions of these tests.
+const toolHome = "/home/sidera"
+
+const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+func createParams(attempt, prompt string) adapterproto.SessionCreateParams {
+	return adapterproto.SessionCreateParams{
+		Attempt: adapterproto.AttemptID(attempt), RuntimeEndpoint: "runtime", SessionEndpoint: "session-1", Preset: "dev",
+		FirstPrompt: adapterproto.FirstPrompt{Attempt: adapterproto.AttemptID(prompt), Text: "hello"},
+		ToolAccess:  adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": toolHome}},
+	}
+}
+
+// userLine is the record line Claude Code writes for a prompt.
+func userLine(session, prompt string) string {
+	return `{"type":"user","uuid":"` + prompt + `","promptSource":"sdk","sessionId":"` + session + `"}`
+}
+
+func queueLine(session string) string {
+	return `{"type":"queue-operation","operation":"enqueue","sessionId":"` + session + `"}`
+}
+
+const (
+	resultOK    = `{"type":"result","subtype":"success","is_error":false}` + "\n"
+	resultError = `{"type":"result","subtype":"error_during_execution","is_error":true}` + "\n"
+)
+
+// sessionOf reads the session uuid from the arguments of a launch.
+func sessionOf(l proc.Launch) string {
+	for i, a := range l.Argv {
+		if (a == "--session-id" || a == "--resume") && i+1 < len(l.Argv) {
+			return l.Argv[i+1]
+		}
+	}
+	return ""
+}
+
+// claudeWrites is the behaviour of a Claude that takes its prompt: it writes the
+// session file and runs until the test ends it.
+func claudeWrites(delay time.Duration) func(*world, *fakeProc, proc.Launch) {
+	return func(w *world, p *fakeProc, l proc.Launch) {
+		time.Sleep(delay)
+		var in struct {
+			UUID string `json:"uuid"`
+		}
+		w.mu.Lock()
+		raw := w.files[l.Stdin]
+		w.mu.Unlock()
+		_ = json.Unmarshal(raw, &in)
+		session := sessionOf(l)
+		w.appendRecord(filepath.Join(recordDir, session+".jsonl"), queueLine(session), userLine(session, in.UUID))
+	}
+}
+
+// waitRecord waits until the session file holds the user record of the prompt.
+func (w *world) waitRecord(session, prompt string) {
+	w.t.Helper()
+	path := filepath.Join(recordDir, session+".jsonl")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w.mu.Lock()
+		ok := bytes.Contains(w.files[path], []byte(`"uuid":"`+prompt+`"`))
+		w.mu.Unlock()
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			w.t.Fatalf("the prompt %s never reached the session file", prompt)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func (w *world) launchCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.launches)
+}
+
+func (w *world) lastProc() *fakeProc {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var last *fakeProc
+	for _, p := range w.procs {
+		if last == nil || p.pid > last.pid {
+			last = p
+		}
+	}
+	return last
+}

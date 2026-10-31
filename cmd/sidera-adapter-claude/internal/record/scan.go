@@ -101,3 +101,9 @@ func (ix *Index) judge(line []byte) {
 		ix.hasID = true
 	}
 }
+
+// Write feeds p, so that an Index can be the destination of io.Copy.
+func (ix *Index) Write(p []byte) (int, error) {
+	ix.Feed(p)
+	return len(p), nil
+}

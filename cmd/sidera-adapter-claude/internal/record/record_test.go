@@ -79,7 +79,7 @@ func TestIndex(t *testing.T) {
 		{"the prompt is found after many other lines", strings.Repeat(attach+"\n", 1000) + user + "\n", true, true, false},
 		{"a last line without its newline is not judged yet", queue + "\n" + user, true, false, false},
 		{"a corrupt line is skipped", "{" + prompt + "\n" + user + "\n", true, true, false},
-		{"a record of another session with the uuid still carries the prompt's uuid", unrelated + "\n", true, true, false},
+		{"a user record with the uuid counts whatever session id it names, since uuids are unique", unrelated + "\n", true, true, false},
 	}
 	for _, tc := range tests {
 		for _, chunk := range []int{len(tc.file) + 1, 7, 1} {

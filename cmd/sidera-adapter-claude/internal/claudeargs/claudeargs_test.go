@@ -228,3 +228,28 @@ func TestPresetEnv(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestIsTurnOf(t *testing.T) {
+	const id = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"a new session", []string{"/bin/claude", "-p", "--session-id", id, "--verbose"}, true},
+		{"a resumed session", []string{"/bin/claude", "-p", "--resume", id}, true},
+		{"another executable with the same arguments", []string{"/usr/bin/node", "-p", "--resume", id}, false},
+		{"a shell that mentions the uuid", []string{"/bin/claude", "-c", "echo --resume " + id}, false},
+		{"another session", []string{"/bin/claude", "--resume", "other"}, false},
+		{"the uuid is not the value of a session flag", []string{"/bin/claude", "--model", id}, false},
+		{"the flag is last", []string{"/bin/claude", "--resume"}, false},
+		{"no arguments", nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsTurnOf(tc.args, "/bin/claude", id); got != tc.want {
+				t.Fatalf("IsTurnOf(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}

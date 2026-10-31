@@ -10,7 +10,7 @@ read. Read [../../README.md](../../README.md) and
 | ---- | ---- |
 | `Sanitize(realCwd)`, `Dir(projectsDir, realCwd)` | The record directory of a working directory: the projects directory the runtime reports plus the working directory in normal form C with every character outside `[A-Za-z0-9]` replaced by `-`. A name over `MaxDirName` is refused (`ErrDirNameTooLong`). |
 | `File(recordDir, session)` | `<recordDir>/<session>.jsonl`. |
-| `Index` (`NewIndex`, `Watch`, `Feed`, `Offset`, `SessionSeen`, `UserSeen`) | Finds, in a session file fed in order and in any chunking, whether the file names the session and whether a user record with a watched uuid is there. |
+| `Index` (`NewIndex`, `Watch`, `Feed`, `Write`, `Offset`, `SessionSeen`, `UserSeen`) | Finds, in a session file fed in order and in any chunking, whether the file names the session and whether a user record with a watched uuid is there. |
 | `LastResult(r)` | The outcome (`Succeeded`, `Errored`, `NoResult`) of the last `result` line of a turn process's output stream. |
 
 ## Rules

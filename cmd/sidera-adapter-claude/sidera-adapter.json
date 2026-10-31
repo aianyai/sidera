@@ -1,0 +1,37 @@
+{
+  "manifest_version": 1,
+  "id": "claude",
+  "version": "0.1.0",
+  "protocol": {"min": 1, "max": 1},
+  "entry": {"program": "bin/sidera-adapter-claude"},
+  "platforms": [
+    {"os": "darwin", "arch": "arm64"},
+    {"os": "darwin", "arch": "amd64"}
+  ],
+  "requires": [{"program": "claude"}],
+  "tested": [{"runtime": "claude-code", "min": "2.1.316", "max": "2.1.316"}],
+  "config": {
+    "instance": [
+      {"key": "claude_path", "type": "string", "title": "Claude executable (default: claude on PATH)"},
+      {"key": "sidera_path", "type": "string", "title": "sidera executable (default: sidera on PATH)"}
+    ],
+    "preset": [
+      {"key": "project_dir", "type": "directory", "title": "Working directory", "required": true},
+      {"key": "permission_mode", "type": "enum", "title": "Permission mode", "required": true,
+       "options": ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]},
+      {"key": "model", "type": "string", "title": "Model"},
+      {"key": "effort", "type": "enum", "title": "Effort", "options": ["low", "medium", "high", "xhigh", "max"]},
+      {"key": "allowed_tools", "type": "string_list", "title": "Extra --allowedTools rules"},
+      {"key": "append_system_prompt", "type": "string", "title": "Extra system prompt"},
+      {"key": "background_wait_ms", "type": "integer", "title": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "min": 0, "max": 3600000}
+    ]
+  },
+  "budgets": [
+    {"frontend": "cli", "unit": "chars", "limit": 27000},
+    {"frontend": "mcp", "unit": "chars", "limit": 22500}
+  ],
+  "recv_wait_limits": [
+    {"frontend": "cli", "max_s": 100},
+    {"frontend": "mcp", "max_s": 100}
+  ]
+}

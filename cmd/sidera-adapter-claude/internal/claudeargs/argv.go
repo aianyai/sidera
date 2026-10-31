@@ -37,6 +37,22 @@ func SessionFlag(resume bool) string {
 	return "--session-id"
 }
 
+// IsTurnOf reports whether a process with the given argument vector is a turn
+// process of the session: its argv[0] is the Claude executable as the adapter
+// started it, and its arguments name the session with `--session-id` or
+// `--resume`. A wrapper or a shell that merely mentions the uuid is not one.
+func IsTurnOf(args []string, claude, session string) bool {
+	if len(args) == 0 || args[0] != claude {
+		return false
+	}
+	for i := 1; i+1 < len(args); i++ {
+		if (args[i] == SessionFlag(false) || args[i] == SessionFlag(true)) && args[i+1] == session {
+			return true
+		}
+	}
+	return false
+}
+
 // Argv returns the argument vector of the turn process, argv[0] included. The
 // input is read from standard input as stream-json, so that no prompt is on the
 // command line, and the permission mode and the MCP configuration are given on

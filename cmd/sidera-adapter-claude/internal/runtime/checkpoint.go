@@ -1,0 +1,118 @@
+package runtime
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/create"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+// checkpointVersion is the version of the checkpoints this adapter writes. A
+// checkpoint of another version is refused rather than guessed at.
+const checkpointVersion = 1
+
+// attemptCheckpoint is what a creation attempt stores with the daemon: the state
+// of the attempt, one field for each of create.State's, and what the attempt
+// was asked, so that a repeat with other parameters is told from a retry. It
+// holds no token: tool access is sent with every request that needs it.
+type attemptCheckpoint struct {
+	V               int    `json:"v"`
+	Attempt         string `json:"attempt"`
+	Session         string `json:"session"`
+	FirstPrompt     string `json:"first_prompt"`
+	FirstDigest     string `json:"first_digest"`
+	RecordDir       string `json:"record_dir"`
+	Cwd             string `json:"cwd"`
+	Preset          string `json:"preset"`
+	SessionEndpoint string `json:"session_endpoint"`
+	// The numbers of Stage and FailReason are persisted values and never change.
+	Stage      int    `json:"stage"`
+	PID        int    `json:"pid,omitempty"`
+	StartUnix  int64  `json:"start_unix,omitempty"`
+	StartKey   string `json:"start_key,omitempty"`
+	Starts     int    `json:"starts"`
+	FailReason int    `json:"fail_reason"`
+}
+
+// state returns the create.State the checkpoint holds.
+func (c attemptCheckpoint) state() create.State {
+	st := create.State{
+		AttemptID: create.AttemptID(c.Attempt), SessionID: create.SessionID(c.Session),
+		FirstPromptID: create.PromptID(c.FirstPrompt), RecordDir: c.RecordDir,
+		Stage: create.Stage(c.Stage), Starts: c.Starts, FailReason: create.Reason(c.FailReason),
+	}
+	if c.PID != 0 {
+		st.Process = create.Process{PID: c.PID, StartUnix: c.StartUnix}
+	}
+	return st
+}
+
+// withState returns the checkpoint with the state's fields; the start key stays
+// as it was, for the caller to set when the process changes.
+func (c attemptCheckpoint) withState(st create.State) attemptCheckpoint {
+	c.Stage, c.Starts, c.FailReason = int(st.Stage), st.Starts, int(st.FailReason)
+	c.PID, c.StartUnix = st.Process.PID, st.Process.StartUnix
+	return c
+}
+
+func decodeAttemptCheckpoint(raw json.RawMessage) (attemptCheckpoint, error) {
+	var c attemptCheckpoint
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return c, fmt.Errorf("attempt checkpoint: %w", err)
+	}
+	if c.V != checkpointVersion {
+		return c, fmt.Errorf("attempt checkpoint: version %d is not %d", c.V, checkpointVersion)
+	}
+	return c, nil
+}
+
+// dispatchCheckpoint is what a prompt attempt stores before its turn process is
+// started. Its existence is the proof that nothing was started without it.
+type dispatchCheckpoint struct {
+	V       int    `json:"v"`
+	Stage   string `json:"stage"`
+	Session string `json:"session"`
+}
+
+// sessionCheckpoint is what an open session stores: where its files are and the
+// last turn.
+type sessionCheckpoint struct {
+	V         int         `json:"v"`
+	Session   string      `json:"session"`
+	Cwd       string      `json:"cwd"`
+	RecordDir string      `json:"record_dir"`
+	Turn      *turn.State `json:"turn,omitempty"`
+}
+
+func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
+	var c sessionCheckpoint
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return c, fmt.Errorf("session checkpoint: %w", err)
+	}
+	if c.V != checkpointVersion {
+		return c, fmt.Errorf("session checkpoint: version %d is not %d", c.V, checkpointVersion)
+	}
+	if c.Session == "" || c.RecordDir == "" || c.Cwd == "" {
+		return c, fmt.Errorf("session checkpoint: incomplete")
+	}
+	return c, nil
+}
+
+// digest is the SHA-256 of a prompt's text in hex.
+func digest(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+func (a *App) putCheckpoint(ctx context.Context, scope adapterproto.CheckpointScope, id string, state any) error {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return a.conn().CheckpointPut(ctx, adapterproto.CheckpointPutParams{Scope: scope, ID: id, State: raw})
+}

@@ -12,6 +12,7 @@ What a Claude Code turn process is started with, as pure functions. Read
 | `Preset.Env()` | The environment variables the preset adds to a turn process. |
 | `Turn.Argv()` | The argument vector of `claude -p` for one launch, argv[0] included. |
 | `SessionFlag(resume)` | `--resume` or `--session-id`: the flag that, with the uuid, marks a process as a turn process of the session. |
+| `IsTurnOf(args, claude, session)` | Whether a process's arguments make it a turn process of the session: argv[0] is the Claude executable as started and the arguments name the session with `--session-id` or `--resume`. |
 | `SystemPrompt(preset)` | The adapter's system prompt followed by the preset's. |
 | `SanitizeEnv(base)`, `Environ(base, extra, siderDir)` | The environment of a turn process: what is stripped from the adapter's, what is added, and the `PATH` entry for the `sidera` executable. |
 | `UserLine(uuid, text)` | The one line of stream-json input, carrying the prompt's uuid. |

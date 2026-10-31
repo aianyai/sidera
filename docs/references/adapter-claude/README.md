@@ -103,6 +103,106 @@ Transitions are committed atomically; `Ready` and `Failed` are persisted before
 `session.create` is answered, never after. `Started` is committed immediately
 after spawning.
 
+### The adapter's lifecycle
+
+The adapter is served by `sdk/go/adapterkit`, which answers `initialize` (taking the instance
+lock first), ping and shutdown and gates everything else. It declares one runtime with the
+front ends `cli` and `mcp`, and neither `interrupt`, `ack_on_behalf` nor `server_requests`: a
+`claude -p` process sends the adapter no request that needs an answer, and interrupting and
+acknowledging on the agent's behalf are not built yet. The identity answered in `initialize` is
+read from the manifest built into the executable.
+
+- **`adapter.start`** carries the instance configuration, the presets and the sessions to take
+  back. The adapter finds `claude` and `sidera` (the instance's `claude_path` and `sidera_path`,
+  else the program on `PATH`), writes the MCP configuration file into the state directory and
+  keeps the presets, which are fixed for the life of the process because the host restarts the
+  instance when they change. A session is `lost` when its session file is gone (Claude Code
+  removes records of sessions idle longer than its cleanup period, 30 days by default),
+  `unreachable` (and logged) when its checkpoint is missing or unusable, and otherwise
+  `attached`, with `turn_active` true exactly when a turn process of the session runs. A process
+  of the session that the checkpoint does not know is the writer all the same and is followed. What
+  the adapter lost while it was away is reported after the answer (see turn events).
+- **`adapter.probe`** reports the runtime (`claude-code` and the version of `claude --version`), the
+  login (`claude auth status`: valid or invalid, the method is logged and the account never read),
+  the dependencies `claude` and `sidera`, whether each preset can be used (values valid, working
+  directory present, record directory name within bounds) and the tool probes: for the command-line
+  front end `sidera probe` is run, for MCP `sidera mcp` is started and sent `initialize` and its
+  own probe on connection is waited for, each with the probe token in `SIDERA_PROBE_TOKEN` and no
+  model turn; both are reported as `unsandboxed`. It then sends the availability snapshot:
+  `dependency_missing` for a program that is not found, `runtime_auth` when not logged in.
+
+### Configuration
+
+The manifest declares two instance keys, `claude_path` and `sidera_path`, and the preset keys
+`project_dir` (the working directory), `permission_mode` (required, one of `default`,
+`acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`), `model`, `effort`,
+`allowed_tools`, `append_system_prompt` and `background_wait_ms` (the runtime's
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, how long a turn process waits for background tasks
+before it ends, 10 minutes if unset). The output budgets are 27000 characters for the command
+line and 22500 for MCP, in characters because an MCP result over 50000 characters is moved into a
+file and the default limit is 25000 tokens, about one token per character for CJK text; `recv` may
+wait 100 seconds on either front end. The manifest lists only macOS for now. The per-turn files live
+under the instance's `state_dir`, which the daemon provides, so the adapter has no setting for
+them.
+
+### Creating a session, as the runtime does it
+
+`session.create` is answered `failed` before anything is persisted or started when the preset is
+unknown (`preset_unknown`), its values or working directory are invalid or its record directory
+name too long (`preset_invalid`), `claude` or `sidera` is not found (`dependency_missing`), the
+runtime is not logged in (`runtime_auth`) or `claude auth status` cannot be run (`native_unavailable`).
+Otherwise the attempt's checkpoint is stored first: the attempt, the session uuid and first prompt
+id allocated now, the record directory and working directory, the preset, the session endpoint and
+a digest of the first prompt's text, and then each state `create.State` goes through. A repeated
+request for the attempt with another preset, session endpoint or first prompt is `1005`; the
+checkpoint holds no token, because `tool_access` is sent with every request that needs it.
+
+The loop takes one snapshot of the process table, then reads the session file, then asks `Decide`
+and does what it says, storing the new state before the next round and waiting 200 ms when it says
+wait. A turn process is started with `--session-id` for a session that has no file and `--resume`
+otherwise. When the first prompt is in the record the adapter stores `ready`, then the session's
+checkpoint with the first turn, then reports the first turn, and only then answers `created` with
+the session uuid as the native reference, the turn process's identity and the front ends. If the
+first turn's process is already gone (the daemon restarted while it was creating and asks again),
+the answer carries `first_turn_ended`. An attempt that failed is answered `failed` with the reason
+`Reason.CreateFailure` gives, from the stored state, however often it is asked again.
+
+### Delivering a prompt
+
+`prompt.deliver` is `1001` for an endpoint the adapter does not hold and `refused` with
+`session_lost` when the session file is gone. A prompt whose uuid is already in the record is
+answered `persisted` without starting anything; the same attempt with another text is `1005`. The
+session has one writer: while a turn process of it runs (the recorded one, or any process the
+process table shows with the session's uuid, each counted once) the prompt is `refused` as `busy`,
+and two such processes are `control_unknown`; a process that was started and never recorded is
+recorded and followed. Otherwise the adapter stores the attempt's dispatch checkpoint, starts the
+process with `--resume`, stores the session's checkpoint with the new turn and answers `accepted`;
+`prompt.persisted` and `turn.started` follow when the prompt reaches the record. A process that
+cannot be started is `refused` as `native_unavailable`. If the dispatch checkpoint cannot be stored
+the request fails with an error and the daemon reconciles: a checkpoint that was never stored is how
+a reconciliation proves that nothing was started.
+
+### Closing a session
+
+`session.close` of a session the adapter holds interrupts its turn process with SIGINT, which ends a
+turn cleanly (SIGTERM leaves half a turn), waits up to 10 seconds, reports the turn's end as
+`interrupted` and answers `closed`; a process that does not end is answered `close_unconfirmed` with
+`turn_still_running` and is never killed. A session the adapter no longer holds is found by the
+`native_ref` in the process table and treated the same, and none found is `closed`. The uuid of a
+session held under another open endpoint is left alone and answered `closed`. A process table that
+cannot be read is `close_unconfirmed` with `native_unreachable`. The session file stays as history;
+the daemon removes the checkpoint.
+
+### What is not built yet
+
+`session.interrupt` (SIGINT of the turn process on Unix, with the process's end as the confirmation;
+the runtime's messaging socket is another way worth testing), `recv.observed` (it needs the
+runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
+writer that is not the adapter's (the runtime's session registry, which `create.Observations`
+accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed),
+process observation on Linux and Windows, `systemd-run --user` on Linux, Windows' detached start
+and sandbox settings. The turn files in the state directory are not cleaned up.
+
 ### The record directory
 
 The record directory is the base the runtime reports as its projects directory
@@ -312,6 +412,23 @@ stopped and the whole file was scanned: `provably_absent`
   and other uuids, and the line is looked for in the raw file, because a later branch of the
   conversation does not remove it from disk.
 
+- **The checkpoint before the process.** Stored first, the dispatch checkpoint makes "none" a proof:
+  the adapter never starts a turn process for an attempt it has not recorded, so a reconciliation of
+  an attempt without a checkpoint can say it was never dispatched without searching anything.
+- **`session.create` stores the session's checkpoint before it reports the first turn.** The
+  daemon accepts the checkpoint of a session that is still being created and the notifications of
+  an endpoint it does not yet know as open; a crash after the first `turn.started` then leaves a
+  state to pick the turn up from instead of a turn nobody follows.
+- **A process that was never recorded is followed, not refused.** When a prompt finds a process of the
+  session that the checkpoint does not know (the adapter died between starting it and recording it),
+  refusing as busy without following it would leave the daemon waiting for a `turn.ended` that
+  nobody sends. Its turn is reported from the moment it is known, with no prompt attempt, and its end
+  is a failure because there is no output file of its own to read.
+- **Presets are read once.** Changing the presets restarts the instance, so the adapter keeps the
+  values it was given in `adapter.start` and needs no way to learn of a change.
+- **No setting for the turn files.** The state directory is the daemon's place for what belongs to the
+  instance and outlives its process, so a second setting would only be a second place.
+
 ## Where
 
 - `cmd/sidera-adapter-claude/internal/create/state.go`: `State`, stages,
@@ -342,4 +459,16 @@ stopped and the whole file was scanned: `provably_absent`
 - `.../internal/turn`: the event state machine, including the pickup after a restart
   (`TestStep`, `TestRestartAdoption`).
 - `.../internal/reconcile`: the verdicts (`TestDecide`).
-- `.../internal/runtime/proc`: the process table, detached start and signal.
+- `.../internal/runtime/proc`: the process table, detached start and signal (macOS; the others fail with `ErrUnsupported`).
+- `cmd/sidera-adapter-claude/main.go`, `sidera-adapter.json`: the executable and its manifest
+  (`TestManifestAndDeclarationAgree`).
+- `.../internal/runtime`: the adapter. `app.go` (construction, initialize), `config.go` (instance
+  configuration, preset resolution), `create.go` (the creation loop), `deliver.go` (delivery and
+  reconciliation), `close.go`, `start.go`, `probe.go` and `probe_mcp.go`, `session.go` (turn launch,
+  the turn monitor, notifications), `checkpoint.go` (the checkpoints), `world.go` (the interfaces to the
+  outside) and `osworld.go` (their implementations). Tests run against an in-memory world
+  (`fake_test.go`): `create_test.go` (`TestCreateAStartedSessionAndReportItsTurn`,
+  `TestCreateAfterACrashBetweenStartingAndRecording`), `session_test.go` (delivery, closing,
+  reconciliation, `TestStartTakesSessionsBack`, `TestProbe`). `real_test.go`
+  (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) probes the installed Claude Code and finds, then
+  interrupts, a real turn process given no input, so it costs no model turn.
