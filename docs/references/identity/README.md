@@ -125,8 +125,8 @@ sees the link and the read follows it
 
 | File | Holds | Written by |
 | ---- | ----- | ---------- |
-| `identity.key` | The identity private key: an Ed25519 seed. Signs the network-key certificates and the self-revocation, nothing else. | `init`, once |
-| `network.key` | The network private key: an Ed25519 seed. Signs everything the node signs on the network. | `init`, once |
+| `identity.key` | The identity private key: an Ed25519 seed. Signs the network-key certificates and the self-revocation, and the records that bind this node to another: a trust credential and its revocation. | `init`, once |
+| `network.key` | The network private key: an Ed25519 seed. Signs everything else the node signs, and authenticates the node's connections. | `init`, once |
 | `network.cert` | The current network-key certificate, as the record wire bytes. | `init`, each renewal |
 | `network-serial` | The highest certificate serial this node has issued, and the digest of the certificate issued at it. | `init`, each renewal, first |
 | `self-revocation.rec` | The node's statement that its identity key is void, as the record wire bytes. | `init`, once |
@@ -497,6 +497,15 @@ under the refusal of a serial file behind the certificate below.
   key is 32 bytes read with `io.ReadFull` and built with `NewKeyFromSeed`; a test
   fixes a node's identity with a seeded reader, and a reader that fails fails
   `init`.
+- **The identity key signs credentials; the network key leaves the package, the
+  identity key does not.** A trust credential is signed by the identity keys of
+  both ends (the record rule has exactly those two slots), because trust is
+  between nodes, not between connections: a stolen network key then cannot make
+  trust, and a replaced one does not end it. The package hands out a signer for the
+  identity key and never the key. The network key is different: the network layer
+  must authenticate each connection with the very key the certificate names, and
+  the library that does it reads the private key, so `NetworkPrivateKey` returns a
+  copy, once, to that one caller.
 - **30 days, renewed at 10.** A leaked network key stops being accepted within a
   month even if nobody revokes it; a node that has been off for a week still
   holds a valid certificate when it returns.

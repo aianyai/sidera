@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"io"
 
@@ -153,9 +154,25 @@ func checkSerial(seen record.SerialSeen, cert record.Verified[record.NetworkKeyC
 // Node is the identifier of this node, derived from its identity key.
 func (k *Keys) Node() ident.NodeID { return k.s.identity.node }
 
-// NetworkSigner signs with the network key. It prints as no secret. The identity
-// key signs inside this package only: the certificates and the self-revocation.
+// NetworkSigner signs with the network key. It prints as no secret.
 func (k *Keys) NetworkSigner() record.Signer { return k.s.network.signer() }
+
+// IdentitySigner signs with the identity key, for the records that bind this
+// node to another: a trust credential and its revocation. The certificates of the
+// network key and the self-revocation are signed inside this package and are not
+// reached through it. The signer prints as no secret, and the key itself never
+// leaves the package.
+func (k *Keys) IdentitySigner() record.Signer { return k.s.identity.signer() }
+
+// NetworkPrivateKey returns a copy of the network private key, for the network
+// layer to turn into the key its secure transport authenticates the node with: a
+// connection must be authenticated by the very key the certificate names. It is
+// the one place the secret leaves this package, and the caller owns the copy. It
+// prints as bytes, unlike the key held here, so it goes straight to the library
+// that reads it and is never logged or stored.
+func (k *Keys) NetworkPrivateKey() ed25519.PrivateKey {
+	return append(ed25519.PrivateKey(nil), k.s.network.priv...)
+}
 
 // Certificate is the certificate in force. After an interrupted renewal it is
 // the old one, and its serial is below SerialSeen's: it must not be published,
