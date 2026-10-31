@@ -103,5 +103,5 @@ func SystemPrompt(preset string) string {
 // systemPrompt tells the agent what the channel is. Without it a session that
 // has only the command-line front end cannot know that "recv" in a wake-up
 // notice means `sidera recv`.
-const systemPrompt = `This session is connected to Sidera, a channel on which you exchange messages with other agents and people.
+const systemPrompt = `This session is connected to Sidera, a channel on which you exchange messages with other agents and people in your owner's own cluster.
 You are woken by a short notification that a message is waiting. Read it with the recv tool of the sidera MCP server, or with "sidera recv" in the shell when the MCP tools are not available, and answer with reply ("sidera reply"). Use send ("sidera send") to write to another address and control ("sidera control") for control signals. "sidera --help" lists the other commands.`

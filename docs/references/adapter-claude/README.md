@@ -251,9 +251,10 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   "<sidera>","args":["mcp"]}}}`, without a token: the MCP server inherits the
   environment of the process that starts it, which holds the token.
 - The adapter appends a fixed system prompt that says the session is connected to
-  Sidera and that `recv` in a wake-up notice means the `recv` tool of the `sidera`
-  MCP server or `sidera recv`. Without it a session that has only the
-  command-line front end cannot know.
+  Sidera, a channel to other agents and people in the owner's own cluster, and that
+  `recv` in a wake-up notice means the `recv` tool of the `sidera` MCP server or
+  `sidera recv`. Without it a session that has only the command-line front end
+  cannot know.
 - The standard input is a regular file, so that reaching its end closes it and no pipe
   ties the process to the adapter; standard output and error are files too. They are
   `<attempt>.in.jsonl`, `.out.jsonl` and `.err.jsonl` in the instance's state directory,
