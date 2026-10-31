@@ -49,6 +49,16 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		{"alert-raise", nil, func(r *rig) error {
 			return r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{1}, Kind: "k", At: base, Detail: "d"})
 		}, nil},
+		{"trust-credential", nil, func(r *rig) error {
+			peer := peerOf(t, 2, 1, 1)
+			return r.st.TrustCredential(credentialOf(t, 1, 2), &peer)
+		}, []string{path.Join(store.TrustDir, credentialOf(t, 1, 2).Name()), path.Join(store.PeersDir, peerOf(t, 2, 1, 1).Name())}},
+		{"trust-revocation", nil, func(r *rig) error { return r.st.TrustRevocation(revocationOf(t, 1, 2)) },
+			[]string{path.Join(store.TrustDir, revocationOf(t, 1, 2).Name())}},
+		{"peer-cert", nil, func(r *rig) error { return r.st.PeerCert(peerOf(t, 2, 1, 1)) },
+			[]string{path.Join(store.PeersDir, peerOf(t, 2, 1, 1).Name())}},
+		{"trust-local-clear", func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, localRevokedOf(t, 1)) },
+			func(r *rig) error { return r.st.LocalRevokedClear(trustNode(t, 1)) }, nil},
 		{"daemon-stop", nil, func(r *rig) error { return r.st.DaemonStop(adminResult(2)) },
 			[]string{path.Join(store.AdminDir, adminResult(2).Name())}},
 		{"archive-summaries", nil, func(r *rig) error { return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}) },

@@ -7,11 +7,13 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // Record is a decoded record of state/: one of OutRecord, OutLostRecord, InRecord, CtlRecord,
-// EndpointRecord, AttemptsRecord, CheckpointRecord, AdminRecord, AlertRecord
-// and SeqRecord, as a value.
+// EndpointRecord, AttemptsRecord, CheckpointRecord, AdminRecord, AlertRecord,
+// SeqRecord, CredentialRecord, CredRevocationRecord, LocalRevokedRecord and
+// PeerRecord, as a value.
 type Record interface {
 	// Name is the file name of the record.
 	Name() string
@@ -68,6 +70,18 @@ func EncodeRecord(rec Record) ([]byte, error) {
 	case SeqRecord:
 		kind, key = KindSeq, EndpointKeyBytes(r.Sender)
 		body, err = encodeSeq(r)
+	case CredentialRecord:
+		kind, key = KindCredential, DigestKeyBytes(r.Digest)
+		body, err = encodeCredential(r)
+	case CredRevocationRecord:
+		kind, key = KindCredRevocation, DigestKeyBytes(r.Revoked)
+		body, err = encodeCredRevocation(r)
+	case LocalRevokedRecord:
+		kind, key = KindLocalRevoked, NodeKeyBytes(r.Node)
+		body, err = encodeLocalRevoked(r)
+	case PeerRecord:
+		kind, key = KindPeer, NodeKeyBytes(r.Node)
+		body, err = encodePeer(r)
 	default:
 		return nil, fmt.Errorf("store: %T is not a record of state/", rec)
 	}
@@ -153,6 +167,14 @@ func decodeBody(kind Kind, key any, body []byte) (Record, error) {
 		return decodeAlert(key.(AlertID), body)
 	case KindSeq:
 		return decodeSeq(key.(ident.EndpointID), body)
+	case KindCredential:
+		return decodeCredential(key.(record.Digest), body)
+	case KindCredRevocation:
+		return decodeCredRevocation(key.(record.Digest), body)
+	case KindLocalRevoked:
+		return decodeLocalRevoked(key.(ident.NodeID), body)
+	case KindPeer:
+		return decodePeer(key.(ident.NodeID), body)
 	}
 	return nil, fmt.Errorf("no body of kind %q", kind)
 }

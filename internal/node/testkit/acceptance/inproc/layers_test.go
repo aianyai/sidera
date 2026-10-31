@@ -24,7 +24,9 @@ func reportLayerEvidence(t *testing.T, recorded CatalogEvidence) {
 		for _, target := range evidence.Analysis.Targets {
 			t.Logf("layer=%s recovery_normal_target=%s scenario=%s trigger=%+v", layer.name, target.Target.Point, target.Scenario, target.After)
 		}
-		if len(evidence.Reachable)+len(evidence.InProcessOnly) != len(harness.ProgramTable(t).Keys()) {
+		// A key is reached by this layer, reached by the other layer only, or owed by
+		// crashwalk.NotYetWalked.
+		if len(evidence.Reachable)+len(evidence.InProcessOnly)+len(coverage.Deferred) != len(harness.ProgramTable(t).Keys()) {
 			t.Errorf("layer %s does not partition complete catalog evidence", layer.name)
 		}
 		if layer.name == "inproc" && len(evidence.InProcessOnly) != 0 {

@@ -47,6 +47,14 @@ type Scan struct {
 	Alerts      []AlertRecord
 	Seq         []SeqRecord
 
+	// Credentials, CredRevocations, LocalRevoked and Peers are the records of
+	// state/trust/ and state/peers/, structure checked and nothing more: a
+	// signature is checked by whoever reads a record into a decision.
+	Credentials     []CredentialRecord
+	CredRevocations []CredRevocationRecord
+	LocalRevoked    []LocalRevokedRecord
+	Peers           []PeerRecord
+
 	// Bodies are the names of the files of bodies/, none of them read.
 	Bodies []string
 	// Damaged lists the files that failed validation, in directory order with the
@@ -180,6 +188,14 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 		sc.Alerts = append(sc.Alerts, r)
 	case SeqRecord:
 		sc.Seq = append(sc.Seq, r)
+	case CredentialRecord:
+		sc.Credentials = append(sc.Credentials, r)
+	case CredRevocationRecord:
+		sc.CredRevocations = append(sc.CredRevocations, r)
+	case LocalRevokedRecord:
+		sc.LocalRevoked = append(sc.LocalRevoked, r)
+	case PeerRecord:
+		sc.Peers = append(sc.Peers, r)
 	}
 	return nil
 }

@@ -851,6 +851,7 @@ var engineWalks = map[string]string{
 	"backup-confirm":          "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"clock-clear":             "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
 	"identity-retire":         "TestTheOwnersOperationsRecoverFromACrashAtEveryPoint",
+	"trust-local-revoke":      "TestARemovalFromTrustRecoversFromACrashAtEveryPoint",
 }
 
 // judgeTable reads the transactions of the program from its table and says who crashes

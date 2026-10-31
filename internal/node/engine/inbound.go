@@ -309,8 +309,8 @@ func (e *Engine) judge(now time.Time, env envelope.Envelope, from transport.Orig
 	case delivery.IntakeReject:
 		j.in, err = rejected(now, in, verdict.Reject)
 	default:
-		// Only a request judged by node rules can be suspended, and this node has
-		// no trust that lapses yet.
+		// Only a request judged by node rules can be suspended, and only trust that
+		// rests on a voucher is suspended: this node keeps direct trust alone.
 		err = fmt.Errorf("engine: intake of %s: a suspended request has no answer here", env.ID)
 	}
 	return j, err
@@ -387,8 +387,9 @@ type authCheck struct {
 
 // evaluate is the one place the engine asks the authorization rules: a local source is
 // judged by the declarations of the target alone, and any other by the node's rules,
-// with the trust of a node elsewhere not known yet, which is the zero value and is
-// denied: a remote sender is refused until trust exists.
+// with this node's trust in the node it came from (trust.Evaluate): a node this node
+// holds a credential with, that is not revoked or expired, that the owner has not
+// removed and that is not retired, is trusted directly, and any other is denied.
 func (e *Engine) evaluate(now time.Time, c authCheck) authz.Verdict {
 	if c.local {
 		return authz.EvaluateLocal(authz.LocalRequest{
@@ -397,7 +398,7 @@ func (e *Engine) evaluate(now time.Time, c authCheck) authz.Verdict {
 		})
 	}
 	return authz.Evaluate(e.d.Config.Policy().Policy, authz.Request{
-		Now: now, Stage: c.stage, Sender: c.sender, Action: c.action, Target: c.target, Preset: c.preset,
+		Now: now, Trust: e.trustOf(c.sender.Node, now), Stage: c.stage, Sender: c.sender, Action: c.action, Target: c.target, Preset: c.preset,
 		BodySize: c.bodySize, MultiRecipient: c.multiRecipient, Reply: c.reply, TargetDeclaration: c.decl,
 	})
 }

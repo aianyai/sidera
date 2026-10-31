@@ -37,3 +37,18 @@ func TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead(t *testing.T) {
 		t.Fatalf("unread accepted body: violations=%v", r.Violations)
 	}
 }
+
+// A name on the list of declarations not yet walked is a declaration of the
+// program: a name that is mistyped, or whose declaration was removed, would owe
+// nothing and hide that it does not.
+func TestEveryDeclarationNotYetWalkedIsDeclared(t *testing.T) {
+	declared := map[string]bool{}
+	for _, k := range harness.ProgramTable(t).Keys() {
+		declared[k.Tag.Tx] = true
+	}
+	for name := range crashwalk.NotYetWalked {
+		if !declared[name] {
+			t.Errorf("NotYetWalked lists %q, which the program does not declare", name)
+		}
+	}
+}

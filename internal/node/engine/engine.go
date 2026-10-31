@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // Phase is where the engine is in its life.
@@ -105,6 +106,12 @@ type Engine struct {
 	order     []string  // names of the periodic tasks, in the order they were added
 	clockTask string    // the periodic task that persists the clock state, if one was added
 	tr        Transport // set by SetTransport before Start
+	net       Network   // set by SetNetwork before Start; nil pushes nothing
+	// trust is what the loop knows of the trust records and the peers' certificates;
+	// pushedOwn is the digest of the node's own certificate in the snapshot the
+	// network was last given. See trust.go and network.go.
+	trust     *trustState
+	pushedOwn record.Digest
 	outbox    *outbox
 	// directoryKey authenticates cursors for this process only, minted on its
 	// first directory query and never persisted.
@@ -341,6 +348,9 @@ func (e *Engine) Start() {
 	e.timer = e.d.Clock.NewTimer(time.Hour)
 	e.timer.Stop()
 	e.setPhase(PhaseRecovering)
+	// The network is given the facts it judges peers by before the loop serves a
+	// command, and, as no loop runs yet, from the state the scan built.
+	e.publishMembership()
 	go e.loop()
 }
 
@@ -920,6 +930,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		switch {
 		case err == nil:
 			e.sched.set(key, now.Add(p.every))
+			e.publishRenewedCertificate()
 		case txn.IsFatal(err):
 			e.fatal = err
 		default:

@@ -71,6 +71,11 @@ type Store interface {
 	ArchiveSummaries(at time.Time, summaries []store.ArchiveSummary) error
 	ArchiveSweep(c store.SweepChunk) error
 	ArchiveExpire(names []string) error
+
+	TrustCredential(c store.CredentialRecord, peer *store.PeerRecord) error
+	TrustRevocation(r store.CredRevocationRecord) error
+	PeerCert(p store.PeerRecord) error
+	LocalRevokedClear(node ident.NodeID) error
 }
 
 var _ Store = (*store.Store)(nil)
@@ -118,13 +123,17 @@ var _ Config = (*config.Config)(nil)
 
 // Keys is what the engine asks of the node's keys: the node it is, the network
 // key that signs its status reports, the certificate that says the key is the
-// node's, and the statement that retires the identity, which only the owner's
-// operations use. *keys.Keys is the one implementation. The engine reads the
-// certificate in its loop, which is also where a renewal replaces it.
+// node's and its encoded record, the identity key's signer, which signs only the
+// revocations of the credentials this node holds, and the statement that retires
+// the identity, which only the owner's operations use. *keys.Keys is the one
+// implementation. The engine reads the certificate in its loop, which is also
+// where a renewal replaces it.
 type Keys interface {
 	Node() ident.NodeID
 	NetworkSigner() record.Signer
+	IdentitySigner() record.Signer
 	Certificate() record.Verified[record.NetworkKeyCertificate]
+	CertificateWire() []byte
 	SerialSeen() record.SerialSeen
 	SelfRevocation() nodekeys.SelfRevocation
 }

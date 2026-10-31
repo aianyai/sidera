@@ -104,6 +104,16 @@ the edge involves the local node and, when the credential is known, only when
 the directive's claimed ends are the credential's two ends. A directive can only
 revoke; it can neither create trust nor loosen anything.
 
+**The node's own view.** The engine is the one caller that builds the view for the
+running node, from the records of `state/trust/` after it verified them (see the
+[engine reference](../engine/README.md), "Trust and peers"): the credentials this node
+holds and nothing of other nodes' (so no path through an intermediate exists), the digests
+of the revoked ones, the nodes the owner removed, the default settings, and no declared
+inheritance. The retired nodes are not copied in; they are added from the revocation set
+at each use. An authorization check of a request from another node takes the outcome
+of `Evaluate` for the sender; a connection's decision (`preauth.Decide`) takes the same
+view through the snapshot the engine gives the network layer.
+
 ## Why
 
 - **Vouchers instead of expiring inherited trust.** Inheritance depends on the

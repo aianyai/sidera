@@ -671,6 +671,49 @@ func scenarios() []scenario {
 			return r.st.DaemonStop(adminResult(7))
 		}),
 		{
+			// The credential is the commit point; the certificate of the peer it was made
+			// with follows and may be missing in a recovered state.
+			name:     "trust-credential",
+			durable:  "trust-credential/credential.sync-dir#1",
+			mode:     atomic,
+			optional: isIn(store.PeersDir),
+			run: func(t *testing.T, r *rig, s *sim) error {
+				peer := peerOf(t, 2, 1, 1)
+				return r.st.TrustCredential(credentialOf(t, 1, 2), &peer)
+			},
+		},
+		{
+			name:    "trust-revocation",
+			durable: "trust-revocation/revocation.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.TrustRevocation(revocationOf(t, 1, 2))
+			},
+		},
+		{
+			// The certificate of a peer is replaced whole by one of a higher serial.
+			name: "peer-cert",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, peerOf(t, 2, 1, 1))
+			},
+			durable: "peer-cert/peer.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PeerCert(peerOf(t, 2, 2, 2))
+			},
+		},
+		{
+			name: "trust-local-clear",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, localRevokedOf(t, 1), localRevokedOf(t, 2))
+			},
+			durable: "trust-local-clear/local-revoked-dir.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.LocalRevokedClear(trustNode(t, 1))
+			},
+		},
+		{
 			// A previously synced summary stays intact. The unsynced append can
 			// leave any subset of its lines or arbitrarily many damaged lines.
 			name:  "archive-summaries",

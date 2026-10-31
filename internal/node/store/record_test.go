@@ -95,6 +95,14 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return refusedCtl(1, delivery.RejectEndpointMissing)
 	case "out lost at the sender":
 		return lostOutAt(outKey(2, false), base.Add(time.Hour))
+	case "credential":
+		return credentialOf(t, 1, 2)
+	case "cred-revocation":
+		return revocationOf(t, 1, 2)
+	case "local-revoked":
+		return localRevokedOf(t, 1)
+	case "peer":
+		return peerOf(t, 2, 1, 1)
 	case "out lost notice":
 		return store.NewOutLostRecord(store.OutLostKey{Sender: ep(1), Damaged: strings.Repeat("0123456789abcdef", 4)}, node(local), base.Add(time.Hour))
 	}
@@ -488,6 +496,10 @@ func dirOf(rec store.Record) string {
 		return store.AlertsDir
 	case store.SeqRecord:
 		return store.SeqDir
+	case store.CredentialRecord, store.CredRevocationRecord, store.LocalRevokedRecord:
+		return store.TrustDir
+	case store.PeerRecord:
+		return store.PeersDir
 	default:
 		panic(fmt.Sprintf("unknown record %T", r))
 	}
@@ -632,6 +644,15 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	recs["seq empty floors"] = store.SeqRecord{Sender: ep(2), Floors: map[ident.Address]uint64{}}
 	recs["seq two floors"] = store.SeqRecord{Sender: ep(3), Floors: map[ident.Address]uint64{addr(2, 2): 7, addr(local, 4): 1}}
 	recs["checkpoint session scope"] = store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)}
+	// Trust and peers: a credential made by the node of the other key, a revocation
+	// signed by the end that is not the smaller one, a peer whose serial seen is above
+	// its certificate's, and a local removal with an operation of every allowed shape.
+	recs["credential"] = credentialOf(t, 5, 4)
+	recs["credential revocation signed by the other end"] = revocationOf(t, 5, 4)
+	recs["peer with a serial seen above its certificate"] = peerOf(t, 7, 1, 4)
+	local := localRevokedOf(t, 3)
+	local.Operation = "a.b_c-1"
+	recs["local removal"] = local
 	return recs
 }
 

@@ -22,11 +22,19 @@ var (
 
 // acceptedKey is the network key this node accepts for a node, with its
 // revocation status and the highest serial seen, as record.NetworkKeyBelongs
-// wants them. Only this node's own key is known: the engine has no trust graph
-// yet, and a node it knows nothing about has no accepted key, so anything signed
-// in its name fails to verify.
+// wants them. For this node it is the key of the certificate in force. For another
+// node it is the key of the certificate stored for it, judged against the highest
+// serial seen; a node whose certificate this node has not stored has no accepted
+// key, so anything signed in its name fails to verify.
 func (e *Engine) acceptedKey(node ident.NodeID) record.AcceptedNetworkKey {
-	if e.d.Keys == nil || node != e.d.Node {
+	if node != e.d.Node {
+		p, ok := e.trust.peers[node]
+		if !ok {
+			return record.AcceptedNetworkKey{}
+		}
+		return e.d.Config.RevocationSet().NetworkKey(p.cert, p.rec.SerialSeen)
+	}
+	if e.d.Keys == nil {
 		return record.AcceptedNetworkKey{}
 	}
 	return e.d.Config.RevocationSet().NetworkKey(e.d.Keys.Certificate(), e.d.Keys.SerialSeen().Serial)

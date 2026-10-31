@@ -86,4 +86,23 @@ var goldenRecords = []struct {
 	{name: "out lost notice", dir: store.OutDir,
 		file: "sidera-record 1 out-lost 521713ef 155 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZg\n{\"at\":\"2026-10-24T10:00:00Z\",\"feedback\":[{\"sender\":\"node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq\"}]}",
 		hash: e1 + ".14eae9848c676a357c5cf6ee0eb572deeb46e4a3de1cee1084546d314330433b.rec"},
+	// The records of trust and of peers hold signed statements of other parties, made
+	// with deterministic keys (trustSigner): seeds 1 and 2 for a credential and its
+	// revocation, signed by the node of seed 1, and seed 2 for the certificate of a
+	// peer. A credential and a revocation are the record's canonical bytes
+	// themselves; a peer holds them as base64url in a JSON body. Unlike the vectors
+	// above these four were produced by the encoder, because a signed record is not
+	// written by hand, and are read back by the decoder.
+	{name: "credential", dir: store.TrustDir,
+		file: "sidera-record 1 credential 73a25906 349 ZGZjMDM3MzRkYzc4MjFkMWYxNjExNmVkZmY1NmRmYThhYTQxOWQzYzE5ZmE4NTBiZDcyMTU2ZjczYjBmNGE5YQ\n\xa3\x01x\x19sidera/trust-credential/1\x02Xe\xa5\x01X [\x82[\xcem\x88\xdd(j\xac\x8c\x8a\xbc\xc0\x80\xffb\x92\xaa\xf6\x10nP\x00\x17Z\xc7\b\xd9\xe6\xa8\xc0\x02X \xfd\x9c\xe51+\u02ec_\xa0\xad\x89\xa5%\xa0\x0f4\x941'\xbco\xdb\xdc\xfe\xcb|2\xb6\x04hP\x1f\x03\x1aj\xdcs\x90\x04\x1ak\x04\x00\x90\x05P\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x82\xa2\x01\xa2\x01\x01\x02X \x819w\x0e\xa8}\x17_V\xa3Tf\xc3L~\xcc\u02cd\x8a\x91\xb4\xee7\xa2]\xf6\x0f[\x8f\u0273\x94\x02X@\x95\xc7\xe8V<\x94\x9dt/k\x80\xbe\xe8DSD\xd2\xeeK_\x8a+m\x03<\u0686\xc9O\xb9\xf5\xa7\xad\b\x0e\xa9O9\x8b\xea\xc6q\x8bU4\b\x95\xaaA\x98\a\xb4\xcf\xd7\x01\xfb\x97\"3\xe8\x1ew\x14\v\xa2\x01\xa2\x01\x01\x02X \x8a\x88\xe3\xddt\t\xf1\x95\xfdR\xdb-<\xba]r\xcag\t\xbf\x1d\x94\x12\x1b\xf3t\x88\x01\xb4\x0fo\\\x02X@\xe9\x1f\xa5f\x05\xf1\xa1\xcd[\u0167%A\u07f9#\x9f\xa5}V\x7f\xc8\x17D*c\xe0(0\xd5\x0er\x9e\xf4s\x83Qw\xa1,f`\x01l\x92\xaa\xfb\xd3h\x04\xc4\xc0\x81n\xd4}\xf6\x99|\xaf1\xef\x13\b",
+		hash: "52a87b2054a4ba4c336d35f7ec9ef92026d17baee0b3db7d5614e01f711ac400.rec"},
+	{name: "cred-revocation", dir: store.TrustDir,
+		file: "sidera-record 1 cred-revocation c8b8eed7 257 ZGZjMDM3MzRkYzc4MjFkMWYxNjExNmVkZmY1NmRmYThhYTQxOWQzYzE5ZmE4NTBiZDcyMTU2ZjczYjBmNGE5YQ\n\xa3\x01x$sidera/trust-credential-revocation/1\x02Xi\xa1\x01Xe\xa5\x01X [\x82[\xcem\x88\xdd(j\xac\x8c\x8a\xbc\xc0\x80\xffb\x92\xaa\xf6\x10nP\x00\x17Z\xc7\b\xd9\xe6\xa8\xc0\x02X \xfd\x9c\xe51+\u02ec_\xa0\xad\x89\xa5%\xa0\x0f4\x941'\xbco\xdb\xdc\xfe\xcb|2\xb6\x04hP\x1f\x03\x1aj\xdcs\x90\x04\x1ak\x04\x00\x90\x05P\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x81\xa2\x01\xa2\x01\x01\x02X \x8a\x88\xe3\xddt\t\xf1\x95\xfdR\xdb-<\xba]r\xcag\t\xbf\x1d\x94\x12\x1b\xf3t\x88\x01\xb4\x0fo\\\x02X@#\x92az\xc0\x1f\xf4\x8ay(\xce\xd3\x06\xc6\b\xd8\xff,\xc1\xe9$\xe3KW\xbc\xcb\x0f\xa3I\xa1#k\xc1\xfe\x8f\x057jM4_\f\x93XP\xfdX\xbe\x9f\x19\x04}\xd1\x11\x12\u02d7\xa3\xdc^\xa2\xfa+\b",
+		hash: "60a4cb114f41a5d7ef82b423ea2c35b5cae920ac88c44cd94cab0b7eee903e07.rec"},
+	{name: "local-revoked", dir: store.TrustDir,
+		file: "sidera-record 1 local-revoked 35bcbf44 134 bm9kZTFsa3d3MnZmdGV3azlsZzlkM3hqanRncTB4ajJyemZhdWRsZGFlbGt0MHNldHZwcmcycTBzaGFuN3p6\n{\"node\":\"node1lkww2vftewk9lg9d3xjjtgq0xj2rzfaudldaelkt0setvprg2q0shan7zz\",\"at\":\"2026-10-24T09:00:00Z\",\"operation\":\"trust.revoke-node\"}",
+		hash: "cf46e0584399fb93c93122010020456c75d5c250a4c1084d99ceebce5ad7ae3c.rec"},
+	{name: "peer", dir: store.PeersDir,
+		file: "sidera-record 1 peer f30abb57 410 bm9kZTF0d3A5aG5uZDNyd2pzNjR2M2o5dGVzeXFsYTNmOTJoa3pwaDlxcXFodHRyczNrMHg0cnFxNDRhbjRh\n{\"cert\":\"owF4GXNpZGVyYS9uZXR3b3JrLWtleS1jZXJ0LzECWFmlAVggW4Jbzm2I3ShqrIyKvMCA_2KSqvYQblAAF1rHCNnmqMACogEBAlggNLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0YDAQQaatxzGAUaawQAkAOBogGiAQECWCCBOXcOqH0XX1ajVGbDTH7My42KkbTuN6Jd9g9bj8mzlAJYQNqQquyVyVbe4i1w_2AC49doO2g3Da-xkE9mG9Ax_5KTyLDEi8bsDz3ZjYEXr5RoGCP82HVc8ATTuFHu0fCwSwk\",\"serial_seen\":1,\"digest\":\"e3d1b9e0f9163bcb776ed28f84e2cf4223f1c1352ce31a270ccc9205fa9404e8\"}",
+		hash: "378e97949eeae96466d1d504ccf72fb4b136b40855a52582d670cf700a2bf524.rec"},
 }

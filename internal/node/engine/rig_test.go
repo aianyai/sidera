@@ -78,6 +78,8 @@ type rig struct {
 	// installed, when set, changes the installed adapter packages the engine
 	// reads from the configuration (a test that needs tested runtime ranges).
 	installed func([]config.Adapter) []config.Adapter
+	// network, when set, is the network layer the engine is given before it starts.
+	network engine.Network
 	// packages are the package directories an owner can name to install, by the
 	// path the owner names; each is a disk of its own, rooted at the package.
 	packages map[string]fsx.Reader
@@ -108,6 +110,8 @@ func (r *rig) loadKeys() {
 	}
 	r.keys = k
 }
+
+func withNetwork(n engine.Network) rigOption { return func(r *rig) { r.network = n } }
 
 func withoutHome() rigOption { return func(r *rig) { r.home = "" } }
 
@@ -233,7 +237,11 @@ func admitOn(ctx context.Context, e *engine.Engine, instance string, adm adapter
 // open runs the scan entry.
 func (r *rig) open() (*engine.Engine, engine.ScanReport, error) {
 	r.t.Helper()
-	return engine.Open(context.Background(), r.deps(), r.params)
+	e, rep, err := engine.Open(context.Background(), r.deps(), r.params)
+	if err == nil && r.network != nil {
+		err = e.SetNetwork(r.network)
+	}
+	return e, rep, err
 }
 
 // start opens the engine and runs it to the running phase, with the adapter
@@ -417,6 +425,8 @@ func (r *rig) seedRecord(rec store.Record) {
 		dir = store.AlertsDir
 	case store.AttemptsRecord:
 		dir = store.AttemptsDir
+	case store.CredentialRecord, store.LocalRevokedRecord:
+		dir = store.TrustDir
 	default:
 		r.t.Fatalf("seedRecord: no directory for %T", rec)
 	}
@@ -486,7 +496,7 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed, packages: r.packages}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed, network: r.network, packages: r.packages}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {

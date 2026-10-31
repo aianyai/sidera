@@ -25,6 +25,7 @@ the runs through `Options.Observe`.
 | `AnalyzeSources`, `CheckRecoveryTarget` | Derive the three coverage sources and actual recovery-only Normal targets; verify a second interruption against its complete baseline. |
 | `CheckRecoveryRecord`, `CheckRecoveryTrigger` | Validate a complete two-generation recovery recording, including its crash trigger's first-generation prefix; check that prefix alone for an interrupted recovery. |
 | `CheckBudget`, `CompareRuns`, `Assess`, `CheckRecoveryCases` | The individual checks, usable alone. |
+| `NotYetWalked` | The declarations no acceptance recipe walks yet, each with its reason. `Assess` reports their keys as `Coverage.Deferred` and not as missing, and one that a walk reached as `Coverage.StaleDeferred`. |
 | `Mode`, `Shard`, `ParseMode`, `ParseShard`, `EnvMode`, `EnvShard` | `full` or `smoke`, and the part of the walk a CI job takes. |
 | `Hit`, `NewHit`, `NormalizePath`, `IsSync` | A reached crash point, the shared conversion from an observation to normalized path fingerprints, and the sync steps. |
 
@@ -64,6 +65,13 @@ the runs through `Options.Observe`.
   for coverage and target discovery, but skips the dynamic Normal group.
   `RecoveryNormalSkipped` and an observer notification state this explicitly;
   observing a key does not count as interrupting it.
+- **A declaration that no recipe walks yet is listed, never skipped.** `NotYetWalked`
+  (its own file, `notyetwalked.go`) names each such declaration with the reason it is
+  safe to leave. Coverage is judged in `Assess` alone, so the walk of the built binary
+  and the catalog evidence of the in-process layer both see the same answer: a listed
+  declaration's unreached keys are `Deferred` and do not fail either; a listed
+  declaration that a walk reached is `StaleDeferred` and fails both, so the list only
+  shrinks as recipes are written. Delete an entry when its recipe lands.
 - **No point is skipped silently.** A target that the run never reached fails the
   walk and says which. A scenario whose window has more points than its budget
   fails, so that growth is put in front of a reviewer instead of being sampled
@@ -178,7 +186,7 @@ that budget. No new backend driver, clock or dependency is needed.
 `TestWalkSmokeCrashesARecoveryTransactionOnceWhateverScenarioListsItsWrites`,
 `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`,
 `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`,
-`TestAssessCoverage`, `TestCheckRecoveryCasesUnion`,
+`TestAssessCoverage`, `TestAssessSetsAsideTheDeclarationsNotYetWalked`, `TestEveryDeclarationNotYetWalkedSaysWhy`, `TestCheckRecoveryCasesUnion`,
 `TestNewHitConvertsObservationOperandsToStableFingerprints`,
 `TestCompareRunsRejectsAChangedRenameSource`, and the `TestWalk…` tests
 (`…FailsWhenATargetIsNotReached`, `…FailsWhenARerunDivergesFromTheRecording`,

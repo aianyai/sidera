@@ -12,6 +12,12 @@ const (
 	RoleEndpoint = "endpoint"
 	// RoleResult is the role of the result of an administrative operation.
 	RoleResult = "result"
+	// RoleLocalRevoked is the role of the record of a node removed from this
+	// node's own trust, with PutLocalRevoked.
+	RoleLocalRevoked = "local-revoked"
+	// RoleCredRevocation is the role of the revocation of a credential, with
+	// PutCredRevocation.
+	RoleCredRevocation = "revocation"
 )
 
 // Shorthands for the declarations below: a write is {Role, Op, flags}.
@@ -155,6 +161,22 @@ var (
 	declAlertAck      = txn.Decl{Name: "alert-ack", Kind: txn.Normal, Writes: []txn.Write{rep("alert"), rep("result")}}
 	declDaemonStop    = txn.Decl{Name: "daemon-stop", Kind: txn.Normal, Writes: []txn.Write{rep("result")}}
 
+	// trust-credential: a credential this node holds, which is the commit point,
+	// and the certificate of the peer it was made with, when the same call brings
+	// one. A crash between the two leaves the credential alone, and the peer's
+	// certificate comes again with its next exchange.
+	declTrustCredential = txn.Decl{Name: "trust-credential", Kind: txn.Normal, Writes: []txn.Write{
+		rep("credential"), rep("peer", optional),
+	}}
+	declTrustRevocation = txn.Decl{Name: "trust-revocation", Kind: txn.Normal, Writes: []txn.Write{rep(RoleCredRevocation)}}
+	// trust-local-clear: the owner takes a node back into this node's trust. The
+	// removal is made durable before the call returns: a node removed from trust
+	// that came back after a crash would be a revocation lost without a trace.
+	declTrustLocalClear = txn.Decl{Name: "trust-local-clear", Kind: txn.Normal, Writes: []txn.Write{
+		rm(RoleLocalRevoked), syncDir("local-revoked-dir"),
+	}}
+	declPeerCert = txn.Decl{Name: "peer-cert", Kind: txn.Normal, Writes: []txn.Write{rep("peer")}}
+
 	// The recovery transactions.
 	//
 	// quarantine settles one damaged file: the sequence floors it raises, the
@@ -199,6 +221,7 @@ func Transactions() []*txn.Decl {
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
 		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
+		&declTrustCredential, &declTrustRevocation, &declTrustLocalClear, &declPeerCert,
 		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay, &declDerivedReplay,
 	}
 }

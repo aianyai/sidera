@@ -768,7 +768,7 @@ coverage dimensions.
 | Engine backend | `internal/node/testkit/fakeagent/engineagent` | `TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint`, `TestDeclareLeavesAFieldThatIsNilAsItWas`, `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`, `TestEveryEngineReasonMapsToACategoryAndCode`, `TestMePresentsTheCallersDeclarationAndFrontendValues`, `TestPeersReturnsTheVisibleNodeInTheSharedResultShape`, `TestDirectoryPresentsEndpointValuesAndPassesTheContinuation`, `TestProbeNeedsCredentialsThisCallerBoundBackendDoesNotHold` (the scenarios of sending, intake and session creation are in the engine's tests) |
 | Scripts | `internal/node/testkit/scenario`, `internal/node/testkit/scenario_imports_test.go` | `TestRunSetsUpDirectEndpointsThenRunsEachStepAndQuiescesAfterIt`, `TestRunStopsAtTheFirstFailedStepAndNamesIt`, `TestRunRefusesAScriptThatCannotRunBeforeTouchingTheSystem`, `TestRecvAndAckAllAcknowledgesEveryPageAndStopsAtAnEmptyOne`, `TestAScriptIsAScenarioOfTheCrashWalk`, `TestCheckRejects`, `TestACheckOfRepeatSightingsFailsOnlyWhatTheLedgerProvesIsAfterAnotherSighting`, `TestScenarioPackageDoesNotImportTheEngineOrAFixtureOfAnyLayer` |
 | Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`, `TestAFaultArmedForTheNextStartAppliesToThatProcess`, `TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`, `TestACrashIsWrittenToTheLedgerWithItsModeAndSeed`, `TestACrashThatNamesItsPointIsWrittenWithThePoint`, `TestNoSecondWriterAfterAdapterRestart`, `TestACrashCutsTheAdapterWithoutAShutdownAndACleanRestartShutsItDown`, `TestQuiesceWaitsUntilTheEngineHasHandledEveryNotificationTheAdapterSent`, `TestTheAdapterOfTheFixtureIsTakenOnThroughTheHost`, `TestAnExtraInstanceHasItsOwnAdapterRuntimeAndEndpoints`, `TestACallToTheAdapterHostThatReturnsAfterTheProcessWasAbandonedIsNeverAConfirmation`, `TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`, `TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`, `TestQuiesceRejectsAQuietRoundWhoseProcessWasKilled`, `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages`, `TestControlGenReachesEveryPathAndEveryControlRecordCloses` |
-| Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
+| Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestAssessSetsAsideTheDeclarationsNotYetWalked`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test
 
@@ -894,7 +894,14 @@ Normal difference for both whole walks and bounded acceptance runners. Callers
 supply all clean generation-1 hits and only generation 2 from completed
 trigger-only runs. Recovery declarations in clean runs and hits from the wrong
 generation are errors. Coverage and missing/undeclared keys use `Assess`;
-synchronous steps count only when actually observed. Third-generation hits and
+synchronous steps count only when actually observed. `Assess` is also where
+`crashwalk.NotYetWalked` applies: the declarations that no acceptance recipe walks yet
+are listed there with their reasons, their unreached keys are reported as `Deferred`
+rather than missing, and a listed declaration that a recording reached is reported in
+`StaleDeferred`, which fails the walk of the binary and the catalog evidence alike, so
+the list shrinks when a recipe is written and cannot hide a walked declaration. The unit
+rows of the store and the crash walks of the engine already cover the listed
+declarations; the acceptance recipes do not yet. Third-generation hits and
 interrupted prefixes cannot fill complete second-generation coverage.
 
 `CheckRecoveryRecord` validates every complete trigger-only run before it supplies
@@ -1504,8 +1511,9 @@ The storage reference defines the [measurement boundary](../storage/README.md#tr
 No shared measurement API or crash-walk backend is involved.
 
 The denominator is the complete `daemon.Table`, grouped by each owner's existing
-declarations. All 53 declarations have fixtures: txn 2, config 8, keys 2, store 32,
-engine 7 and daemon 2. A selected declaration without a fixture, nonempty write
+declarations. Of the 58 declarations, 53 have fixtures: txn 2, config 8, keys 2, store 32
+(the four of the trust and peer records have none yet), engine 7 (the removal of a node from
+trust has none yet) and daemon 2. A selected declaration without a fixture, nonempty write
 window or successful commit fails. Unknown and duplicate fixture names fail as well.
 Ordinary Go sub-benchmark selectors can validate an owner subset, such as
 `-bench '^BenchmarkTransactionWrites$/txn$'`; a subset is not complete-table

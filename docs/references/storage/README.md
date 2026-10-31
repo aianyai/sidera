@@ -622,8 +622,12 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations, and implements all 53 declarations: txn 2, config 8, keys 2,
-store 32, engine 7 and daemon 2. It runs one named sub-benchmark per declaration,
+owners' declarations. The table holds 58 declarations (txn 2, config 8, keys 2,
+store 36, engine 8 and daemon 2), and the suite has fixtures for 53 of them: the
+five of the trust and peer records and of the removal of a node from trust
+(`trust-credential`, `trust-revocation`, `trust-local-clear`, `peer-cert`,
+`trust-local-revoke`) have none yet, and until they do their sub-benchmarks of an
+unfiltered run fail. It runs one named sub-benchmark per declaration,
 including Recovery declarations. Every selected declaration must have a fixture
 and at least one nonempty successful commit through its owner's existing entry point on
 a real filesystem. An unknown or duplicate fixture fails immediately; a missing
@@ -681,6 +685,10 @@ state/
   admin/<h>.rec        result and fingerprint of an administrative operation
   alerts/<h>.rec       owner alerts
   seq/<h>.rec          sequence floors of one sending endpoint
+  trust/<h>.rec        the credentials this node holds, the revocations of credentials, and the
+                       nodes it removed from its own trust (kinds `credential`, `cred-revocation`,
+                       `local-revoked`)
+  peers/<h>.rec        the network-key certificate accepted from a peer and the highest serial seen
   archive/<date>.jsonl summaries of records that left the live files
 ```
 
@@ -733,7 +741,8 @@ is no separate path for it. This is a damaged
 record file; a body file whose content is not what its record says is a different
 case, settled through that one record (see the quarantine of a body below).
 
-A body is JSON written by `encoding/json` from structs of the package, with
+A body is JSON written by `encoding/json` from structs of the package (the two
+kinds of `trust/` that hold a signed record are the exception, below), with
 times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
 zeros, and read with `strictjson`. Step 7 also requires the body to be exactly
 what the encoder gives for what it decoded to, so no two files mean the same
@@ -753,6 +762,54 @@ keeps after it closes, so that it is not judged by the shape of a delivery
 accepted normally). A target record has neither a lost marker nor a loss cause,
 and the deduplication record has no flag for a lost digest: a body that still
 carries one is a damaged body.
+
+**Trust and peers.** `trust/` and `peers/` hold what this node keeps of other
+parties' signed statements and of its own decisions about trust. They are small,
+never swept and never expire (`RetainUntil` says "not finished" for each, so no
+sweep plans one). The store decodes a signed record only to its structure and
+never checks a signature, a validity window or a revocation: those need facts the
+store does not hold (the revocation set, the clock), so whoever reads a record into
+a decision verifies it first. Four kinds:
+
+| Directory and kind | Key | Body |
+| ------------------ | --- | ---- |
+| `trust/` `credential` | digest of the credential record, lowercase hex | the credential record's canonical bytes (`record.Record.Encode`), not JSON |
+| `trust/` `cred-revocation` | digest of the revoked credential, lowercase hex | the revocation record's canonical bytes, so it can be sent on as it is |
+| `trust/` `local-revoked` | node id | JSON `{"node","at","operation"}`: the node removed from this node's own trust, when, and the name of the administrative operation (the form of the `op` of an admin result) |
+| `peers/` `peer` | node id | JSON `{"cert":"<base64url record bytes>","serial_seen":n,"digest":"<hex>"}` |
+
+Step 7 for these kinds: the bytes are a canonical record (`record.Decode`, which
+is strict and re-encodes to the same bytes) of the type the kind names, whose
+payload passes the descriptor of the type (`record.Peek`), and the key says what
+the record is: a credential's key is its record digest, a revocation's key is the
+digest of the credential its payload embeds (derived from the payload, never taken
+from the sender), a peer's key is the node its certificate is for. A `peer` body is
+canonical JSON; `serial_seen` is at least 1 and not below the serial of the
+certificate, so it is the highest serial seen for the node and may be above the
+accepted certificate's (a certificate seen, and refused or expired, still advances
+it). `digest` is the record digest of the certificate seen at `serial_seen`
+(`record.SerialSeen.Digest`): when `serial_seen` is the certificate's serial it is
+the certificate's own digest and must match it; above that it is the digest of a
+certificate that was seen and not kept, and it is what lets a later certificate of
+the same serial but another content be told from the one seen (a conflict) instead
+of being taken for it. The record only
+moves up: the caller replaces it with a certificate of a serial not below the one
+it read (`PeerCert`). A `local-revoked` entry is the node's alone and no other node
+learns of it; it goes only with an explicit removal (`LocalRevokedClear`), never
+by retention. A damaged file of either directory is settled like any other
+(an alert, the file removed), so a damaged entry no longer holds what it recorded.
+The writes are `trust-credential` (the credential, which is the commit point, then
+the peer's certificate when the call has one), `trust-revocation`, `peer-cert` and
+`trust-local-clear` (one removal and the sync of the directory). The removal of a
+node from trust writes its entry, the revocations of its credentials and the
+result in one transaction the engine opens (`PrepareLocalRevoked`,
+`PrepareCredRevocation` and `PrepareAdminResult` before it begins, then
+`PutLocalRevoked` with `RoleLocalRevoked`, `PutCredRevocation` with
+`RoleCredRevocation` and `PutAdminResult` with `RoleResult`). Tests: the four
+vectors `credential`, `cred-revocation`, `local-revoked` and `peer` of
+`TestRecordGoldenVectors`, `TestTrustAndPeerRecordsAreHeldToTheirRules`,
+`TestTrustAndPeerRecordsComeBackFromTheDisk`, `TestLocalRevokedClearRemovesOnlyThatNode`,
+`TestTrustAndPeerRecordsAreNeverSwept`.
 
 **The time of the state.** Every stored delivery record, whatever its side, kind
 or shape, carries `state_at`, the moment the record entered its current state
@@ -1118,7 +1175,7 @@ durable before the next, so a file that is gone always has its alert.
 | `out/`, an out-lost record whose first line is unreadable | as for any `out/` file with an unreadable first line (the two rows for those): the sender's floors raised and another out-lost record, derived from the name of this one, written; alert | file removed |
 | `seq/`, first line trusted | alert | file overwritten with the floors its sender's source records say |
 | `seq/`, first line unreadable | alert | file removed |
-| any other directory | alert | file removed |
+| any other directory (`trust/` and `peers/` included) | alert | file removed |
 
 The first line of a file is trusted by the same rule as that of a live one
 (steps 1 to 4): a first line that parses but does not hash to the name of the file
@@ -1766,6 +1823,7 @@ so that the double cannot drift from what it stands for.
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheOwnersFileAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
+| trust and peer records | `internal/node/store/codec_trust.go`, `write_trust.go` | `trust_test.go`, `trust_fixtures_test.go`, the four trust and peer vectors of `golden_vectors_test.go`, the scenarios `trust-credential`, `trust-revocation`, `peer-cert` and `trust-local-clear` of `TestEveryTransactionConvergesFromEveryCrashState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules | `internal/node/store/recovery.go` | `recovery_scenarios_test.go` (each rule, and the settlement of each kind of damaged file, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |

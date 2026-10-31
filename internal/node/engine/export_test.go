@@ -512,3 +512,63 @@ func NotTheToken(valid string) map[string]string {
 func FirstPromptAttempt(a adapterproto.AttemptID) adapterproto.AttemptID {
 	return firstPromptAttempt(a)
 }
+
+// The steps the loop makes on the trust records, for the tests to run in it: the
+// commands that carry them to the loop come with the pairing and the owner's
+// operations on trust.
+
+// TestPeer is a certificate a peer presented, as the network layer hands it over.
+type TestPeer struct {
+	Cert record.Verified[record.NetworkKeyCertificate]
+	Rec  record.Record
+	Seen record.SerialSeen
+}
+
+func (p TestPeer) internal() peerCertificate {
+	return peerCertificate{cert: p.Cert, rec: p.Rec, seen: p.Seen}
+}
+
+// InstallCredential keeps a credential of this node and, when peer is not nil, the
+// certificate of the node it was made with.
+func (l LoopSide) InstallCredential(rec record.Record, peer *TestPeer) error {
+	var pc *peerCertificate
+	if peer != nil {
+		p := peer.internal()
+		pc = &p
+	}
+	return l.e.installCredential(rec, pc)
+}
+
+// InstallRevocation keeps the revocation of a credential of this node.
+func (l LoopSide) InstallRevocation(rec record.Record) error { return l.e.installRevocation(rec) }
+
+// RevokeCredential revokes the credential of the digest with the identity key.
+func (l LoopSide) RevokeCredential(digest record.Digest) error { return l.e.revokeCredential(digest) }
+
+// RevokeNodeLocally removes the node from this node's trust as the operation
+// name, and returns the credentials it revoked with it. The result stored is the
+// count of them.
+func (l LoopSide) RevokeNodeLocally(key admin.RequestKey, fp admin.Fingerprint, name string, node ident.NodeID) ([]record.Digest, error) {
+	var revoked []record.Digest
+	x := &opRun{now: l.e.d.Clock.Now(), key: key, fingerprint: fp, name: name}
+	result, err := l.e.revokeNodeLocally(x, node, func(r revokedLocally) ([]byte, error) {
+		revoked = r.Credentials
+		return []byte(fmt.Sprintf(`{"revoked":%d}`, len(r.Credentials))), nil
+	})
+	if err == nil {
+		l.e.view.putStored(key, fp, result)
+	}
+	return revoked, err
+}
+
+// ClearLocallyRevoked takes the node back into this node's trust.
+func (l LoopSide) ClearLocallyRevoked(node ident.NodeID) error {
+	return l.e.clearLocallyRevoked(node)
+}
+
+// VerifyReport verifies a status report the target signed, as the engine does for
+// the report a node answers with.
+func (l LoopSide) VerifyReport(rec record.Record, target ident.NodeID) error {
+	_, err := l.e.verifyReport(l.e.d.Clock.Now(), rec, target)
+	return err
+}

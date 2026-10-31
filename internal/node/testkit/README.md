@@ -119,7 +119,9 @@ and recipes.
 
 [`acceptance`](acceptance/README.md) separates reusable domain recipes from their
 in-process binding. Each run constructs a fresh catalog, uses the existing walk
-backend and reports actual observations against the complete daemon table.
+backend and reports actual observations against the complete daemon table. A
+declaration that no recipe walks yet is listed in `crashwalk.NotYetWalked` with its
+reason; every layer that judges coverage reads that one list through `Assess`.
 
 ## Identifiers of crash points
 

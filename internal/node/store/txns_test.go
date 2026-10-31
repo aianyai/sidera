@@ -78,6 +78,10 @@ var designTable = []struct {
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
 	{"alert-ack", txn.Normal, "alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},
+	{"trust-credential", txn.Normal, "credential:Replace peer:Replace[O]"},
+	{"trust-revocation", txn.Normal, "revocation:Replace"},
+	{"trust-local-clear", txn.Normal, "local-revoked:Remove local-revoked-dir:SyncDir"},
+	{"peer-cert", txn.Normal, "peer:Replace"},
 	{"quarantine", txn.Recovery, "seq-floor:Replace[O] session:Replace[MO] out-lost:Replace[O] alert:Replace overwrite:Replace[O] record:Remove[O] dir:SyncDir[O]"},
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
@@ -129,8 +133,9 @@ func TestTransactionTableIsValid(t *testing.T) {
 			}
 		}
 	}
-	if store.RoleEndpoint != "endpoint" || store.RoleResult != "result" {
-		t.Errorf("the exported roles are %q and %q: they are part of crash point identifiers and fixed", store.RoleEndpoint, store.RoleResult)
+	if store.RoleEndpoint != "endpoint" || store.RoleResult != "result" || store.RoleLocalRevoked != "local-revoked" || store.RoleCredRevocation != "revocation" {
+		t.Errorf("the exported roles are %q, %q, %q and %q: they are part of crash point identifiers and fixed",
+			store.RoleEndpoint, store.RoleResult, store.RoleLocalRevoked, store.RoleCredRevocation)
 	}
 	// Every name is a legal crash point name and none collides with a name of
 	// txn itself.

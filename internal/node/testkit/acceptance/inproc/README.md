@@ -16,7 +16,11 @@ Recovery writes, and stay within its fixed budget. Coverage diagnostics compare
 actual hits, including real setup, with the complete daemon declaration table.
 The combined clean and complete second-generation evidence must leave no missing
 Normal or Recovery declaration and no undeclared write; the declaration table,
-rather than fixed counts, determines completeness.
+rather than fixed counts, determines completeness. The declarations that
+`crashwalk.NotYetWalked` lists are owed and not missing, are counted apart in each
+layer's partition, and fail the evidence when a recording reaches one;
+`TestEveryDeclarationNotYetWalkedIsDeclared` holds each listed name to being a
+declaration of the program.
 
 `TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead` removes the real receive
 and acknowledgement drain and requires the domain judgement to reject the run.
@@ -243,7 +247,9 @@ clock write in its complete recovery record, retaining the original strict
 feedback and final-instance checks.
 
 `BenchmarkTransactionWrites` and its private owner fixtures are test-only real
-filesystem measurements of all 53 declarations across the six owners. The runner
+filesystem measurements of 53 of the 58 declarations across the six owners (the four
+declarations of the store's trust and peer records and the engine's removal of a node
+from trust have no fixture yet). The runner
 enumerates the complete daemon declaration table through the six owners, so a new
 declaration immediately needs a nonempty
 successful fixture in the unfiltered suite. Unknown and duplicate fixture names

@@ -46,6 +46,8 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `Control`, `ControlRequest` | Accept a control signal (`session.create`, `session.close`, `session.interrupt`, `endpoint.status`) from the endpoint a caller is, as `Send` does; a creation may carry an initial message (`Body`, `ContentType`). What the target made of it is read from the status of the message. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
+| `SetNetwork`, `Network`, `Membership` | The layer that carries the node's calls to other nodes, as the engine asks of it (`SetMembership`, `Connected`), and the snapshot of facts the engine pushes to it: its own certificate and record, the revocation set, the trust view, the serial state and the certificates of the stored peers. `Membership` has the fields of the network layer's own type so that the composition root converts one into the other as it is. For the composition root, before `Start`; no network pushes nothing. |
+| `NotePeerCertificate`, `RefusalReason` | What the network layer calls on the engine besides the handler: a member's certificate with its record and serial seen, re-decided against the stored state in the loop, and the name of the reason of a refusal in an error. The engine does not import the network package. |
 | `Inbound`, `Pull`, `QueryDirectory` | The engine as the `transport.Handler`: an envelope, a pull for delivery reports, or a live directory page, each judged under the origin the transport gives. |
 | `Directory`, `DirectoryQuery`, `DirectoryPage`, `DefaultDirectoryLimit` | A caller's bounded directory read through the outbound FIFO. The target returns only visible open endpoints, with live pagination bound to the full source address and this process. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
@@ -62,7 +64,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `OperationResult` | A read: the result stored for a request key, from either place a result is kept, and whether there is one. Taken while the node starts; writes nothing. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
-| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register` and `runtime-admit`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result, and the installation of an adapter, `adapter-install` (the rename of the staged directory, the pointer, the result, the discarding of the old version) and `adapter-install-current` (the result alone). |
+| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register` and `runtime-admit`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result, the removal of a node from this node's trust, `trust-local-revoke` (the entry that says so, the revocations of the credentials held with the node, the result), and the installation of an adapter, `adapter-install` (the rename of the staged directory, the pointer, the result, the discarding of the old version) and `adapter-install-current` (the result alone). |
 | `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`; the other methods read. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host (its calls to an adapter, and `Counts`, which only reads). |
 
@@ -459,8 +461,17 @@ delivery to a session: when it is judged and how the verdict is recorded.
   rules from the record the constructor makes, and holds no body.
 - **A local source is never judged by the node's rules.** Which requests are local is
   the transport's to say (`Origin.Local`); a local request is judged by the endpoint's
-  declarations alone, and a remote one by the rules with no trust, which is denied
-  until trust exists.
+  declarations alone, and a remote one by the rules with this node's trust in the node
+  it came from (`trust.Evaluate` over the credentials this node holds): a node without a
+  credential, or whose credential is revoked, expired or removed by the owner, is denied.
+- **The trust records count only after the engine verified them, and every change of them
+  ends in one place.** The store keeps the credentials, their revocations, the owner's
+  removals and the peers' certificates as structure; `buildTrust` verifies each at the scan
+  entry and a record that does not verify is absent and logged. A change is written first and
+  taken into memory after the commit, and then `trustChanged` makes the view again and pushes
+  the snapshot to the network (`publishMembership`), so no path pushes a snapshot of its own.
+  A peer's certificate is stored only through `NotePeerCertificate`, and only for a node the
+  network layer judged a member; the engine adds no member check of its own.
 - **A pull is answered for the recipients it names, from the records the target
   holds.** For each recipient the pull names, the target gives the signed report of
   its record, or lists the recipient in `NoRecord` when it holds none for the
@@ -577,6 +588,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   engine with `SetTransport` before `Start`; give `Deps.Keys` the keys of this node, loaded
   after the transaction layer recovered; an engine given the keys of another node does
   not open.
+- Give the engine the network layer with `SetNetwork` before `Start` when there is one, and
+  convert `engine.Membership` to the layer's own type in the adapter between the two; the
+  engine pushes the first snapshot in `Start`, before the loop serves.
 - Call the loopback from the outbound worker only, which `SetTransport` makes true.
 - Treat `Err() != nil` after `Done` as the order to exit and rescan.
 - Run the long work of a periodic task outside the loop: a task runs in it, and

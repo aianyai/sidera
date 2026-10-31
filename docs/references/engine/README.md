@@ -459,7 +459,7 @@ view's queue of an endpoint holds those too: a control signal is not for an agen
 The second check is the authorization rules asked at the moment the body would be handed
 out (`evaluate`, the one place the engine asks them, for intake as for the hand-out): a
 local sender is judged by the declarations of the endpoint alone and any other by the
-node's rules, which a node elsewhere does not satisfy yet. A message the rules still
+node's rules, with this node's trust in the sender's node (see "Trust and peers"). A message the rules still
 allow is handed out; a suspended one stays queued, with no lease and nobody told; a
 refused one is closed by `delivery.Record.Handout` (rejected as `second_check_failed`
 when its body was never handed out, `delivery_unknown` when it was) and its body goes with
@@ -859,12 +859,86 @@ then the endpoint (a closed endpoint is rejected as `endpoint_closed`; one that 
 there, one whose creation has not ended and a runtime endpoint, which takes control
 signals only, as `endpoint_missing`), then the authorization check, then the deadline and the endpoint's
 backlog. A request from the loopback is judged by the endpoint's declarations alone; one
-that came any other way is judged by the node's rules with no trust, which is denied until
-trust exists. The accepted record holds the body, the rejected one does not. The reports
+that came any other way is judged by the node's rules, with this node's trust in the node it came
+from (a node this node holds no credential with is denied). The accepted record holds the body, the rejected one does not. The reports
 of the receipt are signed before anything is written and the records, with the source
 record the evidence of a reply changed, are written in one transaction. While the wall
 clock cannot be trusted nothing is signed, so an envelope and a pull are refused and the
 sender tries again.
+
+**Trust and peers.** The engine keeps, besides the endpoints, what `state/trust/` and
+`state/peers/` hold: the credentials this node holds, the revocations of credentials,
+the nodes the owner removed from this node's trust, and the certificate accepted from
+each peer with the highest serial seen for it. The store keeps them as structure only;
+the engine verifies each record when it builds the state at the scan entry (the
+signatures of a credential and of a revocation, that they are of a credential of this
+node, the signature of a certificate) and a record that does not verify is as if it were
+not there, logged and left on disk. The state belongs to the loop and changes only after
+the write that makes the change durable returned (`trust.go`).
+
+- **The trust view** is what `trust.Evaluate` reads: this node as `Local`, the default
+  settings, the credentials this node holds (only its own, for the engine never holds a
+  third party's), the digests of the revoked ones, the removed nodes, and no declared
+  inheritance, so inherited trust cannot hold. The retired nodes are added at each use
+  from the revocation set (`RevocationSet().TrustView`), the one source of retirement. It
+  is rebuilt whole when a record changes and never changed in place, since the network
+  keeps the snapshot it was given.
+- **`evaluate`** sets the trust of a request that did not come over the loopback to the
+  outcome of `trust.Evaluate` for the node it came from, at the time of the command. A node
+  with a credential that is neither revoked nor expired, that the owner has not removed and
+  that is not retired is allowed directly, and the default policy lets such a node do what a
+  member may; any other is denied. A local source is not touched. The trust that suspends a
+  request rests on a voucher, which this node does not keep, so the engine's error for a
+  suspended request stays an error.
+- **`acceptedKey(node)`** is, for this node, the key of its certificate in force, and for
+  another node the key of the certificate stored for it judged by the revocation set against
+  the highest serial seen; a node with no stored certificate has none, so what is signed in
+  its name fails to verify. Every verification of a node's signature (a report, a control
+  reply, the evidence of a reply) goes through it. A certificate of a lower serial does not
+  verify once the serial seen has passed it.
+- **`NotePeerCertificate`** is what the network layer calls, before a connection becomes a
+  member's, with the certificate, the record it was verified from (a verified certificate
+  carries no signature, so the record is what is stored) and the serial state seen. It runs
+  in the loop and waits for it. The certificate is re-decided against the state stored now
+  (`record.DecideSerial`): a serial below the highest seen, the same serial with other
+  content, this node's own certificate and a record that is not the certificate's are refused
+  with `invalid_argument`; the very certificate seen is the peer's reconnect and writes
+  nothing. The peer record (`peer-cert`) is written only when the certificate has a higher
+  serial than the accepted one, or the serial seen advances, and it carries the digest of the
+  certificate seen at the serial seen, so that the same serial with another content is later
+  a conflict and not taken for the same certificate. The caller never hands over the
+  certificate of a node that is not a member: a stranger's serial is remembered by the
+  network in memory only, so that the disk does not grow with whoever connects. `RefusalReason`
+  gives the name of the reason of an engine refusal in an error, and false for any other.
+- **The steps on trust** (`installCredential`, `installRevocation`, `revokeCredential`,
+  `revokeNodeLocally`, `clearLocallyRevoked`) run in the loop and are what the pairing and the
+  owner's operations on trust will call; nothing exposes them yet. A credential is stored with,
+  optionally, the certificate of the node at its other end (`trust-credential`: the credential
+  is the commit point). A revocation is made with the identity key, which only these steps use
+  (`Keys.IdentitySigner`), and never while the identity is retired. Removing a node from trust is
+  one transaction the engine opens, `trust-local-revoke`: the entry of the removal is the
+  commit point, then the revocation of each credential this node holds with the node, then the
+  result of the operation; the first removal's time and operation name are kept when it is
+  done again, and done again after a crash it writes what is missing. Clearing the removal
+  (`trust-local-clear`) restores nothing that was revoked: the credentials revoked with the
+  removal stay revoked, and the node is trusted again only through a new credential.
+- **The network.** The engine defines `Network` (`SetMembership`, `Connected`) and its own
+  `Membership`, which has the fields of the network layer's type and none other, so the
+  composition root converts between them as they are; the engine imports nothing of the
+  network package. `SetNetwork` is called before `Start`; no network means nothing is pushed.
+  The snapshot is this node's certificate and its record, the revocation set, the trust view,
+  the serial state of every stored peer and no authorized persons, and the verified certificates
+  held for peers. It is pushed once when the engine starts, from the state the scan built and
+  before the loop serves, and again after the durable write of every change of those facts
+  (a credential, a revocation, a removal and its clear, a peer's certificate), by one function
+  (`publishMembership`) that every change ends in. A renewal of this node's certificate is made
+  by a periodic task of the composition root, which the engine does not see; after each
+  successful periodic task the engine compares the digest of the certificate in force with the
+  one last pushed and pushes when it changed, so the network closes its connections and the next
+  exchange presents the new certificate. A failed push is logged and the next change pushes a
+  whole new snapshot. The facts also change with time alone (a credential expires): nothing
+  pushes for that, and the snapshot is judged against the clock of the network layer until the
+  next change, which is a known limit.
 
 **Answering a pull.** A pull names a message and the recipients on this node the asking
 source tracks a delivery of it to. For each recipient the answer holds the signed
@@ -1619,6 +1693,10 @@ reproducible).
 | A session nobody controls is one alert for the control record of its creation, however often the node starts | `alerts.go` (`raiseAlertOnce`), `create.go` (`alertUncontrolled`) | `TestAnUncontrolledCreationIsToldOnceAcrossRestarts` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |
 | The owner's operations recover from a crash at every point | `transactions.go` | `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
+| A peer's certificate is kept, its serial only moves forward, and its reports verify only then | `trust.go` (`planPeer`, `NotePeerCertificate`), `signing.go` (`acceptedKey`) | `TestAPeerCertificateIsKeptAndItsSerialOnlyMovesForward` |
+| A node with a credential is let in, and stops when the credential is revoked or the node removed; the view is built from verified records | `trust.go`, `inbound.go` (`evaluate`) | `TestATrustedNodeIsLetInAndStopsWhenItsCredentialIsRevokedOrTheNodeRemoved`, `TestTheTrustViewIsBuiltFromVerifiedRecordsOfTheDisk` |
+| The network is given a snapshot at the start, after each change of the facts and after a renewal of the certificate | `network.go`, `engine.go` (`Start`, `fire`) | `TestTheNetworkIsGivenAFreshSnapshotWhenTheFactsChange`, `TestTheNetworkIsGivenTheRenewedCertificate` |
+| The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |
 | The copy is what is judged | `operations_adapters.go` (`stagePackage`) | `TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource`, `TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree` |

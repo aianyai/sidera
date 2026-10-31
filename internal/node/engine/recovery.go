@@ -164,6 +164,7 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 				return nil, rep, err
 			}
 			e.view.addConfigResults(d.Config.LastOperations())
+			e.trust = e.buildTrust(sc)
 			if err := e.loadFeedback(sc, d.Clock.Now()); err != nil {
 				return nil, rep, err
 			}

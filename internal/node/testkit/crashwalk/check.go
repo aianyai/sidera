@@ -125,6 +125,13 @@ type Coverage struct {
 	// MissingRecovery are declared keys of recovery transactions that no hit
 	// reached.
 	MissingRecovery []fsx.Key
+	// Deferred are the declared keys of the declarations NotYetWalked lists that no
+	// hit reached: owed, and not counted as missing until the list says otherwise.
+	Deferred []fsx.Key
+	// StaleDeferred names the declarations NotYetWalked lists that a hit reached:
+	// they are walked now and the entry is to be deleted. It is an error for every
+	// consumer, so that the list shrinks as the recipes grow.
+	StaleDeferred []string
 	// Undeclared are keys that were hit and that no declaration lists: a write that
 	// does not go through a declared transaction.
 	Undeclared []fsx.Key
@@ -140,8 +147,11 @@ type PathCount struct {
 }
 
 // Assess compares hits with the declared keys of the table. A sync step counts as
-// hit when it was reached, even though the walk never kills there.
-func Assess(table *txn.Table, hits []Hit) Coverage {
+// hit when it was reached, even though the walk never kills there. The keys of the
+// declarations NotYetWalked lists are reported apart (see Coverage.Deferred).
+func Assess(table *txn.Table, hits []Hit) Coverage { return assess(table, hits, NotYetWalked) }
+
+func assess(table *txn.Table, hits []Hit, notYetWalked map[string]string) Coverage {
 	declared := map[fsx.Key]txn.Kind{}
 	for _, k := range table.Keys() {
 		declared[k.Key] = k.Kind
@@ -156,18 +166,30 @@ func Assess(table *txn.Table, hits []Hit) Coverage {
 		}
 	}
 	var c Coverage
+	walkedDeferred := map[string]bool{}
 	for _, k := range table.Keys() {
 		count, missing := &c.Normal, &c.MissingNormal
 		if k.Kind == txn.Recovery {
 			count, missing = &c.Recovery, &c.MissingRecovery
 		}
+		_, deferred := notYetWalked[k.Tag.Tx]
 		count.Declared++
-		if reached[k.Key] {
+		switch {
+		case reached[k.Key]:
 			count.Reached++
-		} else {
+			walkedDeferred[k.Tag.Tx] = walkedDeferred[k.Tag.Tx] || deferred
+		case deferred:
+			c.Deferred = append(c.Deferred, k.Key)
+		default:
 			*missing = append(*missing, k.Key)
 		}
 	}
+	for name, walked := range walkedDeferred {
+		if walked {
+			c.StaleDeferred = append(c.StaleDeferred, name)
+		}
+	}
+	sort.Strings(c.StaleDeferred)
 	for k := range undeclared {
 		c.Undeclared = append(c.Undeclared, k)
 	}

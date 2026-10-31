@@ -97,6 +97,12 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 			return time.Time{}, false
 		}
 		return r.Acked.At.Add(AlertAckRetention), true
+	case CredentialRecord, CredRevocationRecord, LocalRevokedRecord, PeerRecord:
+		// Trust and the keys of peers are facts this node has to keep for as long
+		// as they can be asked about; a revocation or a local removal that left
+		// the live files would let what it ended come back. Only the owner's
+		// explicit removal (LocalRevokedClear) takes one away.
+		return time.Time{}, false
 	}
 	return time.Time{}, false
 }

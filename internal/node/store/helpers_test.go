@@ -221,6 +221,14 @@ var (
 		{Role: "clock", Op: txn.OpReplace},
 		{Role: store.RoleResult, Op: txn.OpReplace},
 	}}
+	// declXRevoke is the shape of the transaction that removes a node from this
+	// node's trust: the local removal, the revocations of its credentials, then the
+	// result.
+	declXRevoke = txn.Decl{Name: "x-revoke", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RoleLocalRevoked, Op: txn.OpReplace},
+		{Role: store.RoleCredRevocation, Op: txn.OpReplace, Many: true, Optional: true},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
 	// declXLayout is what the composition root declares for the layout rule.
 	declXLayout = txn.Decl{Name: "layout", Kind: txn.Recovery, Writes: []txn.Write{
 		{Role: "dir", Op: txn.OpMakeDir, Many: true, Optional: true},
@@ -249,7 +257,7 @@ func program(t testing.TB) *txn.Table {
 
 func programTable() (*txn.Table, error) {
 	decls := append(txn.Internal(), store.Transactions()...)
-	decls = append(decls, &declXAdmit, &declXClear, &declXLayout)
+	decls = append(decls, &declXAdmit, &declXClear, &declXRevoke, &declXLayout)
 	return txn.NewTable(decls...)
 }
 

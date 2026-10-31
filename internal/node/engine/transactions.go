@@ -86,10 +86,23 @@ var declAdapterInstallCurrent = txn.Decl{Name: "adapter-install-current", Kind: 
 	{Role: store.RoleResult, Op: txn.OpReplace},
 }}
 
+// declTrustLocalRevoke removes a node from this node's trust: the entry that says
+// so is the commit point, so a crash after it leaves the node refused, and the
+// revocations of the credentials this node holds with it, which the entry makes
+// necessary, follow it; a restart or a resend finds the entry and writes the ones
+// still missing. The result is last. It is the engine's because the entry is the
+// store's, the revocations are the credentials' and the result is the owner's
+// record of the operation, one transaction of the three.
+var declTrustLocalRevoke = txn.Decl{Name: "trust-local-revoke", Kind: txn.Normal, Writes: []txn.Write{
+	{Role: store.RoleLocalRevoked, Op: txn.OpReplace},
+	{Role: store.RoleCredRevocation, Op: txn.OpReplace, Many: true, Optional: true},
+	{Role: store.RoleResult, Op: txn.OpReplace},
+}}
+
 // Transactions returns the declarations of the transactions of the engine that
 // write the files of more than one owner, for the composition root to put in
 // the table of the program. The transactions of one owner are declared by the
 // owner.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent}
+	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent, &declTrustLocalRevoke}
 }

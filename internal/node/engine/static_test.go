@@ -18,8 +18,8 @@ func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
 		"Ack", "Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
 		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
-		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NodeSettings", "OperationResult", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
-		"Recv", "RecvObserved", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
+		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NodeSettings", "NotePeerCertificate", "OperationResult", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
+		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})
 	var got []string
@@ -68,7 +68,7 @@ func TestTheEngineDeclaresTheTransactionsOfTwoOwnersItOpens(t *testing.T) {
 		got = append(got, d.Name)
 	}
 	sort.Strings(got)
-	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit", "trust-local-revoke"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("engine.Transactions = %v, want %v", got, want)
 	}
 }

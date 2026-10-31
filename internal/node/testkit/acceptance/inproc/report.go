@@ -93,8 +93,8 @@ func RecordCatalog(t testing.TB) (CatalogEvidence, error) {
 		return CatalogEvidence{}, err
 	}
 	c := analysis.Coverage
-	if len(c.MissingNormal) != 0 || len(c.MissingRecovery) != 0 || len(c.Undeclared) != 0 {
-		return CatalogEvidence{}, fmt.Errorf("incomplete catalog evidence: missing_normal=%v missing_recovery=%v undeclared=%v", c.MissingNormal, c.MissingRecovery, c.Undeclared)
+	if len(c.MissingNormal) != 0 || len(c.MissingRecovery) != 0 || len(c.Undeclared) != 0 || len(c.StaleDeferred) != 0 {
+		return CatalogEvidence{}, fmt.Errorf("incomplete catalog evidence: missing_normal=%v missing_recovery=%v undeclared=%v stale_not_yet_walked=%v", c.MissingNormal, c.MissingRecovery, c.Undeclared, c.StaleDeferred)
 	}
 	return evidence, nil
 }
@@ -148,7 +148,7 @@ func hitKeys(hits []crashwalk.Hit) []string {
 func reportCoverage(t testing.TB, path string, hits []crashwalk.Hit) {
 	t.Helper()
 	c := crashwalk.Assess(harness.ProgramTable(t), hits)
-	t.Logf("coverage path=%s normal=%d/%d recovery=%d/%d missing_normal=%v missing_recovery=%v undeclared=%v", path, c.Normal.Reached, c.Normal.Declared, c.Recovery.Reached, c.Recovery.Declared, c.MissingNormal, c.MissingRecovery, c.Undeclared)
+	t.Logf("coverage path=%s normal=%d/%d recovery=%d/%d missing_normal=%v missing_recovery=%v deferred=%d undeclared=%v", path, c.Normal.Reached, c.Normal.Declared, c.Recovery.Reached, c.Recovery.Declared, c.MissingNormal, c.MissingRecovery, len(c.Deferred), c.Undeclared)
 }
 
 func reportProvenance(t testing.TB, scenario, trigger string, hits []crashwalk.Hit) {

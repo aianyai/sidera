@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // The identifiers of the fixtures, written out: node(2), ep(1), ep(2), ep(3).
@@ -116,6 +117,10 @@ func TestParseKeyRoundTripsEveryKind(t *testing.T) {
 		{store.KindAdmin, store.AdminKeyBytes(admin.RequestKey{ID: opid}), admin.RequestKey{ID: opid}},
 		{store.KindAdmin, store.AdminKeyBytes(admin.RequestKey{Person: person, ID: opid}), admin.RequestKey{Person: person, ID: opid}},
 		{store.KindAlert, store.AlertKeyBytes(alert), alert},
+		{store.KindCredential, store.DigestKeyBytes(record.Digest{7}), record.Digest{7}},
+		{store.KindCredRevocation, store.DigestKeyBytes(record.Digest{7}), record.Digest{7}},
+		{store.KindLocalRevoked, store.NodeKeyBytes(node(5)), node(5)},
+		{store.KindPeer, store.NodeKeyBytes(node(5)), node(5)},
 	} {
 		got, err := store.ParseKey(c.kind, c.key)
 		if err != nil {
@@ -176,6 +181,11 @@ func TestParseKeyRefusals(t *testing.T) {
 		{"alert key in capitals", store.KindAlert, strings.ToUpper(aid)},
 		{"alert key of 31 digits", store.KindAlert, aid[1:]},
 		{"alert key of zeros", store.KindAlert, strings.Repeat("0", 32)},
+		{"credential key in capitals", store.KindCredential, strings.ToUpper(strings.Repeat("ab", 32))},
+		{"credential key of 63 digits", store.KindCredential, strings.Repeat("ab", 32)[1:]},
+		{"credential key of zeros", store.KindCredRevocation, strings.Repeat("0", 64)},
+		{"local-revoked key that is an endpoint", store.KindLocalRevoked, e1},
+		{"peer key with two fields", store.KindPeer, n2 + " x"},
 		{"a kind that is not a kind of state", store.Kind("clock"), "clock"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -250,6 +260,10 @@ func reencodeSimpleKey(t *testing.T, kind store.Kind, k any) []byte {
 		return store.AdminKeyBytes(v)
 	case store.AlertID:
 		return store.AlertKeyBytes(v)
+	case record.Digest:
+		return store.DigestKeyBytes(v)
+	case ident.NodeID:
+		return store.NodeKeyBytes(v)
 	case store.OutLostKey:
 		b, err := v.Bytes()
 		if err != nil {

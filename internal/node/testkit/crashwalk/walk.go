@@ -172,6 +172,9 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 	rep.Sources = analysis.Sources
 	rep.Normal, rep.Recovery = analysis.Coverage.Normal, analysis.Coverage.Recovery
 	rep.RecoveryNormalPlanned = len(analysis.Targets)
+	if stale := analysis.Coverage.StaleDeferred; len(stale) > 0 {
+		return rep, fmt.Errorf("crashwalk: NotYetWalked lists declarations that no longer belong in it: %v", stale)
+	}
 	if missing := requiredKeys(analysis.Coverage.MissingNormal, required); len(missing) > 0 {
 		return rep, missingWrites("declared writes were never reached by any recording", missing)
 	}

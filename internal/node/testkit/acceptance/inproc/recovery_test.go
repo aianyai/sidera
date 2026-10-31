@@ -93,8 +93,8 @@ func recoveryEvidence(t *testing.T, evidence CatalogEvidence, cleanHits []crashw
 	if count != expectedTargets {
 		t.Errorf("Recovery targets completed=%d expected=%d", count, expectedTargets)
 	}
-	if len(c.MissingNormal) != 0 || len(c.MissingRecovery) != 0 || len(c.Undeclared) != 0 {
-		t.Errorf("incomplete catalog evidence: missing_normal=%v missing_recovery=%v undeclared=%v", c.MissingNormal, c.MissingRecovery, c.Undeclared)
+	if len(c.MissingNormal) != 0 || len(c.MissingRecovery) != 0 || len(c.Undeclared) != 0 || len(c.StaleDeferred) != 0 {
+		t.Errorf("incomplete catalog evidence: missing_normal=%v missing_recovery=%v undeclared=%v stale_not_yet_walked=%v", c.MissingNormal, c.MissingRecovery, c.Undeclared, c.StaleDeferred)
 	}
 	t.Logf("recovery completed=%d records=%d", count, len(recordings))
 	t.Logf("runs record=%d recovery_record=%d recovery_crash=%d recovery_normal_crash=%d total=%d", len(evidence.Clean), len(recordings), count, derivedCount, len(evidence.Clean)+len(recordings)+count+derivedCount)

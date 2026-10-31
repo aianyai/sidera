@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -262,11 +263,20 @@ func AdminKeyBytes(k admin.RequestKey) []byte {
 	return []byte(who + " " + hex.EncodeToString(k.ID[:]))
 }
 
+// DigestKeyBytes is the key text of a credential or of a credential revocation:
+// the digest of the credential, in lowercase hex.
+func DigestKeyBytes(d record.Digest) []byte { return []byte(d.String()) }
+
+// NodeKeyBytes is the key text of a local-revoked or peer record: the node.
+func NodeKeyBytes(id ident.NodeID) []byte { return []byte(id.String()) }
+
 // AlertKeyBytes is the key text of an alert.
 func AlertKeyBytes(id AlertID) []byte { return []byte(id.String()) }
 
 // ParseKey parses key bytes as a key of the kind: an OutKey, TargetKey,
-// ident.EndpointID, CheckpointKey, admin.RequestKey or AlertID. It is step 4 of
+// ident.EndpointID, CheckpointKey, admin.RequestKey, AlertID, record.Digest
+// (credential and credential revocation) or ident.NodeID (local-revoked and
+// peer). It is step 4 of
 // the validation of a record file.
 func ParseKey(kind Kind, key []byte) (any, error) {
 	fields := strings.Split(string(key), " ")
@@ -373,6 +383,23 @@ func ParseKey(kind Kind, key []byte) (any, error) {
 			return nil, err
 		}
 		return ParseAlertID(fields[0])
+	case KindCredential, KindCredRevocation:
+		if err := want(1); err != nil {
+			return nil, err
+		}
+		var d record.Digest
+		if err := parseHex(d[:], fields[0]); err != nil {
+			return nil, fmt.Errorf("credential digest: %w", err)
+		}
+		if d.IsZero() {
+			return nil, errors.New("credential digest: all zero")
+		}
+		return d, nil
+	case KindLocalRevoked, KindPeer:
+		if err := want(1); err != nil {
+			return nil, err
+		}
+		return ident.ParseNodeID(fields[0])
 	}
 	return nil, fmt.Errorf("%q is not a kind of state/", kind)
 }

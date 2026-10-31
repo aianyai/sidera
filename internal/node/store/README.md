@@ -1,7 +1,8 @@
 # store
 
 The durable records of `state/`: deliveries and their bodies, endpoint state,
-checkpoints, results, alerts, the archive and the quarantine. Read
+checkpoints, results, alerts, the credentials and revocations of trust, the
+certificates of peers, the archive and the quarantine. Read
 [../../../docs/references/storage/README.md](../../../docs/references/storage/README.md)
 for the formats, the reasons and what the tests prove.
 
@@ -23,6 +24,9 @@ engine applies the delivery rules and calls the writes.
 | `New(w)`, `Transactions()` | One `Store` over the program's writer; the declarations the composition root adds to its table. |
 | `EncodeRecord`, `DecodeRecord` | The file of a record, and its validation in seven steps with a class of damage. The seventh step asks the delivery package whether every delivery record in the body is one its rules can produce (`Record.Valid()`), and the same question is asked before a record is written. A message id in a key is judged by `envelope.ValidMessageID`. |
 | `OutRecord`, `OutLostRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
+| `CredentialRecord`, `CredRevocationRecord`, `LocalRevokedRecord`, `PeerRecord` | The records of `state/trust/` and `state/peers/`. The two that hold a signed record keep it as `record.Record`, checked to its structure and never to its signature: whoever reads one into a decision verifies it. They are kept for good (`RetainUntil` never finishes them). |
+| `Store.TrustCredential`, `TrustRevocation`, `PeerCert`, `LocalRevokedClear` | The transactions of those records: a credential then the peer's certificate it came with, a revocation, a peer's certificate replaced whole, and the one removal an owner's decision makes (`trust-local-clear`). |
+| `PrepareLocalRevoked`, `PutLocalRevoked`, `PrepareCredRevocation`, `PutCredRevocation` | The two halves of a write into a transaction another package opens, like those of an endpoint and a result, under the roles `RoleLocalRevoked` and `RoleCredRevocation`: the engine's removal of a node from trust writes the entry, the revocations of its credentials and the result in one transaction. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `ControlEffect`, `CreationEffect`, `ControlEffect.PromptRecords` | The endpoint and initial prompt effects of a confirmed creation. The prompt records use the successful control record's delivery time; the writer and the engine view use the same construction. |
