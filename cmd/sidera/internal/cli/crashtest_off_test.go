@@ -17,7 +17,7 @@ func TestOrdinaryRandomnessIgnoresTestEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer close()
-	if c.random != rand.Reader || c.observer != nil || c.afterRecv != nil {
+	if c.random != rand.Reader || c.tempRandom != nil || c.observer != nil || c.afterRecv != nil {
 		t.Fatal("ordinary process installed test facilities")
 	}
 }

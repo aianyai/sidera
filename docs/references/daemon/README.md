@@ -17,6 +17,25 @@ shape in the interface that owns it.
 
 ## What
 
+### Randomness and filesystem ownership
+
+`Config.Rand` supplies keys, engine randomness and `Env.Rand`; nil resolves to
+`crypto/rand.Reader`. `Config.TempRand` optionally supplies temporary-file names
+for every OS filesystem the daemon opens, including Init, Start and adapter
+package readers. Its nil default is the resolved `Rand`, preserving the existing
+shared stream and its consumption behavior. Both supplied readers must be safe
+for concurrent use. Defaults are resolved only by `Config.withDefaults`.
+
+An explicit `Config.FS` retains its own reader unchanged. The daemon still owns
+opening its default filesystem, creating a missing Init directory, refusing a
+missing Start directory, permissions, locking and recovery. `fsx.OpenOS` keeps its
+existing explicit-reader contract. Independent readers let a caller isolate
+identifier allocations from asynchronous temporary-file consumption; a lock alone
+serializes a shared stream but cannot fix which consumer obtains its next bytes.
+
+`random_test.go` verifies default sharing, independent temporary draws and an
+explicit filesystem's own reader through real Init and Start recovery writes.
+
 ### The start
 
 `daemon.Start` takes fifteen steps in this order. Each logs `startup step N begin`

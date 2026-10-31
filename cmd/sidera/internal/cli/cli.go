@@ -32,13 +32,14 @@ type Config struct {
 
 type command struct {
 	Config
-	home      string
-	json      bool
-	help      bool
-	random    io.Reader
-	observer  txn.Observer
-	afterRecv func()
-	arguments *commandArguments
+	home       string
+	json       bool
+	help       bool
+	random     io.Reader
+	tempRandom io.Reader
+	observer   txn.Observer
+	afterRecv  func()
+	arguments  *commandArguments
 }
 type usageError struct{ message string }
 

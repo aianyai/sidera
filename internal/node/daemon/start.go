@@ -210,7 +210,7 @@ var _ engine.Adapters = (*adapterhost.Host)(nil)
 // system, whatever file system the node's data directory is on, and the engine is
 // given the reading half only.
 func (d *Daemon) openPackage(dir string) (fsx.Reader, error) {
-	return fsx.OpenOS(dir, d.cfg.Rand)
+	return fsx.OpenOS(dir, d.cfg.TempRand)
 }
 
 // Step 6: the scan of state/ (the engine's first recovery entry) runs before the

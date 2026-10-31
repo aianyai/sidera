@@ -68,11 +68,16 @@ and any cleanup failure in the error message. Only these local failures use
 that wrapper and retain the shared error mapping.
 
 Only a `crashtest` build reads `SIDERA_TEST_SEED`, `SIDERA_CRASH_GEN`,
-`SIDERA_CRASH_AT` and `SIDERA_CRASH_RECORD`. The seed selects a locked ChaCha8
-reader derived with a SHA-256 domain containing the seed, command role
-(`init`, `daemon`, `cli`) and positive generation (default 1). Fixtures supply
+`SIDERA_CRASH_AT` and `SIDERA_CRASH_RECORD`. A nonempty seed selects two independently
+locked ChaCha8 readers, directly derived with SHA-256 from distinct fixed purpose
+namespaces plus the seed, command role (`init`, `daemon`, `cli`) and positive
+generation (default 1). The semantic reader retains the `sidera-test-random-v1`
+namespace; the temporary-name reader uses `sidera-test-temp-random-v1`. Local
+commands pass the latter as `daemon.Config.TempRand`, so asynchronous filesystem
+work cannot change subsequent identifiers by consuming their random stream. Fixtures supply
 call-specific seeds; the fake runtime already derives `<base>/<native-ref>/<n>`
-for its CLI calls. Empty seeds retain system randomness. The command opens the
+for its CLI calls. Empty seeds retain system randomness and leave `TempRand` nil;
+ordinary builds do the same without reading these test controls. The command opens the
 record with `O_APPEND`, installs the daemon's observer explicitly, and closes the
 record after completion. Each process owns a separate record file. The daemon
 role reads its record, target and generation together, then immediately removes

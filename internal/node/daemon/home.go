@@ -21,7 +21,7 @@ func openHome(cfg Config, home string) (fsx.FS, error) {
 	if cfg.FS != nil {
 		return cfg.FS, nil
 	}
-	fsys, err := fsx.OpenOS(home, cfg.Rand)
+	fsys, err := fsx.OpenOS(home, cfg.TempRand)
 	switch {
 	case err == nil:
 		return fsys, nil

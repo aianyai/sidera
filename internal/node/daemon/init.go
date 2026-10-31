@@ -59,9 +59,9 @@ func Init(ctx context.Context, cfg Config) (InitReport, error) {
 
 	fsys := cfg.FS
 	if fsys == nil {
-		if fsys, err = fsx.OpenOS(home, cfg.Rand); errors.Is(err, fs.ErrNotExist) {
+		if fsys, err = fsx.OpenOS(home, cfg.TempRand); errors.Is(err, fs.ErrNotExist) {
 			if err = fsx.MakeRoot(home); err == nil {
-				fsys, err = fsx.OpenOS(home, cfg.Rand)
+				fsys, err = fsx.OpenOS(home, cfg.TempRand)
 			}
 		}
 		if err != nil {

@@ -79,11 +79,15 @@ type Config struct {
 	Home string
 	// Clock is the time source; nil is the real clock.
 	Clock clock.Clock
-	// Rand is the source of randomness of the whole node: keys, tokens, names of
-	// temporary files. Nil is crypto/rand, which this package is the only runtime
-	// package to read. It is read by several goroutines and must be safe for
+	// Rand supplies keys, tokens and other node randomness. Nil is crypto/rand,
+	// which this package is the only runtime package to read. It also supplies
+	// temporary-file names unless TempRand overrides it. It must be safe for
 	// concurrent use.
 	Rand io.Reader
+	// TempRand supplies temporary-file names for OS filesystems opened by the
+	// daemon. Nil uses Rand. It must be safe for concurrent use.
+	// An explicitly supplied FS retains its own randomness.
+	TempRand io.Reader
 	// FS is the file system under the data directory; nil is the real one rooted
 	// at Home. A test passes a file system in memory, with the faults it injects.
 	// The sockets are on the real disk whatever FS is.
@@ -121,6 +125,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Rand == nil {
 		c.Rand = rand.Reader
+	}
+	if c.TempRand == nil {
+		c.TempRand = c.Rand
 	}
 	return c
 }

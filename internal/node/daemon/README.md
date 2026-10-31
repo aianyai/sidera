@@ -21,6 +21,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Daemon.RequestStop`, `Wait`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times; the end, and what ended it. |
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
 | `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the configuration and of what of the keys no renewal changes, the instance lock's assertion, the engine, the logs), and a task on a period. |
+| `Config.Rand`, `Config.TempRand`, `Config.FS` | Node randomness, optional independent temporary-name randomness for daemon-opened OS filesystems, and an optional caller-owned filesystem. |
 | `Config.AdapterHost` | The adapter host (`*adapterhost.Host`), or nil for a node that starts no adapter. Given to the engine at step 6, started at step 10 and shut down at step 3 of the shutdown. |
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
@@ -117,8 +118,12 @@ is read here and no test tooling is imported.
 
 ## What the caller must guarantee
 
-- `Config.Rand` is safe for concurrent use: it is read by the file layer, the engine
-  and the keys. `crypto/rand`'s is, and a nil `Config.Rand` is that.
+- `Config.Rand` and `Config.TempRand` are safe for concurrent use. `Rand` supplies
+  keys, engine randomness and `Env.Rand`; nil uses `crypto/rand`. `TempRand`
+  supplies names for every OS filesystem this package opens; nil uses the
+  resolved `Rand`, preserving the shared stream by default. An explicitly supplied
+  `FS` retains its own reader. Separate readers isolate temporary-name consumption
+  from identifiers without moving filesystem initialization out of this package.
 - Call `Init` before `Start`; a data directory is made by init and nothing else.
 - Pass the context of `Start` for the start only: the node lives until `RequestStop`,
   a fatal failure, or the end of `Run`; a context that ends during the start stops it
@@ -145,6 +150,6 @@ the death of the engine); `interrupt_test.go` the lock kept under an engine that
 not ended, a stop that races with a failed start, a context or a signal during the
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
 process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
-`env_test.go` what a hook is given; `agent_test.go` the real Agent listener in probe-only and full-service startup, and its removal at shutdown; `logging_test.go` the deferred log handler;
+`random_test.go` the default shared stream, independent temporary draws and caller-owned filesystem reader through Init and Start recovery; `env_test.go` what a hook is given; `agent_test.go` the real Agent listener in probe-only and full-service startup, and its removal at shutdown; `logging_test.go` the deferred log handler;
 `sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
 resent through the whole daemon.

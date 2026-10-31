@@ -1385,7 +1385,19 @@ the same process launcher as observed commands, with observer variables removed
 and no observed-generation registration. Public observed `Init` still requires
 positive unique generation numbers. Deterministic node seeds distinguish scenario,
 process role and observed generation; native runtime seeds distinguish scenario
-and adapter instance while remaining stable across daemon restarts.
+and adapter instance while remaining stable across daemon restarts. With a nonempty
+`SIDERA_TEST_SEED`, the crashtest CLI derives two separately locked ChaCha8 readers
+directly with SHA-256. The semantic namespace remains `sidera-test-random-v1` and
+the temporary-name namespace is `sidera-test-temp-random-v1`; each includes the
+same seed, role and generation, separated by NUL bytes. Neither reader is seeded
+by consuming the other. Local Init and daemon commands pass the temporary reader
+through `daemon.Config.TempRand`, keeping asynchronous temporary-name draws from
+advancing the semantic stream. Other CLI operations keep their semantic reader.
+Empty seeds and ordinary builds retain system randomness and leave `TempRand`
+nil, so daemon defaults continue sharing `Rand`. This deterministic derivation
+is test-only and adds no environment variable or dependency. Purpose isolation
+does not order competing semantic operations; actual recordings and strict rerun
+comparisons remain authoritative.
 
 The binary backend finishes each interrupted generation by recording the existing
 `fixture.crash` event before starting the replacement. A writing-point crash

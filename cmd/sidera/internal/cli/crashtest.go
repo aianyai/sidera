@@ -15,8 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/daemon"
 )
 
-// lockedRandom meets daemon.Config's concurrent-reader contract while keeping
-// one deterministic stream for all of that daemon's consumers.
+// lockedRandom serializes concurrent reads from one deterministic stream.
 type lockedRandom struct {
 	mu     sync.Mutex
 	source io.Reader
@@ -48,10 +47,11 @@ func (c *command) configureTestProcess(role string) (func() error, error) {
 		gen = parsed
 	}
 	c.random = rand.Reader
+	c.tempRandom = nil
 	if seed := c.Getenv("SIDERA_TEST_SEED"); seed != "" {
-		domain := "sidera-test-random-v1\x00" + seed + "\x00" + role + "\x00" + strconv.Itoa(gen)
-		source := randv2.NewChaCha8(sha256.Sum256([]byte(domain)))
-		c.random = &lockedRandom{source: source}
+		domain := seed + "\x00" + role + "\x00" + strconv.Itoa(gen)
+		c.random = &lockedRandom{source: randv2.NewChaCha8(sha256.Sum256([]byte("sidera-test-random-v1\x00" + domain)))}
+		c.tempRandom = &lockedRandom{source: randv2.NewChaCha8(sha256.Sum256([]byte("sidera-test-temp-random-v1\x00" + domain)))}
 	}
 	if record == "" {
 		if target != "" {
