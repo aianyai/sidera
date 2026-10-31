@@ -59,7 +59,7 @@ request durations are integer seconds.
 | --- | --- | --- |
 | `me` | `{}` | The endpoint's `address`, `node`, `kind`, `display_name`, `declaration` and `frontends` |
 | `declare` | A declaration patch | `{"declaration":{...}}` after applying the patch |
-| `peers` | `{}` | `{"nodes":[{"node":"...","self":true}]}` |
+| `peers` | `{}` | `{"nodes":[{"node":"...","self":true,"trust":"self","connected":true}]}` |
 | `directory` | Optional `node`, `cursor`, `limit` | `{"endpoints":[...],"next_cursor":"..."}` |
 | `send` | Required `to` array and `body`; optional message fields below | `{"message_id":"...","to":["..."],"replayed":false}` |
 | `reply` | Required `message_id`, `body`; optional message fields below | The same shape as `send` |
@@ -82,9 +82,14 @@ an instance not yet admitted has an empty object. Each value is
 `{"recv_wait_max_s":20,"budget":{"unit":"chars","limit":27000}}`, with the
 adapter's limits and their engine-owned defaults. Output budget unit names are
 shared through `apiwire.BudgetUnitName`: `chars` and `tokens`; an unknown unit is
-an internal error rather than a fabricated usable limit. `peers.self` compares
-each visible node with this endpoint's node. With the current local transport,
-the only visible node is the node itself.
+an internal error rather than a fabricated usable limit. `peers` lists
+this endpoint's node first (`self` true, `trust` `"self"`, `connected` always true),
+then every node this node trusts directly, in the order of their identifiers
+(`trust` `"direct"`). A node counts as trusted directly when the trust evaluator
+allows it through a credential this node holds with it, so a revoked or expired
+credential and a node removed from trust drop out. `connected` is whether a
+connection to the node is up now; it is read without waiting and says nothing about
+whether a send would succeed.
 
 **Directory.** `limit` is 1 through 256, default 100. Entries contain `address`,
 `kind`, `display_name`, `description` and `accepts` (action names such as

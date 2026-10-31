@@ -191,7 +191,7 @@ func (a *agent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
 	}
 	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, 0, len(nodes))}
 	for _, node := range nodes {
-		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.Node.String(), Self: node.Self})
+		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected})
 	}
 	return out, nil
 }

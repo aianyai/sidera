@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -55,15 +57,47 @@ func TestMeShowsTheCallersDeclarationAndDeclaredFrontendLimits(t *testing.T) {
 	}
 }
 
-func TestPeersShowsOnlyThisNodeForAResolvedCaller(t *testing.T) {
+func TestPeersShowsThisNodeAndEveryNodeTrustedDirectlyWithItsConnection(t *testing.T) {
 	noLeaks(t)
-	r := newRig(t, 10)
+	first, second := newPeerNode(t, 1), newPeerNode(t, 2)
+	if first.node.String() > second.node.String() {
+		first, second = second, first
+	}
+	net := &fakeNetwork{connected: map[ident.NodeID]bool{second.node: true}}
+	r := trustRig(t, withNetwork(net))
 	e := r.start()
 	id := register(t, e, "own")
 	caller := engine.ByAdapter("chat", adapterproto.EndpointRef(id.String()))
-	got, err := e.Peers(context.Background(), caller)
-	if err != nil || len(got) != 1 || got[0].Node != r.node || !got[0].Self {
-		t.Fatalf("Peers = %v, %v, want only this node", got, err)
+	peers := func() []engine.PeerView {
+		t.Helper()
+		got, err := e.Peers(context.Background(), caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	self := engine.PeerView{Node: r.node, Trust: engine.PeerTrustSelf, Connected: true}
+	if got := peers(); !slices.Equal(got, []engine.PeerView{self}) {
+		t.Fatalf("Peers without a credential = %v, want only this node", got)
+	}
+	creds := map[ident.NodeID]store.CredentialRecord{}
+	for _, p := range []peerNode{second, first} {
+		creds[p.node] = p.credentialWith(r.keys.IdentitySigner(), false)
+		if err := loopErr(t, e, func(l engine.LoopSide) error { return l.InstallCredential(creds[p.node].Record, nil) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []engine.PeerView{self,
+		{Node: first.node, Trust: engine.PeerTrustDirect},
+		{Node: second.node, Trust: engine.PeerTrustDirect, Connected: true}}
+	if got := peers(); !slices.Equal(got, want) {
+		t.Fatalf("Peers with two credentials = %v, want %v", got, want)
+	}
+	if err := loopErr(t, e, func(l engine.LoopSide) error { return l.RevokeCredential(creds[first.node].Digest) }); err != nil {
+		t.Fatal(err)
+	}
+	if got := peers(); !slices.Equal(got, []engine.PeerView{self, want[2]}) {
+		t.Fatalf("Peers after one credential was revoked = %v, want this node and the other one", got)
 	}
 }
 

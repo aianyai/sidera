@@ -33,9 +33,9 @@ func (c *command) result(v any) error {
 	case agentapi.DeclareResult:
 		printDeclaration(w, out.Declaration)
 	case agentapi.PeersResult:
-		fmt.Fprintln(w, "NODE\tSELF")
+		fmt.Fprintln(w, "NODE\tSELF\tTRUST\tCONNECTED")
 		for _, node := range out.Nodes {
-			fmt.Fprintf(w, "%s\t%t\n", node.Node, node.Self)
+			fmt.Fprintf(w, "%s\t%t\t%s\t%t\n", node.Node, node.Self, node.Trust, node.Connected)
 		}
 	case agentapi.DirectoryResult:
 		fmt.Fprintln(w, "ADDRESS\tKIND\tNAME\tACCEPTS")

@@ -22,7 +22,7 @@ arguments, purpose and one example.
 | `daemon` | Run the composition root in the foreground with the executable adapter launcher; the daemon owns signal handling and orderly shutdown. |
 | `me` | Read the authenticated session's address, declaration and front-end limits. |
 | `declare [--paused=<bool>] [--refuse-multi-recipient=<bool>] [--restrict-senders=<bool>] [--accept-from <addr>,...] [--hidden=<bool>]` | Send only the fields explicitly supplied; `--accept-from=` clears the list. |
-| `peers` | List visible nodes. |
+| `peers` | List the node itself and the nodes it trusts directly: `NODE`, `SELF`, `TRUST` (`self` or `direct`) and `CONNECTED` per line. |
 | `directory [--node <id>] [--limit <n>] [--cursor <cursor>]` | Read one directory page. |
 | `send --to <addr> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--accept-before <seconds>] [--key <key>]` | Send a message; comma-separated recipients are passed to the Agent boundary's one-recipient check. |
 | `reply <message-id> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--key <key>]` | Reply to a received message. |

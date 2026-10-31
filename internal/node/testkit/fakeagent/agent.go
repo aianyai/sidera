@@ -185,10 +185,13 @@ type PeersResult struct {
 	Nodes []PeerNode
 }
 
-// PeerNode is a node; Self marks the endpoint's own.
+// PeerNode is a node; Self marks the endpoint's own, Trust is "self" or "direct"
+// and Connected says whether a connection to it is up.
 type PeerNode struct {
-	Node string
-	Self bool
+	Node      string
+	Self      bool
+	Trust     string
+	Connected bool
 }
 
 // DirectoryInput asks for a page of the directory. A zero Limit takes the default.

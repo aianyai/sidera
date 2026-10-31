@@ -605,7 +605,7 @@ func TestAgentCommandsPreservePatchesAndFormatHumanResults(t *testing.T) {
 		t.Fatalf("me: %d %q", code, out)
 	}
 	code, out, diag = n.run(n.first, "peers")
-	if code != 0 || diag != "" || !strings.Contains(out, harness.NodeID().String()+"  true") {
+	if code != 0 || diag != "" || !strings.Contains(out, harness.NodeID().String()+"  true  self   true") {
 		t.Fatalf("peers: %d %q %q", code, out, diag)
 	}
 	code, out, diag = n.run(n.first, "directory", "--limit", "1", "--json")

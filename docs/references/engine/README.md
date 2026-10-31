@@ -109,9 +109,14 @@ display name and a copy of its declaration. Its front-end map lists only the
 agent front ends declared by the adapter's current admission; an instance that
 has not been admitted gives an empty map. Each listed front end carries its
 `Admission.Budget` and `Admission.RecvWait`, including their defaults. `Peers`
-also resolves the caller before answering; the only visible node while there is
-no network transport is this node itself. Its `PeerView` carries both the node
-and the engine-owned `Self` marker; interface backends only map the view. Neither
+also resolves the caller before answering. It returns this node, then each node
+for which `trust.Evaluate` answers `AllowedDirect`, taken from the parties of the
+credentials this node holds, in the order of their identifiers; a revoked or expired
+credential and a removed node therefore drop out by the one evaluator. Connection
+state comes from `Network.Connected`, which reads and never waits, and is true
+for this node itself; with no network it is false for every other node. Its
+`PeerView` carries the node, the engine-owned `Trust` (`PeerTrustSelf` or
+`PeerTrustDirect`) and `Connected`; interface backends only map the view. Neither
 read exposes an endpoint token.
 
 **Directory reads.** `Directory` resolves the caller in a `gateRead` command,
@@ -163,7 +168,10 @@ only that it failed and a name this engine does not know included, is
 
 The single worker is a known limit: a slow target holds every outbound call behind
 it. A directory timeout cancels its own work, never another call ahead of it.
-Transports must honor their contexts; concurrency per target is not implemented.
+Transports must honor their contexts. The remote transport is wired, so a target
+that is down or slow now holds the head of the queue for as long as its call lasts
+(at most the network's connect budget of 4 seconds inside the directory budget of 5
+seconds for a directory read); concurrency per target is still not implemented.
 A full inbox can also delay any method, including directory, for `SubmitWait`
 (10 seconds) before `loop_busy`. This rare common submission delay is outside the
 directory budget and can exceed a front end's ten-second shell limit.

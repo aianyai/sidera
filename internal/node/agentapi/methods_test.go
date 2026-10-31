@@ -373,7 +373,7 @@ func TestPeersIdentifiesThisNode(t *testing.T) {
 	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
 	s.EnableMethods()
 	w := request(s, token, "peers", `{}`)
-	want := `{"nodes":[{"node":"` + harness.NodeID().String() + `","self":true}]}` + "\n"
+	want := `{"nodes":[{"node":"` + harness.NodeID().String() + `","self":true,"trust":"self","connected":true}]}` + "\n"
 	if w.Code != 200 || w.Body.String() != want {
 		t.Fatalf("HTTP %d, %s; want %s", w.Code, w.Body, want)
 	}
