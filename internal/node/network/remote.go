@@ -158,19 +158,13 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	stop := context.AfterFunc(cctx, func() { s.Reset() })
 	defer stop()
 
-	noAnswer := func(err error) error {
-		s.Reset()
-		switch {
-		case ctx.Err() != nil:
-			return ctx.Err()
-		case errors.Is(err, gatedByPeer):
-			return fmt.Errorf("%w: the peer's gate refused the stream", transport.ErrUnreachable)
-		default:
-			if connectionFault(cctx, err) {
-				n.dropConn(e, target)
-			}
-			return fmt.Errorf("%w: %v", transport.ErrTimeout, err)
+	// A call that got no answer may also say that the connection is dead: it is
+	// closed then, so that the next call does not wait on it too.
+	failed := func(err error) error {
+		if ctx.Err() == nil && !errors.Is(err, gatedByPeer) && connectionFault(cctx, err) {
+			n.dropConn(e, target)
 		}
+		return noAnswer(ctx, s, err)
 	}
 	// A failed write is not judged by itself: the stream is dead, and the read
 	// that follows says why with the library's own error, which carries the
@@ -180,7 +174,7 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	}
 	answer, err := nodeproto.ReadMessage(s, limit.Answer)
 	if err != nil {
-		return nil, noAnswer(err)
+		return nil, failed(err)
 	}
 	s.Close()
 	return answer, nil
@@ -206,6 +200,22 @@ func connectionFault(callCtx context.Context, err error) bool {
 		return false
 	}
 	return true
+}
+
+// noAnswer resets the stream of a call that got no answer and says why, in the
+// transport's terms: the caller's own context ended, the peer's gate reset the
+// stream before it read anything (the call was not seen), or the stream broke
+// after the request began to go out.
+func noAnswer(ctx context.Context, s lnet.Stream, err error) error {
+	s.Reset()
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err()
+	case errors.Is(err, gatedByPeer):
+		return fmt.Errorf("%w: the peer's gate refused the stream", transport.ErrUnreachable)
+	default:
+		return fmt.Errorf("%w: %v", transport.ErrTimeout, err)
+	}
 }
 
 // The server side. A handler runs only on a connection the gate judged a

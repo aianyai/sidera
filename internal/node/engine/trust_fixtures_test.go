@@ -2,7 +2,9 @@ package engine_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -131,6 +133,22 @@ type fakeNetwork struct {
 	books     []map[ident.NodeID][]string
 	checkErr  error
 	connected map[ident.NodeID]bool
+	// fetches are the pairing fetches the engine asked for, by the node asked.
+	fetches []ident.NodeID
+}
+
+// PairingFetch records the exchange and answers that none came.
+func (n *fakeNetwork) PairingFetch(_ context.Context, node ident.NodeID, _ []string, _ []byte) ([]byte, engine.PairingPeer, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.fetches = append(n.fetches, node)
+	return nil, engine.PairingPeer{}, errors.New("no answer")
+}
+
+func (n *fakeNetwork) fetched() []ident.NodeID {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]ident.NodeID(nil), n.fetches...)
 }
 
 func (n *fakeNetwork) SetAddressBook(book map[ident.NodeID][]string) error {

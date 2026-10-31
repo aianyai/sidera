@@ -165,6 +165,9 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 			}
 			e.view.addConfigResults(d.Config.LastOperations())
 			e.trust = e.buildTrust(sc)
+			if err := e.openPairing(sc); err != nil {
+				return nil, rep, err
+			}
 			if err := e.loadFeedback(sc, d.Clock.Now()); err != nil {
 				return nil, rep, err
 			}
@@ -311,7 +314,7 @@ var recoveryPhases = [...]recoveryPhase{
 	{11, "reconcile", (*Engine).recoverReconcile},
 	{12, "tick", (*Engine).recoverTick},
 	{13, "feedback", (*Engine).recoverFeedback},
-	{14, "outbound", (*Engine).recoverOutbound},
+	{14, "outbound", (*Engine).recoverLoopback},
 }
 
 // recoverReconcile is step 11 of the start: what was not settled when the node went
@@ -337,6 +340,17 @@ func (e *Engine) recoverReconcile(now time.Time) error {
 // queue was loaded from the disk by the scan entry, after the replay of feedback
 // took off it what a notice already covers.
 func (e *Engine) recoverFeedback(now time.Time) error { return e.runFeedback(now) }
+
+// recoverLoopback is step 14 of the start: the outgoing messages go on, and so do
+// the result fetches of the pairing that were held until the node could use the
+// network.
+func (e *Engine) recoverLoopback(now time.Time) error {
+	if err := e.recoverOutbound(now); err != nil {
+		return err
+	}
+	e.openPairingFetches()
+	return nil
+}
 
 type cmdRecoveryPhase struct {
 	call[struct{}]

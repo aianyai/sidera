@@ -17,6 +17,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/preauth"
 	"github.com/aianyai/sidera/internal/record"
 )
@@ -74,6 +75,9 @@ type Config struct {
 
 	ConnectTimeout time.Duration
 	CallTimeout    time.Duration
+	// FetchTimeout bounds one pairing result fetch once its stream is open;
+	// zero is the pairing package's own.
+	FetchTimeout   time.Duration
 	UnreachableFor time.Duration
 	TickEvery      time.Duration
 }
@@ -87,6 +91,9 @@ func (c *Config) setDefaults() {
 	}
 	if c.CallTimeout == 0 {
 		c.CallTimeout = DefaultCallTimeout
+	}
+	if c.FetchTimeout == 0 {
+		c.FetchTimeout = pairing.DefaultParams().FetchTimeout
 	}
 	if c.UnreachableFor == 0 {
 		c.UnreachableFor = DefaultUnreachableFor

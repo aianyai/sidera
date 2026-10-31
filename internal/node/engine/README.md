@@ -48,6 +48,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
 | `SetNetwork`, `Network`, `Membership` | The layer that carries the node's calls to other nodes, as the engine asks of it (`SetMembership`, `Connected`, the address book push `SetAddressBook`, the rule for entered addresses `CheckAddresses`, and the reads `PeerID`, `ListenAddrs` and `ContactAddrs` the network view shows), and the snapshot of facts the engine pushes to it: its own certificate and record, the revocation set, the trust view, the serial state and the certificates of the stored peers. `Membership` has the fields of the network layer's own type so that the composition root converts one into the other as it is. For the composition root, before `Start`; no network pushes nothing. |
 | `NotePeerCertificate`, `RefusalReason` | What the network layer calls on the engine besides the handler: a member's certificate with its record and serial seen, re-decided against the stored state in the loop, and the name of the reason of a refusal in an error. The engine does not import the network package. |
+| `PairingOpened`, `PairingFrame`, `PairingClosed`, `PairingPeer`, `PairingStream`, `Network.PairingFetch` | The pairing driver (`pairing.go`): what the network layer calls for a pairing stream the node serves and its frames, and the result fetch the engine asks the network for. `PairingPeer` and `PairingStream` have the fields and methods of the network layer's own types, so the composition root converts the one into the other as it is. |
 | `Inbound`, `Pull`, `QueryDirectory` | The engine as the `transport.Handler`: an envelope, a pull for delivery reports, or a live directory page, each judged under the origin the transport gives. |
 | `Directory`, `DirectoryQuery`, `DirectoryPage`, `DefaultDirectoryLimit` | A caller's bounded directory read through the outbound FIFO. The target returns only visible open endpoints, with live pagination bound to the full source address and this process. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
@@ -476,6 +477,11 @@ delivery to a session: when it is judged and how the verdict is recorded.
   the snapshot to the network (`publishMembership`), so no path pushes a snapshot of its own.
   A peer's certificate is stored only through `NotePeerCertificate`, and only for a node the
   network layer judged a member; the engine adds no member check of its own.
+- **The pairing's actions are performed in one place, in one order.** `pairingPerform` runs the
+  persist actions first, in order, each its own write, and only then adopts the state and performs
+  what reaches outside (frames, closes, fetches, notices); a list with a persist after one of
+  those is refused whole, never reordered. The fetches wait for the end of the second recovery
+  entry. See the engine reference for the reasons.
 - **A pull is answered for the recipients it names, from the records the target
   holds.** For each recipient the pull names, the target gives the signed report of
   its record, or lists the recipient in `NoRecord` when it holds none for the

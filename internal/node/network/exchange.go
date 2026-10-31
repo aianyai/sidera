@@ -32,13 +32,13 @@ const (
 	rejected
 )
 
-func (n *Network) ownExchange() []byte {
+// ownMembership is the snapshot whose certificate an exchange presents; nil
+// before the first snapshot. The certificate that is sent is the one the
+// connection keeps as the node's own, so the exchange takes the snapshot once.
+func (n *Network) ownMembership() *membership {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.membership == nil {
-		return nil
-	}
-	return n.membership.exchange
+	return n.membership
 }
 
 // serveExchange is the handler of the exchange protocol on the side that read
@@ -68,16 +68,16 @@ func (n *Network) serveExchange(ctx context.Context, s lnet.Stream, e *connEntry
 		n.refuseUndecided(e)
 		return
 	}
-	own := n.ownExchange()
+	own := n.ownMembership()
 	if own == nil {
 		s.Reset() // the node has no certificate to present yet
 		return
 	}
-	if n.decideAndApply(ctx, e, ex) != applied {
+	if n.decideAndApply(ctx, e, ex, own) != applied {
 		s.Reset()
 		return
 	}
-	if _, err := s.Write(own); err != nil {
+	if _, err := s.Write(own.exchange); err != nil {
 		s.Reset()
 		return
 	}
@@ -96,7 +96,7 @@ func (n *Network) exchangeOutbound(e *connEntry) {
 }
 
 func (n *Network) runOutbound(ctx context.Context, e *connEntry) error {
-	own := n.ownExchange()
+	own := n.ownMembership()
 	if own == nil {
 		return errors.New("the node has no certificate to present yet")
 	}
@@ -111,7 +111,7 @@ func (n *Network) runOutbound(ctx context.Context, e *connEntry) error {
 	}
 	stop := context.AfterFunc(ctx, func() { s.Reset() })
 	defer stop()
-	if _, err := s.Write(own); err != nil {
+	if _, err := s.Write(own.exchange); err != nil {
 		s.Reset()
 		return err
 	}
@@ -129,7 +129,7 @@ func (n *Network) runOutbound(ctx context.Context, e *connEntry) error {
 		s.Reset()
 		return fmt.Errorf("the peer's exchange message: %w", err)
 	}
-	res := n.decideAndApply(ctx, e, ex)
+	res := n.decideAndApply(ctx, e, ex, own)
 	s.Close()
 	if res == rejected {
 		return errors.New("the peer's certificate was refused")
@@ -156,8 +156,9 @@ func (n *Network) refuseUndecided(e *connEntry) {
 }
 
 // decideAndApply decides on the peer's message with the current facts and
-// applies the decision to the connection.
-func (n *Network) decideAndApply(ctx context.Context, e *connEntry, ex preauth.Exchange) applyResult {
+// applies the decision to the connection. own is the snapshot whose certificate
+// this side presented (or is presenting) in the exchange.
+func (n *Network) decideAndApply(ctx context.Context, e *connEntry, ex preauth.Exchange, own *membership) applyResult {
 	n.mu.Lock()
 	facts, ok := n.factsLocked()
 	decided := e.decided
@@ -169,13 +170,16 @@ func (n *Network) decideAndApply(ctx context.Context, e *connEntry, ex preauth.E
 		n.log.Debug("no membership snapshot yet; the exchange is refused", "peer", e.conn.RemotePeer())
 		return n.settleRefusal(e, preauth.Decision{State: preauth.StateUnauthenticated})
 	}
-	return n.apply(ctx, e, ex, preauth.Decide(facts, e.peerKey, ex))
+	return n.apply(ctx, e, ex, preauth.Decide(facts, e.peerKey, ex), own.Own)
 }
 
 // apply puts a connection in the state its exchange decided. A member's
 // certificate is handed to the engine first, and the connection is a member's
-// only once the engine has taken it.
-func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, d preauth.Decision) applyResult {
+// only once the engine has taken it. A completed node exchange also leaves on
+// the entry the facts a pairing stream on this connection is judged by: the
+// certificate Decide accepted, its record and serial state, and the node's own
+// certificate (own) as the exchange presented it.
+func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, d preauth.Decision, own record.Verified[record.NetworkKeyCertificate]) applyResult {
 	refused := preauth.Decision{State: preauth.StateUnauthenticated, Reason: d.Reason}
 	if ex.Kind == preauth.KindNode && d.Completed() && d.Node == n.ownNode() {
 		// A node that presents this node's identity is a second instance of it,
@@ -184,15 +188,18 @@ func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, 
 		n.log.Warn("another instance uses this node's identity", "peer", e.conn.RemotePeer())
 		return n.settleRefusal(e, refused)
 	}
+	var seen record.SerialSeen
+	if ex.Kind == preauth.KindNode && d.Completed() {
+		seen = d.SerialSeen
+		if seen.Node.IsZero() {
+			seen = record.SerialSeenOf(d.NodeCertificate)
+		}
+	}
 	if d.State == preauth.StateMember && ex.Kind == preauth.KindNode {
 		node := n.currentNode()
 		if node == nil {
 			n.log.Warn("a member's certificate arrived while no node is set", "peer", e.conn.RemotePeer())
 			return n.settleRefusal(e, refused)
-		}
-		seen := d.SerialSeen
-		if seen.Node.IsZero() {
-			seen = record.SerialSeenOf(d.NodeCertificate)
 		}
 		if err := node.NotePeerCertificate(ctx, d.NodeCertificate, ex.Record, seen); err != nil {
 			n.log.Warn("the engine did not take a member's certificate", "peer", e.conn.RemotePeer(), "err", err)
@@ -230,6 +237,9 @@ func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, 
 	}
 	e.state, e.node = d.State, d.Node
 	e.exchange = &ex
+	if ex.Kind == preauth.KindNode {
+		e.peerCert, e.peerRecord, e.peerSeen, e.ownCert = d.NodeCertificate, ex.Record, seen, own
+	}
 	e.signalReadyLocked()
 	n.mu.Unlock()
 	if d.State.HasStanding() {

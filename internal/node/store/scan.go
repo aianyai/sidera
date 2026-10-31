@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/pairing"
 )
 
 // DamagedFile is a file that failed validation and is not settled yet
@@ -54,6 +55,15 @@ type Scan struct {
 	CredRevocations []CredRevocationRecord
 	LocalRevoked    []LocalRevokedRecord
 	Peers           []PeerRecord
+
+	// The pairing records of state/pairing/ as the pairing package decoded them,
+	// ready for pairing.Restore: the requests held as target and as initiator,
+	// the counters (the zero Limits when there is no file) and the expectations
+	// (none when there is no file).
+	PairingTargets      []pairing.TargetRecord
+	PairingInitiators   []pairing.InitiatorRecord
+	PairingLimits       pairing.Limits
+	PairingExpectations []pairing.Expectation
 
 	// Bodies are the names of the files of bodies/, none of them read.
 	Bodies []string
@@ -196,6 +206,14 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 		sc.LocalRevoked = append(sc.LocalRevoked, r)
 	case PeerRecord:
 		sc.Peers = append(sc.Peers, r)
+	case PairingTargetRecord:
+		sc.PairingTargets = append(sc.PairingTargets, r.Record)
+	case PairingInitiatorRecord:
+		sc.PairingInitiators = append(sc.PairingInitiators, r.Record)
+	case PairingLimitsRecord:
+		sc.PairingLimits = r.Limits
+	case PairingExpectationsRecord:
+		sc.PairingExpectations = r.List
 	}
 	return nil
 }

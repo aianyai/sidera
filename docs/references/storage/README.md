@@ -622,12 +622,14 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations. The table holds 58 declarations (txn 2, config 8, keys 2,
-store 36, engine 8 and daemon 2), and the suite has fixtures for 53 of them: the
-five of the trust and peer records and of the removal of a node from trust
-(`trust-credential`, `trust-revocation`, `trust-local-clear`, `peer-cert`,
-`trust-local-revoke`) have none yet, and until they do their sub-benchmarks of an
-unfiltered run fail. It runs one named sub-benchmark per declaration,
+owners' declarations. The table holds 65 declarations (txn 2, config 9, keys 2,
+store 42, engine 8 and daemon 2), and the suite has fixtures for 53 of them: the
+twelve of the trust and peer records, the pairing records, the removal of a node
+from trust and the network configuration (`trust-credential`, `trust-revocation`,
+`trust-local-clear`, `peer-cert`, `pairing-target-put`, `pairing-target-delete`,
+`pairing-initiator-put`, `pairing-initiator-delete`, `pairing-limits`,
+`pairing-expectations`, `trust-local-revoke`, `network-set`) have none yet, and
+until they do their sub-benchmarks of an unfiltered run fail. It runs one named sub-benchmark per declaration,
 including Recovery declarations. Every selected declaration must have a fixture
 and at least one nonempty successful commit through its owner's existing entry point on
 a real filesystem. An unknown or duplicate fixture fails immediately; a missing
@@ -689,6 +691,10 @@ state/
                        nodes it removed from its own trust (kinds `credential`, `cred-revocation`,
                        `local-revoked`)
   peers/<h>.rec        the network-key certificate accepted from a peer and the highest serial seen
+  pairing/<h>.rec      the pairing requests this node holds as target and as initiator, the counters
+                       that limit pairing, and the node identifiers an owner entered ahead of time
+                       (kinds `pairing-target`, `pairing-initiator`, `pairing-limits`,
+                       `pairing-expectations`)
   archive/<date>.jsonl summaries of records that left the live files
 ```
 
@@ -810,6 +816,49 @@ vectors `credential`, `cred-revocation`, `local-revoked` and `peer` of
 `TestRecordGoldenVectors`, `TestTrustAndPeerRecordsAreHeldToTheirRules`,
 `TestTrustAndPeerRecordsComeBackFromTheDisk`, `TestLocalRevokedClearRemovesOnlyThatNode`,
 `TestTrustAndPeerRecordsAreNeverSwept`.
+
+**Pairing records.** `pairing/` holds what the pairing package asks to be kept
+across restarts. The body of every file is the persisted bytes that package
+produces (`TargetRecord.Encode`, `InitiatorRecord.Encode`, `Limits.Encode`,
+`EncodeExpectations`), stored exactly as given, so the store never re-encodes or
+interprets them. Four kinds:
+
+| Kind | Key | Body |
+| ---- | --- | ---- |
+| `pairing-target` | the pairing identifier (`pairing.ID`), lowercase hex | the target record |
+| `pairing-initiator` | the pairing identifier, lowercase hex | the initiator record |
+| `pairing-limits` | the fixed text `singleton` | the counters of reveals and failures; no file means no counters |
+| `pairing-expectations` | the fixed text `singleton` | the list of expectations; no file means an empty list |
+
+Step 7 for these kinds: the bytes decode through the pairing package's own
+`Decode...` function (strict, canonical, bounded by `pairing.MaxPersisted`, and
+the identifier and every derived value recomputed from the transcript), and for a
+request record the identifier it decodes to is the one in the key. A record moved
+under another name is not the request that name stands for, so it is refused as a
+damaged body. A damaged file is settled like any other (an alert, the file
+removed). `Scan` hands the decoded values to the engine (`PairingTargets`,
+`PairingInitiators`, `PairingLimits`, `PairingExpectations`) in the form
+`pairing.Restore` takes.
+
+The store applies no retention to these kinds: `RetainUntil` says "not finished"
+for each, so no sweep plans one. The pairing rules decide when a request ends
+(its `Tick` hands out the removal of a finished request once its result has been
+kept long enough), and the engine enforces them through the pairing package; a
+second rule here would end a request on a clock that package does not use.
+
+The writes are one transaction each, with one write: `pairing-target-put` and
+`pairing-initiator-put` (replace the request's file whole), `pairing-limits` and
+`pairing-expectations` (replace the one file), and `pairing-target-delete` and
+`pairing-initiator-delete` (remove the file and sync the directory). Removing a
+request that has no file is not an error and writes nothing: a removal that
+already happened and one a crash prevented are the same to the pairing rules. The
+expectations are also written inside a transaction the engine opens, together
+with the operation's result: `PreparePairingExpectations` before it begins, then
+`PutPairingExpectations` with `RolePairingExpectations` and `PutAdminResult` with
+`RoleResult`; that transaction is declared by the engine, not here. Tests: the
+scenarios of the six declarations in `TestEveryTransactionConvergesFromEveryCrashState`,
+`TestPairingRecordsComeBackFromTheDisk`, `TestPairingExpectationsWriteInsideAnotherTransaction`,
+`TestPairingRecordsAreHeldToTheirKeys`, `TestPairingRecordsAreNeverSwept`.
 
 **The time of the state.** Every stored delivery record, whatever its side, kind
 or shape, carries `state_at`, the moment the record entered its current state
@@ -1175,7 +1224,7 @@ durable before the next, so a file that is gone always has its alert.
 | `out/`, an out-lost record whose first line is unreadable | as for any `out/` file with an unreadable first line (the two rows for those): the sender's floors raised and another out-lost record, derived from the name of this one, written; alert | file removed |
 | `seq/`, first line trusted | alert | file overwritten with the floors its sender's source records say |
 | `seq/`, first line unreadable | alert | file removed |
-| any other directory (`trust/` and `peers/` included) | alert | file removed |
+| any other directory (`trust/`, `peers/` and `pairing/` included) | alert | file removed |
 
 The first line of a file is trusted by the same rule as that of a live one
 (steps 1 to 4): a first line that parses but does not hash to the name of the file
@@ -1824,6 +1873,7 @@ so that the double cannot drift from what it stands for.
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheOwnersFileAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | trust and peer records | `internal/node/store/codec_trust.go`, `write_trust.go` | `trust_test.go`, `trust_fixtures_test.go`, the four trust and peer vectors of `golden_vectors_test.go`, the scenarios `trust-credential`, `trust-revocation`, `peer-cert` and `trust-local-clear` of `TestEveryTransactionConvergesFromEveryCrashState` |
+| pairing records | `internal/node/store/codec_pairing.go`, `write_pairing.go` | `pairing_test.go`, `pairing_fixtures_test.go`, the six pairing scenarios of `TestEveryTransactionConvergesFromEveryCrashState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules | `internal/node/store/recovery.go` | `recovery_scenarios_test.go` (each rule, and the settlement of each kind of damaged file, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |

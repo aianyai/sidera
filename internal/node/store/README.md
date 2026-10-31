@@ -2,7 +2,7 @@
 
 The durable records of `state/`: deliveries and their bodies, endpoint state,
 checkpoints, results, alerts, the credentials and revocations of trust, the
-certificates of peers, the archive and the quarantine. Read
+certificates of peers, the pairing requests, the archive and the quarantine. Read
 [../../../docs/references/storage/README.md](../../../docs/references/storage/README.md)
 for the formats, the reasons and what the tests prove.
 
@@ -27,6 +27,9 @@ engine applies the delivery rules and calls the writes.
 | `CredentialRecord`, `CredRevocationRecord`, `LocalRevokedRecord`, `PeerRecord` | The records of `state/trust/` and `state/peers/`. The two that hold a signed record keep it as `record.Record`, checked to its structure and never to its signature: whoever reads one into a decision verifies it. They are kept for good (`RetainUntil` never finishes them). |
 | `Store.TrustCredential`, `TrustRevocation`, `PeerCert`, `LocalRevokedClear` | The transactions of those records: a credential then the peer's certificate it came with, a revocation, a peer's certificate replaced whole, and the one removal an owner's decision makes (`trust-local-clear`). |
 | `PrepareLocalRevoked`, `PutLocalRevoked`, `PrepareCredRevocation`, `PutCredRevocation` | The two halves of a write into a transaction another package opens, like those of an endpoint and a result, under the roles `RoleLocalRevoked` and `RoleCredRevocation`: the engine's removal of a node from trust writes the entry, the revocations of its credentials and the result in one transaction. |
+| `PairingTargetRecord`, `PairingInitiatorRecord`, `PairingLimitsRecord`, `PairingExpectationsRecord` | The records of `state/pairing/`: the persisted bytes of the pairing package kept exactly as it encodes them, read back through its `Decode...` functions, and for a request refused when its identifier is not the one in its key. The pairing rules decide when one ends, so `RetainUntil` never finishes them. `Scan` returns the decoded pairing values (`PairingTargets`, `PairingInitiators`, `PairingLimits`, `PairingExpectations`) for `pairing.Restore`. |
+| `Store.PairingTargetPut`, `PairingTargetDelete`, `PairingInitiatorPut`, `PairingInitiatorDelete`, `PairingLimitsPut`, `PairingExpectationsPut` | One transaction of one write each; a removal of a request with no file writes nothing and is not an error. |
+| `PreparePairingExpectations`, `PutPairingExpectations` | The two halves of a write of the expectations into a transaction the engine opens with the operation's result, under the role `RolePairingExpectations`. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `ControlEffect`, `CreationEffect`, `ControlEffect.PromptRecords` | The endpoint and initial prompt effects of a confirmed creation. The prompt records use the successful control record's delivery time; the writer and the engine view use the same construction. |

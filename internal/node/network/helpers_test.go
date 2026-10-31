@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/transport"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/preauth"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
@@ -68,6 +69,22 @@ type fakeNode struct {
 	noteErr   error
 	notes     []record.SerialSeen
 	origins   []transport.Origin
+
+	// The pairing side: what the engine saw of its streams, in order. A stream
+	// the network opened for it is given the session pairOpenedAs; a frame is
+	// answered by onPairFrame, which may write to the session's stream.
+	pairOpenedAs pairing.SessionID
+	pairPeers    []PairingPeer
+	pairStreams  map[pairing.SessionID]PairingStream
+	pairEvents   []pairEvent
+	onPairFrame  func(sid pairing.SessionID, frame []byte, s PairingStream)
+}
+
+// pairEvent is one call the network made on the fake engine for a pairing stream.
+type pairEvent struct {
+	kind  string // "opened", "frame" or "closed"
+	sid   pairing.SessionID
+	frame []byte
 }
 
 func (f *fakeNode) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, envelope []byte) (transport.Receipt, error) {
@@ -126,6 +143,53 @@ func (f *fakeNode) RefusalReason(err error) (string, bool) {
 		return "", false
 	}
 	return h(err)
+}
+
+func (f *fakeNode) PairingOpened(_ context.Context, peer PairingPeer, s PairingStream) (pairing.SessionID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sid := f.pairOpenedAs
+	f.pairPeers = append(f.pairPeers, peer)
+	f.keepStreamLocked(sid, s)
+	f.pairEvents = append(f.pairEvents, pairEvent{kind: "opened", sid: sid})
+	return sid, nil
+}
+
+func (f *fakeNode) PairingFrame(_ context.Context, sid pairing.SessionID, frame []byte) error {
+	f.mu.Lock()
+	f.pairEvents = append(f.pairEvents, pairEvent{kind: "frame", sid: sid, frame: frame})
+	h, s := f.onPairFrame, f.pairStreams[sid]
+	f.mu.Unlock()
+	if h != nil {
+		h(sid, frame, s)
+	}
+	return nil
+}
+
+func (f *fakeNode) PairingClosed(_ context.Context, sid pairing.SessionID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pairEvents = append(f.pairEvents, pairEvent{kind: "closed", sid: sid})
+}
+
+func (f *fakeNode) keepStreamLocked(sid pairing.SessionID, s PairingStream) {
+	if f.pairStreams == nil {
+		f.pairStreams = map[pairing.SessionID]PairingStream{}
+	}
+	f.pairStreams[sid] = s
+}
+
+// keepStream is how a test hands the fake the stream StartPairing returned.
+func (f *fakeNode) keepStream(sid pairing.SessionID, s PairingStream) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keepStreamLocked(sid, s)
+}
+
+func (f *fakeNode) pairing() []pairEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pairEvent(nil), f.pairEvents...)
 }
 
 func (f *fakeNode) noted() []record.SerialSeen {

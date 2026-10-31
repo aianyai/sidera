@@ -688,21 +688,25 @@ func TestTheReportsAreAskedForUntilTheReportDeadlineAndNoLonger(t *testing.T) {
 // foreignKeys are the keys of a node that is not the one the engine is built for.
 type foreignKeys struct {
 	engine.Keys
-	node ident.NodeID
+	node     ident.NodeID
+	identity record.Signer
 }
 
 func (k foreignKeys) Node() ident.NodeID { return k.node }
 
+// IdentitySigner is what the pairing's recovery at the scan entry asks of the keys.
+func (k foreignKeys) IdentitySigner() record.Signer { return k.identity }
+
 func TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart(t *testing.T) {
 	r := newRig(t, 1)
 	d := r.deps()
-	d.Keys = foreignKeys{node: mustNode(t, 9)}
+	d.Keys = foreignKeys{node: mustNode(t, 9), identity: seededSigner(t, 9)}
 	if _, _, err := engine.Open(context.Background(), d, r.params); err == nil {
 		t.Fatal("an engine was opened to sign as one node with the keys of another")
 	}
 	// The same dependencies with the keys of this node do open it, so that the
 	// refusal above is about the keys.
-	d.Keys = foreignKeys{node: d.Node}
+	d.Keys = foreignKeys{node: d.Node, identity: seededSigner(t, 9)}
 	e, _, err := engine.Open(context.Background(), d, r.params)
 	if err != nil {
 		t.Fatalf("Open with the keys of the node: %v", err)

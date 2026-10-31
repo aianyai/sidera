@@ -90,8 +90,8 @@ is read here and no test tooling is imported.
   Step 6 takes the network key from the keys once (they are not safe for concurrent
   use), builds the host, which listens on nothing, gives it the engine as its node and
   the address book of `network.json`, and gives the engine the network as the layer it
-  pushes its membership to; the two `Membership` types have the same fields, and this
-  package converts. Step 15 opens the listeners of `network.json` after the hooks, and
+  pushes its membership to; the two `Membership` types, like the two types of the facts of a
+  pairing connection, have the same fields, and this package converts. Step 15 opens the listeners of `network.json` after the hooks, and
   a port in use fails the start naming the address. Shutdown step 2 closes the network
   beside the two HTTP servers, on the fatal path as well. A change of the listen list
   takes effect with the next start: the listeners open once.

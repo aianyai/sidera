@@ -714,6 +714,66 @@ func scenarios() []scenario {
 			},
 		},
 		{
+			// A request record is replaced whole by its next state.
+			name: "pairing-target-put",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				earlier := pairingTargetOf(t)
+				earlier.ExpiresAt = earlier.ExpiresAt.Add(-time.Second)
+				seed(t, mem, store.PairingTargetRecord{Record: earlier})
+			},
+			durable: "pairing-target-put/pairing-target.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingTargetPut(pairingTargetOf(t))
+			},
+		},
+		{
+			name: "pairing-target-delete",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, store.PairingTargetRecord{Record: pairingTargetOf(t)})
+			},
+			durable: "pairing-target-delete/pairing-dir.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingTargetDelete(pairingTargetOf(t).ID())
+			},
+		},
+		{
+			name:    "pairing-initiator-put",
+			durable: "pairing-initiator-put/pairing-initiator.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingInitiatorPut(pairingInitiatorOf(t))
+			},
+		},
+		{
+			name: "pairing-initiator-delete",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, store.PairingInitiatorRecord{Record: pairingInitiatorOf(t)})
+			},
+			durable: "pairing-initiator-delete/pairing-dir.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingInitiatorDelete(pairingInitiatorOf(t).ID())
+			},
+		},
+		{
+			name:    "pairing-limits",
+			durable: "pairing-limits/pairing-limits.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingLimitsPut(pairingLimitsOf(t))
+			},
+		},
+		{
+			name:    "pairing-expectations",
+			durable: "pairing-expectations/pairing-expectations.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.PairingExpectationsPut(pairingExpectationsOf(t))
+			},
+		},
+		{
 			// A previously synced summary stays intact. The unsynced append can
 			// leave any subset of its lines or arbitrarily many damaged lines.
 			name:  "archive-summaries",

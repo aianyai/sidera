@@ -83,6 +83,9 @@ const (
 	// schedReleaseDeadline is the end of the time a native session has to be released
 	// before the owner is told; the id is the endpoint.
 	schedReleaseDeadline
+	// schedPairingTick is the next time the pairing's state machine is ticked while
+	// something of a pairing is under way; there is one entry, with no id.
+	schedPairingTick
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/preauth"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // connEntry is the network layer's record of one live connection: what the
@@ -34,6 +35,16 @@ type connEntry struct {
 	// exchange is the peer's message, kept for deciding again when the facts
 	// change.
 	exchange *preauth.Exchange
+	// peerCert is the certificate Decide accepted on this connection, peerRecord
+	// the record it was verified from, peerSeen the serial state to store, and
+	// ownCert the node's own certificate as this connection's exchange presented
+	// it. They are set with the state, for a node exchange, and are what a
+	// pairing stream's parties are built from: the certificates of this
+	// connection, not whatever the snapshot holds later.
+	peerCert   record.Verified[record.NetworkKeyCertificate]
+	peerRecord record.Record
+	peerSeen   record.SerialSeen
+	ownCert    record.Verified[record.NetworkKeyCertificate]
 	// busy counts the calls and handlers in flight on the connection;
 	// closeIdle asks for the connection to be closed as soon as none is.
 	busy      int
@@ -214,16 +225,25 @@ func (n *Network) release(e *connEntry) {
 	}
 }
 
-// memberConn returns a live connection that this side judged to be a member's,
-// for the node: the one not asked to close comes first, and of those the one
-// established last, since an older one may be left from before the peer went
-// away and came back.
-func (n *Network) memberConn(node ident.NodeID) *connEntry {
+// memberOnly and mayPair are the states a call looks for in a connection: the
+// member protocols want a member's, a pairing also takes a node that is not a
+// member yet (the access table's rule for the pairing protocol, for nodes).
+func memberOnly(s preauth.State) bool { return s == preauth.StateMember }
+
+func mayPair(s preauth.State) bool {
+	return s == preauth.StateMember || s == preauth.StateNonMemberNode
+}
+
+// nodeConn returns a live connection that this side judged to be a connection
+// to the node, in a state accept takes: the one not asked to close comes first,
+// and of those the one established last, since an older one may be left from
+// before the peer went away and came back.
+func (n *Network) nodeConn(node ident.NodeID, accept func(preauth.State) bool) *connEntry {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	var best *connEntry
 	for _, e := range n.conns {
-		if e.state != preauth.StateMember || e.node != node {
+		if !accept(e.state) || e.node != node {
 			continue
 		}
 		if best == nil {
@@ -258,6 +278,10 @@ func (n *Network) dropConn(e *connEntry, node ident.NodeID) {
 	n.log.Debug("closing a connection a call found at fault", "peer", e.conn.RemotePeer(), "node", node)
 	e.conn.Close()
 }
+
+// memberConn returns a live connection that this side judged a member's, for
+// the node.
+func (n *Network) memberConn(node ident.NodeID) *connEntry { return n.nodeConn(node, memberOnly) }
 
 // Connected reports whether a connection this side judged a member's is up to
 // the node.

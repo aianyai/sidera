@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -35,6 +36,11 @@ type Network interface {
 	PeerID() string
 	ListenAddrs() []string
 	ContactAddrs() []string
+	// PairingFetch asks a node for the result of a pairing in one exchange: the
+	// frame goes out on a pairing stream and the one frame that answers comes back,
+	// with the facts of the connection it came over. The engine calls it from a
+	// worker, never from the loop.
+	PairingFetch(ctx context.Context, node ident.NodeID, addrs []string, frame []byte) ([]byte, PairingPeer, error)
 }
 
 // Membership is the snapshot of what the network layer needs to judge a peer: the

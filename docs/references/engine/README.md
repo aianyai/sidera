@@ -920,6 +920,60 @@ the write that makes the change durable returned (`trust.go`).
   certificate of a node that is not a member: a stranger's serial is remembered by the
   network in memory only, so that the disk does not grow with whoever connects. `RefusalReason`
   gives the name of the reason of an engine refusal in an error, and false for any other.
+- **The engine is the caller `internal/pairing` describes, and `pairing.go` is where it does
+  what that package asks of its caller.** The state machine is a value in the engine's view:
+  the scan entry restores it from the stored records and recovers it (a state that does not
+  restore is a damaged disk and fails the entry, as an inconsistent scan does), and every call
+  returns the next value, which the loop adopts only after the call's persists are durable.
+  The `World` is made fresh for every call from the engine's own sources: the default
+  parameters, the identity signer of the keys, the revocation set, `trustView()` (whose
+  `Local` is this node, as the state machine requires), no authorized persons and no
+  stored results, because no management command of the pairing is driven yet. Randomness is
+  `Deps.Rand`. A node without keys has no identity key to sign with and runs no pairing:
+  nothing is recovered or ticked and a stream is refused.
+- **The actions of a call are performed by one function, `pairingPerform`, in one order.** The
+  persist actions (`Persist...`, `Delete...`, `StoreCredential`, `StoreRevocation`) run first,
+  in the order given, each as its own write (a credential through `installCredential`, a
+  revocation through `installRevocation`); only when all are durable is the next state taken
+  and the actions that reach outside performed, in order: `Send`, `Close`, `FetchRequest`
+  and `Notify` (logged at info with the kind, the pairing identifier and the remote node). A
+  frame is therefore never sent before the persist that made it safe, and the state never runs
+  ahead of the disk. A persist that comes after an action that reaches outside is not
+  something the state machine produces and no caller can order correctly by guessing, so the
+  whole list is checked before anything is done: such a list is refused with nothing written
+  and nothing sent, logged at error level, and never silently put in order, which would hide
+  that the two disagree. A session that the engine no longer holds is skipped for a `Send` or
+  a `Close`. A `StoreCredential` is stored with the accepted certificate of the connection the
+  call ran on (the stream's, or the fetch's), and with none when the call ran on none
+  (the recovery, a tick).
+- **Sessions are the engine's and the side is in the table.** The engine allocates the
+  session identifiers, in increasing order and never reused. `PairingOpened` registers a target
+  session (stream, connection facts, side) and has the state machine time it; `PairingFrame`
+  and `PairingClosed` find the side from the table and call `TargetReceive` or
+  `InitiatorReceive`, and `TargetClosed` or `InitiatorClosed`. They are commands of the loop and
+  do what a frame causes before they answer, because the network reads the next frame only
+  after `PairingFrame` returns (a result fetch is one frame and its answer). An
+  error of a call, which is not a protocol outcome, closes the stream, forgets the session and
+  makes `PairingFrame` return it, so the network takes no more frames; a frame for a session
+  that is not held is an error and the end of one is ignored. A `Close` action needs no call
+  back: the state machine forgets a stream it closes. The engine mirrors the network's
+  `PairingPeer` and `PairingStream` and does not import the network; the composition root
+  converts the peer, and a stream passes as it is.
+- **Fetches are held while the network cannot be used.** A `FetchRequest` is carried by a worker
+  that calls `Network.PairingFetch` and brings the answer back as a command (`OnFetchResult`
+  with the peer's accepted certificate kept for `StoreCredential`, `OnFetchFailed` for a
+  failure). From the scan entry until the end of the second recovery entry, and always while no
+  network is set, the requests are kept and nothing is handed to the network; step 14 releases
+  them, because the connections a fetch would use are not there before it. A pairing never has two
+  exchanges at once: a second request for it is dropped.
+- **The pairing is ticked by the loop's own schedule.** `Tick` runs after every pairing command
+  and event, so that a confirmation is followed at once by its exchange, and once a second
+  from an entry of the engine's schedule (`schedPairingTick`, one entry) while something is under
+  way: a stream is open, a request waits for its owner, or an initiator's request has not
+  ended. Otherwise there is no entry and no tick; a record that has ended is removed by the
+  next tick that anything else causes. The engine's schedule is used rather than a periodic
+  task of the composition root because the commands move it and a restart restores it from the
+  records, which a fixed period does not.
 - **The steps on trust** (`installCredential`, `installRevocation`, `revokeCredential`,
   `revokeNodeLocally`, `clearLocallyRevoked`) run in the loop and are what the pairing and the
   owner's operations on trust will call; nothing exposes them yet. A credential is stored with,
@@ -1709,6 +1763,8 @@ reproducible).
 | A node with a credential is let in, and stops when the credential is revoked or the node removed; the view is built from verified records | `trust.go`, `inbound.go` (`evaluate`) | `TestATrustedNodeIsLetInAndStopsWhenItsCredentialIsRevokedOrTheNodeRemoved`, `TestTheTrustViewIsBuiltFromVerifiedRecordsOfTheDisk` |
 | The network is given a snapshot at the start, after each change of the facts and after a renewal of the certificate | `network.go`, `engine.go` (`Start`, `fire`) | `TestTheNetworkIsGivenAFreshSnapshotWhenTheFactsChange`, `TestTheNetworkIsGivenTheRenewedCertificate` |
 | The address book is pushed after a durable change of it only, and the view tells what the network and the engine know | `operations_network.go` | `TestNetworkChangesPushTheAddressBookOnlyAfterADurableChange` |
+| The actions of a pairing call run persists first and in order, then the rest; a persist after an action that reaches outside refuses the whole list | `pairing.go` (`pairingPerform`) | `TestPairingActionsArePerformedInOrderOrNotAtAll` |
+| A result fetch asked for while the node starts is held until the second recovery entry has ended | `pairing.go` (`pairingFetchRequested`, `openPairingFetches`), `recovery.go` (`recoverLoopback`) | `TestPairingFetchIsHeldUntilTheNodeHasStarted` |
 | The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |

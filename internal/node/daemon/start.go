@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -18,6 +19,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/pairing"
 )
 
 // Start brings the node up through the fifteen steps of the start, in their order,
@@ -277,11 +279,21 @@ func (d *Daemon) startNetwork(e *engine.Engine) error {
 	if err := net.SetAddressBook(d.cfgd.Network().Peers); err != nil {
 		return err
 	}
-	net.SetNode(e)
+	net.SetNode(engineNode{e})
 	if err := e.SetTransport(network.NewRouter(self, transport.NewLoopback(self, e, nil), net)); err != nil {
 		return err
 	}
 	return e.SetNetwork(engineNetwork{net})
+}
+
+// engineNode is the engine as the network calls it. The engine and the network
+// each define the facts of a pairing connection, with the same fields, so that
+// neither imports the other; the composition root, which imports both, converts.
+// The network's streams are the engine's as they are.
+type engineNode struct{ *engine.Engine }
+
+func (n engineNode) PairingOpened(ctx context.Context, peer network.PairingPeer, s network.PairingStream) (pairing.SessionID, error) {
+	return n.Engine.PairingOpened(ctx, engine.PairingPeer(peer), s)
 }
 
 // engineNetwork is the network as the engine asks for it. The engine and the
@@ -291,6 +303,11 @@ type engineNetwork struct{ *network.Network }
 
 func (n engineNetwork) SetMembership(m engine.Membership) error {
 	return n.Network.SetMembership(network.Membership(m))
+}
+
+func (n engineNetwork) PairingFetch(ctx context.Context, node ident.NodeID, addrs []string, frame []byte) ([]byte, engine.PairingPeer, error) {
+	answer, peer, err := n.Network.PairingFetch(ctx, node, addrs, frame)
+	return answer, engine.PairingPeer(peer), err
 }
 
 // Step 7: the place of the synchronisation of revocations and of the trust graph,

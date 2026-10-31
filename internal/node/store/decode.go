@@ -7,13 +7,15 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 )
 
 // Record is a decoded record of state/: one of OutRecord, OutLostRecord, InRecord, CtlRecord,
 // EndpointRecord, AttemptsRecord, CheckpointRecord, AdminRecord, AlertRecord,
-// SeqRecord, CredentialRecord, CredRevocationRecord, LocalRevokedRecord and
-// PeerRecord, as a value.
+// SeqRecord, CredentialRecord, CredRevocationRecord, LocalRevokedRecord,
+// PeerRecord, PairingTargetRecord, PairingInitiatorRecord, PairingLimitsRecord and
+// PairingExpectationsRecord, as a value.
 type Record interface {
 	// Name is the file name of the record.
 	Name() string
@@ -82,6 +84,18 @@ func EncodeRecord(rec Record) ([]byte, error) {
 	case PeerRecord:
 		kind, key = KindPeer, NodeKeyBytes(r.Node)
 		body, err = encodePeer(r)
+	case PairingTargetRecord:
+		kind, key = KindPairingTarget, PairingKeyBytes(r.Record.ID())
+		body, err = encodePairingTarget(r)
+	case PairingInitiatorRecord:
+		kind, key = KindPairingInitiator, PairingKeyBytes(r.Record.ID())
+		body, err = encodePairingInitiator(r)
+	case PairingLimitsRecord:
+		kind, key = KindPairingLimits, []byte(singletonKeyText)
+		body, err = r.Limits.Encode()
+	case PairingExpectationsRecord:
+		kind, key = KindPairingExpectations, []byte(singletonKeyText)
+		body, err = pairing.EncodeExpectations(r.List)
 	default:
 		return nil, fmt.Errorf("store: %T is not a record of state/", rec)
 	}
@@ -175,6 +189,14 @@ func decodeBody(kind Kind, key any, body []byte) (Record, error) {
 		return decodeLocalRevoked(key.(ident.NodeID), body)
 	case KindPeer:
 		return decodePeer(key.(ident.NodeID), body)
+	case KindPairingTarget:
+		return decodePairingTarget(key.(pairing.ID), body)
+	case KindPairingInitiator:
+		return decodePairingInitiator(key.(pairing.ID), body)
+	case KindPairingLimits:
+		return decodePairingLimits(body)
+	case KindPairingExpectations:
+		return decodePairingExpectations(body)
 	}
 	return nil, fmt.Errorf("no body of kind %q", kind)
 }

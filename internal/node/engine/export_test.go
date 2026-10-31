@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -571,4 +572,19 @@ func (l LoopSide) ClearLocallyRevoked(node ident.NodeID) error {
 func (l LoopSide) VerifyReport(rec record.Record, target ident.NodeID) error {
 	_, err := l.e.verifyReport(l.e.d.Clock.Now(), rec, target)
 	return err
+}
+
+// PairingSession registers a target session on the stream, as PairingOpened does
+// for a stream the network hands over, without the state machine being told.
+func (l LoopSide) PairingSession(stream PairingStream) pairing.SessionID {
+	l.e.pairing.last++
+	sid := l.e.pairing.last
+	l.e.pairing.sessions[sid] = &pairingSession{side: sideTarget, stream: stream}
+	return sid
+}
+
+// PerformPairingActions carries out a list of actions the state machine returned,
+// with the state it already has.
+func (l LoopSide) PerformPairingActions(acts []pairing.Action) error {
+	return l.e.pairingPerform(l.e.pairing.state, acts, nil)
 }

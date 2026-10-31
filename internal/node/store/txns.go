@@ -18,6 +18,15 @@ const (
 	// RoleCredRevocation is the role of the revocation of a credential, with
 	// PutCredRevocation.
 	RoleCredRevocation = "revocation"
+	// RolePairingExpectations is the role of the list of expectations of the
+	// pairing package, with PutPairingExpectations.
+	RolePairingExpectations = "pairing-expectations"
+	// The roles of the declarations of this package that write the other pairing
+	// records.
+	RolePairingTarget    = "pairing-target"
+	RolePairingInitiator = "pairing-initiator"
+	RolePairingLimits    = "pairing-limits"
+	RolePairingDir       = "pairing-dir"
 )
 
 // Shorthands for the declarations below: a write is {Role, Op, flags}.
@@ -177,6 +186,18 @@ var (
 	}}
 	declPeerCert = txn.Decl{Name: "peer-cert", Kind: txn.Normal, Writes: []txn.Write{rep("peer")}}
 
+	// The pairing records: each action of the pairing package is one write of one
+	// file. A removal is made durable before the call returns, as the clearing of a
+	// local revocation is; one that finds no file writes nothing, because a crash
+	// before the removal and a removal that already happened are the same to the
+	// pairing rules.
+	declPairingTargetPut       = txn.Decl{Name: "pairing-target-put", Kind: txn.Normal, Writes: []txn.Write{rep(RolePairingTarget)}}
+	declPairingTargetDelete    = txn.Decl{Name: "pairing-target-delete", Kind: txn.Normal, Writes: []txn.Write{rm(RolePairingTarget), syncDir(RolePairingDir)}}
+	declPairingInitiatorPut    = txn.Decl{Name: "pairing-initiator-put", Kind: txn.Normal, Writes: []txn.Write{rep(RolePairingInitiator)}}
+	declPairingInitiatorDelete = txn.Decl{Name: "pairing-initiator-delete", Kind: txn.Normal, Writes: []txn.Write{rm(RolePairingInitiator), syncDir(RolePairingDir)}}
+	declPairingLimits          = txn.Decl{Name: "pairing-limits", Kind: txn.Normal, Writes: []txn.Write{rep(RolePairingLimits)}}
+	declPairingExpectations    = txn.Decl{Name: "pairing-expectations", Kind: txn.Normal, Writes: []txn.Write{rep(RolePairingExpectations)}}
+
 	// The recovery transactions.
 	//
 	// quarantine settles one damaged file: the sequence floors it raises, the
@@ -222,6 +243,8 @@ func Transactions() []*txn.Decl {
 		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
 		&declTrustCredential, &declTrustRevocation, &declTrustLocalClear, &declPeerCert,
+		&declPairingTargetPut, &declPairingTargetDelete, &declPairingInitiatorPut, &declPairingInitiatorDelete,
+		&declPairingLimits, &declPairingExpectations,
 		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay, &declDerivedReplay,
 	}
 }

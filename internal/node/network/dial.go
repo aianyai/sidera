@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	lnet "github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -146,29 +147,104 @@ func (n *Network) connect(ctx context.Context, node ident.NodeID) (*connEntry, e
 	if len(pids) == 0 {
 		return nil, fmt.Errorf("%w: no address is known for it", transport.ErrUnreachable)
 	}
+	e, err := n.dialWithin(ctx, node, pids, memberOnly)
+	if err != nil {
+		if ctx.Err() == nil {
+			n.mu.Lock()
+			n.unreachable[node] = n.clock.Now().Add(n.cfg.UnreachableFor)
+			n.mu.Unlock()
+		}
+		return nil, err
+	}
+	return e, nil
+}
 
+// pairingConn returns a connection to the node in a state that may pair, a
+// member's or a non-member's: one that is up, or a new one made as connect makes
+// it. The addresses are dial hints for this pairing alone (see pairingPeers). It
+// neither reads nor sets the unreachable memo: the memo spares the outbound
+// worker repeated waits for a node of the cluster, and a pairing is about a node
+// that may not be one, at an address the owner gave for this attempt.
+func (n *Network) pairingConn(ctx context.Context, node ident.NodeID, hints []string) (*connEntry, error) {
+	if e := n.nodeConn(node, mayPair); e != nil {
+		return e, nil
+	}
+	pids, err := n.pairingPeers(node, hints)
+	if err != nil {
+		return nil, err
+	}
+	return n.dialWithin(ctx, node, pids, mayPair)
+}
+
+// pairingPeers returns the peers to dial for a pairing with the node: those of
+// the address book when there are no hints, otherwise those the hints name. A
+// hint ends in /p2p/<peer id>, or, for a node whose certificate is held, names
+// only the transport address, which then goes to the held peers. A hint's
+// transport address is given to the peerstore for the library's temporary
+// lifetime only: it is not the address book's and is not kept.
+func (n *Network) pairingPeers(node ident.NodeID, hints []string) ([]peer.ID, error) {
+	n.mu.Lock()
+	known := n.dialPeers[node]
+	n.mu.Unlock()
+	if len(hints) == 0 {
+		if len(known) == 0 {
+			return nil, fmt.Errorf("%w: no address is known for it", transport.ErrUnreachable)
+		}
+		return known, nil
+	}
+	var pids []peer.ID
+	ps := n.lib.host.Peerstore()
+	for _, h := range hints {
+		m, err := ma.NewMultiaddr(h)
+		if err != nil {
+			return nil, fmt.Errorf("network: dial hint %q: %w", h, err)
+		}
+		tr, pid := peer.SplitAddr(m)
+		targets := known
+		if pid != "" {
+			targets = []peer.ID{pid}
+		}
+		for _, t := range targets {
+			if tr != nil {
+				ps.AddAddrs(t, []ma.Multiaddr{tr}, peerstore.TempAddrTTL)
+			}
+			if !slices.Contains(pids, t) {
+				pids = append(pids, t)
+			}
+		}
+	}
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("%w: the dial hints name no peer", transport.ErrUnreachable)
+	}
+	return pids, nil
+}
+
+// dialWithin dials the peers within the connect budget and returns the
+// connection that proved to be the node in a state accept takes. The error is
+// transport.ErrUnreachable, or the caller's own context error when that is what
+// ended the wait.
+func (n *Network) dialWithin(ctx context.Context, node ident.NodeID, pids []peer.ID, accept func(preauth.State) bool) (*connEntry, error) {
 	bctx, cancel := context.WithTimeout(ctx, n.cfg.ConnectTimeout)
 	defer cancel()
-	e, err := n.dialMember(bctx, node, pids)
+	e, err := n.dialNode(bctx, node, pids, accept)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		n.mu.Lock()
-		n.unreachable[node] = n.clock.Now().Add(n.cfg.UnreachableFor)
-		n.mu.Unlock()
 		return nil, fmt.Errorf("%w: %v", transport.ErrUnreachable, err)
 	}
 	return e, nil
 }
 
-// dialMember dials the peers in order until one connects, completes the
-// exchange and proves to be the node, as a member.
-func (n *Network) dialMember(ctx context.Context, node ident.NodeID, pids []peer.ID) (*connEntry, error) {
+// dialNode dials the peers in order until one connects, completes the exchange
+// and proves to be the node, in a state accept takes.
+func (n *Network) dialNode(ctx context.Context, node ident.NodeID, pids []peer.ID, accept func(preauth.State) bool) (*connEntry, error) {
 	// The library keeps a dial backoff of its own per address (5 seconds plus the
 	// square of the failures, up to 5 minutes, cleared only by a success), which
 	// would keep a node that came back unreachable long after the memo of connect
-	// ran out. The memo is the backoff, so the library's is bypassed.
+	// ran out, and would refuse an owner's pairing attempt made right after a
+	// failed one. The memo paces the redials of calls, and a pairing is the
+	// owner's explicit attempt, so the library's backoff is bypassed for both.
 	ctx = lnet.WithForceDirectDial(ctx, "the memo of the node, not the library's backoff, paces redials")
 	var failures error
 	for _, pid := range pids {
@@ -191,12 +267,12 @@ func (n *Network) dialMember(ctx context.Context, node ident.NodeID, pids []peer
 		state, got := e.state, e.node
 		n.mu.Unlock()
 		switch {
-		case state == preauth.StateMember && got == node:
+		case accept(state) && got == node:
 			return e, nil
-		case state == preauth.StateMember:
+		case accept(state):
 			failures = errors.Join(failures, fmt.Errorf("peer %s is another node", pid))
 		default:
-			failures = errors.Join(failures, fmt.Errorf("peer %s is not a member (%s)", pid, state))
+			failures = errors.Join(failures, fmt.Errorf("peer %s is in state %s, which this call does not accept", pid, state))
 		}
 	}
 	return nil, failures

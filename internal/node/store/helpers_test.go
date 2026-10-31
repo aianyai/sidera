@@ -229,6 +229,12 @@ var (
 		{Role: store.RoleCredRevocation, Op: txn.OpReplace, Many: true, Optional: true},
 		{Role: store.RoleResult, Op: txn.OpReplace},
 	}}
+	// declXExpect is the shape of the transaction that enters or forgets an
+	// expectation: the list of expectations, then the result.
+	declXExpect = txn.Decl{Name: "x-expect", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: store.RolePairingExpectations, Op: txn.OpReplace},
+		{Role: store.RoleResult, Op: txn.OpReplace},
+	}}
 	// declXLayout is what the composition root declares for the layout rule.
 	declXLayout = txn.Decl{Name: "layout", Kind: txn.Recovery, Writes: []txn.Write{
 		{Role: "dir", Op: txn.OpMakeDir, Many: true, Optional: true},
@@ -257,7 +263,7 @@ func program(t testing.TB) *txn.Table {
 
 func programTable() (*txn.Table, error) {
 	decls := append(txn.Internal(), store.Transactions()...)
-	decls = append(decls, &declXAdmit, &declXClear, &declXRevoke, &declXLayout)
+	decls = append(decls, &declXAdmit, &declXClear, &declXRevoke, &declXExpect, &declXLayout)
 	return txn.NewTable(decls...)
 }
 

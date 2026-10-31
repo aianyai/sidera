@@ -103,6 +103,13 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 		// the live files would let what it ended come back. Only the owner's
 		// explicit removal (LocalRevokedClear) takes one away.
 		return time.Time{}, false
+	case PairingTargetRecord, PairingInitiatorRecord, PairingLimitsRecord, PairingExpectationsRecord:
+		// The pairing rules decide when a request, a counter or an expectation
+		// ends, and the engine removes it through the pairing package when they do
+		// (Tick hands out the removal of a request after its result is kept long
+		// enough). A second rule here would end a request on a clock the pairing
+		// package does not use.
+		return time.Time{}, false
 	}
 	return time.Time{}, false
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -76,6 +77,13 @@ type Store interface {
 	TrustRevocation(r store.CredRevocationRecord) error
 	PeerCert(p store.PeerRecord) error
 	LocalRevokedClear(node ident.NodeID) error
+
+	PairingTargetPut(r pairing.TargetRecord) error
+	PairingTargetDelete(id pairing.ID) error
+	PairingInitiatorPut(r pairing.InitiatorRecord) error
+	PairingInitiatorDelete(id pairing.ID) error
+	PairingLimitsPut(l pairing.Limits) error
+	PairingExpectationsPut(list []pairing.Expectation) error
 }
 
 var _ Store = (*store.Store)(nil)

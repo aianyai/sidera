@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -275,8 +276,9 @@ func AlertKeyBytes(id AlertID) []byte { return []byte(id.String()) }
 
 // ParseKey parses key bytes as a key of the kind: an OutKey, TargetKey,
 // ident.EndpointID, CheckpointKey, admin.RequestKey, AlertID, record.Digest
-// (credential and credential revocation) or ident.NodeID (local-revoked and
-// peer). It is step 4 of
+// (credential and credential revocation), ident.NodeID (local-revoked and
+// peer), pairing.ID (pairing-target and pairing-initiator) or SingletonKey
+// (pairing-limits and pairing-expectations). It is step 4 of
 // the validation of a record file.
 func ParseKey(kind Kind, key []byte) (any, error) {
 	fields := strings.Split(string(key), " ")
@@ -400,6 +402,23 @@ func ParseKey(kind Kind, key []byte) (any, error) {
 			return nil, err
 		}
 		return ident.ParseNodeID(fields[0])
+	case KindPairingTarget, KindPairingInitiator:
+		if err := want(1); err != nil {
+			return nil, err
+		}
+		var id pairing.ID
+		if err := parseHex(id[:], fields[0]); err != nil {
+			return nil, fmt.Errorf("pairing id: %w", err)
+		}
+		if id.IsZero() {
+			return nil, errors.New("pairing id: all zero")
+		}
+		return id, nil
+	case KindPairingLimits, KindPairingExpectations:
+		if len(fields) != 1 || fields[0] != singletonKeyText {
+			return nil, fmt.Errorf("the key of %s is %q", kind, singletonKeyText)
+		}
+		return SingletonKey{}, nil
 	}
 	return nil, fmt.Errorf("%q is not a kind of state/", kind)
 }

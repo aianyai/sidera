@@ -60,7 +60,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
 | 9 | agent-probe | Open the Agent listener in probe-only mode, accepting only the one-use probe credential; then run hook `AgentProbeOnly`. | this package, `agentapi` |
 | 10 | adapters | The adapter host (`Config.AdapterHost`, when set) starts the enabled adapter instances and the step waits until each has answered `adapter.start` or been judged offline; then hook `Adapters` runs, for what else starts here. | `adapterhost`, `apiwire` |
-| 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the outbound worker goes on over the loopback. After step 10 on purpose: step 11 asks the connected adapters about creations, closes and interrupts, releases and prompts, and the busy state they reported is used to renew leases after serving. Until step 12 the engine's schedule holds back the ticks, the feedback and the looks at source records that fell due, so none of them runs before the adapters have reported. | `engine` |
+| 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the outbound worker goes on over the loopback. After step 10 on purpose: step 11 asks the connected adapters about creations, closes and interrupts, releases and prompts, and the busy state they reported is used to renew leases after serving. Until step 12 the engine's schedule holds back the ticks, the feedback and the looks at source records that fell due, so none of them runs before the adapters have reported. Step 14 also lets the engine ask the network for the result fetches of the pairing that it held back until then. | `engine` |
 | 15 | serve | The engine serves, then the Agent server enables endpoint methods; hook `AgentServe` runs afterward; last, the network opens its listeners on the addresses `network.json` lists. An address that cannot be opened (a port in use) fails the start, and the error names the address. | this package, `agentapi`, `network` |
 
 A hook runs inside its step, in the state of the engine the step needs (before the
@@ -526,7 +526,7 @@ interface: a sandbox must deny the socket to an agent.
   are made with each other as their node (the network calls the engine's handler, the
   engine pushes its membership to the network), so neither exists before the other and
   the composition root, which imports both, converts between their two `Membership`
-  types. The host is built, not listening, at step 6 so that the node can dial from
+  types and between the two types that carry the facts of a pairing connection. The host is built, not listening, at step 6 so that the node can dial from
   the moment the loop runs; the listeners open last, after every hook of step 15, so
   no other node reaches a node that does not serve yet. A port in use fails the start
   naming the address, and what had begun is shut down like any failed start: a node

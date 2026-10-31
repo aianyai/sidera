@@ -500,6 +500,8 @@ func dirOf(rec store.Record) string {
 		return store.TrustDir
 	case store.PeerRecord:
 		return store.PeersDir
+	case store.PairingTargetRecord, store.PairingInitiatorRecord, store.PairingLimitsRecord, store.PairingExpectationsRecord:
+		return store.PairingDir
 	default:
 		panic(fmt.Sprintf("unknown record %T", r))
 	}

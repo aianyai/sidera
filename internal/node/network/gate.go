@@ -32,6 +32,7 @@ func (n *Network) registerHandlers() {
 	n.handle(nodeproto.ProtocolSend, n.serveSend)
 	n.handle(nodeproto.ProtocolPull, n.servePull)
 	n.handle(nodeproto.ProtocolDirectory, n.serveDirectory)
+	n.handle(string(preauth.ProtocolPairing), n.servePairing)
 }
 
 // handle registers a handler for a protocol behind the gate: a stream whose

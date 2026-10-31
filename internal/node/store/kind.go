@@ -31,6 +31,14 @@ const (
 	KindCredRevocation Kind = "cred-revocation"
 	KindLocalRevoked   Kind = "local-revoked"
 	KindPeer           Kind = "peer"
+	// The kinds of the pairing requests this node takes part in, and of what its
+	// pairing rules keep across restarts: the requests the node holds as target
+	// and as initiator, the counters that limit reveals and failures, and the node
+	// identifiers an owner entered ahead of time. The last two are one file each.
+	KindPairingTarget       Kind = "pairing-target"
+	KindPairingInitiator    Kind = "pairing-initiator"
+	KindPairingLimits       Kind = "pairing-limits"
+	KindPairingExpectations Kind = "pairing-expectations"
 )
 
 // Directories of state/, relative to the data directory root.
@@ -48,13 +56,14 @@ const (
 	SeqDir         = "state/seq"
 	TrustDir       = "state/trust"
 	PeersDir       = "state/peers"
+	PairingDir     = "state/pairing"
 	ArchiveDir     = "state/archive"
 )
 
 // StateDirs lists every directory of state/, a parent before its children: the
 // layout a start rebuilds when state/ or one of its directories is missing.
 func StateDirs() []string {
-	return []string{StateDir, OutDir, InDir, CtlDir, BodiesDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir, SeqDir, TrustDir, PeersDir, ArchiveDir}
+	return []string{StateDir, OutDir, InDir, CtlDir, BodiesDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir, SeqDir, TrustDir, PeersDir, PairingDir, ArchiveDir}
 }
 
 // recordDirs are the directories that hold record files, in the order a scan
@@ -62,7 +71,7 @@ func StateDirs() []string {
 // first: quarantining a source record reads the floor file of its sender, and
 // refuses a damaged one, so a damaged floor file must be settled before the
 // records that need it.
-var recordDirs = []string{SeqDir, OutDir, InDir, CtlDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir, TrustDir, PeersDir}
+var recordDirs = []string{SeqDir, OutDir, InDir, CtlDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir, TrustDir, PeersDir, PairingDir}
 
 // kindDir is the directory of each kind.
 var kindDir = map[Kind]string{
@@ -70,6 +79,7 @@ var kindDir = map[Kind]string{
 	KindEndpoint: EndpointsDir, KindAttempts: AttemptsDir, KindCheckpoint: CheckpointsDir,
 	KindAdmin: AdminDir, KindAlert: AlertsDir, KindSeq: SeqDir,
 	KindCredential: TrustDir, KindCredRevocation: TrustDir, KindLocalRevoked: TrustDir, KindPeer: PeersDir,
+	KindPairingTarget: PairingDir, KindPairingInitiator: PairingDir, KindPairingLimits: PairingDir, KindPairingExpectations: PairingDir,
 }
 
 // Dir is the directory of the kind, "" for a kind that is not one of state/.
@@ -78,7 +88,7 @@ func (k Kind) Dir() string { return kindDir[k] }
 // kindsOf lists the kinds a directory may hold.
 func kindsOf(dir string) []Kind {
 	var out []Kind
-	for _, k := range []Kind{KindOut, KindOutCtl, KindOutLost, KindIn, KindCtl, KindEndpoint, KindAttempts, KindCheckpoint, KindAdmin, KindAlert, KindSeq, KindCredential, KindCredRevocation, KindLocalRevoked, KindPeer} {
+	for _, k := range []Kind{KindOut, KindOutCtl, KindOutLost, KindIn, KindCtl, KindEndpoint, KindAttempts, KindCheckpoint, KindAdmin, KindAlert, KindSeq, KindCredential, KindCredRevocation, KindLocalRevoked, KindPeer, KindPairingTarget, KindPairingInitiator, KindPairingLimits, KindPairingExpectations} {
 		if kindDir[k] == dir {
 			out = append(out, k)
 		}

@@ -113,6 +113,9 @@ type Engine struct {
 	trust     *trustState
 	pushedOwn record.Digest
 	outbox    *outbox
+	// pairing is the state machine of the pairing protocol and the sessions and
+	// fetches that go with it; see pairing.go.
+	pairing *pairingDriver
 	// directoryKey authenticates cursors for this process only, minted on its
 	// first directory query and never persisted.
 	directoryKey []byte
@@ -351,6 +354,9 @@ func (e *Engine) Start() {
 	// The network is given the facts it judges peers by before the loop serves a
 	// command, and, as no loop runs yet, from the state the scan built.
 	e.publishMembership()
+	if e.pairingBusy() {
+		e.sched.set(pairingTickKey, now) // the requests the scan restored are looked at at once
+	}
 	go e.loop()
 }
 
@@ -924,6 +930,8 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		}
 	case schedInstanceDrain:
 		e.later(&cmdInstanceDrain{instance: key.id})
+	case schedPairingTick:
+		_ = e.pairingTick(now) // its failure is logged there; a fatal one is e.fatal
 	case schedPeriodic:
 		p := e.periodic[key.id]
 		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, PausedSince: e.pausedSince, SignRefusal: e.signRefusal()})
