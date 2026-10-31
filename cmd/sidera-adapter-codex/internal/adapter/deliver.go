@@ -16,7 +16,8 @@ import (
 // startTurn starts a turn with a prompt. The prompt's attempt is the client id the
 // server keeps on its record, which is how it is found again; the text is the
 // daemon's, unchanged. The turn is tied to the attempt before its start event can
-// be reported, so that the event names it.
+// be reported, so that the event names it, and the thread counts as busy from the
+// answer on.
 func (a *App) startTurn(ctx context.Context, c *appserver.Client, s *session, preset codexcfg.Preset, attempt, text string) (appserver.Turn, error) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
@@ -32,7 +33,15 @@ func (a *App) startTurn(ctx context.Context, c *appserver.Client, s *session, pr
 	a.mu.Lock()
 	s.pending = nil
 	if err == nil {
-		s.turn(turn.ID).attempt = attempt
+		rec := s.turn(turn.ID)
+		rec.attempt = attempt
+		// The answer says the turn runs, and its events may come much later (the
+		// server holds them while the thread's MCP servers start). Until they do,
+		// nothing else may take the thread for idle, or the same prompt would be
+		// started again. A turn that already ended is over, whatever the answer says.
+		if turn.Running() && !rec.ended {
+			s.activeTurn = turn.ID
+		}
 	}
 	a.mu.Unlock()
 	close(ps.resolved)

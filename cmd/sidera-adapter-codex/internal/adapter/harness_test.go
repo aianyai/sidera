@@ -45,6 +45,10 @@ type fakeCodex struct {
 	// lateItem sends the event of the recorded prompt after the answer to the turn
 	// start instead of before it.
 	lateItem bool
+	// slowStart answers the turn start first and, a moment later, records the
+	// turn and its prompt and sends every event of the turn, as a server does while the thread's
+	// MCP servers are still starting.
+	slowStart bool
 }
 
 type fakeThread struct {
@@ -57,6 +61,9 @@ type fakeTurn struct {
 	id       string
 	status   string
 	clientID string
+	// unrecorded hides the turn from the record (thread/turns/list), which does not
+	// hold it until its prompt is written.
+	unrecorded bool
 }
 
 func newFakeCodex(t *testing.T) *fakeCodex {
@@ -127,6 +134,9 @@ func (f *fakeCodex) install() {
 		data := []any{}
 		for i := len(th.turns) - 1; i >= 0; i-- { // newest first
 			t := th.turns[i]
+			if t.unrecorded {
+				continue
+			}
 			data = append(data, map[string]any{"id": t.id, "status": t.status, "items": []any{
 				map[string]any{"type": "userMessage", "id": "i-" + t.id, "clientId": t.clientID},
 			}})
@@ -147,21 +157,37 @@ func (f *fakeCodex) install() {
 		f.next++
 		turn := &fakeTurn{id: fmt.Sprintf("tu-%d", f.next), status: "inProgress", clientID: p.ClientUserMessageID}
 		th.turns = append(th.turns, turn)
-		late := f.lateItem
+		late, slow := f.lateItem, f.slowStart
+		turn.unrecorded = slow
 		f.mu.Unlock()
-		// The events come before the answer, which the order is not promised to avoid.
-		f.srv.Notify("thread/status/changed", map[string]any{"threadId": th.id, "status": map[string]string{"type": "active"}})
-		f.srv.Notify("turn/started", map[string]any{"threadId": th.id, "turn": map[string]any{"id": turn.id, "status": "inProgress", "items": []any{}}})
+		answer := map[string]any{"turn": map[string]any{"id": turn.id, "status": "inProgress", "items": []any{}}}
+		started := func() {
+			f.srv.Notify("thread/status/changed", map[string]any{"threadId": th.id, "status": map[string]string{"type": "active"}})
+			f.srv.Notify("turn/started", map[string]any{"threadId": th.id, "turn": map[string]any{"id": turn.id, "status": "inProgress", "items": []any{}}})
+		}
 		item := func() {
 			f.srv.Notify("item/completed", map[string]any{"threadId": th.id, "turnId": turn.id,
 				"item": map[string]any{"type": "userMessage", "id": "i-" + turn.id, "clientId": p.ClientUserMessageID}})
 		}
+		if slow {
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				f.mu.Lock()
+				turn.unrecorded = false
+				f.mu.Unlock()
+				started()
+				item()
+			}()
+			return answer, nil
+		}
+		// The events come before the answer, which the order is not promised to avoid.
+		started()
 		if late {
 			go func() { time.Sleep(100 * time.Millisecond); item() }()
 		} else {
 			item()
 		}
-		return map[string]any{"turn": map[string]any{"id": turn.id, "status": "inProgress", "items": []any{}}}, nil
+		return answer, nil
 	})
 	for _, m := range []string{"thread/archive", "thread/unsubscribe"} {
 		f.srv.Handle(m, func(raw json.RawMessage) (any, *appserver.RPCError) {

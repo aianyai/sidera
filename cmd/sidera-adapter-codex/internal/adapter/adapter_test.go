@@ -84,6 +84,23 @@ func TestCreateSession(t *testing.T) {
 // An attempt that was stored and whose prompt is already in the thread's record,
 // with its turn over, is answered from the record, starts no second turn, and says
 // that the turn is over.
+// The events of a turn can come well after the answer to its start, while the
+// thread's MCP servers start. The creation must not take that for a turn that did
+// not start and put the first prompt into the thread a second time.
+func TestCreateStartsOneTurnWhileTheEventsOfItAreStillComing(t *testing.T) {
+	codex := newFakeCodex(t)
+	codex.slowStart = true
+	h := newHarness(t, codex)
+	h.start()
+	got := h.create(attempt1, sessionEP, "dev")
+	if got.Outcome != adapterproto.CreateCreated {
+		t.Fatalf("result = %+v", got)
+	}
+	if n := len(codex.callsOf("turn/start")); n != 1 {
+		t.Fatalf("%d turn starts, want 1: the first prompt went into the thread twice", n)
+	}
+}
+
 func TestCreateAfterARestartFindsThePromptInTheRecord(t *testing.T) {
 	codex := newFakeCodex(t)
 	codex.seed("th-9", &fakeTurn{id: "tu-1", status: "completed", clientID: attempt2})

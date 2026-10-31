@@ -258,7 +258,10 @@ in an interrupted turn without the prompt: the last row.
 
 **Turn events.** `turn/started` becomes `turn.started` with the attempt that caused
 the turn: the answer to `turn/start` says which turn it made, and an event that comes
-first waits up to two seconds for it, then goes without an attempt. A turn the adapter
+first waits up to two seconds for it, then goes without an attempt. The thread counts
+as running a turn from that answer, not from the event: the server sends the events
+only after the thread's MCP servers have started, seconds later, and a creation that
+took the thread for idle in between would put the first prompt in a second time. A turn the adapter
 did not start has no attempt. `turn/completed` becomes `turn.ended` (`completed`,
 `interrupted`, `failed`). Every turn has one pair: a turn whose start was missed is
 reported started just before it is reported ended. When the adapter restarts, the
