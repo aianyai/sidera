@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	lnet "github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
@@ -164,6 +165,11 @@ func (n *Network) connect(ctx context.Context, node ident.NodeID) (*connEntry, e
 // dialMember dials the peers in order until one connects, completes the
 // exchange and proves to be the node, as a member.
 func (n *Network) dialMember(ctx context.Context, node ident.NodeID, pids []peer.ID) (*connEntry, error) {
+	// The library keeps a dial backoff of its own per address (5 seconds plus the
+	// square of the failures, up to 5 minutes, cleared only by a success), which
+	// would keep a node that came back unreachable long after the memo of connect
+	// ran out. The memo is the backoff, so the library's is bypassed.
+	ctx = lnet.WithForceDirectDial(ctx, "the memo of the node, not the library's backoff, paces redials")
 	var failures error
 	for _, pid := range pids {
 		c, err := n.lib.host.Network().DialPeer(ctx, pid)

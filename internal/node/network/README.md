@@ -26,10 +26,10 @@ clock), touches no file and takes no randomness of its own.
 | `Config`, `DefaultParams` | The network key, the clock, the accounting parameters (zero means `DefaultParams`), the log, and the timeouts (4 s to connect, 10 s per call, 10 s unreachable memo, 1 s tick). |
 | `Network.SetNode(Node)`, `Node` | The engine's side: `transport.Handler`, `NotePeerCertificate` (a member's certificate before its connection becomes a member's) and `RefusalReason` (the name of a refusal, for the answer). |
 | `Network.Listen(addrs)`, `ListenAddrs`, `PeerID` | Open the listeners (the address is in the error when one cannot open); where they are open; the identifier a contact line names after `/p2p/`. |
-| `Network.SetMembership(Membership)` | The snapshot of the node's own certificate, the facts of a decision and the held certificates; decides live connections again and closes those that no longer keep. |
+| `Network.SetMembership(Membership)` | The snapshot of the node's own certificate, the facts of a decision and the held certificates; decides live connections again and closes those that no longer keep, and those of a non-member that is now a member (once idle, forgetting the node's unreachable memo). |
 | `Network.SetAddressBook(map)` | The multiaddrs of each node, with `/p2p/<peer id>` unless a held certificate gives the peer. |
 | `Network.CheckAddresses(node, addrs)` | The rule for addresses the owner enters: judged by `config.ValidatePeerAddress`, then one must name the peer while no certificate is held, and every `/p2p/` must be the held certificate's peer once one is. The error is a `*config.FieldError` with the path of the address. |
-| `Network.ContactAddrs()` | The addresses to give another owner: the open listeners, unspecified ones expanded into the interfaces' addresses, no loopback or link-local, each ending in `/p2p/<peer id>`. |
+| `Network.ContactAddrs()` | The addresses to give another owner: the open listeners, unspecified ones expanded into the interfaces' addresses, no loopback or link-local (IPv4 or IPv6), each ending in `/p2p/<peer id>`. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback; whether a member connection to a node is up. |
 | `NewRouter(self, loopback, remote)`, `Router` | The transport the engine calls: this node's calls to the loopback, every other node's to the remote client. |
 
@@ -57,6 +57,11 @@ clock), touches no file and takes no randomness of its own.
   cannot have seen the call; a read error after the request went out is
   `ErrTimeout`; a gated reset is read from the reset code on the read, never from a
   write error.
+- **A connection at fault is closed.** A call that timed out, or failed with an
+  error a live connection does not give, closes its connection and, when it was
+  the node's last member connection, memoizes the node as unreachable; of several
+  member connections the newest is used. The unreachable memo is the only dial
+  backoff, so dials bypass the library's own.
 - **Timers are the clock's.** The accounting's deadlines and the unreachable memo
   use the injected clock; a test advances it. A timer only wakes the loop; the
   accounting's `Overdue` is the truth.

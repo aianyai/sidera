@@ -3,6 +3,7 @@ package network
 import (
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -92,11 +93,18 @@ func (n *Network) ContactAddrs() []string {
 			continue
 		}
 		for _, r := range resolved {
-			if manet.IsIPLoopback(r) || manet.IsIP6LinkLocal(r) || manet.IsIPUnspecified(r) {
+			if manet.IsIPLoopback(r) || isIP4LinkLocal(r) || manet.IsIP6LinkLocal(r) || manet.IsIPUnspecified(r) {
 				continue
 			}
 			out = append(out, r.String()+"/p2p/"+n.peer.String())
 		}
 	}
 	return out
+}
+
+// isIP4LinkLocal reports whether the multiaddr starts with an IPv4 link-local
+// address (169.254.0.0/16), which no other machine can be reached on; the
+// multiaddr library has the check for IPv6 only.
+func isIP4LinkLocal(m ma.Multiaddr) bool {
+	return len(m) > 0 && m[0].Code() == ma.P_IP4 && net.IP(m[0].RawValue()).IsLinkLocalUnicast()
 }

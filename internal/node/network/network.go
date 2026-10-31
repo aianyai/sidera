@@ -118,6 +118,7 @@ type Network struct {
 	closed      bool
 	acct        *preauth.Accounting
 	conns       map[lnet.Conn]*connEntry
+	connSeq     uint64                         // the last sequence number given to a connection
 	byKey       map[preauth.ConnKey]*connEntry // the tracked connection of a key
 	membership  *membership
 	strangers   map[ident.NodeID]record.SerialSeen

@@ -7,10 +7,13 @@ import (
 	"io"
 
 	lnet "github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/protocol"
+	msmux "github.com/multiformats/go-multistream"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/nodeproto"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // A call to another node is one stream: the request is one message and a half
@@ -147,6 +150,9 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if connectionFault(cctx, err) {
+			n.dropConn(e, target)
+		}
 		return nil, fmt.Errorf("%w: %v", transport.ErrUnreachable, err)
 	}
 	stop := context.AfterFunc(cctx, func() { s.Reset() })
@@ -160,6 +166,9 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 		case errors.Is(err, gatedByPeer):
 			return fmt.Errorf("%w: the peer's gate refused the stream", transport.ErrUnreachable)
 		default:
+			if connectionFault(cctx, err) {
+				n.dropConn(e, target)
+			}
 			return fmt.Errorf("%w: %v", transport.ErrTimeout, err)
 		}
 	}
@@ -175,6 +184,28 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	}
 	s.Close()
 	return answer, nil
+}
+
+// connectionFault reports whether a failed call says the connection is at fault:
+// the call ran out of time, or the error is not one that a live connection
+// gives. A live connection also gives a stream the peer reset (its gate, or its
+// handler giving up), a protocol the peer does not serve, a state that may not
+// use the protocol and an answer over the limit. A peer that has gone away
+// gives none of them: its streams do not open or do not answer, and without this
+// the connection would be kept and every call to the node would wait out the
+// call timeout on it.
+func connectionFault(callCtx context.Context, err error) bool {
+	if callCtx.Err() != nil {
+		return true
+	}
+	var reset *lnet.StreamError
+	var unsupported msmux.ErrNotSupported[protocol.ID]
+	switch {
+	case errors.Is(err, errNotAllowed), errors.Is(err, record.ErrOversize),
+		errors.As(err, &reset), errors.As(err, &unsupported):
+		return false
+	}
+	return true
 }
 
 // The server side. A handler runs only on a connection the gate judged a

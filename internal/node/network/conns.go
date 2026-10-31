@@ -38,6 +38,8 @@ type connEntry struct {
 	// closeIdle asks for the connection to be closed as soon as none is.
 	busy      int
 	closeIdle bool
+	// seq orders the connections by when they were established.
+	seq uint64
 	// ready is closed when the outcome of the exchange is known or the
 	// connection is gone.
 	ready      chan struct{}
@@ -113,6 +115,8 @@ func (n *Network) connected(c lnet.Conn) {
 		n.mu.Unlock()
 		return
 	}
+	n.connSeq++
+	e.seq = n.connSeq
 	e.tracked = n.acct.Connected(e.key, n.clock.Now())
 	n.conns[c] = e
 	if e.tracked {
@@ -211,21 +215,48 @@ func (n *Network) release(e *connEntry) {
 }
 
 // memberConn returns a live connection that this side judged to be a member's,
-// for the node; the one not asked to close comes first.
+// for the node: the one not asked to close comes first, and of those the one
+// established last, since an older one may be left from before the peer went
+// away and came back.
 func (n *Network) memberConn(node ident.NodeID) *connEntry {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var found *connEntry
+	var best *connEntry
 	for _, e := range n.conns {
 		if e.state != preauth.StateMember || e.node != node {
 			continue
 		}
-		if !e.closeIdle {
-			return e
+		if best == nil {
+			best = e
+			continue
 		}
-		found = e
+		newer := e.closeIdle == best.closeIdle && e.seq > best.seq
+		if (best.closeIdle && !e.closeIdle) || newer {
+			best = e
+		}
 	}
-	return found
+	return best
+}
+
+// dropConn closes a connection a call found at fault, and, when no other member
+// connection to the node remains, remembers the node as unreachable so that the
+// next call does not dial before the memo has run out and does not wait on a
+// peer that is gone.
+func (n *Network) dropConn(e *connEntry, node ident.NodeID) {
+	n.mu.Lock()
+	other := false
+	for _, o := range n.conns {
+		if o != e && o.state == preauth.StateMember && o.node == node {
+			other = true
+			break
+		}
+	}
+	if !other {
+		n.unreachable[node] = n.clock.Now().Add(n.cfg.UnreachableFor)
+	}
+	n.mu.Unlock()
+	n.log.Debug("closing a connection a call found at fault", "peer", e.conn.RemotePeer(), "node", node)
+	e.conn.Close()
 }
 
 // Connected reports whether a connection this side judged a member's is up to

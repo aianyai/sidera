@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -341,14 +342,6 @@ func TestCallErrors(t *testing.T) {
 			ctx    func() (context.Context, context.CancelFunc)
 			check  func(t *testing.T, err error)
 		}{
-			{"timeout: the target does not answer in time", func(ctx context.Context) (transport.Receipt, error) {
-				<-ctx.Done()
-				return transport.Receipt{}, ctx.Err()
-			}, nil, func(t *testing.T, err error) {
-				if !errors.Is(err, transport.ErrTimeout) {
-					t.Fatalf("err = %v, want ErrTimeout", err)
-				}
-			}},
 			{"refused: the target refuses with a reason", func(context.Context) (transport.Receipt, error) {
 				return transport.Receipt{}, errors.New("conflict")
 			}, nil, func(t *testing.T, err error) {
@@ -375,6 +368,16 @@ func TestCallErrors(t *testing.T) {
 			}, func(t *testing.T, err error) {
 				if !errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrTimeout) {
 					t.Fatalf("err = %v, want the caller's context error", err)
+				}
+			}},
+			// Last: a call that times out closes its connection and the node is
+			// remembered as unreachable, which the rows after it would see.
+			{"timeout: the target does not answer in time", func(ctx context.Context) (transport.Receipt, error) {
+				<-ctx.Done()
+				return transport.Receipt{}, ctx.Err()
+			}, nil, func(t *testing.T, err error) {
+				if !errors.Is(err, transport.ErrTimeout) {
+					t.Fatalf("err = %v, want ErrTimeout", err)
 				}
 			}},
 		}
@@ -469,6 +472,104 @@ func TestNewSnapshotClosesWhatNoLongerKeeps(t *testing.T) {
 	eventually(t, "the connection to be closed on both sides", func() bool { return a.connCount() == 0 && b.connCount() == 0 })
 	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a call to a node that is no longer a member: %v, want ErrUnreachable", err)
+	}
+}
+
+// TestNodeThatCameBackIsReachedWhenTheMemoRunsOut stops a node, fails a call to
+// it, brings it back on the same address and shows that the first call after the
+// memo has run out reaches it, though the library's own dial backoff for that
+// address, which runs on the real clock, has not.
+func TestNodeThatCameBackIsReachedWhenTheMemoRunsOut(t *testing.T) {
+	a, b := pair(t, false, true, true, nil)
+	addr := b.contact(true)
+	listen := strings.TrimSuffix(addr, "/p2p/"+b.net.PeerID())
+	b.net.Close()
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
+		t.Fatalf("a call to a node that is down: %v, want ErrUnreachable", err)
+	}
+
+	back, err := New(Config{Key: b.netKey, Clock: b.clk, Log: slog.New(slog.NewTextHandler(b.log, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { back.Close() })
+	back.SetNode(b.node)
+	if err := back.SetMembership(b.membership(1, false, a)); err != nil {
+		t.Fatal(err)
+	}
+	if err := back.Listen([]string{listen}); err != nil {
+		t.Fatal(err)
+	}
+	a.clk.Advance(DefaultUnreachableFor + time.Second)
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+		t.Fatalf("the first call after the memo ran out: %v", err)
+	}
+}
+
+// TestPromotedNodeIsCalledOnANewConnection makes a node a member while a
+// non-member connection to it is live and shows that the connection is closed,
+// the memo of the failed call is gone, and the next call exchanges again and
+// goes through.
+func TestPromotedNodeIsCalledOnANewConnection(t *testing.T) {
+	a, b := pair(t, false, false, true, nil) // a does not trust b yet
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
+		t.Fatalf("a call to a node that is not a member: %v, want ErrUnreachable", err)
+	}
+	a.setMembership(1, b)
+	eventually(t, "the non-member connection to be closed on both sides", func() bool { return a.connCount() == 0 && b.connCount() == 0 })
+	// The clock is not advanced: the memo of the failed call must not be what
+	// answers now.
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+		t.Fatalf("a call to the node once it is a member: %v", err)
+	}
+}
+
+// TestCallThatTimesOutDropsItsConnection shows that a connection a call timed
+// out on is closed, so that the next call is answered unreachable at once
+// instead of waiting on the same connection.
+func TestCallThatTimesOutDropsItsConnection(t *testing.T) {
+	a, b := pair(t, false, true, true, func(c *Config) { c.CallTimeout = 300 * time.Millisecond })
+	b.node.inbound = func(ctx context.Context, _ transport.Origin, _ ident.EndpointID, _ []byte) (transport.Receipt, error) {
+		<-ctx.Done()
+		return transport.Receipt{}, ctx.Err()
+	}
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrTimeout) {
+		t.Fatalf("err = %v, want ErrTimeout", err)
+	}
+	eventually(t, "the connection to be closed", func() bool { return a.connCount() == 0 })
+	begin := time.Now()
+	_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+	if !errors.Is(err, transport.ErrUnreachable) || time.Since(begin) > 200*time.Millisecond {
+		t.Fatalf("second err = %v after %v, want ErrUnreachable at once", err, time.Since(begin))
+	}
+}
+
+// fakeConn is a key of the connection table that nothing calls.
+type fakeConn struct {
+	lnet.Conn
+	id uint64
+}
+
+// TestMemberConnPrefersTheNewest picks among two member connections to a node.
+func TestMemberConnPrefersTheNewest(t *testing.T) {
+	n := &Network{conns: map[lnet.Conn]*connEntry{}}
+	node := newPeerNode(t, newClock(), 0x11, 0x91).id
+	add := func(seq uint64, closeIdle bool) *connEntry {
+		e := &connEntry{conn: &fakeConn{id: seq}, state: preauth.StateMember, node: node, seq: seq, closeIdle: closeIdle}
+		n.conns[e.conn] = e
+		return e
+	}
+	older, newer, closing := add(1, false), add(2, false), add(3, true)
+	if got := n.memberConn(node); got != newer {
+		t.Fatalf("got connection %d, want the newest that is not closing (2)", got.seq)
+	}
+	delete(n.conns, newer.conn)
+	if got := n.memberConn(node); got != older {
+		t.Fatalf("got connection %d, want the older one that is not closing (1)", got.seq)
+	}
+	delete(n.conns, older.conn)
+	if got := n.memberConn(node); got != closing {
+		t.Fatal("a closing connection is still better than none")
 	}
 }
 
@@ -646,7 +747,7 @@ func TestContactAddrsListNoLoopbackAndEndInThePeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, a := range n.net.ContactAddrs() {
-		if strings.HasPrefix(a, "/ip4/127.") || strings.HasPrefix(a, "/ip4/0.0.0.0") || !strings.HasSuffix(a, "/p2p/"+n.net.PeerID()) {
+		if strings.HasPrefix(a, "/ip4/127.") || strings.HasPrefix(a, "/ip4/169.254.") || strings.HasPrefix(a, "/ip4/0.0.0.0") || !strings.HasSuffix(a, "/p2p/"+n.net.PeerID()) {
 			t.Errorf("contact address %s", a)
 		}
 	}

@@ -46,7 +46,8 @@ type membership struct {
 // SetMembership replaces the snapshot. It sets the members the accounting lets
 // through, decides every live connection again with the new facts and closes
 // those that no longer keep (a refused one, or a member that is now a
-// non-member), and, when the node's own certificate has a new serial, closes
+// non-member) or that are a node's non-member connection while the node is now a
+// member, and, when the node's own certificate has a new serial, closes
 // every connection as soon as it is idle so that the next call exchanges the
 // new certificate: an exchange on an authenticated connection is ignored, so a
 // renewed certificate reaches a peer only on a new connection.
@@ -181,8 +182,12 @@ func (n *Network) refreshHeldLocked() {
 }
 
 // rejudge decides the exchanges of live connections again with the facts and
-// closes the connections that no longer keep. A connection that is promoted is
-// left as it is: a promotion is applied by what caused it.
+// closes the connections that no longer keep. A connection to a node that is now
+// a member but was judged a non-member is closed as soon as it is idle, and the
+// node is no longer remembered as unreachable: the connection would otherwise
+// stay a non-member's for as long as it lives, and a dial returns it, so every
+// call would fail as not a member until it ended. The next call runs the
+// exchange again, which also hands the node's certificate to the engine.
 func (n *Network) rejudge(f preauth.Facts, entries []*connEntry) {
 	type verdict struct {
 		e     *connEntry
@@ -190,6 +195,7 @@ func (n *Network) rejudge(f preauth.Facts, entries []*connEntry) {
 		d     preauth.Decision
 	}
 	var results []verdict
+	var promoted []*connEntry
 	for _, e := range entries {
 		n.mu.Lock()
 		ex, state := e.exchange, e.state
@@ -198,8 +204,11 @@ func (n *Network) rejudge(f preauth.Facts, entries []*connEntry) {
 			continue
 		}
 		d := preauth.Decide(f, e.peerKey, *ex)
-		if !d.Keeps(state) {
+		switch {
+		case !d.Keeps(state):
 			results = append(results, verdict{e, state, d})
+		case state == preauth.StateNonMemberNode && d.State == preauth.StateMember:
+			promoted = append(promoted, e)
 		}
 	}
 	for _, r := range results {
@@ -210,6 +219,17 @@ func (n *Network) rejudge(f preauth.Facts, entries []*connEntry) {
 		n.log.Info("closing a connection that no longer keeps its state",
 			"peer", r.e.conn.RemotePeer(), "was", r.state.String(), "now", r.d.State.String(), "reason", r.d.Reason.String())
 		r.e.conn.Close()
+	}
+	for _, e := range promoted {
+		n.mu.Lock()
+		delete(n.unreachable, e.node)
+		e.closeIdle = true
+		closeNow := e.busy == 0
+		n.mu.Unlock()
+		n.log.Info("closing a non-member connection to a node that is now a member", "peer", e.conn.RemotePeer())
+		if closeNow {
+			e.conn.Close()
+		}
 	}
 }
 
