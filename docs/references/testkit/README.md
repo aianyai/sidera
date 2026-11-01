@@ -454,7 +454,8 @@ coverage dimensions.
   a valid publication with a sharing violation. This changes neither publication
   nor readiness, and adds no retry of read errors. The platform test holds that
   access open and requires creation replay and `Find` to return the same live
-  native identity.
+  native identity through absolute, extended and device paths. Existing extended
+  and device path namespaces are preserved when opening the file.
   `TestPendingStartupSurvivesLauncherLoss` holds a real hello response in this
   window, kills and waits for the launcher parent or cancels its caller, and
   requires replay of the same actual live identity, environment and sole native

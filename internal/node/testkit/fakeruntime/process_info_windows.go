@@ -16,7 +16,7 @@ func readProcessInfoFile(path string) ([]byte, error) {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
 	// Keep the long-path support of os.ReadFile when opening the handle directly.
-	if !strings.HasPrefix(name, `\\?\`) {
+	if !strings.HasPrefix(name, `\\?\`) && !strings.HasPrefix(name, `\\.\`) {
 		if strings.HasPrefix(name, `\\`) {
 			name = `\\?\UNC\` + name[2:]
 		} else {

@@ -26,20 +26,32 @@ func TestProcessInfoIsReadableWhileThePublisherHoldsItsRenameHandle(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { syscall.CloseHandle(h) })
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
-	defer cancel()
-	again, err := e.launcher.Create(ctx, fakeruntime.CreateRequest{
-		Attempt: attempt(1), Endpoint: "sess-1", Preset: "default",
-		FirstAttempt: attempt(1), FirstPrompt: "hello",
-	})
-	if err != nil {
-		t.Fatalf("Create while publication handle is open: %v", err)
-	}
-	if again.Ref() != s.Ref() || again.PID() != s.PID() || again.StartKey() != s.StartKey() || !again.Alive() {
-		t.Fatal("replay did not return the same live native session")
-	}
-	found, ok := e.launcher.Find(s.Ref())
-	if !ok || found.PID() != s.PID() || found.StartKey() != s.StartKey() || !found.Alive() {
-		t.Fatal("Find did not return the published live native session")
+	for _, tc := range []struct {
+		name string
+		dir  string
+	}{
+		{"absolute path", e.dir},
+		{"extended path", `\\?\` + e.dir},
+		{"device path", `\\.\` + e.dir},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e.launcher.Dir = tc.dir
+			ctx, cancel := context.WithTimeout(context.Background(), limit)
+			defer cancel()
+			again, err := e.launcher.Create(ctx, fakeruntime.CreateRequest{
+				Attempt: attempt(1), Endpoint: "sess-1", Preset: "default",
+				FirstAttempt: attempt(1), FirstPrompt: "hello",
+			})
+			if err != nil {
+				t.Fatalf("Create while publication handle is open: %v", err)
+			}
+			if again.Ref() != s.Ref() || again.PID() != s.PID() || again.StartKey() != s.StartKey() || !again.Alive() {
+				t.Fatal("replay did not return the same live native session")
+			}
+			found, ok := e.launcher.Find(s.Ref())
+			if !ok || found.PID() != s.PID() || found.StartKey() != s.StartKey() || !found.Alive() {
+				t.Fatal("Find did not return the published live native session")
+			}
+		})
 	}
 }

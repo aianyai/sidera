@@ -120,6 +120,7 @@ The renamed file is complete and visible before `MoveFileEx` necessarily closes
 its rename handle; an ordinary `os.ReadFile` can reject that valid publication
 with a sharing violation. The reader permits the publisher's existing handle,
 without retrying read errors or changing publication or readiness checks.
+Existing extended and device path namespaces are preserved when opening the file.
 
 `(*ProcessLauncher).waitForProcessInfo` in `launcher.go` has the only narrowly
 permitted real-time wait: one direct `time.NewTimer` call paces re-reading that
@@ -193,4 +194,5 @@ The pending creation ends on explicit cancellation; a replay with a live,
 deadline-bounded caller returns only its deadline error, retaining the exact
 original record and sole creation effect without inventing readiness.
 `process_info_windows_test.go` holds a publisher's DELETE-access handle open and
-checks that creation replay and `Find` still reach the same actual live session.
+checks that creation replay and `Find` still reach the same actual live session
+through absolute, extended and device paths.
