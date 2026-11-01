@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
@@ -18,18 +16,8 @@ import (
 // goes to files: a surviving runtime cannot keep an output-copy pipe open.
 type process struct {
 	native *os.Process
-	cmd    *exec.Cmd
 	done   chan struct{}
 	err    error // published by closing done
-}
-
-func startProcess(cmd *exec.Cmd) (*process, error) {
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	p := &process{native: cmd.Process, cmd: cmd, done: make(chan struct{})}
-	go func() { p.err = cmd.Wait(); close(p.done) }()
-	return p, nil
 }
 
 func (p *process) wait(ctx context.Context) error {
@@ -119,11 +107,7 @@ func (f *Fixture) launch(command, stdout, stderr string, values map[string]strin
 		}
 		args = append(args, "--port", strconv.Itoa(port))
 	}
-	cmd := exec.Command(f.binaries.Tagged, args...)
-	cmd.Dir, cmd.Stdout, cmd.Stderr = f.root, out, errout
-	cmd.Env = processEnv(values)
-	cmd.WaitDelay = 5 * time.Second
-	return startProcess(cmd)
+	return f.scope.start(processSpec{exe: f.binaries.Tagged, args: args, dir: f.root, env: processEnv(values), stdout: out, stderr: errout})
 }
 
 // prepare initializes a normal script's home before observed generation 1.

@@ -103,7 +103,21 @@ files and exactly one `Wait` goroutine. `Stop` freezes the complete-line scenari
 prefix before the public `daemon.stop` operation, then waits for actual exit.
 `Kill` kills only the current daemon, waits, and records only the PID it actually
 killed. Native runtimes belong to the control listener rather than a daemon
-generation. `Close` stops the daemon and closes the listener and fixture ledger.
+generation. A fixture owns one process scope across initialization and every
+daemon generation. On Windows this is a Job Object: the actual child starts
+suspended, joins the job before its first instruction and is then resumed. Its
+adapter, runtime and tool descendants remain in the same job, including before
+they connect to the control listener. Native process handles supply actual exit
+status; there is no intermediary launcher process.
+
+`Close` first attempts the existing orderly daemon stop and closes the control
+listener, then reclaims the process scope with its own bounded cleanup context.
+It waits for the entire Windows job to become empty before closing local ledger
+files or allowing the caller to remove the root. Setup failures also close the
+scope. Stop, job termination and wait failures remain visible to the caller;
+final reclamation does not add scenario kill or crash evidence. A daemon `Kill`
+leaves the scope open, so an existing runtime can survive and reconnect after a
+daemon restart.
 
 `ReadTrace` requires completed `Wait`. It validates generations, the full
 declaration table's kinds, contiguous per-key ordinals and complete JSON lines;
@@ -124,7 +138,8 @@ ordinals, bootstrap replay after a committed preset's response is lost, trace
 rejection, and ordinary builds rejecting tagged controls while ignoring their
 environment variables. Their short roots are removed after each
 run. By default, `TestMain` creates its unique root under the checkout's
-`.scratch/bb` (shared with the main checkout for worktrees). Set
+`.scratch/bb`; a worktree directly under `.worktrees` uses
+`<main-checkout>/.worktrees/.scratch/bb` instead. Set
 `SIDERA_ACCEPTANCE_ROOT` to an absolute path to an existing directory to choose
 a different parent. `TestMain` consumes and clears it before child builds or
 processes start; an invalid value fails the run. Domain recipes, offline damage

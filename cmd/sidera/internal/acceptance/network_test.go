@@ -103,7 +103,7 @@ func startNetNode(ctx context.Context, t *testing.T, name string, runtime bool) 
 	binaries.Tagged, binaries.Plain = networkBinary(t), networkBinary(t)
 	p := startPlainNode(ctx, t, runRoot(t), binaries, Options{Seed: t.Name() + "/" + name, ClockStart: time.Now().UTC()}, fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: runtime})
 	n := &netNode{plainNode: p, env: newEnvironment(ctx, p.f), endpoint: name}
-	t.Logf("node %s: daemon pid %d", name, p.p.cmd.Process.Pid)
+	t.Logf("node %s: daemon pid %d", name, p.p.native.Pid)
 	n.id = n.contactLine()[0]
 	var err error
 	if n.address, err = n.env.Direct(name); err != nil {

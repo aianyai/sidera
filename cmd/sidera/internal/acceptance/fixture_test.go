@@ -446,11 +446,18 @@ func TestRealBinaryPlainRejectsControlsAndIgnoresTestEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer out.Close()
-	cmd := exec.Command(testBinaries.Plain, "--home", home, "daemon")
-	cmd.Env = env
-	cmd.Stdout = out
-	cmd.Stderr = out
-	p, err := startProcess(cmd)
+	scope, err := newProcessScope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := scope.close(cleanup); err != nil {
+			t.Error(err)
+		}
+	}()
+	p, err := scope.start(processSpec{exe: testBinaries.Plain, args: []string{"--home", home, "daemon"}, dir: root, env: env, stdout: out, stderr: out})
 	if err != nil {
 		t.Fatal(err)
 	}

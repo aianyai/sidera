@@ -70,6 +70,7 @@ type Fixture struct {
 	writer         *ledger.Writer
 	gens           map[int]*generation
 	current        *generation
+	scope          *processScope
 	steps          map[string]bool
 	step           string
 	op             uint64
@@ -84,7 +85,7 @@ func NewFixture(ctx context.Context, root string, binaries Binaries, opts Option
 	return newFixture(ctx, root, binaries, opts, fixtureProfile{})
 }
 
-func newFixture(ctx context.Context, root string, binaries Binaries, opts Options, profile fixtureProfile) (*Fixture, error) {
+func newFixture(ctx context.Context, root string, binaries Binaries, opts Options, profile fixtureProfile) (_ *Fixture, err error) {
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("acceptance: root must be absolute")
 	}
@@ -98,7 +99,16 @@ func newFixture(ctx context.Context, root string, binaries Binaries, opts Option
 		return nil, err
 	}
 	f := &Fixture{root: root, home: filepath.Join(root, "n"), binaries: binaries, opts: opts, profile: profile, now: opts.ClockStart, gens: map[int]*generation{}, steps: map[string]bool{}}
-	var err error
+	f.scope, err = newProcessScope()
+	if err != nil {
+		return nil, err
+	}
+	ready := false
+	defer func() {
+		if !ready {
+			err = errors.Join(err, f.Close())
+		}
+	}()
 	f.table, err = daemon.Table()
 	if err != nil {
 		return nil, err
@@ -109,20 +119,17 @@ func newFixture(ctx context.Context, root string, binaries Binaries, opts Option
 	}
 	f.client, err = manageapi.NewClient(manageapi.ClientConfig{Home: f.home})
 	if err != nil {
-		_ = f.control.Close()
 		return nil, err
 	}
 	f.files = ledger.NewDir(filepath.Join(root, "l"))
 	f.writer, err = f.files.Open("fixture", os.Getpid(), f.Now)
 	if err != nil {
-		f.client.Close()
-		_ = f.control.Close()
 		return nil, err
 	}
 	if err = f.prepareInputs(); err != nil {
-		_ = f.Close()
 		return nil, err
 	}
+	ready = true
 	return f, nil
 }
 
@@ -177,7 +184,7 @@ func (f *Fixture) begin(spec GenerationSpec, command string) (*generation, error
 		return nil, err
 	}
 	if f.opts.Log != nil {
-		f.opts.Log.Debug("acceptance process started", "command", command, "generation", spec.Number, "pid", g.p.cmd.Process.Pid)
+		f.opts.Log.Debug("acceptance process started", "command", command, "generation", spec.Number, "pid", g.p.native.Pid)
 	}
 	f.gens[spec.Number] = g
 	return g, nil
@@ -393,7 +400,7 @@ func (f *Fixture) Kill(ctx context.Context) error {
 func (f *Fixture) kill(g *generation) error {
 	killed, err := g.p.killAndWait()
 	if killed {
-		err = errors.Join(err, f.writer.Append(ledger.KindFixtureKill, ledger.Attrs{PIDs: []int64{int64(g.p.cmd.Process.Pid)}}))
+		err = errors.Join(err, f.writer.Append(ledger.KindFixtureKill, ledger.Attrs{PIDs: []int64{int64(g.p.native.Pid)}}))
 	}
 	return err
 }
@@ -450,15 +457,27 @@ func (f *Fixture) Close() error {
 		cancel()
 		if err != nil {
 			errs = append(errs, err)
-			errs = append(errs, f.Kill(context.Background()))
 		}
 	}
-	f.client.Close()
-	errs = append(errs, f.control.Close())
+	if f.client != nil {
+		f.client.Close()
+	}
+	if f.control != nil {
+		errs = append(errs, f.control.Close())
+	}
+	// Final reclamation is independent of the scenario's context and does not
+	// record a crash: it owns every descendant, including one without hello.
+	if f.scope != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		errs = append(errs, f.scope.close(ctx))
+		cancel()
+	}
 	for _, w := range f.agentWriters {
 		errs = append(errs, w.Close())
 	}
-	errs = append(errs, f.writer.Close())
+	if f.writer != nil {
+		errs = append(errs, f.writer.Close())
+	}
 	return errors.Join(errs...)
 }
 

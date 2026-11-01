@@ -190,6 +190,18 @@ and returned controllers keep their ordinary transport errors rather than a
 process-liveness lease. Real-process lifecycle regressions cover exits before and
 during a missing-connection wait and successful acquisition after replacement.
 
+One fixture-owned process scope spans initialization and all daemon generations.
+On Windows the scope is a Job Object. The actual child is created suspended and
+assigned before it runs, so adapter, runtime and tool descendants are owned even
+before their control hello. Real process handles provide exit and abnormal-status
+evidence. Killing a daemon leaves the scope and native runtime alive. Final
+`Close` attempts the ordinary stop, closes control connections and then terminates
+and waits for the whole job with an independent bounded context before closing
+local ledger files. Setup failure follows the same reclamation path. Cleanup
+errors are returned and final reclamation records no scenario kill or crash.
+The real-runtime lifecycle regression checks survival across daemon replacement,
+cleanup after caller cancellation and immediate deletion of the complete root.
+
 `NewWalkBackend` in that same binary support package runs scripts and actual
 startup and terminal lifecycles through this fixture. It accepts prebuilt programs
 and an existing absolute short directory owned by its caller; each run creates,

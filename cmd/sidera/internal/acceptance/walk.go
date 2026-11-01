@@ -177,7 +177,7 @@ func (r *binaryRun) finish(g *generation) error {
 		crashPoint = "after step " + r.plan.Targets[i].AfterStep
 	}
 	if crashPoint != "" {
-		if err := r.fixture.writer.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: crashPoint, PIDs: []int64{int64(g.p.cmd.Process.Pid)}}); err != nil {
+		if err := r.fixture.writer.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: crashPoint, PIDs: []int64{int64(g.p.native.Pid)}}); err != nil {
 			return err
 		}
 	}
@@ -240,7 +240,7 @@ func (r *binaryRun) boundary(ctx context.Context, g *generation, step string) (b
 	if !killed {
 		return false, errors.New("acceptance: boundary process already exited")
 	}
-	if err = r.fixture.writer.Append(ledger.KindFixtureKill, ledger.Attrs{PIDs: []int64{int64(g.p.cmd.Process.Pid)}}); err != nil {
+	if err = r.fixture.writer.Append(ledger.KindFixtureKill, ledger.Attrs{PIDs: []int64{int64(g.p.native.Pid)}}); err != nil {
 		return false, err
 	}
 	var abnormal *exec.ExitError
