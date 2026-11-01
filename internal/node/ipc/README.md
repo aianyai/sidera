@@ -57,9 +57,11 @@ the management socket `<home>/manage/manage.sock`, and on Windows the pipes are
   must be the user's. A failed check returns a `*PeerCheckError` and nothing is
   sent. A missing directory or socket, or `ECONNREFUSED`, is
   `ErrDaemonNotRunning` instead, and the two never match each other. `EACCES`
-  on connect is a failed check (`access_denied`), not "not running": the user's
-  own socket always lets the user connect, so a refusal means someone else holds
-  the name.
+  or `EPERM` on connect is a failed check (`access_denied`), not "not running":
+  the user's own socket always lets the user connect, so a refusal means someone
+  else holds the name or a sandbox blocks the connection. A dial that finds
+  nobody serving returns a `*NotRunningError` (it matches `ErrDaemonNotRunning`)
+  with the path and the reason, so that the caller can say where it tried and why.
 - **Windows, listener.** The pipe is created as the first instance of its name,
   so a second listener on the name fails. Its security descriptor is
   `O:<SID>D:P(A;;GA;;;<SID>)` for the user's own SID, never the owner-rights

@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -240,6 +243,42 @@ func TestTheClientSideFailuresOfTheWayToTheDaemon(t *testing.T) {
 	check(t, got, want{"unavailable", "peer_check_failed"})
 	if !strings.Contains(got.Message, "mode 0755") {
 		t.Errorf("the message %q does not say which check failed", got.Message)
+	}
+}
+
+// A client that cannot connect to the daemon's endpoint says where it tried and
+// why it failed, in the unavailable category, and not "internal error": a sandbox
+// that blocks the socket must be recognisable to the agent inside it.
+func TestAFailureToConnectToTheDaemonSaysWhereAndWhy(t *testing.T) {
+	const path = "/h/run/agent.sock"
+	denied := &ipc.PeerCheckError{Failure: ipc.FailAccessDenied, Path: path, Detail: "refused", Err: syscall.EPERM}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want want
+		text string
+	}{
+		{"no such file", &ipc.NotRunningError{Path: path, Reason: "no such file", Err: syscall.ENOENT}, want{"unavailable", "daemon_not_running"},
+			"cannot reach the Sidera daemon at /h/run/agent.sock: no such file (is the daemon running? start it with `sidera daemon`)"},
+		{"connection refused", &ipc.NotRunningError{Path: path, Reason: "connection refused", Err: syscall.ECONNREFUSED}, want{"unavailable", "daemon_not_running"},
+			"cannot reach the Sidera daemon at /h/run/agent.sock: connection refused (is the daemon running? start it with `sidera daemon`)"},
+		{"permission denied", denied, want{"unavailable", "peer_check_failed"},
+			"cannot reach the Sidera daemon at /h/run/agent.sock: permission denied (a sandbox may be blocking it; otherwise another user holds this endpoint)"},
+		// What the HTTP client wraps a dial failure in.
+		{"wrapped by the HTTP client", &url.Error{Op: "Post", URL: "http://sidera/v1/agent/me", Err: denied}, want{"unavailable", "peer_check_failed"},
+			"cannot reach the Sidera daemon at /h/run/agent.sock: permission denied (a sandbox may be blocking it; otherwise another user holds this endpoint)"},
+		{"another failed check keeps its own words", &ipc.PeerCheckError{Failure: ipc.FailDirectoryMode, Path: "/h/run", Detail: "mode 0755, want 0700"}, want{"unavailable", "peer_check_failed"},
+			"ipc: peer check failed on " + runtime.GOOS + " (directory_mode): /h/run: mode 0755, want 0700"},
+		{"an error that names no path", fmt.Errorf("%w", ipc.ErrDaemonNotRunning), want{"unavailable", "daemon_not_running"},
+			"the daemon is not running; start it with `sidera daemon`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiwire.FromError(tc.err)
+			check(t, got, tc.want)
+			if got.Message != tc.text {
+				t.Errorf("message %q, want %q", got.Message, tc.text)
+			}
+		})
 	}
 }
 

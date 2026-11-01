@@ -91,3 +91,40 @@ func TestClientReportsASocketTheSystemRefusesAsAFailedCheck(t *testing.T) {
 		t.Fatalf("%v: the system error should be kept as the cause", err)
 	}
 }
+
+// Every way a connect to the socket can fail is one of three things for the
+// caller: nobody serves it, the system refused the user (a sandbox gives EPERM on
+// macOS and EACCES elsewhere), or something that is not either.
+func TestAFailedConnectIsNotRunningRefusedOrOther(t *testing.T) {
+	addr := Address{name: "/h/run/agent.sock"}
+	other := errors.New("some other failure")
+	for _, tc := range []struct {
+		name    string
+		err     error
+		refused bool
+		reason  string // of a daemon that is not running; empty for the other two
+	}{
+		{"no such file", &os.PathError{Op: "connect", Path: addr.name, Err: syscall.ENOENT}, false, "no such file"},
+		{"connection refused", &os.PathError{Op: "connect", Path: addr.name, Err: syscall.ECONNREFUSED}, false, "connection refused"},
+		{"permission denied", &os.PathError{Op: "connect", Path: addr.name, Err: syscall.EACCES}, true, ""},
+		{"operation not permitted", &os.PathError{Op: "connect", Path: addr.name, Err: syscall.EPERM}, true, ""},
+		{"anything else", other, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := connectError(addr, tc.err)
+			var nr *NotRunningError
+			switch {
+			case tc.refused:
+				assertPeerCheck(t, got, FailAccessDenied)
+			case tc.reason != "":
+				if !errors.As(got, &nr) || !errors.Is(got, ErrDaemonNotRunning) || nr.Path != addr.name || nr.Reason != tc.reason {
+					t.Fatalf("got %#v, want not running at %s: %s", got, addr.name, tc.reason)
+				}
+			default:
+				if errors.Is(got, ErrDaemonNotRunning) || errors.Is(got, ErrPeerCheckFailed) || !errors.Is(got, other) {
+					t.Fatalf("got %v, want the failure as it is", got)
+				}
+			}
+		})
+	}
+}

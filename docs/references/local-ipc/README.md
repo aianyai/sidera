@@ -40,9 +40,10 @@ allow a second daemon while it is gone.
   link), owned by the user, mode exactly 0700; the socket is a real socket (not
   a link), owned by the user. After connecting it reads the server's
   credentials and requires the user's uid. Nothing is sent when a check fails.
-  `EACCES` on connect is a failed check (`access_denied`), not "not running": the
-  user's own socket lets the user connect, so a refusal means someone else holds
-  the name.
+  `EACCES` and `EPERM` (what a macOS sandbox gives) on connect are a failed
+  check (`access_denied`), not "not running": the user's own socket lets the user
+  connect, so a refusal means someone else holds the name or a sandbox blocks the
+  connection.
 - Linux abstract-namespace sockets are not used: they are not protected by file
   permissions.
 
@@ -250,8 +251,8 @@ made, and `Listen` takes only the address of the management interface; a scan in
 
 | Error                   | Meaning                                                               | Reported as                           |
 | ----------------------- | --------------------------------------------------------------------- | ------------------------------------- |
-| `ErrDaemonNotRunning`   | Socket or directory absent, `ECONNREFUSED`, pipe not found            | `unavailable`/`daemon_not_running`    |
-| `*PeerCheckError`       | A check failed; carries the `Failure`, the path and the system error  | `unavailable`/`peer_check_failed`     |
+| `ErrDaemonNotRunning`   | Socket or directory absent, `ECONNREFUSED`, pipe not found; a dial returns it as a `*NotRunningError` that keeps the path, the reason (`no such file` or `connection refused`) and the system error | `unavailable`/`daemon_not_running`; the message names the path and the reason |
+| `*PeerCheckError`       | A check failed; carries the `Failure`, the path and the system error  | `unavailable`/`peer_check_failed`; for `access_denied` the message names the path and says a sandbox may be blocking the connection |
 | `*PathTooLongError`     | The socket path exceeds the platform limit                            | `invalid_argument`/`socket_path_too_long`; the extracted error keeps the path, byte length, limit and shorter-directory advice |
 | `ErrLockNotHeld`        | `Listen` without the caller's assertion that it holds the instance lock | `internal`/`instance_lock_not_held`, with a fixed startup-error explanation |
 
@@ -263,7 +264,7 @@ The `Failure` values of a `*PeerCheckError` are stable strings:
 | `socket_missing`, `socket_not_socket`, `socket_owner`                               | The socket file (Unix): exists, is a socket, owner.                                |
 | `stat_failed`                                                                       | A file could not be inspected for another reason.                                  |
 | `server_credentials`, `server_uid`                                                  | The process serving the socket (Unix): credentials unreadable, or not the user.    |
-| `access_denied`                                                                     | The system refused the user access to the socket (`EACCES`) or pipe (`ERROR_ACCESS_DENIED`): someone else holds the name. |
+| `access_denied`                                                                     | The system refused the user access to the socket (`EACCES`, `EPERM`) or pipe (`ERROR_ACCESS_DENIED`): someone else holds the name, or a sandbox blocks the connection. |
 | `own_sid`                                                                           | The client could not determine its own SID (Windows).                              |
 | `pipe_owner`                                                                        | The pipe's owner is unreadable or is not the user (Windows).                       |
 | `server_process_id`, `server_process_open`, `server_token_open`, `server_token_user`, `server_sid` | The server process of the pipe (Windows): one value per step, and `server_sid` when its user is not ours. |

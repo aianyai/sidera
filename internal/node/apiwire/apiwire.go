@@ -200,7 +200,7 @@ func Malformed(message, path string) *Error {
 
 // FromError maps an error to its words on the wire: the error of the wire itself
 // as it is, a fatal daemon failure, a refusal of the engine, a refused change of
-// the configuration, a fault in a request, a daemon or IPC failure, an ended request
+// the configuration, a fault in a request, a daemon or IPC failure (a failure to connect says where and why), an ended request
 // context, and everything else as an internal error whose text stays out of the
 // answer. nil is nil.
 func FromError(err error) *Error {
@@ -214,6 +214,7 @@ func FromError(err error) *Error {
 	var ce *config.ChangeError
 	var se *strictjson.Error
 	var pe *ipc.PeerCheckError
+	var nr *ipc.NotRunningError
 	switch {
 	case errors.As(err, &we):
 		return we
@@ -226,8 +227,14 @@ func FromError(err error) *Error {
 		return fromChange(ce)
 	case errors.As(err, &se):
 		return Malformed("the request is not what the method takes: "+se.Error(), se.Path)
+	case errors.As(err, &pe) && pe.Failure == ipc.FailAccessDenied:
+		// The system will not let this process connect: for the owner's own endpoint,
+		// most often a sandbox. The caller has to be told so, not that something broke.
+		return New(CategoryUnavailable, "peer_check_failed", unreachable(pe.Path, "permission denied (a sandbox may be blocking it; otherwise another user holds this endpoint)"))
 	case errors.As(err, &pe):
 		return New(CategoryUnavailable, "peer_check_failed", pe.Error())
+	case errors.As(err, &nr):
+		return New(CategoryUnavailable, "daemon_not_running", unreachable(nr.Path, nr.Reason+" (is the daemon running? start it with `sidera daemon`)"))
 	case errors.Is(err, ipc.ErrDaemonNotRunning):
 		return New(CategoryUnavailable, "daemon_not_running", "the daemon is not running; start it with `sidera daemon`")
 	case errors.As(err, &pathErr):
@@ -250,6 +257,12 @@ func FromError(err error) *Error {
 		return New(CategoryUnavailable, "request_timeout", "the request context deadline was exceeded")
 	}
 	return New(CategoryInternal, CodeInternal, "internal error")
+}
+
+// unreachable is the message of a failure to connect to the daemon's local
+// endpoint: where it was tried and why it failed.
+func unreachable(path, why string) string {
+	return "cannot reach the Sidera daemon at " + path + ": " + why
 }
 
 func fromRefusal(r *engine.Refusal) *Error {

@@ -3,9 +3,8 @@ package ipc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
-	"runtime"
+	"syscall"
 )
 
 // Dial connects to the interface at addr, after checking that the way to it and
@@ -24,12 +23,19 @@ func Dial(ctx context.Context, addr Address, opts Options) (net.Conn, error) {
 
 // accessDenied is the failed check for an open or connect the system refused.
 // The user's own socket and pipe always grant the user access, so a refusal
-// means someone else holds the name, which is not the same as nobody serving it.
+// means that someone else holds the name or that a sandbox the process runs in
+// does not let it connect, which is not the same as nobody serving it.
 func accessDenied(addr Address, cause error) error {
 	return &PeerCheckError{Failure: FailAccessDenied, Path: addr.name,
-		Detail: "the system refused the user access to the endpoint, which the user's own endpoint always grants", Err: cause}
+		Detail: "the system refused the user access to the endpoint, which the user's own endpoint always grants: another user holds the name, or a sandbox blocks the connection", Err: cause}
 }
 
+// notRunning is ErrDaemonNotRunning for a path that does not exist (cause may be
+// nil) or a socket nobody accepts on.
 func notRunning(addr Address, cause error) error {
-	return fmt.Errorf("%w: %s (%s): %w", ErrDaemonNotRunning, addr.name, runtime.GOOS, cause)
+	reason := "no such file"
+	if errors.Is(cause, syscall.ECONNREFUSED) {
+		reason = "connection refused"
+	}
+	return &NotRunningError{Path: addr.name, Reason: reason, Err: cause}
 }

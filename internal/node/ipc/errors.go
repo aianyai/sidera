@@ -20,6 +20,29 @@ var (
 	ErrLockNotHeld = errors.New("ipc: the instance lock is not held")
 )
 
+// NotRunningError is ErrDaemonNotRunning with where it was looked for and why the
+// connection failed: errors.Is matches ErrDaemonNotRunning and, through Unwrap, the
+// system error. Reason is "no such file" for a missing directory, socket or pipe
+// and "connection refused" for a socket nobody accepts on.
+type NotRunningError struct {
+	Path   string // the socket or pipe that was dialled
+	Reason string
+	Err    error // the underlying system error, when there is one
+}
+
+func (e *NotRunningError) Error() string {
+	s := fmt.Sprintf("%s: %s (%s): %s", ErrDaemonNotRunning, e.Path, runtime.GOOS, e.Reason)
+	if e.Err != nil {
+		s += ": " + e.Err.Error()
+	}
+	return s
+}
+
+func (e *NotRunningError) Unwrap() error { return e.Err }
+
+// Is makes every NotRunningError match ErrDaemonNotRunning.
+func (e *NotRunningError) Is(target error) bool { return target == ErrDaemonNotRunning }
+
 // Failure says which check failed, as a stable machine-readable value.
 type Failure string
 

@@ -221,8 +221,12 @@ an engine refusal in its cause: a daemon that stopped requires recovery, while
 a standalone engine storage-fatal refusal still means
 `outcome_unknown/storage_fatal` for a request. All new daemon and missing-lock
 messages are fixed, without outer wrapper text or underlying causes. IPC
-path-length errors use only the extracted typed error's explanation; the
-existing peer-check mapping is unchanged. Untyped filesystem and hook errors
+path-length errors use only the extracted typed error's explanation. A failure to
+connect to a local endpoint is the exception to fixed messages: it names the socket
+and the reason (`daemon_not_running` for a missing socket or a refused connection,
+`peer_check_failed` for a refusal of access), as the
+[command-line reference](../command-line/README.md) lists; the other peer checks keep
+their mapping. Untyped filesystem and hook errors
 retain their existing mapping or the fixed `internal/internal` fallback.
 
 The local `init` and foreground `daemon` commands use these mappings for JSON

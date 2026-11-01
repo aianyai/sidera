@@ -244,6 +244,22 @@ including `--json`; no error body is emitted for usage errors. Human initializat
 and foreground-daemon failures print `error: <err>` on stderr, retaining the
 daemon's original explanation.
 
+A command that cannot connect to the daemon's local endpoint (the Agent socket for
+the agent commands, the management socket for the owner's) says where it tried and
+why, in the `unavailable` category (exit 9), never as `internal`. This is the same
+for every command and for `mcp`, because they share one dial path
+(`ipc.Dial`, mapped by `apiwire.FromError`):
+
+| The connection fails because | Code | Message |
+| ---------------------------- | ---- | ------- |
+| the socket or pipe does not exist (`ENOENT`, pipe not found) | `daemon_not_running` | `cannot reach the Sidera daemon at <path>: no such file (is the daemon running? start it with `sidera daemon`)` |
+| nobody accepts on the socket (`ECONNREFUSED`) | `daemon_not_running` | `cannot reach the Sidera daemon at <path>: connection refused (is the daemon running? start it with `sidera daemon`)` |
+| the system refuses the user (`EACCES`, `EPERM`, `ERROR_ACCESS_DENIED`) | `peer_check_failed` | `cannot reach the Sidera daemon at <path>: permission denied (a sandbox may be blocking it; otherwise another user holds this endpoint)` |
+
+A sandbox that denies the connection is the usual cause of the last row: the user's
+own socket always lets the user connect. A failure that is none of these three stays
+`internal/internal`, whose text carries no path or cause.
+
 Their JSON failures use the shared
 `apiwire` mapping for typed daemon and IPC errors: stable codes identify a held
 instance lock, an initialized or uninitialized directory, an unusable directory,

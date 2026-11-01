@@ -25,13 +25,7 @@ func dial(ctx context.Context, addr Address, opts Options) (net.Conn, error) {
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", addr.name)
 	if err != nil {
-		switch {
-		case errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist):
-			return nil, notRunning(addr, err)
-		case errors.Is(err, syscall.EACCES):
-			return nil, accessDenied(addr, err)
-		}
-		return nil, fmt.Errorf("ipc: dial %s: %w", addr.name, err)
+		return nil, connectError(addr, err)
 	}
 
 	// The second check of the same thing: the process that accepted is the
@@ -58,4 +52,17 @@ func missingMeansNotRunning(addr Address, err error) error {
 		return notRunning(addr, pe.Err)
 	}
 	return err
+}
+
+// connectError classifies a failure to connect to the socket: nobody serves it,
+// the system refused the user, or something else went wrong.
+func connectError(addr Address, err error) error {
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist):
+		return notRunning(addr, err)
+	// EPERM is what a sandbox that denies the connection gives on macOS.
+	case errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM):
+		return accessDenied(addr, err)
+	}
+	return fmt.Errorf("ipc: dial %s: %w", addr.name, err)
 }
