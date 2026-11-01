@@ -14,17 +14,17 @@ func TestEveryToolProjectsItsArgumentsAndUsesTheAgentCredential(t *testing.T) {
 	const declaration = `{"paused":false,"refuse_multi_recipient":false,"restrict_senders":false,"accept_from":[],"hidden_from_directory":false}`
 	const accepted = `{"message_id":"9fcd5192c24b6ff0b06924563af0c837","to":["recipient"],"replayed":false}`
 	for _, tc := range []struct{ name, args, request, result string }{
-		{"me", `{"future":true}`, `{}`, `{"address":"address","node":"node","kind":"session","display_name":"test","declaration":` + declaration + `,"frontends":{}}`},
-		{"declare", `{"paused":false,"accept_from":[],"future":1}`, `{"paused":false,"accept_from":[]}`, `{"declaration":` + declaration + `}`},
+		{"me", `{}`, `{}`, `{"address":"address","node":"node","kind":"session","display_name":"test","declaration":` + declaration + `,"frontends":{}}`},
+		{"declare", `{"paused":false,"accept_from":[]}`, `{"paused":false,"accept_from":[]}`, `{"declaration":` + declaration + `}`},
 		{"peers", `{}`, `{}`, `{"nodes":[{"node":"node","self":true,"trust":"self","connected":true}]}`},
 		{"directory", `{"node":"node","cursor":"cursor","limit":1}`, `{"node":"node","cursor":"cursor","limit":1}`, `{"endpoints":[],"next_cursor":""}`},
 		{"send", `{"to":["recipient"],"body":"中文 <body>","content_type":"text/plain","thread":"thread","disclose_recipients":false,"accept_before_s":1,"idempotency_key":"key"}`, `{"to":["recipient"],"body":"中文 <body>","content_type":"text/plain","thread":"thread","disclose_recipients":false,"accept_before_s":1,"idempotency_key":"key"}`, accepted},
 		{"reply", `{"message_id":"9fcd5192c24b6ff0b06924563af0c837","body":"reply","content_type":"text/plain","thread":"thread","idempotency_key":"key"}`, `{"message_id":"9fcd5192c24b6ff0b06924563af0c837","body":"reply","content_type":"text/plain","thread":"thread","idempotency_key":"key"}`, accepted},
-		{"recv", `{"wait_s":0,"ack_lease":"previous","frontend":"cli"}`, `{"wait_s":0,"ack_lease":"previous","frontend":"mcp"}`, `{"lease":"lease_1234567890123456","messages":[],"more":0}`},
-		{"ack", `{"lease":"lease_1234567890123456","items":[{"message_id":"9fcd5192c24b6ff0b06924563af0c837","part":1,"future":true}]}`, `{"lease":"lease_1234567890123456","items":[{"message_id":"9fcd5192c24b6ff0b06924563af0c837","part":1}]}`, `{"items":[]}`},
+		{"recv", `{"wait_s":0,"ack_lease":"previous"}`, `{"wait_s":0,"ack_lease":"previous","frontend":"mcp"}`, `{"lease":"lease_1234567890123456","messages":[],"more":0}`},
+		{"ack", `{"lease":"lease_1234567890123456","items":[{"message_id":"9fcd5192c24b6ff0b06924563af0c837","part":1}]}`, `{"lease":"lease_1234567890123456","items":[{"message_id":"9fcd5192c24b6ff0b06924563af0c837","part":1}]}`, `{"items":[]}`},
 		{"status", `{"message_id":"9fcd5192c24b6ff0b06924563af0c837"}`, `{"message_id":"9fcd5192c24b6ff0b06924563af0c837"}`, `{"recipients":[{"to":"recipient","state":"delivered"}]}`},
 		{"control", `{"to":"runtime","signal":"session.create","preset":"default","body":"initial message","idempotency_key":"key"}`, `{"to":"runtime","signal":"session.create","preset":"default","body":"initial message","idempotency_key":"key"}`, `{"message_id":"9fcd5192c24b6ff0b06924563af0c837","to":"session","replayed":false}`},
-		{"probe", `{"frontend":"cli","future":true}`, `{"frontend":"mcp"}`, `{"ok":true,"preset":"default","frontend":"mcp"}`},
+		{"probe", `{}`, `{"frontend":"mcp"}`, `{"ok":true,"preset":"default","frontend":"mcp"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := httpAgent(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -129,7 +129,7 @@ func TestToolsCallThroughTheAgentSocket(t *testing.T) {
 	s := start(t, mcp.Config{Agent: c, Version: "test"})
 	s.exchange(t, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{}}}`, `{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sidera","version":"test"},"instructions":"Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."}}`)
 	want := `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"declaration\":{\"paused\":true,\"refuse_multi_recipient\":false,\"restrict_senders\":false,\"accept_from\":[],\"hidden_from_directory\":false}}\n"}],"isError":false}}`
-	s.exchange(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"declare","arguments":{"paused":true,"future":42}}}`, want)
+	s.exchange(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"declare","arguments":{"paused":true}}}`, want)
 	me, err := c.Me(context.Background())
 	if err != nil || !me.Declaration.Paused || me.Address != address {
 		t.Fatalf("me: %+v %v", me, err)
@@ -176,21 +176,37 @@ func TestToolArgumentsAndFailures(t *testing.T) {
 		name           string
 		args           any
 		category, code string
+		message        string // what the error's message holds, when it is checked
 	}{
-		{"send", map[string]any{"body": "missing recipient"}, "invalid_argument", "malformed_request"},
-		{"recv", map[string]any{"wait_s": -1}, "invalid_argument", "malformed_request"},
-		{"directory", map[string]any{"limit": 257}, "invalid_argument", "malformed_request"},
-		{"declare", map[string]any{"paused": "true"}, "invalid_argument", "malformed_request"},
-		{"send", map[string]any{"to": []string{"a", "b"}, "body": "message"}, "invalid_argument", "single_recipient_only"},
+		{"send", map[string]any{"body": "missing recipient"}, "invalid_argument", "malformed_request", ""},
+		{"recv", map[string]any{"wait_s": -1}, "invalid_argument", "malformed_request", ""},
+		{"directory", map[string]any{"limit": 257}, "invalid_argument", "malformed_request", ""},
+		{"declare", map[string]any{"paused": "true"}, "invalid_argument", "malformed_request", ""},
+		{"send", map[string]any{"to": []string{"a", "b"}, "body": "message"}, "invalid_argument", "single_recipient_only", ""},
+		// An argument the schema does not declare is refused, not dropped: a model that
+		// misspells wait_s must learn that no wait took place.
+		{"recv", map[string]any{"wait": 300}, "invalid_argument", "malformed_request", `unknown argument "wait"; recv accepts: ack_lease, msg, part, wait_s`},
+		{"recv", map[string]any{"wait_s": 5, "wait": 300, "limit": 2}, "invalid_argument", "malformed_request", `unknown arguments "limit", "wait"; recv accepts: ack_lease, msg, part, wait_s`},
+		{"me", map[string]any{"verbose": true}, "invalid_argument", "malformed_request", `unknown argument "verbose"; me accepts no arguments`},
+		{"send", map[string]any{"recipient": "a", "body": "message"}, "invalid_argument", "malformed_request", `unknown argument "recipient"; send accepts: accept_before_s, body, content_type, disclose_recipients, idempotency_key, thread, to`},
+		{"ack", map[string]any{"lease": "l", "items": []any{map[string]any{"message_id": "m", "part": 1, "extra": 1}}}, "invalid_argument", "malformed_request", `unknown argument "extra"; items[0] accepts: message_id, part`},
+		// The front end is the server's to set, never the client's.
+		{"recv", map[string]any{"frontend": "cli"}, "invalid_argument", "malformed_request", `unknown argument "frontend"; recv accepts: ack_lease, msg, part, wait_s`},
+		{"recv", map[string]any{"wait_s": "5"}, "invalid_argument", "malformed_request", ""},
+		// The valid call still reaches the node.
+		{"recv", map[string]any{"wait_s": 0}, "", "", ""},
 	} {
-		t.Run(tc.name+tc.code, func(t *testing.T) {
+		t.Run(tc.name+tc.code+tc.message, func(t *testing.T) {
 			text, isError := s.call(t, i+1, tc.name, tc.args)
 			var body struct {
-				Error struct{ Category, Code string } `json:"error"`
+				Error struct{ Category, Code, Message string } `json:"error"`
 			}
 			json.Unmarshal([]byte(text), &body)
-			if !isError || body.Error.Category != tc.category || body.Error.Code != tc.code {
+			if isError != (tc.code != "") || body.Error.Category != tc.category || body.Error.Code != tc.code {
 				t.Fatalf("tool error: %s, isError=%v", text, isError)
+			}
+			if tc.message != "" && body.Error.Message != tc.message {
+				t.Fatalf("message %q, want %q", body.Error.Message, tc.message)
 			}
 		})
 	}

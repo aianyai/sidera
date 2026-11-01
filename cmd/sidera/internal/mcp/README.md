@@ -12,7 +12,10 @@ package selects the MCP dialect, including whole-frame duplicate-key and Unicode
 checks, and owns request-era selection, protocol results and the Agent tool
 catalogue. Its default request handler routes every accepted request through the
 same era validation before method dispatch, including unknown methods. The
-catalogue schemas also validate and project
+catalogue schemas also validate the arguments of a tool call as declared, so
+an undeclared argument or a value of the wrong type is a tool error naming it, not
+a protocol error and not an argument silently dropped; unknown fields outside the
+arguments stay ignored. They project
 known arguments; projected JSON retains explicit member presence through
 `agentapi.Client.Call`. Integral JSON numbers are projected exactly into signed
 64-bit integer lexemes before that call, including decimal and exponent inputs.

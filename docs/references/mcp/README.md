@@ -44,8 +44,11 @@ supported version but missing required client capabilities returns `-32602`.
 Valid modern requests and initialized legacy requests for unknown methods return
 `-32601`; an uninitialized request without modern metadata returns `-32602`.
 
-Only fields the server uses are interpreted. Unknown input members, including
-extra metadata, are ignored. MCP explicitly enables the peer dialect's
+At the protocol level only fields the server uses are interpreted: unknown members
+of a request or of its `params`, including extra metadata, are ignored, because
+clients differ in what they add and the revisions grow fields. The members of a
+tool's `arguments` are not of that kind; they are validated against the
+catalogue (see Agent tools). MCP explicitly enables the peer dialect's
 `RejectDuplicateKeysAndInvalidUnicode`: repeated member names and unpaired
 UTF-16 surrogate escapes anywhere in a frame are `-32600`, including unknown
 extensions, unknown methods, notifications and responses. This check precedes
@@ -56,8 +59,8 @@ top-level id is echoed only when it occurs exactly once and is legal, and the
 frame has exactly one string `method`. Every other rejected frame, including a
 response, gets a null id: a response's id belongs to the other side's call-id
 space and cannot identify a request here. JSON syntax and UTF-8 errors stay
-`-32700`, and ordinary parameter errors stay `-32602`. Unknown fields and values
-remain accepted. Output follows the selected version's schema.
+`-32700`, and ordinary parameter errors stay `-32602`. Unknown protocol fields and
+values remain accepted. Output follows the selected version's schema.
 
 `notifications/cancelled` reads `requestId`, ignores invalid or unknown targets
 and cancels the matching handler without answering it. The peer supplies this
@@ -87,9 +90,23 @@ no authorization and never replace the Agent interface's checks.
 
 The catalogue's JSON schemas use common object, array, scalar, required, enum and
 numeric-bound keywords without `$ref` or `$schema`. They are both the advertised
-input description and the validator's source of truth. Extra input properties
-are ignored even though `additionalProperties: false` guides models to send only
-known arguments. Integer schemas accept exact integral JSON numbers regardless
+input description and the validator's source of truth. Tool arguments are a schema
+this server defines and shows to the model, so they are validated as declared,
+and `additionalProperties: false` is enforced: an argument the schema does not
+declare is refused, never dropped. A dropped argument is silent, and the model
+acts on the answer as if it had been applied: a `recv` that was sent `wait`, a
+misspelling of `wait_s`, returned an empty page at once and the agent reported
+that it had waited. The refusal is a tool error result (`isError: true`), not a
+protocol error, so the model sees it and can correct the call. Its message names
+the unknown arguments and lists the ones the tool accepts, for example
+`unknown argument "wait"; recv accepts: ack_lease, msg, part, wait_s`; below the
+top level the object is named by its path (`items[0] accepts: message_id, part`).
+The same applies to the front end of `recv` and `probe`, which the server fixes
+and a client cannot send. The unknown arguments are checked before the required
+ones, so a call that misnames a required argument is told the accepted names. An
+argument of a declared name with a value of the wrong type, a value outside its
+bounds or an enum, or null is a tool error as well, whose `details.path` names the
+argument. Integer schemas accept exact integral JSON numbers regardless
 of notation (`1`, `1.0` and `1e0`), as defined by
 [JSON Schema](https://json-schema.org/understanding-json-schema/reference/numeric#integer),
 within signed 64-bit bounds and the schema's
