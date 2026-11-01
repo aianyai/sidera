@@ -155,7 +155,7 @@ func TestAlertsAreListedAndAcknowledgedThroughTheManagementInterface(t *testing.
 		t.Fatal(err)
 	}
 	clk.Advance(time.Minute)
-	second, err := d.Engine().RaiseAlert(ctx, "version_untested", "chat", "an adapter newer than the ones tried")
+	second, err := d.Engine().RaiseAlert(ctx, "control_unknown", "chat", "a session of unknown control")
 	if err != nil {
 		t.Fatal(err)
 	}

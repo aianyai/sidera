@@ -26,5 +26,6 @@ var NotYetWalked = map[string]string{
 	"trust-reject":             "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
 	"trust-clear":              "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
 	"trust-result":             "not yet walked by the acceptance recipes; the crash walk of the engine covers it",
+	"alert-ack":                "not walked by the acceptance recipes, which cannot make a node raise an alert at will; the crash walk of the engine covers it",
 	"network-set":              "the network configuration write is not yet walked by the acceptance recipes",
 }

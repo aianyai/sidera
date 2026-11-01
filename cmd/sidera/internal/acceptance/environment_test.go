@@ -4,7 +4,6 @@ package acceptance
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -102,8 +101,8 @@ func profiledFixture(t *testing.T, profile fixtureProfile) (*Fixture, context.Co
 	return f, ctx
 }
 
-func TestProfileInstallsExtraAndWarningInputsWithoutRaisingAlert(t *testing.T) {
-	f, ctx := profiledFixture(t, fixtureProfile{mainInstance: "chat", preset: "default", extraInstances: []string{"extra"}, probeWarning: true})
+func TestProfileInstallsExtraInputs(t *testing.T) {
+	f, ctx := profiledFixture(t, fixtureProfile{mainInstance: "chat", preset: "default", extraInstances: []string{"extra"}})
 	if err := f.Start(ctx, GenerationSpec{Number: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -124,26 +123,8 @@ func TestProfileInstallsExtraAndWarningInputsWithoutRaisingAlert(t *testing.T) {
 	for _, a := range listed.Adapters {
 		installed[a.ID] = true
 	}
-	if !installed["chat"] || !installed["extra"] || !installed[versionWarningInstance] {
+	if !installed["chat"] || !installed["extra"] {
 		t.Fatalf("installed inputs: %+v", listed.Adapters)
-	}
-	for _, in := range listed.Instances {
-		if in.Instance == versionWarningInstance && in.Enabled {
-			t.Fatal("warning input enabled before recipe action")
-		}
-	}
-	raw, err = f.Manage(ctx, "alerts.list", manageapi.Request{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var alerts struct {
-		Alerts []json.RawMessage `json:"alerts"`
-	}
-	if err := resultBody(raw, &alerts); err != nil {
-		t.Fatal(err)
-	}
-	if len(alerts.Alerts) != 0 {
-		t.Fatalf("warning input raised alerts during preparation: %s", raw)
 	}
 	e := newEnvironment(ctx, f)
 	if _, err := e.directOn("extra", "outside"); err != nil {

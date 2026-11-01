@@ -1,7 +1,7 @@
 // Package declare holds what the adapter says about itself: its identity, its
 // capabilities and its package manifest. The manifest is generated from the same
 // constants the adapter answers `initialize` with, so the two cannot disagree, and
-// the range of Codex versions the adapter was tested with is stated once, here.
+// the Codex version the adapter was tested with is stated once, here.
 package declare
 
 import (
@@ -15,11 +15,10 @@ const (
 	ID          = "codex"
 	Version     = "0.1.0"
 	RuntimeName = "codex"
-	// TestedMin and TestedMax bound the Codex versions the adapter was tested with.
-	// The App Server protocol is not a stable one, so the range is a single version
-	// until a newer one has been checked.
-	TestedMin = "0.164.0"
-	TestedMax = "0.164.0"
+	// TestedVersion is the Codex version the adapter was tested with. The App
+	// Server protocol is not a stable one, so only this version is known to keep a
+	// thread's record in the form the adapter reads it.
+	TestedVersion = "0.164.0"
 )
 
 // Entry program of the package, relative to its root, without the extension of the
@@ -54,13 +53,9 @@ func Capabilities() adapterproto.Capabilities {
 	}}
 }
 
-// Tested is the range of Codex versions the adapter was tested with.
-func Tested() manifest.TestedRange {
-	return manifest.TestedRange{Runtime: RuntimeName, Min: TestedMin, Max: TestedMax}
-}
-
-// VersionTested reports whether a Codex version is inside the tested range.
-func VersionTested(version string) bool { return Tested().Contains(version) }
+// VersionTested reports whether a Codex version is the one the adapter was tested
+// with.
+func VersionTested(version string) bool { return version == TestedVersion }
 
 // Manifest is the manifest of the package for one platform. A package holds one
 // binary, so its platform list names only that platform: the list is what the
@@ -74,7 +69,6 @@ func Manifest(goos, goarch string) manifest.Manifest {
 		Entry:           manifest.Entry{Program: programName},
 		Platforms:       []manifest.Platform{{OS: goos, Arch: goarch}},
 		Requires:        []manifest.Requirement{{Program: "codex"}},
-		Tested:          []manifest.TestedRange{Tested()},
 		Config:          &manifest.Config{Instance: codexcfg.InstanceFields(), Preset: codexcfg.PresetFields()},
 		Budgets: []manifest.Budget{
 			{Frontend: manifest.FrontendMCP, Unit: manifest.UnitTokens, Limit: recvBudget},

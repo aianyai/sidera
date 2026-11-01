@@ -47,10 +47,6 @@ func newManagementOps() recipes.ManagementOps {
 		DisableAdapter: func(e scenario.Env, q recipes.ManagementRequest, instance string) (recipes.ManagementOutcome, error) {
 			return managementChange(e, q, "adapters.disable", map[string]any{"instance": instance})
 		},
-		CreateVersionAlert: newVersionAlertOp(),
-		AcknowledgeAlert: func(e scenario.Env, q recipes.ManagementRequest, name string) (recipes.ManagementOutcome, error) {
-			return managementChange(e, q, "alerts.ack", map[string]any{"alert": name})
-		},
 		ConfirmBackup: func(e scenario.Env, q recipes.ManagementRequest) (recipes.ManagementOutcome, error) {
 			var exported manageapi.RevocationExportResult
 			if err := managementRead(e, "identity.export_revocation", nil, &exported); err != nil {
@@ -80,18 +76,6 @@ func newManagementOps() recipes.ManagementOps {
 		},
 		InspectEndpoint: inspectManagedEndpoint,
 		InspectInstance: inspectManagedInstance,
-		InspectAlert: func(e scenario.Env, name string) (bool, error) {
-			alerts, err := managementAlerts(e)
-			if err != nil {
-				return false, err
-			}
-			for _, a := range alerts {
-				if a.ID == name {
-					return a.Acknowledged, nil
-				}
-			}
-			return false, fmt.Errorf("acceptance: managed alert %s absent", name)
-		},
 		DirectOn: func(e scenario.Env, instance, name string) (string, error) {
 			return envFrom(e).directOn(instance, name)
 		},
@@ -363,53 +347,4 @@ func inspectManagedNode(e scenario.Env) (recipes.NodeFacts, error) {
 		out.Retired = out.Retired || (rev.Kind() == revocation.KindNodeSelf && rev.Node() == local)
 	}
 	return out, nil
-}
-
-type managementAlert struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	Subject      string `json:"subject"`
-	Acknowledged bool   `json:"acknowledged"`
-}
-
-func managementAlerts(e scenario.Env) ([]managementAlert, error) {
-	var listed struct {
-		Alerts []managementAlert `json:"alerts"`
-	}
-	err := managementRead(e, "alerts.list", map[string]any{"include_acknowledged": true}, &listed)
-	return listed.Alerts, err
-}
-func newVersionAlertOp() func(scenario.Env) (string, error) {
-	var request *recipes.ManagementRequest
-	return func(e scenario.Env) (string, error) {
-		if err := envFrom(e).check(); err != nil {
-			return "", err
-		}
-		if request == nil {
-			versions, err := managementVersions(e)
-			if err != nil {
-				return "", err
-			}
-			request = &recipes.ManagementRequest{ID: admin.OperationID{54}, Expected: versions.Instances}
-		}
-		out, err := managementChange(e, *request, "adapters.enable", map[string]any{"adapter": versionWarningInstance, "instance": versionWarningInstance})
-		if err != nil {
-			return "", err
-		}
-		if out.Code != "" || out.Value != "true" || out.Version != request.Expected+1 {
-			return "", fmt.Errorf("%w: warning adapter enable returned %+v", recipes.ErrManagementEffect, out)
-		}
-		if err := e.Quiesce(); err != nil {
-			return "", err
-		}
-		alerts, err := managementAlerts(e)
-		if err != nil {
-			return "", err
-		}
-		facts := make([]recipes.VersionAlertFacts, 0, len(alerts))
-		for _, a := range alerts {
-			facts = append(facts, recipes.VersionAlertFacts{ID: a.ID, Kind: a.Kind, Subject: a.Subject})
-		}
-		return recipes.RequireVersionAlert(facts, versionWarningInstance)
-	}
 }

@@ -18,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
-	"github.com/aianyai/sidera/sdk/go/internal/semver"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
@@ -127,9 +126,6 @@ type Manifest struct {
 	// Requires lists programs the adapter needs, for display and the install
 	// check; the probe is what proves they work.
 	Requires []Requirement `json:"requires,omitempty"`
-	// Tested lists the closed ranges of runtime versions the adapter was tested
-	// against.
-	Tested []TestedRange `json:"tested,omitempty"`
 	// Config describes the configuration the adapter takes.
 	Config *Config `json:"config,omitempty"`
 	// Budgets gives the output budget of recv per front end.
@@ -161,39 +157,6 @@ type Requirement struct {
 	Program string `json:"program"`
 	// OS limits the requirement to these operating systems; absent means all.
 	OS []string `json:"os,omitempty"`
-}
-
-// TestedRange is a closed range of versions of one runtime, compared as SemVer.
-type TestedRange struct {
-	Runtime string `json:"runtime"`
-	Min     string `json:"min"`
-	Max     string `json:"max"`
-}
-
-// Contains reports whether version is a SemVer version inside the range. A
-// version that is not SemVer is never inside.
-func (r TestedRange) Contains(version string) bool {
-	v, err := semver.Parse(version)
-	if err != nil {
-		return false
-	}
-	lo, err1 := semver.Parse(r.Min)
-	hi, err2 := semver.Parse(r.Max)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return semver.Compare(lo, v) <= 0 && semver.Compare(v, hi) <= 0
-}
-
-// Tests reports whether any of the manifest's tested ranges for runtime
-// contains version.
-func (m Manifest) Tests(runtime, version string) bool {
-	for _, r := range m.Tested {
-		if r.Runtime == runtime && r.Contains(version) {
-			return true
-		}
-	}
-	return false
 }
 
 // Config describes configuration values: those of the adapter instance and those
@@ -371,14 +334,6 @@ func (m Manifest) Validate() error {
 			return under("requires"+idx(i), err)
 		}
 	}
-	if m.Tested != nil && (len(m.Tested) < 1 || len(m.Tested) > 64) {
-		return fail("tested", "%d entries, need 1..64", len(m.Tested))
-	}
-	for i, r := range m.Tested {
-		if err := r.validate(); err != nil {
-			return under("tested"+idx(i), err)
-		}
-	}
 	if m.Config != nil {
 		if err := m.Config.validate(); err != nil {
 			return under("config", err)
@@ -469,24 +424,6 @@ func (r Requirement) validate() error {
 		}
 	}
 	return unique("os", r.OS)
-}
-
-func (r TestedRange) validate() error {
-	if err := length(r.Runtime, 1, 64); err != nil {
-		return under("runtime", err)
-	}
-	if err := adapterproto.ValidateSemVer(r.Min); err != nil {
-		return under("min", err)
-	}
-	if err := adapterproto.ValidateSemVer(r.Max); err != nil {
-		return under("max", err)
-	}
-	lo, _ := semver.Parse(r.Min)
-	hi, _ := semver.Parse(r.Max)
-	if semver.Compare(lo, hi) > 0 {
-		return failBeyond("", "min %s is above max %s", r.Min, r.Max)
-	}
-	return nil
 }
 
 func (c Config) validate() error {

@@ -104,16 +104,10 @@ no recipe writes node state. Each recipe records 74 main points and has a fixed
 budget of 111.
 
 Management recipes cover versioned node, preset and endpoint changes; a stale
-version is refused without changing the setting. The maintenance recipe enables
-an installed, disabled warning adapter inside its first step and waits for its
-real probe to report a runtime version outside the manifest's tested range.
-`ManagementOps.CreateVersionAlert` returns the resulting owner alert's actual
-identifier. `RequireVersionAlert` judges all owner-alert facts together: exactly
-one alert, with kind `version_untested` and the enabled instance as subject. The
-same request identifier and expected version survive interruption; repeating the
-drain resumes the real enable and probe instead of raising another alert.
-The remaining actions cover acknowledgement, backup confirmation, clearing a
-real clock rollback pause,
+version is refused without changing the setting. The maintenance recipe covers
+backup confirmation and clearing a real clock rollback pause; no acceptance layer
+can make a node raise an alert at will, so alert acknowledgement is walked by the
+engine's crash walk, not here. The other recipes cover
 endpoint closure, and adapter disable/enable with pending messages and control
 work. Named callbacks return real results after checking the same request's
 persistent replay. The recipe then compares the result with the requested effect.
@@ -334,10 +328,10 @@ established. The blocking phases and their clock advances retain the original
 before its final receive.
 
 `Needs` declares runtime-adapter use, extra instances, sweep period, package input,
-an installed but disabled probe-warning adapter (`ProbeWarning`), offline damage
+offline damage
 kind and each required filesystem fault. `Capabilities.Supports`
 and `Catalog.Select` choose recipes before execution. `BinaryCapabilities`
-includes probe-warning input and offline damage on the stopped real disk, with no
+includes offline damage on the stopped real disk, with no
 filesystem fault injection. Unknown damage and filesystem-fault kinds are never
 supported, even if a capability list contains the same unknown name.
 

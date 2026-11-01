@@ -930,7 +930,6 @@ except the observations that are plain calls (marked "call"):
 | `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
 | availability `runtime_auth` | `Signals.AuthInvalid` |
 | availability `native_unavailable`, `dependency_missing` | `Signals.ServiceUnavailable` |
-| probed runtime name and version outside every tested range of the manifest (`RuntimeVersionUntested`) | no cause; status condition 6 `version_untested`, written by the daemon |
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
 | the cause `handoff.AssessBlocked` names (`AdapterOffline`, `AuthInvalid`, `ServiceUnavailable`) | `delivery.CauseAdapterOffline`, `CauseRuntimeAuth`, `CauseNativeUnavailable` (`BlockedCause`; `HandoffBlockedCause` is its inverse, for a block known only from the marks on target records) |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
@@ -972,7 +971,7 @@ except the observations that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestBlockedCause`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
+  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestBlockedCause`, `TestStatusConditions`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals
@@ -1013,7 +1012,7 @@ daemon alone from what it has observed:
 | ----- | ------- |
 | `activity` | 1 idle, 2 busy, 3 unknown (the adapter is offline and the last report cannot be checked) |
 | `queued` | messages waiting, not counting those paused by authorization |
-| `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown, 6 version_untested |
+| `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown |
 | `presets` | `name`, `available`, sorted by name; runtime endpoints only |
 | `as_of` | Unix seconds, 1 to 253402300799 (9999-12-31T23:59:59Z, the latest time any record carries; the millisecond bound would admit times billions of years away) |
 
@@ -1027,14 +1026,6 @@ with `signal` beside its fields, and enums are their names.
   and their different outcomes under one message identifier and one
   `control_reply`. The schema states it (`if` `control` is present, `to` has at
   most one entry) and `SendParams.Validate` repeats it.
-- `version_untested` is a sixth condition because an untested runtime version must
-  show in the status without stopping the endpoint. The daemon writes it from the
-  manifest (`adapterreg.RuntimeVersionUntested`) and the name and version the
-  probe reported; the adapter neither reports a `tested` flag in the probe result
-  nor a `version_untested` availability condition. The ranges are the
-  manifest's, and the daemon is the only reader of the manifest that decides
-  anything, so there is one judge and an adapter cannot disagree with its own
-  manifest.
 - A creation that times out is `unconfirmed` and not `failed` because a session
   may exist; the pre-allocated endpoint is returned either way so a retry cannot
   create a second one.
@@ -1106,7 +1097,6 @@ its entry) for the `package` subcommand of each adapter.
   "entry": {"program": "bin/sidera-adapter-example", "args": ["--stdio"]},
   "platforms": [{"os": "darwin", "arch": "arm64"}, {"os": "linux", "arch": "amd64"}],
   "requires": [{"program": "example-runtime", "os": ["darwin", "linux"]}],
-  "tested": [{"runtime": "example-runtime", "min": "2.1.306", "max": "2.1.308"}],
   "budgets": [{"frontend": "cli", "unit": "chars", "limit": 27000},
               {"frontend": "mcp", "unit": "tokens", "limit": 22500}],
   "recv_wait_limits": [{"frontend": "cli", "max_s": 8},
@@ -1122,8 +1112,7 @@ error.
 The rules are in [sdk/go/manifest/README.md](../../../sdk/go/manifest/README.md).
 In short: `id` and `version` are checked as the adapter reports them in
 `initialize`, and must equal them; the protocol range and the adapter's
-announcement are checked against each other; `tested` ranges are closed SemVer
-ranges; configuration uses a small field vocabulary; budgets map to the output
+announcement are checked against each other; configuration uses a small field vocabulary; budgets map to the output
 budget of `recv` for that front end, and a front end without one gets the default;
 `recv_wait_limits` give, per agent front end (`cli` or `mcp`, never `direct`), the
 longest an agent's `recv` may wait for a message, in whole seconds from 1 to 120
@@ -1138,11 +1127,13 @@ operating system and architecture of the machine is refused when it is installed
 (`adapterreg.RunsOn`), because it would otherwise be installed and fail to start,
 which the owner would meet only as an instance that never comes online.
 
-A native version outside the tested ranges still runs. The daemon compares the
-name and version that `adapter.probe` reported with the ranges and produces the
-status condition `version_untested`, shown to the owner and in the status of the
-endpoints, but it is not blocked: blocking would disconnect users after every
-automatic update of the runtime, while a wrong reconciliation can only end as
+The manifest lists no tested versions of the native runtime, and the daemon neither
+judges nor blocks a version: the runtimes upgrade several times a day, so a list
+could not stay true and an alert about a version outside it would be noise. The
+name and version that `adapter.probe` reported are shown as reported. An adapter
+whose reading of a runtime's record depends on the version decides that itself,
+and answers `prompt.reconcile` with `indeterminate` and `runtime_version_untested`
+where the version leaves absence unproven; a wrong reconciliation can only end as
 "cannot tell".
 
 ### Why

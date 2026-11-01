@@ -20,7 +20,6 @@ func base() manifest.Manifest {
 		Entry:     manifest.Entry{Program: "bin/sidera-adapter-example", Args: []string{"--stdio"}},
 		Platforms: []manifest.Platform{{OS: "linux", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"}},
 		Requires:  []manifest.Requirement{{Program: "git", OS: []string{"linux", "darwin"}}},
-		Tested:    []manifest.TestedRange{{Runtime: "r", Min: "2.1.306", Max: "2.1.308"}},
 		Config: &manifest.Config{
 			Instance: []manifest.Field{{Key: "home", Type: manifest.FieldDirectory, Title: "Home", Required: true}},
 			Preset:   []manifest.Field{{Key: "model", Type: manifest.FieldString, Title: "Model", Default: json.RawMessage(`"standard"`)}},
@@ -159,51 +158,6 @@ func platforms(n int) []manifest.Platform {
 		}
 	}
 	return out
-}
-
-func TestTestedRangeRules(t *testing.T) {
-	r := func(min, max string) []manifest.TestedRange {
-		return []manifest.TestedRange{{Runtime: "r", Min: min, Max: max}}
-	}
-	runManifestRows(t, []mrow{
-		{"no tested ranges", func(m *manifest.Manifest) { m.Tested = nil }, "", false},
-		{"a range of one version", func(m *manifest.Manifest) { m.Tested = r("2.1.306", "2.1.306") }, "", false},
-		{"min above max", func(m *manifest.Manifest) { m.Tested = r("2.1.308", "2.1.306") }, "tested[0]", true},
-		{"compared as numbers, not text", func(m *manifest.Manifest) { m.Tested = r("2.10.0", "2.9.0") }, "tested[0]", true},
-		{"compared as numbers, ascending", func(m *manifest.Manifest) { m.Tested = r("2.9.0", "2.10.0") }, "", false},
-		{"a pre-release is below its release", func(m *manifest.Manifest) { m.Tested = r("1.0.0", "1.0.0-rc.1") }, "tested[0]", true},
-		{"a pre-release range", func(m *manifest.Manifest) { m.Tested = r("1.0.0-alpha", "1.0.0-beta") }, "", false},
-		{"build metadata does not order", func(m *manifest.Manifest) { m.Tested = r("1.0.0+b", "1.0.0+a") }, "", false},
-		{"min not SemVer", func(m *manifest.Manifest) { m.Tested = r("2.1", "2.2.0") }, "tested[0].min", false},
-		{"max not SemVer", func(m *manifest.Manifest) { m.Tested = r("2.1.0", "latest") }, "tested[0].max", false},
-		{"runtime required", func(m *manifest.Manifest) { m.Tested = []manifest.TestedRange{{Min: "1.0.0", Max: "1.0.0"}} }, "tested[0].runtime", false},
-		{"runtime over the limit", func(m *manifest.Manifest) {
-			m.Tested = []manifest.TestedRange{{Runtime: repeat("r", 65), Min: "1.0.0", Max: "1.0.0"}}
-		}, "tested[0].runtime", false},
-		{"two ranges for one runtime", func(m *manifest.Manifest) {
-			m.Tested = []manifest.TestedRange{{Runtime: "r", Min: "1.0.0", Max: "1.2.0"}, {Runtime: "r", Min: "2.0.0", Max: "2.0.1"}}
-		}, "", false},
-		{"an empty list", func(m *manifest.Manifest) { m.Tested = []manifest.TestedRange{} }, "tested", false},
-	})
-}
-
-func TestTestedRangeContains(t *testing.T) {
-	m := base()
-	m.Tested = []manifest.TestedRange{{Runtime: "r", Min: "2.1.306", Max: "2.1.308"}, {Runtime: "r", Min: "3.0.0-rc.1", Max: "3.0.0"}, {Runtime: "other", Min: "9.0.0", Max: "9.9.9"}}
-	for _, tc := range []struct {
-		runtime, version string
-		want             bool
-	}{
-		{"r", "2.1.306", true}, {"r", "2.1.307", true}, {"r", "2.1.308", true}, {"r", "2.1.305", false}, {"r", "2.1.309", false},
-		{"r", "2.1.308+build", true}, {"r", "2.1.308-rc.1", true}, {"r", "2.1.306-rc.1", false},
-		{"r", "3.0.0-rc.2", true}, {"r", "3.0.0", true}, {"r", "3.0.1", false}, {"r", "3.0.0-beta", false},
-		{"other", "2.1.307", false}, {"other", "9.1.0", true}, {"missing", "2.1.307", false},
-		{"r", "not a version", false}, {"r", "", false}, {"r", "2.1", false},
-	} {
-		if got := m.Tests(tc.runtime, tc.version); got != tc.want {
-			t.Errorf("Tests(%q, %q) = %v, want %v", tc.runtime, tc.version, got, tc.want)
-		}
-	}
 }
 
 func TestConfigFieldRules(t *testing.T) {

@@ -39,17 +39,13 @@ type Needs struct {
 	ArchiveSweepEvery time.Duration
 	PackageInput      bool
 
-	// ProbeWarning requires an installed, disabled adapter whose probe reports a
-	// runtime version outside its manifest's tested range. The recipe enables it.
-	ProbeWarning bool
-
 	Damage   DamageKind
 	FSFaults []FSFault
 }
 
 // Capabilities describes what an execution layer can supply.
 type Capabilities struct {
-	RuntimeAdapter, ExtraInstances, ArchiveSweep, PackageInput, ProbeWarning bool
+	RuntimeAdapter, ExtraInstances, ArchiveSweep, PackageInput bool
 
 	Damage   []DamageKind
 	FSFaults []FSFault
@@ -57,7 +53,7 @@ type Capabilities struct {
 
 // BinaryCapabilities intentionally provides no filesystem fault injection.
 func BinaryCapabilities() Capabilities {
-	return Capabilities{RuntimeAdapter: true, ExtraInstances: true, ArchiveSweep: true, PackageInput: true, ProbeWarning: true,
+	return Capabilities{RuntimeAdapter: true, ExtraInstances: true, ArchiveSweep: true, PackageInput: true,
 		Damage: []DamageKind{DamageSource, DamageTarget, DamageCreatingControl, DamageSourceBody, DamageLayout}}
 }
 
@@ -68,7 +64,7 @@ func (c Capabilities) Supports(n Needs) bool {
 	default:
 		return false
 	}
-	if n.RuntimeAdapter && !c.RuntimeAdapter || len(n.ExtraInstances) != 0 && !c.ExtraInstances || n.ArchiveSweepEvery != 0 && !c.ArchiveSweep || n.PackageInput && !c.PackageInput || n.ProbeWarning && !c.ProbeWarning || n.Damage != "" && !slices.Contains(c.Damage, n.Damage) {
+	if n.RuntimeAdapter && !c.RuntimeAdapter || len(n.ExtraInstances) != 0 && !c.ExtraInstances || n.ArchiveSweepEvery != 0 && !c.ArchiveSweep || n.PackageInput && !c.PackageInput || n.Damage != "" && !slices.Contains(c.Damage, n.Damage) {
 		return false
 	}
 	for _, fault := range n.FSFaults {

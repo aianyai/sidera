@@ -120,7 +120,7 @@ func (w *powerLossWorld) next() *operation {
 		return &operation{name: "checkpoint-put", call: func() error { return r.st.CheckpointPut(c) },
 			writes: map[string][]byte{path.Join(store.CheckpointsDir, c.Name()): w.enc(c)}}
 	case 5:
-		a := store.AlertRecord{ID: store.AlertID{byte(1 + w.rng(5))}, Kind: "version_untested", At: base, Detail: fmt.Sprintf("d%d", w.rng(100))}
+		a := store.AlertRecord{ID: store.AlertID{byte(1 + w.rng(5))}, Kind: "control_unknown", At: base, Detail: fmt.Sprintf("d%d", w.rng(100))}
 		return &operation{name: "alert-raise", call: func() error { return r.st.AlertRaise(a) },
 			writes: map[string][]byte{path.Join(store.AlertsDir, a.Name()): w.enc(a)}}
 	case 6:

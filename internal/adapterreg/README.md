@@ -30,9 +30,8 @@ not frame, send or store anything.
 | `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`; `accepted` returns zero because the attempt has no outcome yet. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
 | `BlockedCause(handoff.Cause)` | The cause of a blocked delivery as the delivery rules record and tell it. |
-| `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations, `version_untested` among them. |
+| `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations (offline, requests rejected, control unknown). |
 | `RunsOn(manifest, goos, goarch)` | Whether the manifest lists the platform: the one judge of whether a package may be installed on this machine. |
-| `RuntimeVersionUntested(manifest, runtime)` | Whether the probed runtime version is outside every tested range of the manifest: the one judge of the status condition `version_untested`. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
 | `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline, node endpoint limit. |
 | `ItemAck`, `AckReason`, `ActionOf` | Names of `delivery` and `handoff` values and of authorization actions as the protocol spells them. |
@@ -101,13 +100,6 @@ not frame, send or store anything.
   reconciled. The difference is `1005 attempt_conflict`: the attempt identifier
   is already known with other parameters, so an earlier request of the same
   attempt reached the adapter and may have delivered; the attempt is unknown.
-- **Tested runtime version.** The adapter's probe result reports only the
-  runtime's name and version; the daemon alone compares them with
-  `manifest.Manifest.Tests` (`RuntimeVersionUntested`) and writes status
-  condition 6 itself. An adapter cannot report it, because a second judge could
-  disagree with the manifest it was admitted under. It is no availability cause
-  and blocks nothing. No probed runtime makes no claim; a manifest without
-  tested ranges contains no version, so any probed version is untested.
 - **`Since` of a cause** is unknown (zero) unless every condition of the winning
   cause reports a start that is not later than the moment the daemon received the
   snapshot; the adapter's clock is for reference only.

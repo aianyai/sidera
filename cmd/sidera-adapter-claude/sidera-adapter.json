@@ -9,7 +9,6 @@
     {"os": "darwin", "arch": "amd64"}
   ],
   "requires": [{"program": "claude"}],
-  "tested": [{"runtime": "claude-code", "min": "2.1.316", "max": "2.1.316"}],
   "config": {
     "instance": [
       {"key": "claude_path", "type": "string", "title": "Claude executable (default: claude on PATH)"},

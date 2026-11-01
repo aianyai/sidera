@@ -305,7 +305,7 @@ func (e *Engine) instanceDisabled(now time.Time, instance string) {
 	if st := e.adapters[instance]; st != nil {
 		st.goOffline(now)
 		st.admitted = false
-		st.tokens, st.probed, st.probe, st.probedAt, st.versionUntested, st.declared = nil, false, adapterproto.ProbeResult{}, time.Time{}, false, false
+		st.tokens, st.probed, st.probe, st.probedAt, st.declared = nil, false, adapterproto.ProbeResult{}, time.Time{}, false
 	}
 	if e.d.Adapters != nil {
 		e.d.Adapters.Stop(instance)

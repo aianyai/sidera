@@ -191,7 +191,7 @@
       "properties": {
         "runtime": {
           "type": "object",
-          "description": "What the adapter found: the runtime's name and version. Whether that version is inside a tested range of the manifest is the daemon's decision, so the adapter does not report it.",
+          "description": "What the adapter found: the runtime's name and version.",
           "required": ["name", "version"],
           "additionalProperties": false,
           "properties": {

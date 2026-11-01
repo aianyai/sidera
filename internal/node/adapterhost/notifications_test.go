@@ -98,7 +98,7 @@ func TestAnInvalidOrUndeclaredNotificationIsDroppedAndTheOthersAreDelivered(t *t
 		o.AckOnBehalf = false
 		o.Frontends = nil
 		o.RecvWaitS = nil
-		o.RuntimeName, o.RuntimeVersion, o.Tested, o.AckMarkers = "", "", nil, nil
+		o.RuntimeName, o.RuntimeVersion, o.AckMarkers = "", "", nil
 		o.Budgets = o.Budgets[2:]
 	}})
 	var a *scripted

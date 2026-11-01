@@ -27,7 +27,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
-	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // What the adapter host asks of the engine for the life of a connection: the
@@ -787,7 +786,7 @@ func TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// The tested runtime versions
+// The probe result
 
 func probeResult(name, version string) adapterproto.ProbeResult {
 	r := adapterproto.ProbeResult{
@@ -800,137 +799,47 @@ func probeResult(name, version string) adapterproto.ProbeResult {
 	return r
 }
 
-func testedRanges(rs ...manifest.TestedRange) func([]config.Adapter) []config.Adapter {
-	return func(in []config.Adapter) []config.Adapter {
-		out := slices.Clone(in)
-		for i := range out {
-			out[i].Manifest.Tested = rs
-		}
-		return out
-	}
-}
-
-func versionUntestedAlerts(t testing.TB, e *engine.Engine) []store.AlertRecord {
-	t.Helper()
-	all, err := e.Alerts(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []store.AlertRecord
-	for _, a := range all {
-		if a.Kind == "version_untested" {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
-func TestVersionUntestedAlertIsRaisedOnceForARuntimeOutsideTheTestedRanges(t *testing.T) {
+// A probe result is kept for the instance and shown as it is. The version of the
+// runtime is never judged: it raises no alert whatever it is, since a runtime
+// that upgrades several times a day cannot be tested in each version.
+func TestProbeResultIsKeptAndRaisesNoAlert(t *testing.T) {
 	noLeaks(t)
 	rt := runtimeAdmission(t, 0, adapterproto.FrontendCLI)
-	tested := withInstalled(testedRanges(manifest.TestedRange{Runtime: "codex", Min: "1.2.0", Max: "1.4.0"}))
-	const outsideDetail = "runtime codex 1.5.0 is outside the tested ranges of adapter chat 1.0.0"
-
 	for _, tc := range []struct {
-		name      string
-		opts      []rigOption
-		result    adapterproto.ProbeResult
-		wantAlert string // the detail, empty for none
-		untested  bool
+		name   string
+		result adapterproto.ProbeResult
 	}{
-		{"a version above the tested range", []rigOption{tested}, probeResult("codex", "1.5.0"), outsideDetail, true},
-		{"a version below the tested range", []rigOption{tested}, probeResult("codex", "1.1.9"), "runtime codex 1.1.9 is outside the tested ranges of adapter chat 1.0.0", true},
-		{"the lowest tested version", []rigOption{tested}, probeResult("codex", "1.2.0"), "", false},
-		{"the highest tested version", []rigOption{tested}, probeResult("codex", "1.4.0"), "", false},
-		{"a version inside the range", []rigOption{tested}, probeResult("codex", "1.3.0"), "", false},
-		{"another runtime with a version inside the range", []rigOption{tested}, probeResult("other", "1.3.0"), "runtime other 1.3.0 is outside the tested ranges of adapter chat 1.0.0", true},
-		{"no runtime in the result makes no claim", []rigOption{tested}, probeResult("", ""), "", false},
-		{"a manifest without tested ranges contains no version", nil, probeResult("codex", "1.3.0"), "runtime codex 1.3.0 is outside the tested ranges of adapter chat 1.0.0", true},
+		{"a runtime", probeResult("codex", "1.5.0")},
+		{"no runtime in the result", probeResult("", "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newRig(t, 10, tc.opts...)
+			r := newRig(t, 10)
 			e := r.start()
 			if err := admitOn(ctx, e, "chat", rt); err != nil {
 				t.Fatal(err)
 			}
 			if err := e.AdapterProbed(ctx, "chat", tc.result); err != nil {
-				t.Fatalf("AdapterProbed: %v (the adapter keeps running)", err)
+				t.Fatalf("AdapterProbed: %v", err)
 			}
-			alerts := versionUntestedAlerts(t, e)
-			if tc.wantAlert == "" {
-				if len(alerts) != 0 {
-					t.Errorf("alerts %+v, want none", alerts)
-				}
-			} else {
-				if len(alerts) != 1 {
-					t.Fatalf("%d version_untested alerts, want 1: %+v", len(alerts), alerts)
-				}
-				if a := alerts[0]; a.Subject != "chat" || a.Detail != tc.wantAlert {
-					t.Errorf("alert subject %q detail %q, want subject chat and detail %q", a.Subject, a.Detail, tc.wantAlert)
-				}
+			alerts, err := e.Alerts(ctx)
+			if err != nil || len(alerts) != 0 {
+				t.Fatalf("alerts %+v, %v; want none", alerts, err)
 			}
 			v, err := e.Adapter(ctx, "chat")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !v.Probed || v.VersionUntested != tc.untested {
-				t.Errorf("view: probed %v, untested %v; want true, %v", v.Probed, v.VersionUntested, tc.untested)
-			}
-			if (v.Runtime == nil) != (tc.result.Runtime == nil) || (v.Runtime != nil && *v.Runtime != *tc.result.Runtime) {
-				t.Errorf("view runtime %+v, want %+v", v.Runtime, tc.result.Runtime)
+			if !v.Probed || (v.Runtime == nil) != (tc.result.Runtime == nil) || (v.Runtime != nil && *v.Runtime != *tc.result.Runtime) {
+				t.Errorf("view: probed %v, runtime %+v; want true, %+v", v.Probed, v.Runtime, tc.result.Runtime)
 			}
 		})
 	}
 
-	t.Run("the same fact is raised once, on this engine and after a restart, and a new fact is raised again", func(t *testing.T) {
-		r := newRig(t, 10, tested)
-		e := r.start()
-		if err := admitOn(ctx, e, "chat", rt); err != nil {
-			t.Fatal(err)
-		}
-		probe := func(version string) {
-			t.Helper()
-			if err := e.AdapterProbed(ctx, "chat", probeResult("codex", version)); err != nil {
-				t.Fatal(err)
-			}
-		}
-		probe("1.5.0")
-		probe("1.5.0")
-		if n := len(versionUntestedAlerts(t, e)); n != 1 {
-			t.Fatalf("%d alerts after probing twice, want 1", n)
-		}
-		r.restart()
-		e = r.start()
-		if err := admitOn(ctx, e, "chat", rt); err != nil {
-			t.Fatal(err)
-		}
-		probe("1.5.0")
-		if n := len(versionUntestedAlerts(t, e)); n != 1 {
-			t.Fatalf("%d alerts after a restart and the same probe, want 1: alerts are persistent", n)
-		}
-		probe("1.6.0")
-		alerts := versionUntestedAlerts(t, e)
-		if len(alerts) != 2 {
-			t.Fatalf("%d alerts after a probe of another version, want 2", len(alerts))
-		}
-		if alerts[1].Detail != "runtime codex 1.6.0 is outside the tested ranges of adapter chat 1.0.0" {
-			t.Errorf("second alert detail %q", alerts[1].Detail)
-		}
-		probe("1.3.0")
-		v, _ := e.Adapter(ctx, "chat")
-		if v.VersionUntested {
-			t.Error("a later probe inside the range still says untested")
-		}
-	})
-
 	t.Run("an instance that was not admitted is unknown", func(t *testing.T) {
-		r := newRig(t, 10, tested)
+		r := newRig(t, 10)
 		r.enableInstance("agent", "")
 		e := r.start()
 		wantReason(t, e.AdapterProbed(ctx, "agent", probeResult("codex", "1.5.0")), engine.ReasonInstanceUnknown)
-		if n := len(versionUntestedAlerts(t, e)); n != 0 {
-			t.Errorf("%d alerts for an instance that is not admitted", n)
-		}
 	})
 }
 

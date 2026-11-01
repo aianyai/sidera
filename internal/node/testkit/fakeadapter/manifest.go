@@ -43,11 +43,9 @@ type ManifestOptions struct {
 	// Budgets is the output budget of recv per front end.
 	Budgets []manifest.Budget `json:"budgets,omitempty"`
 
-	// RuntimeName and RuntimeVersion are what a probe reports; Tested is the
-	// range of runtime versions the manifest says the adapter was tested with.
-	RuntimeName    string                 `json:"runtime_name,omitempty"`
-	RuntimeVersion string                 `json:"runtime_version,omitempty"`
-	Tested         []manifest.TestedRange `json:"tested,omitempty"`
+	// RuntimeName and RuntimeVersion are what a probe reports.
+	RuntimeName    string `json:"runtime_name,omitempty"`
+	RuntimeVersion string `json:"runtime_version,omitempty"`
 
 	// AckMarkers declares how the runtime shows a replaced or cut tool result. The
 	// observed knob builds its replaced and truncated texts from them.
@@ -90,7 +88,6 @@ func DefaultManifestOptions() ManifestOptions {
 			{Frontend: manifest.FrontendDirect, Unit: manifest.UnitChars, Limit: 9000},
 		},
 		RuntimeName: "fake-runtime", RuntimeVersion: "1.0.0",
-		Tested: []manifest.TestedRange{{Runtime: "fake-runtime", Min: "1.0.0", Max: "1.9.9"}},
 		AckMarkers: &manifest.AckMarkers{
 			Replaced:  []manifest.Marker{{Literal: &lit}},
 			Truncated: []manifest.Marker{{Regexp: &re}},
@@ -139,7 +136,6 @@ func (o ManifestOptions) Manifest() manifest.Manifest {
 		Protocol:        adapterproto.SupportedRange(),
 		Entry:           manifest.Entry{Program: o.Program, Args: append([]string(nil), o.Args...)},
 		Platforms:       []manifest.Platform{{OS: runtime.GOOS, Arch: runtime.GOARCH}},
-		Tested:          append([]manifest.TestedRange(nil), o.Tested...),
 		Budgets:         append([]manifest.Budget(nil), o.Budgets...),
 	}
 	for _, f := range []adapterproto.Frontend{adapterproto.FrontendCLI, adapterproto.FrontendMCP} {

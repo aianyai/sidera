@@ -244,9 +244,9 @@ func (e *Engine) statusReply(now time.Time, st *endpointState) *adapterproto.Con
 	online := a != nil && a.online
 	r := &adapterproto.ControlStatusReply{Activity: adapterproto.ActivityUnknown, Queued: e.view.backlog[st.rec.ID], AsOf: now.Unix()}
 	var snapshot []adapterproto.Availability
-	var rejected, controlUnknown, untested bool
+	var rejected, controlUnknown bool
 	if a != nil {
-		snapshot, rejected, controlUnknown, untested = a.snapshot, a.rejected[ref], a.controlUnknown && st.rec.Kind == adapterreg.KindRuntime, a.versionUntested
+		snapshot, rejected, controlUnknown = a.snapshot, a.rejected[ref], a.controlUnknown && st.rec.Kind == adapterreg.KindRuntime
 	}
 	if online {
 		r.Activity = adapterproto.ActivityIdle
@@ -254,7 +254,7 @@ func (e *Engine) statusReply(now time.Time, st *endpointState) *adapterproto.Con
 			r.Activity = adapterproto.ActivityBusy
 		}
 	}
-	r.Conditions = adapterreg.StatusConditions(snapshot, ref, !online, rejected, controlUnknown, untested)
+	r.Conditions = adapterreg.StatusConditions(snapshot, ref, !online, rejected, controlUnknown)
 	if st.rec.Kind == adapterreg.KindRuntime {
 		stopped := containsAnyCondition(r.Conditions, adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionRuntimeAuth, adapterproto.ControlConditionNativeUnavailable)
 		presets := e.d.Config.Presets().Items

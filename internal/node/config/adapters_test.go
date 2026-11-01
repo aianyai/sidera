@@ -869,7 +869,6 @@ const richManifest = `{"manifest_version":1,"id":"rich","version":"0.1.0","proto
 	`"entry":{"program":"bin/sidera-adapter-example","args":["--serve"]},` +
 	`"platforms":[{"os":"linux","arch":"amd64"},{"os":"darwin","arch":"arm64"}],` +
 	`"requires":[{"program":"git","os":["linux","darwin"]}],` +
-	`"tested":[{"runtime":"claude","min":"1.0.0","max":"2.0.0"}],` +
 	`"config":{"instance":[{"key":"limit","type":"integer","title":"Limit","default":3,"min":1,"max":9}],` +
 	`"preset":[{"key":"mode","type":"enum","title":"Mode","options":["a","b"],"default":"a"}]},` +
 	`"budgets":[{"frontend":"cli","unit":"chars","limit":1000}],` +
@@ -908,7 +907,6 @@ func TestAdaptersReturnsCopiesOfTheManifests(t *testing.T) {
 	m.Entry.Args[0] = "x"
 	m.Platforms[0].OS = "x"
 	m.Requires[0].OS[0] = "x"
-	m.Tested[0].Min = "x"
 	m.Config.Instance[0].Title = "x"
 	m.Config.Instance[0].Default[0] = '7'
 	*m.Config.Instance[0].Max = 99

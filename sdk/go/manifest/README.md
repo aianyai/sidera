@@ -2,7 +2,7 @@
 
 The adapter package manifest, `sidera-adapter.json`: the file at the root of an
 adapter package that says what the adapter is, how to start it, where it runs,
-what it needs, which runtime versions it was tested against, what configuration
+what it needs, what configuration
 it takes, how much output one `recv` may print for it and how long one `recv` may
 wait for a message. `Parse` reads it
 strictly and `Validate` states the structural rules once. The daemon reads the
@@ -21,7 +21,6 @@ the same rules in JSON Schema.
 | `Manifest.Validate()` | Every structural rule; use it on a manifest built in code |
 | `Encode(m)` | The text of `sidera-adapter.json` for a manifest built in code: validated, indented, with a trailing newline |
 | `WritePackage(dir, m, binary)` | An installable package directory: the manifest and a copy of the binary built for the platform at the manifest's `entry.program`, with `.exe` added to both for a Windows package; what each adapter's `package` subcommand ends in |
-| `Manifest.Tests(runtime, version)` | Whether a runtime version is inside a tested range |
 | `FieldTypes()`, `BudgetFrontends()`, `Units()`, `KnownOS()`, `KnownArch()` | The vocabularies the schema is compared with |
 
 ## Rules
@@ -39,8 +38,6 @@ the same rules in JSON Schema.
 - `platforms` is a non-empty list of distinct `os`/`arch` pairs in Go's GOOS and
   GOARCH vocabulary. `requires` is for display and the install check only; the
   probe is what proves a program works.
-- `tested` ranges are closed and compared as SemVer, `min` not above `max`;
-  build metadata does not order versions.
 - `config` has two groups, `instance` and `preset`, of fields with a key
   (`[a-z][a-z0-9_]{0,63}`, unique in the group), a type, a title and optional
   description, `required`, `default`, `min`, `max` and `options`. Types are

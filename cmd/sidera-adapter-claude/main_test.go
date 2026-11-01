@@ -29,9 +29,6 @@ func TestManifestAndDeclarationAgree(t *testing.T) {
 	if cfg.Adapter.ID != m.ID || cfg.Adapter.Version != m.Version {
 		t.Fatalf("identity %+v, manifest %s %s", cfg.Adapter, m.ID, m.Version)
 	}
-	if !m.Tests(runtime.RuntimeName, "2.1.316") {
-		t.Fatal("the tested range does not name the runtime of a probe")
-	}
 	var declared []string
 	for _, f := range cfg.Capabilities.Runtime.Frontends {
 		declared = append(declared, string(f))

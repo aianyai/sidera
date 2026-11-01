@@ -665,7 +665,7 @@ func scenarios() []scenario {
 			return r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{"cursor":1}`)})
 		}),
 		single("alert-raise", "alert-raise/alert.sync-dir#1", func(r *rig) error {
-			return r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{9}, Kind: "version_untested", At: base, Detail: "d"})
+			return r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{9}, Kind: "control_unknown", At: base, Detail: "d"})
 		}),
 		single("daemon-stop", "daemon-stop/result.sync-dir#1", func(r *rig) error {
 			return r.st.DaemonStop(adminResult(7))

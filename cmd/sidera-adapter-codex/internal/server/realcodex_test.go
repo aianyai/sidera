@@ -40,7 +40,7 @@ func requireRealCodex(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if !declare.VersionTested(v) {
-		t.Logf("codex %s is outside the tested range %s..%s: a failure below may be the version", v, declare.TestedMin, declare.TestedMax)
+		t.Logf("codex %s is not the tested version %s: a failure below may be the version", v, declare.TestedVersion)
 	}
 	return program
 }

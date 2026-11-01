@@ -20,7 +20,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/publication"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
-	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // What the adapter host asks of the engine for the life of one connection: the
@@ -73,10 +72,9 @@ type adapterState struct {
 	// conditions are, and the alert that told the owner is on disk.
 	controlUnknown bool
 
-	probed          bool
-	probe           adapterproto.ProbeResult
-	probedAt        time.Time
-	versionUntested bool
+	probed   bool
+	probe    adapterproto.ProbeResult
+	probedAt time.Time
 	// declared: the probe has passed once since the instance was enabled, so the
 	// runtime endpoint is part of what the node declares. It is not withdrawn when
 	// the instance later becomes unusable, so that the declaration does not flap,
@@ -468,16 +466,9 @@ func (c *cmdProbed) run(e *Engine, now time.Time) {
 	c.done(struct{}{}, e.classify(e.probeResult(now, c.instance, c.result)))
 }
 
-// versionUntestedKind is the kind of the alert that says an adapter's runtime is
-// outside the versions its manifest was tested against.
-const versionUntestedKind = "version_untested"
-
 // AdapterProbed tells the engine what adapter.probe found. The result is kept for
-// the instance. When the runtime it names is outside every tested range of the
-// installed manifest, the owner is told once with an alert of kind
-// version_untested: the same words about the same instance are never raised twice,
-// and alerts are on disk, so a restart does not raise them again. It blocks
-// nothing and the adapter keeps running.
+// the instance. The version of the runtime it names is shown, never judged: a
+// runtime that upgrades several times a day cannot be tested in each version.
 func (e *Engine) AdapterProbed(ctx context.Context, instance string, r adapterproto.ProbeResult) error {
 	c := &cmdProbed{call: newCall[struct{}](), instance: instance, result: r}
 	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
@@ -489,20 +480,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	if err != nil {
 		return err
 	}
-	man, err := e.installedManifest(instance)
-	if err != nil {
-		return err
-	}
-	untested := adapterreg.RuntimeVersionUntested(man, r.Runtime)
-	if untested {
-		detail := fmt.Sprintf("runtime %s %s is outside the tested ranges of adapter %s %s", r.Runtime.Name, r.Runtime.Version, man.ID, man.Version)
-		if !e.alerted(versionUntestedKind, instance, detail) {
-			if _, err := e.raiseAlert(now, versionUntestedKind, instance, detail); err != nil {
-				return err
-			}
-		}
-	}
-	st.probed, st.probe, st.probedAt, st.versionUntested = true, r, now, untested
+	st.probed, st.probe, st.probedAt = true, r, now
 	e.declareIfPassed(instance, st, now)
 	// The probe is a call the host made to the adapter, so the connection is in
 	// service: what the node asked the instance to create before this connection is
@@ -514,27 +492,6 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	e.redriveReleases(instance, now)
 	e.noteInstanceProbed(instance, now)
 	return nil
-}
-
-// alerted reports whether an alert with these words exists, acknowledged or not.
-func (e *Engine) alerted(kind, subject, detail string) bool {
-	return slices.ContainsFunc(e.view.alerts, func(a store.AlertRecord) bool {
-		return a.Kind == kind && a.Subject == subject && a.Detail == detail
-	})
-}
-
-// installedManifest is the manifest of the package the instance runs.
-func (e *Engine) installedManifest(instance string) (manifest.Manifest, error) {
-	in, ok := e.d.Config.Instances().Items[instance]
-	if !ok {
-		return manifest.Manifest{}, refuse(ReasonInstanceUnknown)
-	}
-	for _, a := range e.d.Config.Adapters() {
-		if a.ID == in.Adapter {
-			return a.Manifest, nil
-		}
-	}
-	return manifest.Manifest{}, fmt.Errorf("engine: adapter %q of instance %q is not installed", in.Adapter, instance)
 }
 
 type cmdGone struct {
@@ -737,11 +694,9 @@ type AdapterView struct {
 	// RuntimeEndpoint is the runtime endpoint of an adapter that declared a runtime.
 	RuntimeEndpoint adapterproto.EndpointRef
 	// Probed says whether adapter.probe has answered, and Runtime is the runtime it
-	// found, if any. VersionUntested is the verdict on that version against the
-	// manifest's tested ranges.
-	Probed          bool
-	Runtime         *adapterproto.RuntimeInfo
-	VersionUntested bool
+	// found, if any.
+	Probed  bool
+	Runtime *adapterproto.RuntimeInfo
 	// Conditions is the last availability snapshot and ConditionsReceived when the
 	// engine got it.
 	Conditions         []adapterproto.Availability
@@ -776,7 +731,7 @@ func (c *cmdAdapter) run(e *Engine, now time.Time) {
 	}
 	v := AdapterView{
 		Admitted: st.admitted, Online: st.online, OfflineSince: st.offlineSince,
-		Info: st.info, Probed: st.probed, VersionUntested: st.versionUntested,
+		Info: st.info, Probed: st.probed,
 		Conditions: cloneAvailability(st.snapshot), ConditionsReceived: st.received,
 		Busy: sortedRefs(st.busy), ServerRequestRejected: sortedRefs(st.rejected),
 	}

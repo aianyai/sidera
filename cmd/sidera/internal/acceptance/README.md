@@ -41,8 +41,7 @@ result and finishes its readiness wait; completed stages are not repeated.
 Later starts reuse the installed package; only the separate input configuration's
 clock origin is updated. The default
 adapter provides direct endpoints. A private fixture profile supplies the catalog
-instance and preset names, runtime declarations, extra instances, and an installed
-warning package that remains disabled until a recipe enables it. Runtime profiles declare only the CLI front end, with its actual wait limit and
+instance and preset names, runtime declarations and extra instances. Runtime profiles declare only the CLI front end, with its actual wait limit and
 budget; they make no MCP coverage claim. Their fake adapters execute the actual
 `sidera probe --json` command for every requested preset, including init's default,
 using only that request's environment. Each generation must present its newly
@@ -163,8 +162,7 @@ other waits are polls with a 30 second deadline. The test is run by hand and by 
 
 `Options.AdapterInputs` supplies initial `fakeadapter.ExternalInputs` by installed
 instance. Preparation constructs one registry for the fixture's entire run and
-registers its control handler before launching any fake. The instance list also
-includes the installed, initially disabled warning instance. Every generated
+registers its control handler before launching any fake. Every generated
 `ProcessConfig` explicitly enables `RestoreInputs`, so hello is followed by
 confirmed installation before the adapter enters `Serve` on every generation.
 
@@ -334,12 +332,6 @@ Package inspection passes that reader to
 pointer and version directories; a refused installation must leave no adapter
 directory.
 
-The warning callback enables the profile's installed, disabled warning package
-inside the step, retaining its original operation identifier and expected version
-before the first send. After real probes and quiet, the shared recipe judgement
-requires the unique `version_untested` alert for that instance. A restart resumes
-the original request. Acknowledgement uses the public alert operation and list.
-
 Installation creates real caller-owned package sources with the fake program,
 optional nested data, and an explicitly foreign platform for refusal. Each binding
 instance retains its completed input paths across reentry. The public installer
@@ -349,8 +341,7 @@ preparation returns an explicit unsupported error, matching binary capabilities.
 Focused tests exercise settings, stale versions, presets, endpoint closure,
 instance disable/enable, backup confirmation and clock clearing through the real
 daemon. They also kill and replace the daemon before replaying a settings or
-installation request, and cut warning enable at its real commit point before
-resuming probe and acknowledgement in the next generation.
+installation request.
 
 ## Session and retention bindings
 

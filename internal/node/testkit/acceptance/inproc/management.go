@@ -78,17 +78,6 @@ func newManagementOps() recipes.ManagementOps {
 			node := e.(*harness.H).Engine()
 			return runManagement(e, node, q, "adapters.disable", instance, engine.DisableAdapterOp(instance, encodeManagementInstance))
 		},
-		CreateVersionAlert: newVersionAlertOp(),
-		AcknowledgeAlert: func(e scenario.Env, q recipes.ManagementRequest, name string) (recipes.ManagementOutcome, error) {
-			id, err := store.ParseAlertID(name)
-			if err != nil {
-				return recipes.ManagementOutcome{}, err
-			}
-			node := e.(*harness.H).Engine()
-			return runManagement(e, node, q, "alerts.ack", name, engine.AcknowledgeAlertOp(id, func(v store.AlertID) ([]byte, error) {
-				return json.Marshal(recipes.ManagementOutcome{Value: v.String()})
-			}))
-		},
 		ConfirmBackup: func(e scenario.Env, q recipes.ManagementRequest) (recipes.ManagementOutcome, error) {
 			node := e.(*harness.H).Engine()
 			exported, err := node.ExportRevocation(e.Ctx())
@@ -157,18 +146,6 @@ func newManagementOps() recipes.ManagementOps {
 				}
 			}
 			return out, nil
-		},
-		InspectAlert: func(e scenario.Env, name string) (bool, error) {
-			scan, err := e.(*harness.H).Records()
-			if err != nil {
-				return false, err
-			}
-			for _, a := range scan.Alerts {
-				if a.ID.String() == name {
-					return a.Acked != nil, nil
-				}
-			}
-			return false, fmt.Errorf("acceptance: managed alert %s absent", name)
 		},
 		DirectOn: func(e scenario.Env, instance, name string) (string, error) {
 			return e.(*harness.H).DirectOn(instance, name)

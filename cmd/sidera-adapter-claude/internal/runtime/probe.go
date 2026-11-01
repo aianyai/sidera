@@ -12,8 +12,7 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// RuntimeName is the runtime's name in a probe, which the manifest's tested
-// ranges name too.
+// RuntimeName is the runtime's name in a probe.
 const RuntimeName = "claude-code"
 
 // probeTimeout bounds one tool probe.

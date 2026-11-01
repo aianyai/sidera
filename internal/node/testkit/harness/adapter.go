@@ -89,8 +89,7 @@ func AdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptio
 
 // RuntimeAdapterManifest is AdapterManifest for an adapter that also declares a
 // runtime: the command line and MCP front ends, interrupt and acknowledging on
-// behalf, with the runtime and the tested range the fake adapter declares by
-// default.
+// behalf, with the runtime the fake adapter declares by default.
 func RuntimeAdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
 	return RuntimeAdapterManifestOf(Instance, maxDirect)
 }
@@ -102,7 +101,7 @@ func RuntimeAdapterManifestOf(instance string, maxDirect int) fakeadapter.Manife
 	o.Runtime = true
 	o.Frontends, o.Interrupt, o.AckOnBehalf = d.Frontends, d.Interrupt, d.AckOnBehalf
 	o.RecvWaitS, o.Budgets = d.RecvWaitS, d.Budgets
-	o.RuntimeName, o.RuntimeVersion, o.Tested, o.AckMarkers = d.RuntimeName, d.RuntimeVersion, d.Tested, d.AckMarkers
+	o.RuntimeName, o.RuntimeVersion, o.AckMarkers = d.RuntimeName, d.RuntimeVersion, d.AckMarkers
 	return o
 }
 

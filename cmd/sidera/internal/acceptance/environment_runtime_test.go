@@ -18,7 +18,7 @@ import (
 func TestRuntimeProfileProbesAcrossGeneration(t *testing.T) {
 	for _, preset := range []string{"default", "fixture"} {
 		t.Run(preset, func(t *testing.T) {
-			f, ctx := profiledFixture(t, fixtureProfile{mainInstance: "chat", preset: preset, runtimeAdapter: true, extraInstances: []string{"managed"}, probeWarning: true})
+			f, ctx := profiledFixture(t, fixtureProfile{mainInstance: "chat", preset: preset, runtimeAdapter: true, extraInstances: []string{"managed"}})
 			addresses := map[string]string{}
 			for gen := 1; gen <= 2; gen++ {
 				if err := f.Start(ctx, GenerationSpec{Number: gen}); err != nil {

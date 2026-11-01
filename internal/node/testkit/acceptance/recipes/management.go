@@ -46,27 +46,21 @@ type InstanceFacts struct {
 // Operations return the first actual result after checking its persistent replay.
 // Inspection returns only facts needed by this domain's requested effects.
 type ManagementOps struct {
-	Versions       func(scenario.Env) (ManagementVersions, error)
-	NodeSet        func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
-	PresetAdd      func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
-	PresetRemove   func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
-	EndpointSet    func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
-	CloseEndpoint  func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
-	EnableAdapter  func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
-	DisableAdapter func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
-	// CreateVersionAlert enables the fixture's installed, disabled warning adapter,
-	// waits for its real probe, and returns the unique version_untested owner
-	// alert for that instance. Repeating it resumes from persistent facts.
-	CreateVersionAlert func(scenario.Env) (string, error)
-	AcknowledgeAlert   func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
-	ConfirmBackup      func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
-	ClearClock         func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
-	InspectNode        func(scenario.Env) (NodeFacts, error)
-	InspectPreset      func(scenario.Env, string) (bool, error)
-	InspectEndpoint    func(scenario.Env, string) (EndpointFacts, error)
-	InspectInstance    func(scenario.Env, string) (InstanceFacts, error)
-	InspectAlert       func(scenario.Env, string) (bool, error)
-	DirectOn           func(scenario.Env, string, string) (string, error)
+	Versions        func(scenario.Env) (ManagementVersions, error)
+	NodeSet         func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
+	PresetAdd       func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
+	PresetRemove    func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
+	EndpointSet     func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
+	CloseEndpoint   func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
+	EnableAdapter   func(scenario.Env, ManagementRequest, string, string) (ManagementOutcome, error)
+	DisableAdapter  func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
+	ConfirmBackup   func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
+	ClearClock      func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
+	InspectNode     func(scenario.Env) (NodeFacts, error)
+	InspectPreset   func(scenario.Env, string) (bool, error)
+	InspectEndpoint func(scenario.Env, string) (EndpointFacts, error)
+	InspectInstance func(scenario.Env, string) (InstanceFacts, error)
+	DirectOn        func(scenario.Env, string, string) (string, error)
 }
 
 var ErrManagementEffect = errors.New("acceptance: management result and effect disagree")
@@ -223,33 +217,7 @@ func managementSettings(b Bindings) ScriptRecipe {
 func managementMaintenance(b Bindings) ScriptRecipe {
 	ops := b.Management
 	r := &managementRun{}
-	var alert string
 	steps := []scenario.Step{
-		{Name: "raise-alert", Do: func(e scenario.Env) error {
-			r.active = func(e scenario.Env) error {
-				var err error
-				alert, err = ops.CreateVersionAlert(e)
-				return err
-			}
-			if err := r.active(e); err != nil {
-				return err
-			}
-			r.active = nil
-			return nil
-		}},
-		r.step("alert", "acknowledge-alert", 51, nil, ops, func(e scenario.Env, q ManagementRequest) (ManagementOutcome, error) {
-			return ops.AcknowledgeAlert(e, q, alert)
-		},
-			func(e scenario.Env, o ManagementOutcome) error {
-				acked, err := ops.InspectAlert(e, alert)
-				if err != nil {
-					return err
-				}
-				if o.Value != alert || !acked {
-					return fmt.Errorf("%w: alert acknowledgement absent", ErrManagementEffect)
-				}
-				return nil
-			}),
 		r.step("backup", "confirm-backup", 52, nil, ops, ops.ConfirmBackup,
 			func(e scenario.Env, o ManagementOutcome) error {
 				f, err := ops.InspectNode(e)
@@ -281,7 +249,7 @@ func managementMaintenance(b Bindings) ScriptRecipe {
 				return nil
 			}),
 	}
-	return ScriptRecipe{Needs: Needs{ProbeWarning: true}, Script: scenario.Script{Name: "management-maintenance", Crash: scenario.CrashPlan{MaxPoints: 66}, Steps: steps}, Drain: r.drain, Check: r.check}
+	return ScriptRecipe{Script: scenario.Script{Name: "management-maintenance", Crash: scenario.CrashPlan{MaxPoints: 33}, Steps: steps}, Drain: r.drain, Check: r.check}
 }
 
 func managementClose(b Bindings) ScriptRecipe {

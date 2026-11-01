@@ -439,7 +439,7 @@ audit also compares the key, certificate and serial bytes to detect signing
 changes. Audit errors and domain-check failures become violations.
 
 `adapter_inputs_test.go` checks installed disabled runtime input on memory and real
-file systems, absence of a pre-enable process or alert, real enable/probe warning,
+file systems, absence of a pre-enable process, real enable and probe,
 and cache separation for changed manifests and disabled states.
 
 `clock_test.go` covers durable rollback at refusal, preservation of the pause's

@@ -12,7 +12,7 @@ import (
 )
 
 func TestSelectRequiresEveryDeclaredCapability(t *testing.T) {
-	needs := []recipes.Needs{{RuntimeAdapter: true}, {ExtraInstances: []string{"extra"}}, {ArchiveSweepEvery: time.Hour}, {PackageInput: true}, {ProbeWarning: true}, {Damage: recipes.DamageSource}, {FSFaults: []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody}}}
+	needs := []recipes.Needs{{RuntimeAdapter: true}, {ExtraInstances: []string{"extra"}}, {ArchiveSweepEvery: time.Hour}, {PackageInput: true}, {Damage: recipes.DamageSource}, {FSFaults: []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody}}}
 	catalog := recipes.Catalog{}
 	for i, n := range needs {
 		catalog.Scripts = append(catalog.Scripts, recipes.ScriptRecipe{Needs: n, Script: scenario.Script{Name: string(rune('a' + i))}})

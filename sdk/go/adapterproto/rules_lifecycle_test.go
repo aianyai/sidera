@@ -333,7 +333,6 @@ func TestAvailabilityRules(t *testing.T) {
 		{"healthy is an empty list", func(p *adapterproto.AvailabilityParams) { p.Conditions = []adapterproto.Availability{} }, "", false},
 		{"condition native_unavailable", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Condition = "native_unavailable" }, "", false},
 		{"condition dependency_missing", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Condition = "dependency_missing" }, "", false},
-		{"condition version_untested is the daemon's own judgment", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Condition = "version_untested" }, "conditions[0].condition", false},
 		{"condition adapter_offline is the daemon's own", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Condition = "adapter_offline" }, "conditions[0].condition", false},
 		{"condition missing", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Condition = "" }, "conditions[0].condition", false},
 		{"endpoints optional", func(p *adapterproto.AvailabilityParams) { p.Conditions[0].Endpoints = nil }, "", false},

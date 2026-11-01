@@ -5,7 +5,7 @@
     "outcome": "indeterminate",
     "grounds": {
       "code": "runtime_version_untested",
-      "detail": "runtime 3.0.0 is outside every tested range"
+      "detail": "the record of runtime 3.0.0 cannot show the attempt"
     }
   }
 }

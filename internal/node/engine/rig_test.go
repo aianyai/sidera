@@ -75,9 +75,6 @@ type rig struct {
 	home string
 	// adapters is the adapter host the engine is given, nil when a test has none.
 	adapters engine.Adapters
-	// installed, when set, changes the installed adapter packages the engine
-	// reads from the configuration (a test that needs tested runtime ranges).
-	installed func([]config.Adapter) []config.Adapter
 	// network, when set, is the network layer the engine is given before it starts.
 	network engine.Network
 	// packages are the package directories an owner can name to install, by the
@@ -116,10 +113,6 @@ func withNetwork(n engine.Network) rigOption { return func(r *rig) { r.network =
 func withoutHome() rigOption { return func(r *rig) { r.home = "" } }
 
 func withAdapters(a engine.Adapters) rigOption { return func(r *rig) { r.adapters = a } }
-
-func withInstalled(f func([]config.Adapter) []config.Adapter) rigOption {
-	return func(r *rig) { r.installed = f }
-}
 
 // withPackage makes the directory dir the package src, for the owner to install.
 func withPackage(dir string, src fsx.Reader) rigOption {
@@ -188,28 +181,13 @@ func (r *rig) deps() engine.Deps {
 	}
 	d := engine.Deps{
 		Node: r.node, Clock: clk, HighWater: r.hw, RollbackPaused: r.paused, RollbackPausedSince: r.pausedSince,
-		Writer: r.w, Store: r.st, Config: r.engineConfig(), Rand: harness.RandReader(r.seed),
+		Writer: r.w, Store: r.st, Config: r.cfg, Rand: harness.RandReader(r.seed),
 		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log), OpenPackage: r.openPackage,
 	}
 	if r.keys != nil {
 		d.Keys = r.keys
 	}
 	return d
-}
-
-// installedConfig is the configuration with the installed packages a test chose.
-type installedConfig struct {
-	engine.Config
-	pick func([]config.Adapter) []config.Adapter
-}
-
-func (c installedConfig) Adapters() []config.Adapter { return c.pick(c.Config.Adapters()) }
-
-func (r *rig) engineConfig() engine.Config {
-	if r.installed == nil {
-		return r.cfg
-	}
-	return installedConfig{Config: r.cfg, pick: r.installed}
 }
 
 // initInfo is what an adapter with the admission's capabilities answers to
@@ -498,7 +476,7 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed, network: r.network, packages: r.packages}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, network: r.network, packages: r.packages}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {

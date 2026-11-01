@@ -53,18 +53,6 @@
       "program": "git"
     }
   ],
-  "tested": [
-    {
-      "runtime": "example-runtime",
-      "min": "2.1.306",
-      "max": "2.1.308"
-    },
-    {
-      "runtime": "example-runtime",
-      "min": "2.2.0-rc.1",
-      "max": "2.2.0"
-    }
-  ],
   "config": {
     "instance": [
       {

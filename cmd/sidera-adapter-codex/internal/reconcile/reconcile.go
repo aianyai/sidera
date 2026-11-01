@@ -28,8 +28,8 @@ type Input struct {
 	// Unreachable says the server could not be asked; the other fields are then
 	// empty.
 	Unreachable bool
-	// VersionUntested says the Codex version is outside the range the adapter was
-	// tested with, so a record that does not show the attempt proves little.
+	// VersionUntested says the Codex version is not the one the adapter was tested
+	// with, so a record that does not show the attempt proves little.
 	VersionUntested bool
 }
 

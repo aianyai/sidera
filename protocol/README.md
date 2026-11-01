@@ -84,7 +84,7 @@ that matches `adapterproto.ErrBeyondSchema` (`manifest.ErrBeyondSchema`).
   and points at part `index + 1`.
 - In a status reply `conditions` ascend and `presets` are sorted by name with no
   name twice.
-- In a manifest: a tested range has `min` not above `max` in SemVer order; a field
+- In a manifest: a field
   `default` lies within the field's options, or within `min` and `max`; `min` is
   not above `max`; the keys of one group of fields are distinct; no front end has
   two budgets and none has two receive wait limits.

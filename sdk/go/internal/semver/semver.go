@@ -1,6 +1,5 @@
 // Package semver parses and orders Semantic Versioning 2.0.0 versions, which
-// the adapter manifest uses for the adapter version and for the closed ranges of
-// runtime versions it has been tested against.
+// the adapter manifest uses for the adapter version.
 //
 // Each of major, minor and patch has at most nine digits so that comparison
 // never overflows; versions beyond that are not real releases and are refused.

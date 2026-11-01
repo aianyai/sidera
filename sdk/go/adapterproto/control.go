@@ -305,13 +305,10 @@ const (
 	ControlConditionServerRequestRejected
 	// ControlConditionControlUnknown: the outcome of an earlier control action is unknown.
 	ControlConditionControlUnknown
-	// ControlConditionVersionUntested: the runtime's version is outside the tested
-	// ranges. It does not stop the endpoint working.
-	ControlConditionVersionUntested
 )
 
 var conditionText = enumText[ControlCondition]{[]string{
-	"adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown", "version_untested",
+	"adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown",
 }}
 
 func (v ControlCondition) String() string                { return conditionText.name(v) }

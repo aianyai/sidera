@@ -1338,21 +1338,13 @@ it. Initially disabled instances are omitted from first-boot predecessor orderin
 so another enabled instance cannot wait for their nonexistent processes.
 
 
-The maintenance acceptance recipe creates its warning through real adapter
-enablement and probing, inside the recipe step. Its fixture input is an installed,
-disabled adapter whose actual runtime version falls outside its manifest's tested
-range. `ManagementOps.CreateVersionAlert` retains a deterministic enable request
-across interruptions, waits for the current process's probe and returns the real
-alert identifier. `RequireVersionAlert` owns the shared judgement of all owner
-alerts: exactly one `version_untested` alert, naming that enabled instance. Missing,
-additional, wrong-kind and wrong-subject facts all fail. A resumed drain completes
-the same request and reads persistent facts, so it cannot create a second warning
-just to regain an identifier. Alert acknowledgement, backup confirmation and clock
-rollback clearance retain their durable-result and effect checks. Its real recording
-contains 44 main points and has a fixed budget of 66.
+The maintenance acceptance recipe covers backup confirmation and clock rollback
+clearance, each with its durable-result and effect check. No acceptance layer can make
+a node raise an alert at will, so the acknowledgement of an alert is not walked here: the
+crash walk of the engine covers it (`crashwalk.NotYetWalked`). Its real recording
+contains 22 main points and has a fixed budget of 33.
 
-Both execution layers explicitly support the `ProbeWarning` input need. Unknown
-damage or filesystem-fault names are unsupported even when a capability list
+Unknown damage or filesystem-fault names are unsupported even when a capability list
 contains the same unknown value. Package inputs and their real installation stay
 with each fixture; the callback adds no arbitrary-alert API or test RPC.
 
@@ -1456,20 +1448,14 @@ that identifier unknown. Facts come from public lists or read-only decoding of
 actual configuration, clock, package and endpoint files; a token is checked only
 on disk because the management interface never publishes one.
 
-The warning callback retains its enable request before sending it and resumes
-that same request after an interrupted commit. It waits for the real warning
-adapter's probe and quiet, then applies the shared unique `version_untested`
-judgement. Installation retains completed caller-owned source paths and extends
+Installation retains completed caller-owned source paths and extends
 only those inputs with nested data or a foreign platform. The public installer
 owns installed state. Pointer-fault callbacks explicitly fail as unavailable in
 the binary layer, consistent with capability selection.
 
 `TestBinaryManagementBindingsPreserveRequestsAndEffects` exercises changes and
 refusals through the running daemon, including same-request replay after actual
-kill and replacement. `TestBinaryVersionAlertResumesCommittedEnable` cuts the
-real adapter enable commit, verifies the target and abnormal exit, and resumes
-the original request before acknowledging its real alert.
-`TestBinaryInstallationBindingsUpgradeAndReplayAcrossGeneration` checks real
+kill and replacement. `TestBinaryInstallationBindingsUpgradeAndReplayAcrossGeneration` checks real
 upgrades, current-version installation, platform refusal without residue and
 persistent replay after kill and restart.
 

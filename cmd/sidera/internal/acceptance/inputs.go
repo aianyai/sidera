@@ -29,13 +29,11 @@ type bootstrapStep struct {
 // fixtureProfile describes caller-owned inputs, never mutations of node state.
 // The public fixture's zero profile retains its direct-only fake/fixture defaults.
 type fixtureProfile struct {
-	mainInstance, preset       string
-	runtimeAdapter             bool
-	extraInstances             []string
-	probeWarning, packageInput bool
+	mainInstance, preset string
+	runtimeAdapter       bool
+	extraInstances       []string
+	packageInput         bool
 }
-
-const versionWarningInstance = "warning-probe"
 
 func profileFromNeeds(needs recipes.Needs) (fixtureProfile, error) {
 	if needs.ArchiveSweepEvery != 0 && needs.ArchiveSweepEvery != daemon.ArchiveSweepEvery {
@@ -44,7 +42,7 @@ func profileFromNeeds(needs recipes.Needs) (fixtureProfile, error) {
 	if !recipes.BinaryCapabilities().Supports(needs) {
 		return fixtureProfile{}, fmt.Errorf("acceptance: unsupported needs: %+v", needs)
 	}
-	return fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: needs.RuntimeAdapter, extraInstances: append([]string(nil), needs.ExtraInstances...), probeWarning: needs.ProbeWarning, packageInput: needs.PackageInput}, nil
+	return fixtureProfile{mainInstance: "chat", preset: "default", runtimeAdapter: needs.RuntimeAdapter, extraInstances: append([]string(nil), needs.ExtraInstances...), packageInput: needs.PackageInput}, nil
 }
 
 func (p fixtureProfile) instance() string {
@@ -94,16 +92,13 @@ func inputManifest(runtime bool) fakeadapter.ManifestOptions {
 	opts.AckOnBehalf = false
 	opts.Frontends = nil
 	opts.RecvWaitS = nil
-	opts.RuntimeName, opts.RuntimeVersion, opts.Tested, opts.AckMarkers = "", "", nil, nil
+	opts.RuntimeName, opts.RuntimeVersion, opts.AckMarkers = "", "", nil
 	opts.Budgets = []manifest.Budget{{Frontend: manifest.FrontendDirect, Unit: manifest.UnitChars, Limit: 9000}}
 	return opts
 }
 
 func (f *Fixture) prepareInputs() error {
 	names := append([]string{f.profile.instance()}, f.profile.extraInstances...)
-	if f.profile.probeWarning {
-		names = append(names, versionWarningInstance)
-	}
 	var err error
 	f.adapterInputs, err = fakeadapter.NewInputRegistry(names, f.opts.AdapterInputs)
 	if err != nil {
@@ -121,17 +116,13 @@ func (f *Fixture) prepareInputs() error {
 			return fmt.Errorf("acceptance: duplicate input instance %q", name)
 		}
 		seen[name] = true
-		warning := f.profile.probeWarning && name == versionWarningInstance
-		opts := inputManifest(f.profile.runtimeAdapter || warning)
+		opts := inputManifest(f.profile.runtimeAdapter)
 		// Each extra instance owns a package with its own stable public identity.
 		if name != f.profile.instance() || f.profile.mainInstance != "" {
 			opts.ID = name
 		}
 		if f.profile.mainInstance != "" {
 			opts.MaxDirectEndpoints = adapterproto.MaxDirectEndpoints
-		}
-		if warning {
-			opts.Tested = []manifest.TestedRange{{Runtime: opts.RuntimeName, Min: "2.0.0", Max: "2.9.9"}}
 		}
 		config := filepath.Join(f.root, "input", name+".json")
 		opts.Args = fakeadapter.ConfigArgs(config)
@@ -147,9 +138,7 @@ func (f *Fixture) prepareInputs() error {
 		}
 		f.inputs = append(f.inputs, adapterInput{source: source, config: config, process: fakeadapter.ProcessConfig{RestoreInputs: true, InstanceID: name, Manifest: opts, ToolProbe: toolProbe, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: f.runtimeSeed(name), RuntimeTestSeed: f.opts.Seed + "/runtime/" + name, Control: f.control.Addr()}})
 		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.install", request: manageapi.Request{Params: map[string]any{"source": source}}})
-		if !warning {
-			f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": opts.ID, "instance": name}}})
-		}
+		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": opts.ID, "instance": name}}})
 	}
 	return f.writeInputs()
 }

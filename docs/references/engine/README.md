@@ -421,10 +421,9 @@ connection does, and `AdapterGone` is taken only for an instance that is enabled
 that observation. The snapshot, the busy turns and the requests the runtime saw
 refused are memory: they are rebuilt by the adapter after a restart, and a
 notification about an endpoint the engine does not know is kept by reference and
-writes nothing. The probe result is kept per instance; when its runtime is outside
-the tested ranges of the installed manifest the owner gets one alert of kind
-`version_untested`, once for the same instance and words, across restarts too
-because alerts are persistent. `ProbeTokens` makes a token for each front end of
+writes nothing. The probe result is kept per instance and shown as it is: the
+version of the runtime is never judged and raises no alert, since a runtime that
+upgrades several times a day cannot be tested in each version. `ProbeTokens` makes a token for each front end of
 each preset, valid for five minutes on the injected clock and kept in memory only;
 the Agent interface will present it.
 
@@ -1821,7 +1820,7 @@ reproducible).
 | The admission crashes anywhere | `transactions.go` | `TestRuntimeAdmitRecoversFromACrashAtEveryPoint` |
 | What `adapter.start` carries | `adapters.go` (`startParams`) | `TestAdmissionReturnsWhatAdapterStartCarries` |
 | Probe tokens | `adapters.go` (`probeTokens`) | `TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes` |
-| A runtime outside the tested ranges is one alert | `adapters.go` (`probeResult`) | `TestVersionUntestedAlertIsRaisedOnceForARuntimeOutsideTheTestedRanges` |
+| A probe result is kept and raises no alert | `adapters.go` (`probeResult`) | `TestProbeResultIsKeptAndRaisesNoAlert` |
 | Availability becomes handoff's signals; online and offline | `adapters.go` (`notified`, `gone`, `AdapterSignals`) | `TestAvailabilitySnapshotsBecomeHandoffSignals`, `TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission`, `TestAnInstanceTheConfigurationDoesNotEnableIsUnknownToReadsAndToGone` |
 | Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest`, `TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore` |
 | A checkpoint is on disk before it is answered; a session's is taken while the session is being created | `adapters.go` (`checkpointPut`), `view.go` (`resolveSessionBeingMade`, `resolveAttemptBeingMade`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |

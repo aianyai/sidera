@@ -66,10 +66,10 @@ is ended, not what it started.
 (`codex --version`). The server's own version is in the user agent it answers
 `initialize` with. When the two differ (Codex was upgraded under a running server)
 the probe reports the `app-server` dependency as `wrong_version`; the adapter does
-not restart a server it did not start. The range of versions the adapter was tested
-with is `tested` in the manifest and `declare.TestedMin`/`TestedMax`; the daemon
-judges a version outside it (`version_untested`), and `prompt.reconcile` does not
-conclude that a prompt is absent on one.
+not restart a server it did not start. The version the adapter was tested with is
+`declare.TestedVersion`; the manifest does not list it and the daemon does not judge a
+version, but `prompt.reconcile` does not conclude that a prompt is absent on any
+other.
 
 ### The connection
 
@@ -248,7 +248,7 @@ read page by page until the attempt is found or the record is exhausted:
 | ----- | ------- | ------- |
 | the attempt is in a turn | `found`, with the turn and its state | `attempt_in_record` |
 | the server cannot be asked | `indeterminate` | `native_unreachable` |
-| not found, version outside the tested range | `indeterminate` | `runtime_version_untested` |
+| not found, version is not the tested one | `indeterminate` | `runtime_version_untested` |
 | not found, the thread is active or the adapter's own turn has not ended | `indeterminate` | `turn_running` |
 | not found, the record was not read to its end | `indeterminate` | `record_unreadable` |
 | not found, idle, whole record read | `provably_absent` | `record_complete_without_attempt` |

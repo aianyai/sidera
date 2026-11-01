@@ -134,7 +134,7 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 
 	// The rest of the single-file writes, then the sweep and an acknowledged alert.
 	mustDo(t, r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)}))
-	mustDo(t, r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d"}))
+	mustDo(t, r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{1}, Kind: "control_unknown", At: base, Detail: "d"}))
 	mustDo(t, r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}))
 	check("checkpoint, alert, summaries")
 	sc := r.scan()
@@ -145,7 +145,7 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	check("sweep")
 	mustDo(t, r.st.ArchiveExpire(store.ExpiredArchiveFiles([]string{"2026-01-01.jsonl"}, base, 30*24*time.Hour)))
-	acked := store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d", Acked: &store.AlertAcked{At: base, Operation: adminResult(3).Key.ID}}
+	acked := store.AlertRecord{ID: store.AlertID{1}, Kind: "control_unknown", At: base, Detail: "d", Acked: &store.AlertAcked{At: base, Operation: adminResult(3).Key.ID}}
 	mustDo(t, r.st.AlertAck(store.AlertAckInput{Alert: acked, Result: adminResult(3)}))
 	check("alert acknowledged")
 	if step < 20 {

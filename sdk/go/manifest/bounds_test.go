@@ -32,11 +32,6 @@ func TestStringBounds(t *testing.T) {
 			m.Requires = []manifest.Requirement{{Program: s}}
 			return m.Validate()
 		}},
-		{"tested runtime", 1, 64, false, func(s string) error {
-			m := base()
-			m.Tested = []manifest.TestedRange{{Runtime: s, Min: "1.0.0", Max: "1.0.0"}}
-			return m.Validate()
-		}},
 		{"field title", 1, 128, false, setField(func(f *manifest.Field, s string) { f.Title = s })},
 		{"field description", 1, 1024, true, setField(func(f *manifest.Field, s string) { f.Description = s })},
 		{"field default string", 0, 4096, true, setField(func(f *manifest.Field, s string) { f.Default = str(s) })},

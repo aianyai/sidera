@@ -256,10 +256,10 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **A probe token is made for each preset and front end, kept in memory, valid
   for `ProbeTokenLifetime`.** A new call replaces the earlier tokens of the
   instance. A token is never written, logged or returned by a read.
-- **A runtime outside the tested ranges is one alert, once.** `RuntimeVersionUntested`
-  judges it against the installed manifest; the alert of kind `version_untested`
-  is not raised again for the same instance and words, which alerts being on disk
-  makes true across restarts.
+- **The version of a runtime is shown, never judged.** The probe result is kept
+  per instance as the adapter reported it and raises no alert: a runtime that
+  upgrades several times a day cannot be tested in each version, so an alert about
+  an untested one would be noise.
 - **A checkpoint is on disk before it is answered.** `CheckpointPut` is taken in
   every phase the loop runs in, stores the state compact, one value for each
   (scope, id), and refuses a session scope that is not an open session endpoint of

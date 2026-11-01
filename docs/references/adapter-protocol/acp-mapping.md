@@ -184,8 +184,7 @@ Stated as facts about the two protocols; none of it is built.
    `native_request.handled`.
 9. **Availability and version.** There is no ACP notification for health. The
    runtime name and version come from `agentInfo`, which an agent should provide
-   but need not. The manifest's `tested` ranges and the daemon's
-   `version_untested` condition need that name and version.
+   but need not. The probe result shows that name and version.
 10. **Concurrent prompts.** A second `session/prompt` while a turn is running is
     refused by Sidera with reason `busy`. The v1 pages read do not say what an
     agent does with it (UNVERIFIED); the v2 draft mentions queued prompts.

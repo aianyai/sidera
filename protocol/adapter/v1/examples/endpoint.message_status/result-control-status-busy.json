@@ -14,7 +14,7 @@
       "queued": 3,
       "conditions": [
         "server_request_rejected",
-        "version_untested"
+        "control_unknown"
       ],
       "as_of": 1792713600
     }
