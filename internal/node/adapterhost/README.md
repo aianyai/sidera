@@ -48,8 +48,8 @@ and its own log goes through the handle the daemon gives it.
   capabilities of the daemon); `adapterreg.CheckHandshake` and `adapterreg.Admit`
   against the installed manifest; `Engine.AdapterAdmitted`, which returns the
   parameters of `adapter.start`; only then are the adapter's requests let
-  through and the forwarder started; `adapter.start` and `Engine.AdapterStarted`;
-  the connection is in service; `Engine.ProbeTokens`, `adapter.probe`,
+  through; `adapter.start` and `Engine.AdapterStarted`, after which the forwarder
+  starts; the connection is in service; `Engine.ProbeTokens`, `adapter.probe`,
   `Engine.AdapterProbed`. Each call to the adapter is limited by
   `Params.HandshakeTimeout`. Anything that fails before `adapter.start` was taken
   on kills the process and is reported as `GoneStartFailed`. An answer
@@ -96,7 +96,9 @@ and its own log goes through the handle the daemon gives it.
 - **Notifications** are decoded and validated; an invalid one is logged and
   dropped. They go into a buffer of `NotificationBuffer` in arrival order and one
   forwarder per connection hands them to `Engine.AdapterNotified` one at a time,
-  after `AdapterAdmitted` has returned (what arrives before waits in the buffer).
+  after `AdapterStarted` has returned (what arrives before, `adapter.start` still being
+  answered included, waits in the buffer: the start result states the adapter's picture
+  as of its answer and must not overwrite what a notification then said).
   One the declaration does not allow is logged and dropped when the forwarder
   takes it; a dropped notification counts as handled. While the buffer is full the
   handler blocks, the peer's queue fills and the peer ends the connection, which

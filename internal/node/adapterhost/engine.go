@@ -12,7 +12,7 @@ import (
 // called in this order: AdapterAdmitted, AdapterStarted, ProbeTokens,
 // AdapterProbed, and from then on AdapterNotified and the requests of the
 // adapter, until AdapterGone. A notification reaches AdapterNotified only after
-// AdapterAdmitted has returned, in the order the adapter sent it, and none
+// AdapterStarted has returned, in the order the adapter sent it, and none
 // reaches it once AdapterGone was called for a connection that was lost or
 // refused: the host ends its forwarding first and drops what is still buffered.
 // The one report that does not end a connection is GoneStartFailed for an

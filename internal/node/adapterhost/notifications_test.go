@@ -2,6 +2,7 @@ package adapterhost_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"testing"
@@ -86,6 +87,37 @@ func TestNotificationsReachTheEngineInTheOrderSentAndThoseBeforeAdmissionWaitFor
 		c := r.host.Counts("chat")
 		return c.Handled == 6 && c.Buffered == 0
 	})
+}
+
+// What the adapter says while it is still answering adapter.start reaches the
+// engine only after the engine has applied that answer: the answer states the
+// adapter's picture as of the moment it was given, and an end of turn the engine
+// processed before it would be overwritten by it.
+func TestNotificationsSentWhileAdapterStartIsAnsweredReachTheEngineAfterTheStartResult(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, _ := r.scriptedProcess(func(a *scripted) {
+			a.handlers = map[string]peer.RequestHandler{
+				adapterproto.MethodAdapterStart: func(context.Context, json.RawMessage) (any, error) {
+					a.notify(adapterproto.MethodTurnEnded, turnEnded("session-1", 1))
+					// The answer is given only once the host holds the end of turn.
+					eventually(t, "the host to hold the end of turn", func() bool { return r.host.Counts("chat").Buffered == 1 })
+					return adapterproto.StartResult{Sessions: []adapterproto.SessionState{{Endpoint: "session-1", State: adapterproto.AttachAttached, TurnActive: true}}}, nil
+				},
+			}
+		}, false)
+		return pp, nil
+	}
+	r.start()
+	r.ready("chat", 1)
+	r.waitEvents("notified", 1)
+
+	kinds := r.eng.kinds()
+	i := slices.Index(kinds, "started")
+	j := slices.Index(kinds, "notified")
+	if i < 0 || j < i {
+		t.Fatalf("the engine saw %v: the end of turn must come after the start result", kinds)
+	}
 }
 
 // An invalid notification, one the declaration does not allow, is dropped and

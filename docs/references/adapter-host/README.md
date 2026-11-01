@@ -46,8 +46,13 @@ host's clock:
    is logged as another process holding the lock.
 2. `Engine.AdapterAdmitted`, which returns the parameters of `adapter.start`. Only
    now are the adapter's requests let through (before it they are `-32003`, except
-   `ping`), and only now does the forwarder start.
-3. `adapter.start`, then `Engine.AdapterStarted`. The connection is in service:
+   `ping`).
+3. `adapter.start`, then `Engine.AdapterStarted`, and only after the engine has
+   applied the result does the forwarder start: what the adapter said since it was
+   launched, `adapter.start` still being answered included, reaches the engine then, in
+   the order it arrived. The result states the adapter's picture as of its answer, so
+   a notification the engine processed before it (a turn that ended while the adapter
+   was still answering) would be overwritten by it. The connection is in service:
    calls from the engine are possible and whoever waits in `Start` for this instance
    is released.
 4. `Engine.ProbeTokens`, `adapter.probe`, `Engine.AdapterProbed`.
@@ -189,8 +194,8 @@ A notification is decoded and validated; an invalid one is logged and dropped. I
 goes into the connection's buffer (`Params.NotificationBuffer`) in the order it
 arrived. One goroutine per connection takes them in order and calls
 `Engine.AdapterNotified`, and a notification counts as handled when that call
-returns. Those that arrive before the admission is complete wait in the buffer and
-are delivered after it. A notification the declaration does not allow (checked when
+returns. Those that arrive before the engine has applied the result of `adapter.start`
+wait in the buffer and are delivered after it. A notification the declaration does not allow (checked when
 the forwarder takes it, because the declaration is not known before) is logged and
 dropped and counts as handled. The engine receives the parameters as the value of
 their type. Notifications do not wait for a request the host has sent: the host's call
@@ -349,6 +354,12 @@ Everything about Windows and Linux is pending verification by CI on main.
 - **The declaration of a notification is checked when it is taken.** The host does
   not know what the adapter declared until it is admitted, and notifications that
   arrive earlier must wait for it anyway.
+- **The forwarder starts after the engine has applied the start result.** The
+  buffer that already keeps order and bounds memory is the one mechanism that
+  holds the notifications of an adapter that is still answering `adapter.start`;
+  nothing else is held. The engine never needs a notification to answer the start,
+  so the wait cannot deadlock; a stall longer than the buffer and the peer's queue
+  hold together ends the connection as it does at any other time.
 - **The engine's errors are turned into codes in one place.** The host passes a
   `*peer.Error` through and calls everything else internal, so that the engine's
   texts, which can name paths or ids, never reach an adapter, and the meaning of a
@@ -395,6 +406,7 @@ check on every test):
 | The order on the wire and in the calls to the engine, what each step carries, a failed probe | `TestAConnectionIsTakenOnInTheOrderInitializeAdmitStartProbe` |
 | The limit of a handshake call on the host's clock | `TestAHandshakeCallThatIsNotAnsweredEndsThePassAtTheHandshakeTimeout` |
 | Order of notifications, those before admission wait, an endpoint that does not exist yet | `TestNotificationsReachTheEngineInTheOrderSentAndThoseBeforeAdmissionWaitForIt` |
+| A notification sent while `adapter.start` is answered reaches the engine after the start result | `TestNotificationsSentWhileAdapterStartIsAnsweredReachTheEngineAfterTheStartResult` |
 | Invalid and undeclared notifications are dropped | `TestAnInvalidOrUndeclaredNotificationIsDroppedAndTheOthersAreDelivered` |
 | The bound of a stalled engine | `TestAStalledEngineLosesNoNotificationAndBeyondItsBoundTheConnectionEnds` |
 | The adapter's requests, the engine's errors, the optional parts | `TestRequestsOfTheAdapterReachTheEngineAndItsErrorsReachTheAdapter` |

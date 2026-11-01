@@ -142,10 +142,19 @@ func (c *conn) send(ctx context.Context, method string, params, result adapterpr
 	return nil
 }
 
-// admit lets the adapter's requests through and starts the forwarder: from here
-// on what the adapter says reaches the engine.
+// admit lets the adapter's requests through. Its notifications are still held in
+// the buffer: see startForwarding.
 func (c *conn) admit(a adapterreg.Admission) {
 	c.admission.Store(&a)
+}
+
+// startForwarding starts the forwarder, so that what the adapter said since it
+// was launched reaches the engine, in the order it arrived. It is called only
+// once the engine has applied the result of adapter.start: the result states the
+// adapter's picture as of its answer, and a notification the engine processed
+// before it (a turn that ended while the adapter was still answering) would be
+// overwritten by it.
+func (c *conn) startForwarding() {
 	c.fwdOnce.Do(func() {
 		c.s.spawn(c.forward)
 	})

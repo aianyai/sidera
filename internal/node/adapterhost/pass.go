@@ -126,8 +126,8 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	if err != nil {
 		return fmt.Errorf("the engine could not take the adapter on: %w", err)
 	}
-	// Only now are the adapter's requests let through, and what it said before
-	// reaches the engine.
+	// Only now are the adapter's requests let through. What it says is held until
+	// the engine has applied the result of adapter.start.
 	c.admit(adm)
 	var started adapterproto.StartResult
 	if err := s.rpc(c, adapterproto.MethodAdapterStart, start, &started, limit); err != nil {
@@ -137,6 +137,7 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	if err != nil {
 		return fmt.Errorf("the engine could not take adapter.start: %w", err)
 	}
+	c.startForwarding()
 	s.mu.Lock()
 	if !s.stopping {
 		s.service = c

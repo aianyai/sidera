@@ -575,6 +575,15 @@ correlated by `turn`. Turns the runtime starts itself (an automatic continuation
 work triggered by background activity) are reported the same way. A turn caused
 by a prompt names the attempt.
 
+**The order at start.** The result of `adapter.start` states which sessions have a turn
+running as of the moment the adapter answered, and the daemon replaces its busy state with
+it. An adapter may therefore emit `turn.started` or `turn.ended` while it is still
+answering (Codex takes its sessions back one at a time inside `adapter.start`, and Claude
+starts monitors before it returns), and the result then already counts or no longer counts
+that turn. The daemon keeps the two in order by delivering the notifications the adapter
+sent while `adapter.start` was outstanding only after it has applied the result, in the
+order they arrived; an adapter needs nothing special for it, and need not wait to send them.
+
 **The order of a creation's events.** A session works on its first prompt as soon as
 it exists, so the first `turn.started` of a session (with the attempt of the first
 prompt) may reach the daemon before the result of the `session.create` that made it,
