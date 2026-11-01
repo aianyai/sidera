@@ -31,11 +31,17 @@ func newClock() *clocktest.Fake { return clocktest.NewFake(time.Unix(1_800_000_0
 // credential with whom; a knows where b is.
 func pair(t testing.TB, quic bool, aTrustsB, bTrustsA bool, tune func(*Config)) (a, b *peerNode) {
 	t.Helper()
+	return pairTuned(t, quic, aTrustsB, bTrustsA, tune, tune)
+}
+
+// pairTuned is pair with a configuration of its own for each node.
+func pairTuned(t testing.TB, quic bool, aTrustsB, bTrustsA bool, tuneA, tuneB func(*Config)) (a, b *peerNode) {
+	t.Helper()
 	clk := newClock()
 	a = newPeerNode(t, clk, 0x11, 0x91)
 	b = newPeerNode(t, clk, 0x12, 0x92)
-	a.start(quic, tune)
-	b.start(quic, tune)
+	a.start(quic, tuneA)
+	b.start(quic, tuneB)
 	var aTrusts, bTrusts []*peerNode
 	if aTrustsB {
 		aTrusts = append(aTrusts, b)
@@ -527,8 +533,15 @@ func TestPromotedNodeIsCalledOnANewConnection(t *testing.T) {
 // TestCallThatTimesOutDropsItsConnection shows that a connection a call timed
 // out on is closed, so that the next call is answered unreachable at once
 // instead of waiting on the same connection.
+//
+// The peer keeps its default call timeout, far beyond the caller's, so nothing
+// comes back on the stream before the caller's own deadline, as with a peer that
+// is gone or stuck. With equal timeouts the peer's handler gives up a moment
+// after the caller and resets the stream; under load that reset can reach the
+// caller before its own deadline is seen, and a reset is the answer of a live
+// connection, which is rightly kept.
 func TestCallThatTimesOutDropsItsConnection(t *testing.T) {
-	a, b := pair(t, false, true, true, func(c *Config) { c.CallTimeout = 300 * time.Millisecond })
+	a, b := pairTuned(t, false, true, true, func(c *Config) { c.CallTimeout = 300 * time.Millisecond }, nil)
 	b.node.inbound = func(ctx context.Context, _ transport.Origin, _ ident.EndpointID, _ []byte) (transport.Receipt, error) {
 		<-ctx.Done()
 		return transport.Receipt{}, ctx.Err()
