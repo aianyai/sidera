@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -92,5 +93,61 @@ func TestPromptDeliveryProofSurvivesALateReconcileResultWhileItsWriteIsRetried(t
 				t.Fatalf("the target records are %+v, want the proven prompt marked notified", sc.In)
 			}
 		})
+	}
+}
+
+// acceptedThenFound is an adapter host that accepts every prompt without proof and,
+// asked about an attempt, finds it with its turn running: the runtime holds the prompt.
+type acceptedThenFound struct {
+	*hostDouble
+	prompts atomic.Int64
+}
+
+func (h *acceptedThenFound) DeliverPrompt(context.Context, string, adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	h.prompts.Add(1)
+	return adapterproto.PromptDeliverResult{Stage: adapterproto.PromptAccepted}, nil
+}
+
+func (h *acceptedThenFound) Reconcile(context.Context, string, adapterproto.ReconcileParams) (adapterproto.ReconcileResult, error) {
+	return adapterproto.ReconcileResult{
+		Verdict: adapterproto.VerdictFound, Turn: &adapterproto.TurnReport{Ref: "t1", State: adapterproto.TurnStateRunning},
+		Grounds: adapterproto.Grounds{Code: adapterproto.GroundsAttemptInRecord},
+	}, nil
+}
+
+// The turns an adapter reports as it starts are a picture of that moment. A
+// reconciliation answered after it that finds the prompt with its turn running is
+// newer, and the probe that follows does not read the start result again over it:
+// the turn holds the session busy and no second prompt is sent while it runs.
+func TestATurnFoundByReconciliationAfterTheStartIsNotUndoneByTheProbe(t *testing.T) {
+	host := &acceptedThenFound{hostDouble: newHostDouble()}
+	r, session, _ := waitingSession(t, host)
+	e := r.start()
+	started(t, e, "chat")
+	if err := e.AdapterProbed(ctx, "chat", probeResult("", "")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	if n := host.prompts.Load(); n != 1 {
+		t.Fatalf("%d prompts were sent, want the one that is accepted", n)
+	}
+	// The adapter goes away and comes back before the prompt is proven, and reports the
+	// session idle: the runtime holds the prompt and has not begun its turn.
+	gone(t, e, "chat")
+	idle := adapterproto.SessionState{Endpoint: adapterproto.EndpointRef(session.String()), State: adapterproto.AttachAttached}
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{idle}}); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(engine.DefaultParams().PromptConfirmWait) // the reconciliation of the accepted prompt
+	settle(t, e)
+	if a := headOf(t, r, session); a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+		t.Fatalf("the attempts are %+v, want the prompt delivered by reconciliation", a)
+	}
+	if err := e.AdapterProbed(ctx, "chat", probeResult("", "")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	if n := host.prompts.Load(); n != 1 {
+		t.Errorf("%d prompts were sent, want 1: the turn the reconciliation found runs", n)
 	}
 }

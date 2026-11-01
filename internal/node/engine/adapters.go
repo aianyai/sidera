@@ -408,6 +408,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 			}
 		}
 	}
+	e.noteTurnsOfInstance(instance)
 	e.noteLeasesOfInstance(instance) // the turns it reports are the ones that extend leases
 	// What the instance was asked to create before its last connection ended may
 	// or may not have been done: it is asked again, with the same attempt.

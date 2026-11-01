@@ -184,26 +184,39 @@ func (e *Engine) notePromptDelivered(now time.Time, ref adapterproto.EndpointRef
 	return false
 }
 
-// noteInstanceProbed is the event of an adapter whose connection is in service, which
-// its probe having been answered shows: the host puts the connection in service after
-// it has told the node that the adapter started, so a prompt sent on the start would
-// find nobody to call: the endpoints of the instance are judged only from now on. The
-// turns the adapter reports are those that are running, so a turn that was counted and
-// is not among them is over, every attempt in flight is asked of it, and every endpoint
-// of the instance is judged, since what waited for an adapter that was away has had no
-// other event to be judged by.
-func (e *Engine) noteInstanceProbed(instance string, now time.Time) {
-	st := e.adapters[instance]
-	st.inService = true
+// noteTurnsOfInstance takes the turns an adapter reports running as it starts as the
+// ones that run: a turn a prompt started that is not among them is over. It is made
+// with the start result and never later, because a verdict on an attempt taken in
+// after it (a reconciliation that finds the prompt with its turn running) is newer
+// than the result, and the result read again then would free the place of a turn that
+// runs and wake the session a second time.
+func (e *Engine) noteTurnsOfInstance(instance string) {
+	busy := e.adapters[instance].busy
 	for id, es := range e.view.endpoints {
 		if es.rec.Instance != instance || !promptable(es) {
 			continue
 		}
-		p := e.promptOf(id)
-		if p.flight == nil && p.turn && !st.busy[adapterproto.EndpointRef(id.String())] {
+		if p := e.prompts[id]; p != nil && p.flight == nil && p.turn && !busy[adapterproto.EndpointRef(id.String())] {
 			p.turn = false
 		}
-		if p.trigger == 0 {
+	}
+}
+
+// noteInstanceProbed is the event of an adapter whose connection is in service, which
+// its probe having been answered shows: the host puts the connection in service after
+// it has told the node that the adapter started, so a prompt sent on the start would
+// find nobody to call: the endpoints of the instance are judged only from now on.
+// Every attempt in flight is asked of it, and every endpoint of the instance is judged,
+// since what waited for an adapter that was away has had no other event to be judged
+// by. The turns the adapter reported as it started were taken in with the start
+// result (noteTurnsOfInstance).
+func (e *Engine) noteInstanceProbed(instance string, now time.Time) {
+	e.adapters[instance].inService = true
+	for id, es := range e.view.endpoints {
+		if es.rec.Instance != instance || !promptable(es) {
+			continue
+		}
+		if p := e.promptOf(id); p.trigger == 0 {
 			p.trigger = handoff.TriggerArrival
 		}
 	}

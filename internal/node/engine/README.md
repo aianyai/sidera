@@ -255,7 +255,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **A new connection starts from what it reports.** A successful admission forgets
   the busy states and the availability snapshot of the connection before, and
   `AdapterStarted` replaces the busy states with the sessions its result lists as
-  `turn_active` instead of merging into the old ones.
+  `turn_active` instead of merging into the old ones, and frees there, and only there,
+  the place of a turn a prompt started that the result does not list: a verdict on an
+  attempt that comes later is newer than the result.
 - **Availability, busy and rejected states are memory.** A snapshot replaces the
   last one and is stamped with the engine's time of receiving it; a turn started or
   ended and a refused native request are kept by endpoint reference, whether or not

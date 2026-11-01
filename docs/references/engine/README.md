@@ -1830,7 +1830,11 @@ reproducible).
   The state of a turn of an adapter that is away is unknown, and a turn nobody can see must not
   stop the node; an endpoint whose adapter is away is not judged, because a prompt for it is
   bound to fail and its failure would be taken for a reason to call delivery blocked. When the
-  adapter returns, the turns it reports running are the ones that still count.
+  adapter returns, the turns it reports running are the ones that still count. That picture is
+  taken in once, with the start result (`noteTurnsOfInstance`), and never read again later: a
+  reconciliation answered after the start that finds a prompt with its turn running is newer, and
+  reading the start result over it at the probe would free the place of a turn that runs and wake
+  the session a second time.
 - **No prompt goes on a connection before it is in service.** The host tells the node that an
   adapter started before it puts the connection in service, so a call made in between is refused
   with nothing sent, and a refused prompt is a failed attempt, which holds the endpoint back for
@@ -2020,6 +2024,7 @@ reproducible).
 | An accepted prompt remains in flight and marks no message until persisted or a turn proves delivery, before or after the deliver answer; no proof within the confirmation window makes reconciliation due | `prompts.go` (`promptResult`, `notePromptPersisted`), `adapters.go` (`notified`), `Params.PromptConfirmWait` | `TestAcceptedPromptWaitsForDeliveryProof`, `TestAcceptedPromptWithoutConfirmationIsReconciledAfterItsWindow` |
 | Delivery proof ends an outstanding deliver or reconcile call immediately, and survives a late negative reconciliation result while its settlement write is retried | `prompts.go` (`settlePrompt`, `takePromptCallResult`) | `TestPromptDeliveryProofEndsTheOutstandingCall`, `TestPromptDeliveryProofSurvivesALateReconcileResultWhileItsWriteIsRetried` |
 | A restart after acceptance reconciles the same in-flight attempt immediately and sends no second prompt, after a process crash or power loss | `prompts.go` (`reconcilePrompts`) | `TestAcceptedPromptIsReconciledAfterARestartWithoutResend` |
+| The turns a starting adapter reports are taken in with its start result only, so a turn a later reconciliation finds running is not freed by the probe and wakes no second prompt | `adapters.go` (`markStarted`), `prompts.go` (`noteTurnsOfInstance`, `reconcileResult`) | `TestATurnFoundByReconciliationAfterTheStartIsNotUndoneByTheProbe` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
 | The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`, `failCreationWithoutEndpoint`, `dropCreationCheckpoints`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
