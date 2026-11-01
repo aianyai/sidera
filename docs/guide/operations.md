@@ -13,7 +13,7 @@ sidera adapter list      # the probe state of each enabled instance (see the not
 sidera trust list        # the nodes you paired with are under `trusted`
 sidera network show      # the first line is the contact line; peers show connected
 sidera alerts list       # normally empty
-sidera status            # daemon state, queues, delivery counts
+sidera status            # daemon state, queues, delivery counts, and `home`, the data directory
 sidera endpoint list     # console, runtime and session endpoints of this node
 ```
 
@@ -24,6 +24,10 @@ Notes:
   may show `failed`, because no command-line front end is offered under that
   sandbox; this is a known limit of the display, and sessions still work. Whether
   `codex` is found shows when a session is created.
+- `home` in `sidera status` (also `result.home` with `--json`) is the data directory the
+  command used, and so the directory of the daemon that answered: the command asks the
+  daemon that runs in the directory it resolved from `--home`, then `SIDERA_HOME`, then
+  the default. Check it after a move or when two nodes share a machine.
 - `connected` in `network show` is whether a connection is up now. It can be
   `false` for a healthy node until one side sends.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
@@ -121,8 +125,11 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
      Copy-Item $env:USERPROFILE\sidera-release\*.exe $bin\
      ```
 
-     Delete the two `.old` files after the daemon has started again. Do not kill the
-     Codex App Server or its helpers.
+     Once the new daemon runs, delete the two `.old` files: they are only the renamed
+     programs of the release before, and nothing uses them. (Windows refuses to delete
+     one while a process still runs from it, such as a `sidera mcp` helper of a Codex
+     session; leave it until that session ends.) Do not kill the Codex App Server or
+     its helpers.
 
    Only these two programs belong in the directory on your `PATH`. A directory
    filled by an earlier layout of the archive can still hold adapter programs such
@@ -197,21 +204,23 @@ restart the daemon once so that it finds the new Codex release.
 ### The Codex App Server after an upgrade
 
 The App Server outlives the daemon, so the one that is running after an upgrade was
-started by the adapter of the release before. The probe of the Codex instance
-reports its `app-server` dependency as `wrong_version`, with a detail that says to
-restart it, in two cases: the server was started by an earlier build,
-which ran it in the adapter's state directory instead of an empty directory of its
-own (a sandboxed command can then be given write access to the adapter's files,
-`ws-token` among them), or the server runs another version than the installed
-`codex` program. The adapter never ends a server it did not start, so you restart
-it yourself, and the report stays until you do.
+started by the adapter of the release before. An older adapter ran it in the adapter's
+state directory instead of an empty directory of its own, so a sandboxed command can be
+given write access to the adapter's files, `ws-token` among them. The adapter never
+ends a server it did not start, so you restart it yourself.
 
-The server records the directory it was started in as `work_dir` in
-`app-server.json`, in the adapter's state directory. It is an empty directory of the
-adapter's own in your user cache directory, outside the data directory (see
-[Logs and state](#logs-and-state)). A file without `work_dir` is a server that an older
-adapter started in the state directory, and the probe reports it as `wrong_version`
-until it is restarted; one with `work_dir` is not reported for that reason.
+`sidera adapter list` does not show this: the probe state of an instance is judged on
+its tool probes, and the `app-server` dependency, which the adapter does report as
+`wrong_version` to the daemon, does not change it. Two things show it:
+
+- A warning in `logs/adapter-codex.log` (`logs/adapter-<instance>.log` for another
+  instance name) each time the adapter finds the server: `the App Server that answers
+  runs in the state directory: restart it`.
+- `adapter-state/codex/app-server.json` has no `work_dir`. The server records the
+  directory it was started in there: an empty directory of the adapter's own in your
+  user cache directory, outside the data directory (see [Logs and state](#logs-and-state)).
+  A file without `work_dir` is a server that an older adapter started in the state
+  directory; one with `work_dir` is not.
 
 Ending the server ends any turn that runs in it, so do it when no Codex session is
 working, and only after step 4 of the upgrade has installed the new adapter packages.
@@ -221,19 +230,27 @@ running, find the server and end it as in
 [Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server),
 then either leave the daemon running or restart it: the new Codex adapter starts a new
 server by itself when it finds none, resumes its sessions and records the new
-server's working directory. Check with `sidera adapter list` that the report is gone
-(it can show `pending` or `failed` for another reason, see the notes under
-[Health checks](#health-checks)).
+server's working directory. Check that the new server's `app-server.json` has a
+`work_dir` and that the warning no longer appears in the log.
+
+The one case that ends the server earlier is the move of the Windows data directory,
+which needs it gone before the directory is moved; it may need ending a second time
+after the adapters are installed, as that section says.
 
 ### Move the Windows data directory to the new default
 
 A node made by a build before 0.8.0 keeps its data in `%USERPROFILE%\.sidera`. Every
 command that uses the data directory refuses until it is moved, or until
-`SIDERA_HOME` names the former directory. To move it:
+`SIDERA_HOME` names the former directory.
+
+`Move-Item` renames the directory only when nothing in it is open. When something
+holds a file, it can fail with "being used by another process" after it has created the
+target and moved some files one by one. So end everything that holds the directory
+first, in this order, and move only when the check in step 3 shows nothing:
 
 1. Stop the daemon and check that it has gone, as in step 1 of the upgrade.
-2. If the Codex App Server is still running from the old directory, end it: it
-   survives the daemon, and it holds the old paths. Read its process id in
+2. End the Codex App Server, if it is running: it survives the daemon, and it holds
+   the old paths. Read its process id in
    `%USERPROFILE%\.sidera\adapter-state\codex\app-server.json` and confirm the
    command line before you stop it. It must be an `app-server` whose `--ws-token-file`
    is under that directory, not your own Codex's:
@@ -244,19 +261,65 @@ command that uses the data directory refuses until it is moved, or until
    Stop-Process -Id $serverPid
    ```
 
-3. Move the directory:
+3. Confirm that no `sidera` daemon, no adapter and no `codex ... app-server` process of
+   that directory remains. No output means none:
+
+   ```powershell
+   $old = "$env:USERPROFILE\.sidera"
+   Get-CimInstance Win32_Process | Where-Object {
+     ($_.Name -eq 'sidera.exe' -and $_.CommandLine -match ' daemon') -or
+     $_.ExecutablePath -like "$old\*" -or
+     ($_.CommandLine -like '*app-server*' -and $_.CommandLine -like "*$old*")
+   } | Select-Object ProcessId, Name, CommandLine
+   ```
+
+4. Move the directory:
 
    ```powershell
    Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"
    ```
 
-4. Start the daemon, the way you started it before.
+5. Start the daemon, the way you started it before, and run `sidera status`: its `home`
+   line is the new directory.
+6. The old adapter is still the one installed until you run `sidera adapter install`
+   (step 4 of the upgrade), and when it found no App Server at the first start it
+   started one in the state directory. Install the new adapter packages, then end that
+   server again by the process id in `adapter-state\codex\app-server.json`, as in
+   step 2. The new adapter starts a fresh one, whose `app-server.json` has a `work_dir`
+   outside the data directory (see [the section above](#the-codex-app-server-after-an-upgrade)).
 
-Moved within one volume, the directory keeps the access list it had: a folder that a Codex sandbox's setup had
-already granted its group carries that entry along, and the daemon then refuses to
-start and names it (see [Troubleshooting](#troubleshooting)). A Codex App Server that
-an older adapter started in the state directory and that you did not end is reported
-as `wrong_version` until it is restarted, as in the section above.
+**When the move fails halfway.** If `Move-Item` stops with "being used by another
+process", do not run it again. `%LOCALAPPDATA%\Sidera` may exist, with some of the files
+moved into it one by one, and it has an inherited, unprotected access list. A second
+run would then move `.sidera` into `Sidera` as a folder inside it. Also run no
+`sidera` command that uses the directory until this is settled: the daemon takes an
+existing `%LOCALAPPDATA%\Sidera` as the data directory and would start on the part
+that was moved. Instead:
+
+1. End what holds the files: repeat steps 1 to 3, and close any program that has a file
+   of the directory open (an editor, a backup tool, an antivirus scan).
+2. Move the files that were moved back:
+
+   ```powershell
+   Get-ChildItem -Force "$env:LOCALAPPDATA\Sidera" | Move-Item -Destination "$env:USERPROFILE\.sidera"
+   ```
+
+3. Remove the empty target, which refuses if anything is left in it:
+
+   ```powershell
+   Remove-Item "$env:LOCALAPPDATA\Sidera"
+   ```
+
+4. Move again from step 4.
+
+A directory that was renamed as a whole keeps the access list it had, and so does a
+file that was moved, because a move within one volume is a rename. A target that
+`Move-Item` created itself does not: it gets the inherited list of its parent, which
+the daemon refuses at start (see [Troubleshooting](#troubleshooting)), so the whole-directory
+rename is the only move to rely on. A folder that a Codex sandbox's setup had already
+granted its group carries that entry along in the rename, and the daemon then refuses
+to start and names it. A Codex App Server that an older adapter started in the state
+directory and that you did not end is a leftover that step 6 and the section above deal with.
 
 ## Stop the daemon and the Codex App Server
 
@@ -370,6 +433,11 @@ first it finds.
 
 - Inspect. Windows: `icacls <path>` lists the entries; `Get-Acl <path> | Format-List`
   shows them with their SIDs. Unix: `ls -ld <path>` shows the mode and the owner.
+  `icacls` writes in the console's code page, so on a non-English Windows its output
+  is garbled over ssh. For a script, read PowerShell's properties, whose names do not
+  change: `Get-Acl <path> | Format-List`, or `(Get-Acl <path>).Access` for the entries
+  (`IdentityReference`, `FileSystemRights`, `AccessControlType`, `IsInherited`). Or run
+  `chcp 65001` first and keep using `icacls`.
 - Remove, Windows: `icacls <path> /remove:g <group> /T` removes the entries granted
   to an account or group by name, and from the directory's files too. An entry
   whose SID the system cannot resolve (a group that no longer exists) is refused by
@@ -477,7 +545,9 @@ node is not told.
   enforces a denial, except for the user's own MCP servers and for a command that
   you approved to run outside the sandbox. On Windows the directory's location,
   `%LOCALAPPDATA%\Sidera`, with an access list for its owner only, is the main
-  guard; a deny entry for the sandbox's accounts is added too, and another Codex
+  guard, and it is what keeps the sandbox out. Codex adds a deny entry for the data
+  directory to the sandbox's accounts only when a sandboxed Sidera session runs a
+  command (a plain `codex sandbox` run outside Sidera adds none), and another Codex
   session can revoke it. A Claude Code `light` session's file tools cannot read it,
   but if your own Claude settings allow a Bash file command such as `grep` or `find`,
   the session can read it; a guarantee needs Claude's operating-system sandbox, which

@@ -266,7 +266,9 @@ directory, not the session's own credentials.
 The denial was measured on macOS (Codex 0.164 and 0.166) and on Linux (0.166, bubblewrap), where
 a `workspace-write` or `read-only` command gets `Operation not permitted` or `Permission denied`.
 
-**Windows.** The deny entry is tracked per sandbox account in `CODEX_HOME`, so another,
+**Windows.** Codex adds the deny entry when a sandboxed session of the adapter runs a
+command; a `codex sandbox` run outside the adapter adds none. The entry is tracked per
+sandbox account in `CODEX_HOME`, so another,
 unrelated Codex session that shares the same `CODEX_HOME` can revoke it. There the
 protected data directory (private to its owner) is the primary guard, and the profile
 a second one. This was not run on Windows.

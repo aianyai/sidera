@@ -248,8 +248,9 @@ What this gives, as measured on real machines:
   That is a Codex setting you control, not a Sidera preset key. Before you choose
   `light` for Codex on Windows, check that `codex sandbox -- cmd /c echo hi` works.
   On Windows the node's data lives in `%LOCALAPPDATA%\Sidera`, whose access list is
-  protected and names only its owner, and that is the main guard: the deny entry that
-  Sidera also adds for the sandbox's accounts can be revoked by another Codex session.
+  protected and names only its owner, and that is the main guard, which keeps the sandbox
+  out. Codex adds a deny entry for the sandbox's accounts only when a sandboxed Sidera
+  session runs a command, and another Codex session can revoke it.
 - While a `workspace-write` preset exists, `sidera adapter list` may show the Codex
   probe as `failed` (it shows `pending` before that), because the command-line front
   end is not offered under the sandbox. Sessions still work.
@@ -468,9 +469,10 @@ refuses to start otherwise (see [Operations](operations.md#troubleshooting)).
   exceptions are the user's own MCP servers, which Codex starts outside the sandbox,
   and a command you approved to run outside it.
 - **Codex `light`, Windows:** the directory is `%LOCALAPPDATA%\Sidera` with a protected
-  access list for its owner only, and that location is the main guard. A deny entry for
-  the sandbox's accounts is added as well, but another Codex session that shares the
-  same Codex configuration can revoke it. Codex's elevated sandbox grants its sandbox
+  access list for its owner only, and that location is the main guard, which keeps the
+  sandbox out. Codex adds a deny entry for the sandbox's accounts only when a sandboxed
+  Sidera session runs a command, and another Codex session that shares the same Codex
+  configuration can revoke it. Codex's elevated sandbox grants its sandbox
   group read access on most first-level folders of your user profile; with Sidera's data
   in the new location that does not reach it. If a foreign entry ever appears, the
   daemon refuses to start and names it (see

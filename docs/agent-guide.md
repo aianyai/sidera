@@ -452,8 +452,9 @@ What the `light` preset gives:
     failed, while `unelevated` worked. That is the owner's Codex setting, not a
     Sidera key; do not change it without asking.
     On Windows the data directory is `%LOCALAPPDATA%\Sidera`, with an access list for
-    its owner only, and that location is the main guard: the deny entry that Sidera
-    also adds for the sandbox's accounts can be revoked by another Codex session.
+    its owner only, and that location is the main guard, which keeps the sandbox out.
+    Codex adds a deny entry for the sandbox's accounts only when a sandboxed Sidera
+    session runs a command, and another Codex session can revoke it.
     Codex's elevated sandbox grants its group read access on most first-level folders
     of the user profile; in that location it does not reach Sidera. If a foreign entry
     ever appears, the daemon refuses to start and names it (see the troubleshooting

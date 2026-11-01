@@ -204,7 +204,8 @@ of every session) also depends on the preset:
   the operating system enforces a denial, except for the user's own MCP servers and a
   command the owner approved to run outside the sandbox. On Windows the directory,
   `%LOCALAPPDATA%\Sidera`, has an access list for its owner only, which is the main
-  guard; the deny entry added for the sandbox can be revoked by another Codex session.
+  guard, which keeps the sandbox out; the deny entry Codex adds for the sandbox's accounts
+  when a sandboxed Sidera session runs a command can be revoked by another Codex session.
   Codex's elevated sandbox on Windows grants its group read access on most first-level
   folders of the profile, which does not reach Sidera in that location; if a foreign
   entry ever appears, the daemon refuses to start and names it.
