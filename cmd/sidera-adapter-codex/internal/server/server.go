@@ -43,7 +43,15 @@ const (
 	defaultStartTimeout = 15 * time.Second
 	termWait            = 3 * time.Second
 	killWait            = 2 * time.Second
+	// probeTimeout bounds one probe of a server that is known to be running.
+	probeTimeout = 2 * time.Second
 )
+
+// defaultRetryWaits is the pause before each further probe of a server that is
+// recorded as running but did not answer: a few attempts over a few seconds,
+// enough for a server that is busy or still starting, short enough that a server
+// which is wedged is reported while the caller's reconnect loop still has its turn.
+var defaultRetryWaits = []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second}
 
 // ErrStartFailed is wrapped by errors from a start that did not end in a
 // reachable server.
@@ -73,6 +81,13 @@ type Server struct {
 
 	mu    sync.Mutex
 	owned *ownedProcess // the server this process started, if any
+
+	// The platform and the calls that reach outside the process, as fields so that
+	// a test can stand in for them.
+	goos         string
+	probe        func(context.Context, appserver.Endpoint) error
+	processStart func(pid int) (startedNS int64, running bool)
+	retryWaits   []time.Duration
 }
 
 type ownedProcess struct {
@@ -92,7 +107,14 @@ func New(cfg Config) *Server {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{cfg: cfg, log: log}
+	return &Server{
+		cfg:          cfg,
+		log:          log,
+		goos:         runtime.GOOS,
+		probe:        appserver.Probe,
+		processStart: processStart,
+		retryWaits:   defaultRetryWaits,
+	}
 }
 
 // Started reports whether this process started the running server and still
@@ -119,16 +141,67 @@ func (s *Server) ownedProcess() *ownedProcess {
 // Connect returns an endpoint a server answers at: the one that is already
 // listening, or the one it starts. Finding one that is up is the normal case after
 // the adapter restarts, and the reason the server is started detached.
+//
+// On Windows nothing but this check keeps a second server from being started
+// beside one that is running: a server recorded as running that fails to answer
+// is waited for, never replaced, because the new server would take over the
+// address and the token of the one that still holds threads. On Unix Codex takes a
+// lock per socket path, so a second server for the same path cannot run and a
+// failed probe may go straight to a start.
 func (s *Server) Connect(ctx context.Context) (appserver.Endpoint, error) {
-	if ep, err := s.existing(); err == nil && appserver.Probe(ctx, ep) == nil {
+	ep, err := s.existing()
+	if err == nil && s.probe(ctx, ep) == nil {
 		return ep, nil
+	}
+	if err == nil && s.goos == "windows" {
+		if st, running := s.recordedServer(); running {
+			return s.awaitRecorded(ctx, ep, st)
+		}
 	}
 	return s.start(ctx)
 }
 
+// awaitRecorded probes a server that is running but did not answer again, with a
+// short backoff. When it still does not answer the attempt fails, naming it; the
+// caller's reconnect loop tries again later. A server that ends meanwhile is
+// replaced.
+func (s *Server) awaitRecorded(ctx context.Context, ep appserver.Endpoint, st state) (appserver.Endpoint, error) {
+	for _, wait := range s.retryWaits {
+		select {
+		case <-ctx.Done():
+			return ep, ctx.Err()
+		case <-time.After(wait):
+		}
+		if _, running := s.recordedServer(); !running {
+			return s.start(ctx)
+		}
+		pctx, cancel := context.WithTimeout(ctx, probeTimeout)
+		err := s.probe(pctx, ep)
+		cancel()
+		if err == nil {
+			return ep, nil
+		}
+	}
+	return ep, fmt.Errorf("the App Server (pid %d) recorded in %s is running but does not answer at %s", st.PID, stateFileName, st.Address)
+}
+
+// recordedServer reads the state file and reports the server it names and
+// whether that process is running and is the one that was started: a pid alone
+// could be anyone's by now, so the process's start time recorded with it must
+// match. A state file without a start time can only be checked for a running
+// process.
+func (s *Server) recordedServer() (state, bool) {
+	st, err := s.loadState()
+	if err != nil || st.PID <= 0 {
+		return st, false
+	}
+	started, running := s.processStart(st.PID)
+	return st, running && (st.StartedNS == 0 || st.StartedNS == started)
+}
+
 // existing is the endpoint a server left running would be at.
 func (s *Server) existing() (appserver.Endpoint, error) {
-	if runtime.GOOS != "windows" {
+	if s.goos != "windows" {
 		return s.unixEndpoint()
 	}
 	return s.readState()
@@ -147,16 +220,28 @@ func (s *Server) unixEndpoint() (appserver.Endpoint, error) {
 type state struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
+	// StartedNS is when the process started, in nanoseconds since the Unix epoch,
+	// where the platform can tell (Windows); zero otherwise. With the pid it
+	// identifies the process.
+	StartedNS int64 `json:"started_ns,omitempty"`
 }
 
-func (s *Server) readState() (appserver.Endpoint, error) {
+func (s *Server) loadState() (state, error) {
 	raw, err := os.ReadFile(filepath.Join(s.cfg.StateDir, stateFileName))
 	if err != nil {
-		return appserver.Endpoint{}, err
+		return state{}, err
 	}
 	var st state
 	if err := json.Unmarshal(raw, &st); err != nil || st.Address == "" {
-		return appserver.Endpoint{}, errors.New("unreadable state file")
+		return state{}, errors.New("unreadable state file")
+	}
+	return st, nil
+}
+
+func (s *Server) readState() (appserver.Endpoint, error) {
+	st, err := s.loadState()
+	if err != nil {
+		return appserver.Endpoint{}, err
 	}
 	token, err := os.ReadFile(filepath.Join(s.cfg.StateDir, tokenFileName))
 	if err != nil {
@@ -168,7 +253,7 @@ func (s *Server) readState() (appserver.Endpoint, error) {
 func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	args := []string{"--no-daemon", "app-server"}
 	var ep appserver.Endpoint
-	if runtime.GOOS != "windows" {
+	if s.goos != "windows" {
 		var err error
 		if ep, err = s.unixEndpoint(); err != nil {
 			return ep, err
@@ -220,7 +305,7 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 			return ep, fmt.Errorf("%w: not reachable after %v", ErrStartFailed, s.cfg.StartTimeout)
 		case <-tick.C:
 			pctx, cancel := context.WithTimeout(ctx, time.Second)
-			err := appserver.Probe(pctx, ep)
+			err := s.probe(pctx, ep)
 			cancel()
 			if err == nil {
 				return ep, nil
@@ -261,7 +346,8 @@ func (s *Server) openLog() (*os.File, error) {
 }
 
 func (s *Server) writeState(pid int, ep appserver.Endpoint) {
-	raw, _ := json.Marshal(state{PID: pid, Address: ep.Address})
+	started, _ := s.processStart(pid)
+	raw, _ := json.Marshal(state{PID: pid, Address: ep.Address, StartedNS: started})
 	if err := os.WriteFile(filepath.Join(s.cfg.StateDir, stateFileName), raw, 0o600); err != nil {
 		s.log.Warn("cannot write the state file", "error", err)
 	}
@@ -270,6 +356,11 @@ func (s *Server) writeState(pid int, ep appserver.Endpoint) {
 // newTCPEndpoint picks a free loopback port and makes the token the listener will
 // ask for. The port is found by binding and releasing it, which a second process
 // could take in between; the start then fails loudly and the next try picks again.
+//
+// The token file is written here, before the server exists, because the server
+// reads it as it starts. It replaces the token of an earlier server, so it is
+// reached only when Connect found no running server recorded: a running server's
+// token is never overwritten.
 func (s *Server) newTCPEndpoint() (appserver.Endpoint, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -289,8 +380,9 @@ func (s *Server) newTCPEndpoint() (appserver.Endpoint, error) {
 }
 
 // Stop ends the server this process started: the whole process group, politely,
-// then by force. A server another process started is never touched: without a
-// check of the process's identity a pid in a file could be anyone's now. It
+// then by force. A server another process started is never touched: a pid in a
+// file could be anyone's now, and a wrong guess here would end someone else's
+// process. It
 // returns once the server's process group is gone.
 func (s *Server) Stop() error {
 	o := s.ownedProcess()

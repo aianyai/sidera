@@ -24,7 +24,7 @@ version is not ours to fix.
 | Platform | Listens on | Reached by |
 | -------- | ---------- | ---------- |
 | Unix | `--listen unix://<state_dir>/app-server.sock` | WebSocket over the Unix socket. Codex makes the socket `0600` in a `0700` directory, symlinks it at the path given, and takes a lock per path, so a second server for the same path cannot run. |
-| Windows | `--listen ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <state_dir>/ws-token` | WebSocket over loopback with `Authorization: Bearer <token>`. The port is found by binding port 0 and releasing it; the port and the pid are in `app-server.json`, the token (`0600`, random, 32 bytes) in `ws-token`. |
+| Windows | `--listen ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <state_dir>/ws-token` | WebSocket over loopback with `Authorization: Bearer <token>`. The port is found by binding port 0 and releasing it; the port, the pid and the process's start time are in `app-server.json`, the token (`0600`, random, 32 bytes) in `ws-token`. |
 
 `<state_dir>` is `instance.state_dir` of `initialize`. On Unix the socket path must
 fit the socket address limit; the adapter refuses a longer one with a message that
@@ -37,6 +37,24 @@ adapter restarts, with its turns still running. Otherwise it starts one and wait
 to 15 seconds for it to answer. A server that exits before it answered ends the wait
 with an error that names the log and says an earlier server may hold the socket.
 Codex replaces a stale socket left by a server that was killed.
+
+**A server that is up but does not answer.** On Windows nothing like the socket
+lock keeps a second server from running beside the first, and a second server
+would overwrite `ws-token` and take the address, leaving the first with threads
+and no way in. So when the probe of the recorded address fails, the adapter
+checks `app-server.json` before it starts anything: if its pid is a running
+process whose start time is the one recorded (a pid alone could be anyone's now;
+a file without a start time is checked for a running process only), a server
+exists. It is probed again after 250 ms, 500 ms, 1 s and 2 s, each probe bounded
+at 2 seconds; the first answer is used. When none comes, the attempt fails with an
+error that names the pid and the address, no server is started, and the
+reconnect loop tries again later. A process that ends during the wait is
+replaced by a start. The token file is written when a start begins, because the
+server reads it as it starts; it is reached only when no running server is
+recorded, so a running server's token is never overwritten. On Unix the lock per
+socket path already makes a second server impossible, and a failed probe goes
+straight to a start, which ends with the error above when an earlier server holds
+the socket.
 
 **Detached start.** On Unix the child gets a session of its own (`setsid`), so the
 signals aimed at the adapter's process group do not reach it and its pid is the id
@@ -58,8 +76,9 @@ is left alone and loads as usual.
 **Ending it.** Only a server this process started and still holds is ever ended
 (`Server.Stop`): the process group gets `SIGTERM`, then `SIGKILL` after three
 seconds. A server another process started is never touched, because a pid in a file
-could be anyone's by now and the adapter does not verify a process's identity. The
-adapter's own shutdown does not stop the server. On Windows only the process itself
+could be anyone's by now: the check above errs toward waiting, while a wrong guess
+here would end someone else's process. The adapter's own shutdown does not stop the
+server. On Windows only the process itself
 is ended, not what it started.
 
 **Versions.** `adapter.probe` reports the version of the `codex` program
