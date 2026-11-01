@@ -242,7 +242,7 @@ Every turn of a session is one `claude -p` process, started with:
 claude -p (--session-id|--resume) <uuid> --input-format stream-json
   --output-format stream-json --verbose --strict-mcp-config --mcp-config <file>
   --permission-mode <mode> --permission-prompts none
-  --allowedTools "Bash(sidera *)" mcp__sidera [--allowedTools <preset rules>]
+  --allowedTools "Bash(sidera me *)" "Bash(sidera peers *)" ... mcp__sidera [--allowedTools <preset rules>]
   [--model M] [--effort E] --append-system-prompt <adapter text + preset text>
 ```
 
@@ -252,8 +252,23 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   permission mode and the MCP configuration are given on every launch, because a
   resumed session does not restore them. With `--permission-prompts none` anything
   that would ask a person is denied at once. The channel's tools are always allowed,
-  so no permission mode can lock the agent out of the channel. `permission_mode`
+  so no permission mode can lock the agent out of the channel, and only they are
+  (next bullet). `permission_mode`
   has no default: loosening permissions is a decision the owner writes in the preset.
+- The channel's tools are the MCP tools (`mcp__sidera`) and the `sidera` commands
+  of the agent interface, one rule each: `me`, `peers`, `directory`, `declare`,
+  `send`, `reply`, `recv`, `ack`, `status` and `control` as `Bash(sidera <command> *)`
+  (the space before `*` makes the match a whole word and also admits the command
+  with no arguments), and `Bash(sidera --help)`. No other `sidera` command is
+  allowed, so a session that runs one in `dontAsk` or any other mode is denied:
+  `preset`, `trust`, `adapter`, `identity`, `daemon`, `network`, `endpoint`, `node`,
+  `alerts`, `clock`, `init`, `mcp`. `sidera mcp` needs no rule, because Claude
+  Code starts it from the MCP configuration, not through Bash. Claude Code checks
+  every part of a compound command (`;`, `&&`, `|`, `$(...)`) against the rules,
+  so an allowed command cannot carry a denied one. One gap: `status` with a
+  message identifier is an agent command, but without one the CLI runs the owner's
+  node status, and a rule cannot tell them apart; it is read-only. A preset's own
+  `allowed_tools` are the owner's decision and are added after these.
 - argv[0] is the configured Claude executable as written. A process is recognised
   as a turn process of the session when its argv[0] is that path and its arguments
   hold `--session-id <uuid>` or `--resume <uuid>`; the resolved path of the executable
@@ -342,6 +357,13 @@ at another path.
 
 ## Why
 
+- **No `Bash(sidera *)`.** The management interface identifies the owner by the
+  user's uid alone and has no token (see [local-ipc](../local-ipc/README.md)), so
+  every `sidera` command that reaches it acts as the owner. A session that was
+  allowed all of `sidera` could, whatever its permission mode and on the word of
+  any trusted node, add a preset with full access, change trust, retire the
+  identity or stop the daemon. The allowed commands are the ones that use the
+  session's own token, listed in one place (`claudeargs.ChannelToolRules`).
 - **The window between starting and recording.** Starting a process and
   committing its PID cannot be one atomic step. A crash in between leaves a
   running process the state does not know. Once the session file exists, a retry

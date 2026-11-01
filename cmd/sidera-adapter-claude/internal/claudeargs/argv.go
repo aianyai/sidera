@@ -9,7 +9,34 @@ import (
 // channel's command-line and MCP tools. Whatever the permission mode, the
 // agent can then reach the channel, and with `--permission-prompts none` a tool
 // that is not allowed is denied at once instead of waiting for a person.
-var ChannelToolRules = []string{"Bash(sidera *)", "mcp__sidera"}
+//
+// The command line is allowed one agent command at a time and never as
+// `Bash(sidera *)`: the management interface trusts the user's uid alone, so any
+// `sidera` command that reaches it (preset, trust, adapter, identity, daemon
+// stop, ...) would let a session act as the owner, and a session must never reach
+// it. Only the commands of the agent interface are listed. In a rule, the space
+// before the final `*` makes the match a whole word and also admits the command
+// with no arguments, so one rule covers both. Claude Code checks each part of a
+// compound command (`;`, `&&`, `|`, `$(...)`) against the rules, so an allowed
+// command cannot carry an owner command with it. One gap remains: `status` is an
+// agent command with a message identifier but the owner's node status without
+// one, and the rule syntax cannot tell the two apart. The MCP tools are
+// agent-only. `sidera mcp` needs no rule: Claude Code starts it from the MCP
+// configuration, not through Bash.
+var ChannelToolRules = []string{
+	"Bash(sidera me *)",
+	"Bash(sidera peers *)",
+	"Bash(sidera directory *)",
+	"Bash(sidera declare *)",
+	"Bash(sidera send *)",
+	"Bash(sidera reply *)",
+	"Bash(sidera recv *)",
+	"Bash(sidera ack *)",
+	"Bash(sidera status *)",
+	"Bash(sidera control *)",
+	"Bash(sidera --help)",
+	"mcp__sidera",
+}
 
 // Turn is one launch of a turn process: `claude -p` for one session.
 type Turn struct {

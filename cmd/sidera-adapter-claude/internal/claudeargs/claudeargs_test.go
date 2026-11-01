@@ -14,17 +14,30 @@ func abs(elem ...string) string {
 	return filepath.Join(append([]string{filepath.VolumeName(os.TempDir()) + string(filepath.Separator)}, elem...)...)
 }
 
+// channelRules is spelled out here on purpose: a rule added to ChannelToolRules is a
+// command a session may run, and it has to show in a diff of the tests. Every
+// command of the agent interface is here and none of the owner's (preset, trust,
+// adapter, identity, daemon, ...): the management interface trusts the uid alone.
+var channelRules = []string{
+	"Bash(sidera me *)", "Bash(sidera peers *)", "Bash(sidera directory *)", "Bash(sidera declare *)",
+	"Bash(sidera send *)", "Bash(sidera reply *)", "Bash(sidera recv *)", "Bash(sidera ack *)",
+	"Bash(sidera status *)", "Bash(sidera control *)", "Bash(sidera --help)", "mcp__sidera",
+}
+
 func TestArgv(t *testing.T) {
 	const id = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
 	base := Turn{Claude: "/bin/claude", SessionID: id, MCPConfig: "/s/mcp.json", Preset: Preset{PermissionMode: "dontAsk"}}
-	common := func(flag string) []string {
+	common := func(flag, mode string) []string {
 		return []string{
 			"/bin/claude", "-p", flag, id,
 			"--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 			"--strict-mcp-config", "--mcp-config", "/s/mcp.json",
-			"--permission-mode", "dontAsk", "--permission-prompts", "none",
-			"--allowedTools", "Bash(sidera *)", "mcp__sidera",
+			"--permission-mode", mode, "--permission-prompts", "none",
+			"--allowedTools",
 		}
+	}
+	withChannel := func(flag, mode string, rest ...string) []string {
+		return append(append(common(flag, mode), channelRules...), rest...)
 	}
 	full := base
 	full.Resume = true
@@ -36,19 +49,14 @@ func TestArgv(t *testing.T) {
 		want []string
 	}{
 		{"a new session names its uuid with --session-id", base,
-			append(common("--session-id"), "--append-system-prompt", SystemPrompt(""))},
+			withChannel("--session-id", "dontAsk", "--append-system-prompt", SystemPrompt(""))},
 		{"a resumed session names its uuid with --resume", func() Turn { t := base; t.Resume = true; return t }(),
-			append(common("--resume"), "--append-system-prompt", SystemPrompt(""))},
-		{"preset tools, model, effort and prompt follow the channel's rules", full, []string{
-			"/bin/claude", "-p", "--resume", id,
-			"--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-			"--strict-mcp-config", "--mcp-config", "/s/mcp.json",
-			"--permission-mode", "plan", "--permission-prompts", "none",
-			"--allowedTools", "Bash(sidera *)", "mcp__sidera",
+			withChannel("--resume", "dontAsk", "--append-system-prompt", SystemPrompt(""))},
+		{"preset tools, model, effort and prompt follow the channel's rules", full, withChannel("--resume", "plan",
 			"--allowedTools", "Read", "Bash(git *)",
 			"--model", "opus", "--effort", "high",
 			"--append-system-prompt", SystemPrompt("Be brief."),
-		}},
+		)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

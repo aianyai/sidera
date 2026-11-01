@@ -24,6 +24,10 @@ What a Claude Code turn process is started with, as pure functions. Read
   MCP configuration and the channel's tool rules: a resumed session restores none
   of them. `--permission-prompts none` is fixed, so a tool that is not allowed is
   denied at once, never waited on.
+- The channel's `sidera` commands are allowed one agent command at a time
+  (`ChannelToolRules`), never as `Bash(sidera *)`: the management interface trusts
+  the uid alone, so a session must never be allowed an owner command. A command
+  added to the agent interface is added there and in the reference.
 - The prompt is never on the command line: it is the `uuid`ed line on standard
   input.
 - `permission_mode` has no default: the owner states it in the preset.
