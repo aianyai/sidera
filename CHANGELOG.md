@@ -57,11 +57,11 @@ and Windows (amd64).
   (for example a local network). `sidera network` shows where the node listens and
   the addresses kept for other nodes, and sets them; `init --port` chooses the
   port (7744 by default).
-- **Pairing.** Two nodes become trusted by pairing, with a six-digit code compared
-  on both screens: `sidera trust expect <node>` states in advance that the owner
-  means to pair with a node, `trust request <node>` asks for it, `trust list` shows
-  what is held, `trust reject` ends a request, `trust forget` withdraws an
-  expectation, `trust remove` removes a node from the node's trust and revokes the
+- **Pairing.** Two nodes become trusted when each owner has named the other node in
+  advance: `sidera trust expect <node>` states that the owner means to pair with a
+  node, and `trust request <node>` then completes the pairing (the verification code
+  it prints is informational). `trust list` shows what is held, `trust reject` ends
+  a request, `trust forget` withdraws an expectation, `trust remove` removes a node from the node's trust and revokes the
   credentials held with it, and `trust clear` takes a removed node back.
 - **Messages between nodes.** `sidera peers` lists the node and the nodes it trusts,
   `sidera directory --node <id>` lists the endpoints another node shows, and `send`
