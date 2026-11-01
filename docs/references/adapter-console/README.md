@@ -34,7 +34,7 @@ apply to what arrives.
 | Command | Does |
 | ------- | ---- |
 | `whoami` | Prints the address of the owner endpoint, `<node>/<endpoint>`. |
-| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `message: <id>`, then asks `endpoint.message_status` once a second until the control reply is there and prints `session: <address>`. |
+| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `message: <id>`, then asks `endpoint.message_status` once a second until the control reply is there and prints `session: <address>`, the address of the session on the node of the runtime. |
 | `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message with its sender and id, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. |
 | `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. |
 | `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
@@ -142,9 +142,16 @@ sidera adapter enable console
 - **The address is `<node>/<endpoint>`.** The adapter gets the node text in
   `adapter.start` and the endpoint in the result of `endpoint.register`; the
   protocol calls both opaque, and the console writes an address from them the way
-  the node does (`ident.Address`). It is used for display only: a wrong form shows
-  in `whoami`, which is checked against `sidera endpoint list`, and never reaches
-  the wire, where addresses the person typed are sent unchanged.
+  the node does (`ident.Address`). For the owner endpoint it is used for display
+  only: a wrong form shows in `whoami`, which is checked against `sidera endpoint
+  list`.
+- **The session is on the node of the runtime, not on this one.** The control reply
+  names the session endpoint as the node that made the session knows it, without a
+  node, and that node is the one of the runtime address `new` was given. The
+  console prints the node of the message's only recipient (`sessionAddress`), for
+  `new` and for `status` alike; the node of this adapter would be right only for a
+  runtime on the same node, and sending to that address anywhere else is rejected
+  as `endpoint_missing`.
 - **Polling lives in the client.** `new` is a `send` and a series of `status`
   requests; the adapter stays a mapping of one request to one call, with no timers.
 - **A token on Windows.** The repository's own local interfaces use named pipes
@@ -165,7 +172,8 @@ sidera adapter enable console
 - Tests: `TestCommandsBecomeTheEndpointCallTheyName` (command to request),
   `TestStartRegistersTheOwnerEndpointAndWhoamiNamesIt`,
   `TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered`,
-  `TestNewSendsTheControlSignalAndPollsForTheReply`,
+  `TestNewSendsTheControlSignalAndPollsForTheReply` (a runtime on another node),
+  `TestStatusNamesTheSessionOnTheNodeOfTheRuntime`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
   `TestReplyGoesToTheSenderSeenInRecv` (the adapter over pipes against a stand-in
   for the daemon), `TestTokenTransportServesOnlyAClientThatPresentsTheToken`,

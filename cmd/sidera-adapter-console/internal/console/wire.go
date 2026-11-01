@@ -1,6 +1,8 @@
 package console
 
 import (
+	"strings"
+
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -46,7 +48,19 @@ type failure struct {
 	Message string `json:"message"`
 }
 
-// address is the text form of an endpoint on this node, `<node>/<endpoint>`.
+// address is the text form of an endpoint on a node, `<node>/<endpoint>`.
 func address(node string, endpoint adapterproto.EndpointRef) string {
 	return node + "/" + string(endpoint)
+}
+
+// sessionAddress is the address of the session a control reply names. The reply
+// carries the endpoint as the node that made it knows it, and that node is the one
+// of the runtime the signal went to, which is not necessarily this one. A control
+// message has exactly one recipient, so the node is the node of its address.
+func sessionAddress(recipients []adapterproto.RecipientStatus, endpoint adapterproto.EndpointRef) string {
+	var node string
+	if len(recipients) == 1 {
+		node, _, _ = strings.Cut(string(recipients[0].To), "/")
+	}
+	return address(node, endpoint)
 }

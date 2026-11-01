@@ -118,7 +118,9 @@ func (v ControlCreateReason) UnconfirmedReason() bool {
 type ControlCreateReply struct {
 	Outcome ControlCreateOutcome `json:"outcome"`
 	// SessionEndpoint is the endpoint allocated for the session; present when the
-	// outcome is created or unconfirmed. A retry gets the same endpoint.
+	// outcome is created or unconfirmed. A retry gets the same endpoint. It names the
+	// endpoint on the node of the runtime, which is not the node of a sender that
+	// signalled from another node.
 	SessionEndpoint EndpointRef `json:"session_endpoint,omitempty"`
 	// Reason is present when the outcome is unconfirmed or failed, and belongs to
 	// the matching group.

@@ -299,7 +299,7 @@ func (c *client) execute(ctx context.Context, inv *invocation) int {
 		if err != nil {
 			return c.errorf(err)
 		}
-		c.printStatus(resp.Node, *resp.Status)
+		c.printStatus(*resp.Status)
 	case "recv":
 		return c.receive(ctx, inv)
 	case "new":

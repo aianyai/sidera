@@ -223,6 +223,8 @@ func TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered(t *testing.T) {
 }
 
 func TestNewSendsTheControlSignalAndPollsForTheReply(t *testing.T) {
+	// The runtime is on node-2, so the session is too: the reply names the endpoint
+	// as node-2 knows it, and the printed address must lead to it, not to node-1.
 	d := &daemon{statusAnswer: func(n int) adapterproto.MessageStatusResult {
 		res := adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryDelivered}}}
 		if n >= 3 {
@@ -236,7 +238,7 @@ func TestNewSendsTheControlSignalAndPollsForTheReply(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("new: exit %d, stderr %q", code, h.errOut.String())
 	}
-	if got := h.out.String(); got != "message: msg-out-1\nsession: node-1/ep-session\n" {
+	if got := h.out.String(); got != "message: msg-out-1\nsession: node-2/ep-session\n" {
 		t.Errorf("output %q", got)
 	}
 	s := d.sends[0]
@@ -349,6 +351,21 @@ func TestReplyGoesToTheSenderSeenInRecv(t *testing.T) {
 	}
 	if code := h.run("reply", "m-9", "--to", "node-4/other", "--body", "late"); code != exitOK || d.sends[1].To[0] != "node-4/other" {
 		t.Errorf("reply with --to: exit %d, send %+v", code, d.sends[1])
+	}
+}
+
+// `status` prints the session of a control reply with the node of the runtime the
+// signal went to, as `new` does.
+func TestStatusNamesTheSessionOnTheNodeOfTheRuntime(t *testing.T) {
+	h := newHarness(t, &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult {
+		return adapterproto.MessageStatusResult{
+			Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryDelivered}},
+			ControlReply: &adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate,
+				Create: &adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: "ep-session"}},
+		}
+	}})
+	if code := h.run("status", "msg-out-1"); code != exitOK || !strings.Contains(h.out.String(), "session: node-2/ep-session\n") {
+		t.Errorf("status: exit %d, output %q", code, h.out.String())
 	}
 }
 

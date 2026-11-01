@@ -1026,7 +1026,7 @@ the carrying message; an empty body means none. Reply:
 | Field | Values | Present |
 | ----- | ------ | ------- |
 | `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (no session will be attached to the channel; certainly not created, except for reason 9) | always |
-| `session_endpoint` | the endpoint allocated for the session | outcome 1 or 2 |
+| `session_endpoint` | the endpoint allocated for the session, as the node of the runtime knows it: the node is not part of it, and a sender on another node completes the address with the node of the runtime it signalled | outcome 1 or 2 |
 | `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown, 10 node_endpoint_limit; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
 
 `control.session.close` (target: a session endpoint), no parameters. Reply

@@ -28,7 +28,7 @@ func (c *client) create(ctx context.Context, inv *invocation) int {
 			return c.errorf(err)
 		}
 		if reply := resp.Status.ControlReply; reply != nil {
-			return c.printCreateReply(resp.Node, reply.Create)
+			return c.printCreateReply(resp.Status.Recipients, reply.Create)
 		}
 		if reason, ok := refused(resp.Status.Recipients); ok {
 			fmt.Fprintln(c.env.Stderr, "sidera-adapter-console: the message was not delivered:", reason)
@@ -60,13 +60,13 @@ func refused(recipients []adapterproto.RecipientStatus) (string, bool) {
 	return "", false
 }
 
-func (c *client) printCreateReply(node string, r *adapterproto.ControlCreateReply) int {
+func (c *client) printCreateReply(recipients []adapterproto.RecipientStatus, r *adapterproto.ControlCreateReply) int {
 	switch r.Outcome {
 	case adapterproto.CreateReplyCreated:
-		fmt.Fprintln(c.env.Stdout, "session:", address(node, r.SessionEndpoint))
+		fmt.Fprintln(c.env.Stdout, "session:", sessionAddress(recipients, r.SessionEndpoint))
 		return exitOK
 	case adapterproto.CreateReplyUnconfirmed:
-		fmt.Fprintln(c.env.Stdout, "session:", address(node, r.SessionEndpoint))
+		fmt.Fprintln(c.env.Stdout, "session:", sessionAddress(recipients, r.SessionEndpoint))
 		fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: the session may exist but is not confirmed ready (%s)\n", r.Reason)
 		return exitUnsettled
 	}
@@ -76,7 +76,7 @@ func (c *client) printCreateReply(node string, r *adapterproto.ControlCreateRepl
 
 // printStatus writes the delivery state of each recipient and, for a signal, its
 // reply.
-func (c *client) printStatus(node string, s adapterproto.MessageStatusResult) {
+func (c *client) printStatus(s adapterproto.MessageStatusResult) {
 	w := c.env.Stdout
 	for _, r := range s.Recipients {
 		if r.Reason != "" {
@@ -96,7 +96,7 @@ func (c *client) printStatus(node string, s adapterproto.MessageStatusResult) {
 		}
 		fmt.Fprintln(w)
 		if cr.SessionEndpoint != "" {
-			fmt.Fprintln(w, "session:", address(node, cr.SessionEndpoint))
+			fmt.Fprintln(w, "session:", sessionAddress(s.Recipients, cr.SessionEndpoint))
 		}
 	default:
 		raw, _ := json.Marshal(reply)
