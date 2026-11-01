@@ -7,17 +7,19 @@
 # one archive per platform, sidera_<version>_<os>_<arch>.tar.gz (.zip for Windows),
 # and checksums.txt, the SHA-256 of every archive. Nothing else is left in it.
 #
-# An archive holds the binaries at its top level, the adapters' packages in
-# adapters/<name>/ (ready for `sidera adapter install`), LICENSE and README.txt.
+# An archive holds, at its top level, sidera, sidera-adapter-console (which is also
+# the owner's command-line client), LICENSE and README.txt. The adapters' programs
+# are only inside their packages, adapters/<name>/, ready for `sidera adapter
+# install`; the Claude adapter is built for darwin only.
 # The workflow .github/workflows/release.yml runs this script, and so can anyone
 # who wants to check what a release would contain.
 set -euo pipefail
 
 module=github.com/aianyai/sidera
 platforms="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64"
-# The adapters every archive carries; the Claude adapter is added for the platforms
-# its manifest lists, which are the darwin ones (cmd/sidera-adapter-claude).
-adapters="codex console"
+# The adapters, each shipped as a package. The Claude adapter's manifest lists the
+# darwin platforms only (cmd/sidera-adapter-claude), so it is built for those.
+adapters="claude codex console"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <version> <outdir>" >&2
@@ -77,7 +79,7 @@ hostarch=$(go env GOHOSTARCH)
 hostexe=""
 [ "$hostos" = windows ] && hostexe=.exe
 mkdir -p "$work/host"
-for name in claude $adapters; do
+for name in $adapters; do
   build "$hostos" "$hostarch" "sidera-adapter-$name" "$work/host/sidera-adapter-$name$hostexe"
 done
 # A release stamped at the wrong path would silently report the development
@@ -99,23 +101,28 @@ for platform in $platforms; do
   mkdir -p "$stage/adapters"
 
   build "$goos" "$goarch" sidera "$stage/sidera$exe"
-  files=("sidera$exe")
-  platform_adapters=$adapters
-  [ "$goos" = darwin ] && platform_adapters="claude $adapters"
-  for adapter in $platform_adapters; do
-    binary=$stage/sidera-adapter-$adapter$exe
+  # Only the console program is also an archive file of its own; the others are
+  # built outside the archive and reach it inside their packages.
+  files=("sidera$exe" "sidera-adapter-console$exe")
+  mkdir -p "$work/$name-bin"
+  for adapter in $adapters; do
+    if [ "$adapter" = claude ] && [ "$goos" != darwin ]; then continue; fi
+    binary=$work/$name-bin/sidera-adapter-$adapter$exe
+    [ "$adapter" = console ] && binary=$stage/sidera-adapter-console$exe
     build "$goos" "$goarch" "sidera-adapter-$adapter" "$binary"
     "$work/host/sidera-adapter-$adapter$hostexe" package \
       --goos "$goos" --goarch "$goarch" --binary "$binary" --out "$stage/adapters/$adapter"
-    files+=("sidera-adapter-$adapter$exe")
   done
 
   cp LICENSE "$stage/LICENSE"
   cat >"$stage/README.txt" <<README
 Sidera $version ($goos/$goarch)
 
-The program sidera, the adapter programs, and the adapter packages in adapters/
-that 'sidera adapter install' takes.
+sidera                   the program: the daemon and the command line of agents
+sidera-adapter-console   the console adapter, which is also the owner's command-line
+                         client
+adapters/                the packages of the adapters, ready for 'sidera adapter
+                         install' (each holds its own program)
 
 Install guide:
 https://github.com/aianyai/sidera/blob/v$version/docs/guide/install.md

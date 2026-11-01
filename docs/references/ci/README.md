@@ -177,11 +177,14 @@ darwin/amd64, linux/amd64, linux/arm64 and windows/amd64: `sidera`,
 `sidera-adapter-codex` and `sidera-adapter-console`, and `sidera-adapter-claude` on
 darwin only, since its manifest lists darwin only. Each adapter's `package`
 subcommand then writes its package, which is where a package gets the release
-version in its manifest. `<outdir>` ends up with exactly:
+version in its manifest. An adapter's program is shipped inside its package and
+nowhere else, except the console's, which is also the top-level
+`sidera-adapter-console` because the same program is the owner's command-line
+client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 
 | File | Holds |
 | ---- | ----- |
-| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: the programs (`.exe` on Windows), `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`), `LICENSE` and `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md` |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
@@ -342,6 +345,11 @@ included. Nothing modifies it. The list is written before the first tag, from
   the same on a development machine as on the runner, and adds no tool to learn;
   the workflow is only the runner, the tag and the token. A tool such as GoReleaser
   would bring a configuration language for what these steps already express.
+- **Why the archives hold the adapters' programs once**: a program of an adapter
+  other than the console is only useful installed, and `sidera adapter install`
+  takes the package, so a second copy at the top level would only make the archive
+  larger and leave two programs to choose between. The console is the exception
+  because its program is also the owner's client.
 - **The package commands run on the builder**: a cross-compiled adapter cannot
   run there, so the script builds one native copy of each adapter, with the same
   version, to run `package` with, and gives it the cross-compiled binary to copy.
