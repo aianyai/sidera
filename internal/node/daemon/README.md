@@ -53,7 +53,8 @@ is read here and no test tooling is imported.
 - **The order of the start is the log.** Every step logs `startup step N begin` and
   `end`; a test reads them. A step that fails stops the start and what had begun is
   shut down by the same path as any shutdown.
-- **Refuse before touching.** The permissions of the root and of `keys/` and the
+- **Refuse before touching.** The permissions of the root, of `keys/` and of the rest of
+  the tree (every directory, the files that hold a token) and the
   marker of `init` are judged before the lock is taken, and the lock before
   anything is written. Nothing is narrowed, repaired or created by a start that
   refuses. A symbolic link as the data directory is refused.

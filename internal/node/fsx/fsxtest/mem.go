@@ -256,7 +256,7 @@ func (m *Mem) ReadDir(dir string) ([]fsx.Entry, error) {
 	names := sortedKeys(d.entries)
 	entries := make([]fsx.Entry, len(names))
 	for i, name := range names {
-		entries[i] = fsx.Entry{Name: name, IsDir: d.entries[name].dir}
+		entries[i] = fsx.Entry{Name: name, IsDir: d.entries[name].dir, IsRegular: !d.entries[name].dir}
 	}
 	return entries, nil
 }

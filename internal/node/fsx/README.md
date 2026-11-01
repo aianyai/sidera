@@ -24,6 +24,8 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
 | `IsNoSpace` | Whether an error means the volume or the quota is full (`ENOSPC`, `EDQUOT`; `ERROR_DISK_FULL`, `ERROR_HANDLE_DISK_FULL`, `ERROR_DISK_QUOTA_EXCEEDED`), and nothing a platform does not return: a test injects `fsxtest.DiskFull`. The Windows codes are pending verification by CI on main. The one place that knows the codes. |
+| `CheckPrivateTree(r, dir, judgeFile)`, `NotPrivateError` | Refuses a tree in which someone but the owner can reach a directory at any depth or a file `judgeFile` names (the rest of the files rely on their directory); a symbolic link among the named files is refused too. The refusal names the path and, from `Info.Exposure`, who can reach it and how. Nothing is changed. |
+| `OpenOSReader(root)` | The read side of the real file system rooted at an existing directory, for a caller that makes no write and has no random source. |
 | `Exists(r, path)` | Whether a path is there: `fs.ErrNotExist` is false, any other failure of `Stat` is returned, never read as "absent". |
 | `Leftovers`, `IsLeftover`, `TempPrefix`, `TrashPrefix` | Finding the debris of interrupted operations. |
 | `ErrLocked` | Returned by `FS.Lock` when the lock is held elsewhere. |

@@ -20,6 +20,7 @@ for the crash model, its sources and what it can and cannot prove.
 | `Faulty.Abandon()` | Ends injection and future-hit expectations after the owner has been forcibly interrupted, preserving actual hits. |
 | `Match` | Selects calls by transaction, role, step, ordinal of the key and path. |
 | `RunConformance(t, newFS)` | The behaviour `Mem` and the real file system must share. |
+| `GrantForeign(t, path, mask)`, `ForeignSID`, `Modify` | Windows only: add an allow entry for `ForeignSID`, a SID no account holds, to a real path, for the tests of a permission check. |
 | `DiskFull` | The fault a test injects for a full disk: `ENOSPC` on Unix, `ERROR_DISK_FULL` on Windows (pending verification by CI on main). `fsx.IsNoSpace` recognises it, so such a test means the same on both. |
 
 ## Rules of the model

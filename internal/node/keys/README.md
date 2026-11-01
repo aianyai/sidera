@@ -27,7 +27,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | `ParseRevocationExport` | The inverse of the formatter: strictly parses the armor and verifies the statement, returning its wire bytes, digest and node together. The formatter's final LF is optional; every other spelling is refused with `ErrCorrupt` and a zero statement. |
 | `Keys.CheckNotRetired` | The refusal to run a node whose identity is among the loaded revocations. |
 | `PlanInit`, `InitPlan.WriteKeys`, `WriteMarker`, `Initialized` | The key side of `init`, and the marker. |
-| `CheckPermissions` | The permission sweep of `keys/`, for a caller that checks before it loads. |
+| `CheckPermissions` | The permission sweep of `keys/`, for a caller that checks before it loads; a refusal says who can reach the file and how, from `fsx.Info.Exposure`. |
 | `Transactions`, `InitWrites`, `InitMarkerWrite`, the `Role…` and `Tx…` constants | Declarations: the transactions this package opens (`cert-renew`, `clock-high-water`), and the writes it contributes to the `init` and `clock-clear` transactions that their composers declare. |
 | `CertificateLifetime`, `RenewBefore` | The decided parameters: 30 days and 10 days. |
 | `FileError`, `ErrPermissionsTooBroad`, `ErrMissing`, `ErrCorrupt`, `ErrInconsistent`, … | Every failure about a file is a `*FileError` that names it. |

@@ -103,9 +103,16 @@ the backoff like any other.
 Before every launch the host makes `adapter-state/<instance>` in the data directory,
 and `adapter-state/` itself when it is missing, with `fsx.MakeRoot`: the one function
 that makes a directory only its owner can reach, with the protected access list on
-Windows. A directory that is already there is left as it is, since it holds what the
-adapter put in it and the data directory around it is already owner-only; the supervisors
-of different instances may make `adapter-state/` together, so its existing is no error.
+Windows. The supervisors of different instances may make `adapter-state/` together, so its
+existing is no error. A directory that is already there is judged, not trusted: it holds
+what the adapter put in it, and it is protected on its own, so the owner-only data
+directory around it says nothing of it, and another program (a sandbox's group, say) may
+have added an entry since it was made. The host checks every directory of `adapter-state/`
+and every file of the instance's own directory, by `fsx.CheckPrivateTree`, the walk the
+daemon makes at its start, and a directory or a file that someone else can reach fails
+the pass naming the path, the trustee and the rights, like a launch that failed. It does
+not rewrite the list: that would hide from the owner who could reach the tokens kept
+there (the Codex adapter's `ws-token`), and only the owner knows who already read them.
 Only the host makes it, so the adapter never has to know where the data directory is.
 `StateDir(home, instance)` is the one definition, sent in `initialize` and in
 `Instance.StateDir`; a directory that cannot be made fails the pass like a launch that

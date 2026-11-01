@@ -232,6 +232,16 @@ that has not paired yet can be created again on a free port with
 `sidera init --port <n>`, after you delete its data directory.
 `daemon_already_running` means a daemon on the same data directory is already up.
 
+**The daemon does not start: `the data directory is not private to its owner`.** The
+start checks the data directory, every directory below it, the key files and the files
+that hold a token, and refuses when anyone but the owner can reach one. The message names
+the path, who can reach it (an account or group by SID and name, or a mode) and with
+which rights, for example `...\adapter-state\codex grants Modify (0x1301bf) to S-1-5-21-... (unresolved)`.
+Sidera never changes a permission itself: only you know who has read the files. Find out
+what added the entry (a sandbox, an installer, a backup tool), treat what the files hold
+as read by that account, then remove the entry (Windows: `icacls <path> /remove <sid>`;
+Unix: `chmod go-rwx <path>`) and start again.
+
 **`socket_path_too_long`.** Sidera's local sockets live under the data directory,
 and a Unix socket path has a limit of about 100 bytes. Use a shorter `--home` or
 `SIDERA_HOME`.

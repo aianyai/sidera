@@ -76,6 +76,15 @@ and Windows (amd64).
 - **`sidera version`** prints the version, the commit and the Go version (`--json`
   for an object), and every adapter program prints the same with `version`.
 
+### Security
+
+- **The start checks the whole data directory.** The daemon refuses to start when
+  anyone but the owner can reach the data directory, a directory below it, a key
+  file or a file that holds a token (an endpoint's token, an adapter's state files).
+  The refusal names the path, the account or group by SID and name, and the rights.
+  Sidera never changes a permission itself. An adapter's state directory is judged
+  again before the adapter is launched.
+
 ### Not yet
 
 - NAT traversal and relays: two nodes must be able to dial each other.

@@ -408,7 +408,11 @@ Specifically, for Windows:
   object), which cannot widen access and is skipped. An entry of any other type,
   such as a callback or object allow entry, may grant access in a way the check
   does not evaluate and makes the answer false, as does failing to read the
-  descriptor, so a key file is never assumed private.
+  descriptor, so a key file is never assumed private. When the answer is false,
+  `Info.Exposure` says why as a phrase that follows the path: the first entry
+  found, with its rights, its SID and the account the system resolves it to, or
+  `unresolved`; on Unix the mode or the owner. `CheckPrivateTree` uses it to name
+  what it refuses.
 
 On Linux, `flock` (`TestOSUnixLockConflictsAcrossInstancesAndIsReleasedOnUnlock`)
 and `statfs` (`TestOSFSConformsToTheFSContract`) are exercised on the Linux CI

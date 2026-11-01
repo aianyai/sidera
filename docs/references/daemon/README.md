@@ -50,7 +50,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 
 | Step | Name | What happens | Owner |
 | ---- | ---- | ------------ | ----- |
-| 1 | lock | The data directory is resolved; the root and `keys/` are checked to be private to the owner (a directory that is not one, a symbolic link among them, is refused and nothing is narrowed); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running"; last, the data directory becomes the daemon's working directory, and failing to change to it fails the start. A daemon over an explicit `Config.FS` does not change it: that home is not necessarily a directory of this machine. | this package |
+| 1 | lock | The data directory is resolved; the root, `keys/` and the rest of the tree are checked to be private to the owner (a directory that is not one, a symbolic link among them, is refused and nothing is narrowed; see "The instance lock and the permissions"); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running"; last, the data directory becomes the daemon's working directory, and failing to change to it fails the start. A daemon over an explicit `Config.FS` does not change it: that home is not necessarily a directory of this machine. | this package |
 | 2 | config | The transaction layer recovers (settle, then removal of every `.tmp-*`); the layout of `state/`, `run/`, `manage/` and `logs/` is made again where the owner removed it; the log opens; `config/` is loaded strictly and a file that is not valid stops the start and is named. | this package, `txn`, `config` |
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
@@ -238,15 +238,55 @@ describes the output streams.
 
 ### The instance lock and the permissions
 
-The root and `keys/` are checked before anything is written, before the lock is
-taken and before a socket is made, so a refused start leaves no lock file. The
-check is the file layer's `OwnerOnly`, which fails closed: on Unix any group or
-other bit, on Windows a DACL that grants anyone but the owner, SYSTEM and
-Administrators. The root is read without following a symbolic link, so a link is
-not a directory and is refused, whatever it points to (a link above the data
-directory is followed: macOS's temporary directory is one). `keys/` and its files
-are checked by `keys.CheckPermissions`. The lock is `daemon.lock` at the root, not
-in `state/`, which can be deleted as a whole.
+The root, `keys/` and the rest of the tree are checked before anything is written,
+before the lock is taken and before a socket is made, so a refused start leaves no
+lock file. The check is the file layer's `OwnerOnly`, which fails closed: on Unix any
+group or other bit, on Windows a DACL that grants anyone but the owner, SYSTEM and
+Administrators (deny entries are skipped, an entry of a type the check cannot judge is
+refused). The root is read without following a symbolic link, so a link is not a
+directory and is refused, whatever it points to (a link above the data directory is
+followed: macOS's temporary directory is one). `keys/` and its files are checked by
+`keys.CheckPermissions`. The lock is `daemon.lock` at the root, not in `state/`, which
+can be deleted as a whole.
+
+The root alone is not enough. A directory made with its own protected list, as
+`adapter-state/<instance>` is, does not inherit from the root, so an entry another
+program adds to the root says nothing of it, and one added to it says nothing at the
+root: on Windows a sandbox's group was granted Modify on `adapter-state\codex`, and
+inherited read on the root, by two different grants. The start therefore walks the whole
+tree (`fsx.CheckPrivateTree`) and judges:
+
+- every directory, whatever it holds, at any depth;
+- every regular file of `state/endpoints/`, which keeps the token of each session
+  endpoint in clear, and of `adapter-state/`, where each adapter keeps what it needs to
+  reach its runtime: the Codex adapter's `ws-token`, the console's `console.addr` with
+  its token, the Claude adapter's files; with the files of `keys/`, which
+  `keys.CheckPermissions` judges, these are the files that hold a token or a key;
+- a symbolic link among those files, which is refused: nothing the node writes there is
+  one, and a read follows it to a file nobody judged.
+
+A record file of `state/` and every other file holds no secret and relies on its
+directory, which is judged. That is a decision about cost and about what can happen: on
+Windows a file made in a private directory inherits the directory's list, so a foreign
+entry reaches it only when something adds it to the file itself (or moves the file in),
+and a program that grants access to a directory does so on the directory. A file can
+carry an entry its directory does not show; judging every file would add one read of an
+access list per file to every start, measured at 4.3 s for 50,000 record files on
+Windows against 0.13 s for the walk that judges the directories and the secret files
+(the same walk takes 0.03 s on macOS), and the cost grows with the records.
+A socket, a device or a junction among the entries is left to the directory that holds
+it. An entry that vanishes between the listing and its look (the temporary file of a
+daemon that runs) is skipped.
+
+The refusal is `ErrPermissions` and names the path as the operating system does, who can
+reach it and how, so that the owner can find the entry: `the data directory is not private
+to its owner: C:\...\adapter-state\codex grants Modify (0x1301bf) to S-1-5-21-...
+(unresolved)` (the account name stands where the system resolves one, `DOMAIN\name`; on
+Unix, `has mode 0755, which lets the group or others reach it`). Nothing is repaired: only
+the owner knows who has already read what the files hold, and rewriting a list would hide
+it. The same walk judges the state directory of an instance before the host launches its
+adapter (see [adapter-host](../adapter-host/README.md)), because an entry can be added
+while the daemon runs.
 
 ### The layout rule
 

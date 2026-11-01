@@ -248,7 +248,7 @@ func TestOSDirectoryEntriesIdentifyLinksAndReadsFollowRegularTargets(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0] != (fsx.Entry{Name: "link", IsSymlink: true}) || entries[1] != (fsx.Entry{Name: "target"}) {
+	if len(entries) != 2 || entries[0] != (fsx.Entry{Name: "link", IsSymlink: true}) || entries[1] != (fsx.Entry{Name: "target", IsRegular: true}) {
 		t.Fatalf("ReadDir = %+v", entries)
 	}
 	data, err := fsys.ReadFile("link")

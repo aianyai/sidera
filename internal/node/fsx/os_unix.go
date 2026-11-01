@@ -4,6 +4,7 @@ package fsx
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -65,10 +66,19 @@ func available(abs string) (uint64, error) {
 	return uint64(st.Bavail) * uint64(st.Bsize), nil
 }
 
-// ownerOnly: owned by the effective user and no group or other permission bit.
-func ownerOnly(_ string, fi fs.FileInfo) bool {
+// exposure is empty when the object is owned by the effective user and has no
+// group or other permission bit, and otherwise says which of the two is not so.
+func exposure(_ string, fi fs.FileInfo) string {
 	st, ok := fi.Sys().(*syscall.Stat_t)
-	return ok && int(st.Uid) == unix.Geteuid() && fi.Mode().Perm()&0o077 == 0
+	switch {
+	case !ok:
+		return "has no owner the check can read"
+	case int(st.Uid) != unix.Geteuid():
+		return fmt.Sprintf("is owned by user %d, not by the user running the process (%d)", st.Uid, unix.Geteuid())
+	case fi.Mode().Perm()&0o077 != 0:
+		return fmt.Sprintf("has mode %04o, which lets the group or others reach it", fi.Mode().Perm())
+	}
+	return ""
 }
 
 // lockFile takes flock(LOCK_EX|LOCK_NB) on the lock file. The lock belongs to

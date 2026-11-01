@@ -31,6 +31,26 @@ func OpenOS(root string, rand io.Reader) (FS, error) {
 	if rand == nil {
 		return nil, errors.New("fsx: OpenOS needs a random source for temporary names")
 	}
+	o, err := openRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	o.rand = rand
+	return o, nil
+}
+
+// OpenOSReader returns the read side of the real file system rooted at the
+// existing directory root. It needs no random source because it makes no
+// temporary name, and nothing it returns writes.
+func OpenOSReader(root string) (Reader, error) {
+	o, err := openRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func openRoot(root string) (*osFS, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -42,7 +62,7 @@ func OpenOS(root string, rand io.Reader) (FS, error) {
 	if !fi.IsDir() {
 		return nil, &fs.PathError{Op: "open", Path: abs, Err: syscall.ENOTDIR}
 	}
-	return &osFS{root: abs, rand: rand}, nil
+	return &osFS{root: abs}, nil
 }
 
 // MakeRoot creates the data directory so that only its owner can reach it,
@@ -96,7 +116,7 @@ func (o *osFS) ReadDir(dir string) ([]Entry, error) {
 	}
 	entries := make([]Entry, len(des))
 	for i, de := range des {
-		entries[i] = Entry{Name: de.Name(), IsDir: de.IsDir(), IsSymlink: de.Type()&fs.ModeSymlink != 0}
+		entries[i] = Entry{Name: de.Name(), IsDir: de.IsDir(), IsSymlink: de.Type()&fs.ModeSymlink != 0, IsRegular: de.Type().IsRegular()}
 	}
 	return entries, nil
 }
@@ -110,13 +130,19 @@ func (o *osFS) Stat(p string) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	return Info{
-		Name:      path.Base(p),
-		Size:      fi.Size(),
-		IsDir:     fi.IsDir(),
-		OwnerOnly: fi.Mode().Type()&^fs.ModeDir == 0 && ownerOnly(a, fi),
-	}, nil
+	info := Info{Name: path.Base(p), Size: fi.Size(), IsDir: fi.IsDir()}
+	if fi.Mode().Type()&^fs.ModeDir != 0 {
+		info.Exposure = "is neither a regular file nor a directory"
+		return info, nil
+	}
+	info.Exposure = exposure(a, fi)
+	info.OwnerOnly = info.Exposure == ""
+	return info, nil
 }
+
+// ownerOnly is the rule of Info.OwnerOnly for an object that is a regular file or
+// a directory.
+func ownerOnly(abs string, fi fs.FileInfo) bool { return exposure(abs, fi) == "" }
 
 func (o *osFS) Available(dir string) (uint64, error) {
 	a, err := o.abs(dir)

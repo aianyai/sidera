@@ -4,6 +4,7 @@ package fsx
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -236,53 +237,101 @@ func isTrusted(sid *windows.SID, trusted []*windows.SID) bool {
 	return false
 }
 
-// ownerOnly fails closed: it is true only when the owner is trusted, a DACL
+// exposure fails closed: it is empty only when the owner is trusted, a DACL
 // exists, every access-allowed entry names a trusted identity, and every other
 // entry is of a type that can only deny access. Entries that deny access cannot
 // widen it and are skipped; an entry of any other type (a callback or object
 // allow entry, for example) may grant access in a way this check does not
-// evaluate, so it makes the answer false, as does any failure to read the
-// descriptor: the caller refuses to start rather than assume a key file is
-// private.
-func ownerOnly(abs string, _ fs.FileInfo) bool {
+// evaluate, so it is an exposure, as is any failure to read the descriptor: the
+// caller refuses to start rather than assume a key file is private. A nonempty
+// answer names the first thing found, with the SID and the resolved account name
+// of the trustee and the rights, so that the owner can find it.
+func exposure(abs string, _ fs.FileInfo) string {
 	sd, err := windows.GetNamedSecurityInfo(abs, windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
-		return false
+		return fmt.Sprintf("has an access list that cannot be read: %v", err)
 	}
-	return ownerOnlyDescriptor(sd)
+	return descriptorExposure(sd)
 }
 
-func ownerOnlyDescriptor(sd *windows.SECURITY_DESCRIPTOR) bool {
+func ownerOnlyDescriptor(sd *windows.SECURITY_DESCRIPTOR) bool { return descriptorExposure(sd) == "" }
+
+func descriptorExposure(sd *windows.SECURITY_DESCRIPTOR) string {
 	defer runtime.KeepAlive(sd) // owner and dacl point into the descriptor
 	owner, _, err := sd.Owner()
 	if err != nil || owner == nil {
-		return false
+		return "has no owner the check can read"
 	}
 	dacl, _, err := sd.DACL()
 	if err != nil || dacl == nil {
-		return false // no DACL grants everyone full access
+		return "has no access list, which grants everyone full access"
 	}
 	trusted, err := trustedSIDs()
-	if err != nil || !isTrusted(owner, trusted) {
-		return false
+	if err != nil {
+		return fmt.Sprintf("cannot be judged: the user running the process is unknown: %v", err)
+	}
+	if !isTrusted(owner, trusted) {
+		return "is owned by " + describeSID(owner)
 	}
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
-			return false
+			return fmt.Sprintf("has an access list that cannot be read: %v", err)
 		}
 		switch {
 		case isDenyACE(ace.Header.AceType):
 			continue
 		case ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE:
-			return false
+			return fmt.Sprintf("has an access entry of type %d, which the check cannot judge", ace.Header.AceType)
 		}
-		if !isTrusted((*windows.SID)(unsafe.Pointer(&ace.SidStart)), trusted) {
-			return false
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !isTrusted(sid, trusted) {
+			return fmt.Sprintf("grants %s to %s", describeRights(ace.Mask), describeSID(sid))
 		}
 	}
-	return true
+	return ""
+}
+
+// describeSID is the SID and the account the system resolves it to, or says that
+// it does not resolve (the account is of another machine, or has been deleted).
+func describeSID(sid *windows.SID) string {
+	account, domain, _, err := sid.LookupAccount("")
+	if err != nil {
+		return sid.String() + " (unresolved)"
+	}
+	if domain != "" {
+		account = domain + `\` + account
+	}
+	return sid.String() + " (" + account + ")"
+}
+
+// Access masks of the standard file rights, as icacls names them.
+const (
+	rightsFull           = 0x1F01FF
+	rightsModify         = 0x1301BF
+	rightsReadAndExecute = 0x1200A9
+	rightsRead           = 0x120089
+	rightsWrite          = 0x100116
+)
+
+// describeRights names the largest standard set of rights that mask holds and
+// always gives the mask itself, since a mask of another shape has no name.
+func describeRights(mask windows.ACCESS_MASK) string {
+	m := uint32(mask)
+	switch {
+	case m&windows.GENERIC_ALL != 0 || m&rightsFull == rightsFull:
+		return fmt.Sprintf("full control (0x%x)", m)
+	case m&rightsModify == rightsModify || m&windows.GENERIC_WRITE != 0 && m&windows.GENERIC_READ != 0:
+		return fmt.Sprintf("Modify (0x%x)", m)
+	case m&rightsReadAndExecute == rightsReadAndExecute || m&windows.GENERIC_READ != 0 && m&windows.GENERIC_EXECUTE != 0:
+		return fmt.Sprintf("Read and execute (0x%x)", m)
+	case m&rightsRead == rightsRead || m&windows.GENERIC_READ != 0:
+		return fmt.Sprintf("Read (0x%x)", m)
+	case m&rightsWrite == rightsWrite || m&windows.GENERIC_WRITE != 0:
+		return fmt.Sprintf("Write (0x%x)", m)
+	}
+	return fmt.Sprintf("access 0x%x", m)
 }
 
 // makeRoot creates the directory with a protected DACL (no inheritance from

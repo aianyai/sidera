@@ -25,7 +25,7 @@ func statOwnerOnly(r fsx.Reader, p string) (fsx.Info, error) {
 		return info, &FileError{Path: p, Err: fmt.Errorf("cannot read the file's permissions: %w", err)}
 	}
 	if !info.OwnerOnly {
-		return info, fileError(p, ErrPermissionsTooBroad, "")
+		return info, tooBroad(p, info)
 	}
 	return info, nil
 }
@@ -68,7 +68,7 @@ func CheckPermissions(r fsx.Reader) error {
 		return &FileError{Path: Dir, Err: fmt.Errorf("cannot read the permissions: %w", err)}
 	}
 	if !info.OwnerOnly {
-		return fileError(Dir, ErrPermissionsTooBroad, "")
+		return tooBroad(Dir, info)
 	}
 	entries, err := r.ReadDir(Dir)
 	if err != nil {
@@ -81,6 +81,15 @@ func CheckPermissions(r fsx.Reader) error {
 		}
 	}
 	return nil
+}
+
+// tooBroad is the refusal of a path that others can reach, with what the file
+// system says about who can: the owner needs it to find the entry.
+func tooBroad(p string, info fsx.Info) error {
+	if info.Exposure == "" {
+		return fileError(p, ErrPermissionsTooBroad, "")
+	}
+	return fileError(p, ErrPermissionsTooBroad, "it %s", info.Exposure)
 }
 
 // corrupt marks the failure to read a file as damage. The error it carries never

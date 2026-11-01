@@ -88,6 +88,9 @@ type Entry struct {
 	Name      string
 	IsDir     bool // does not follow a symbolic link
 	IsSymlink bool
+	// IsRegular is true for a regular file. A socket, a device, a FIFO, a Windows
+	// junction and a link are none of IsDir, IsRegular and (but the link) IsSymlink.
+	IsRegular bool
 }
 
 // Info describes one file or directory.
@@ -106,6 +109,12 @@ type Info struct {
 	// ReadFile does, so the permission bits of a link say nothing about who can
 	// read what it points to.
 	OwnerOnly bool
+	// Exposure says, when OwnerOnly is false, who can reach the file and how, as
+	// a phrase that follows its path: "has mode 0755" on Unix, "grants Modify to
+	// S-1-5-21-... (unresolved)" on Windows, with the SID and the account name the
+	// system resolves it to. It is empty when OwnerOnly is true, and for a file
+	// system that has nothing more to say than that the answer is false.
+	Exposure string
 }
 
 // FS is the narrow file system every persistent byte goes through. Paths are

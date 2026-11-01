@@ -12,6 +12,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/keys"
 )
 
@@ -171,5 +172,69 @@ func TestThePermissionsAreJudgedBeforeTheLockIsTaken(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(c.Home, "daemon.lock")); err == nil {
 		t.Error("a lock file was made on a directory whose permissions were refused")
+	}
+}
+
+// treeFixture puts, in an initialized data directory, the places that matter
+// besides the root and keys/: the token of a session endpoint, an adapter's state
+// directory (protected on its own, as the host makes it) with the token file in
+// it, and a record file that holds nothing secret.
+func treeFixture(t testing.TB, home string) {
+	t.Helper()
+	for _, dir := range []string{"adapter-state", "adapter-state/codex"} {
+		if err := fsx.MakeRoot(filepath.Join(home, dir)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"state/endpoints/e.rec", "adapter-state/codex/ws-token", "state/in/m.rec"} {
+		if err := os.WriteFile(filepath.Join(home, file), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A start judges the whole tree, not the root alone: a directory made protected
+// on its own, as adapter-state/<instance> is, does not follow the root, and the
+// file that holds a token is judged by itself. The refusal names the path. A
+// record file that holds no secret relies on its directory and is not judged.
+// widen lets someone other than the owner reach a path, as the platform does it.
+func TestStartRefusesAPrivateTreeThatOthersCanReach(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		refused error // what the start returns, nil when it starts
+	}{
+		{"a directory of the state", "state/in", daemon.ErrPermissions},
+		{"a state directory of an instance", "adapter-state/codex", daemon.ErrPermissions},
+		{"the directory of the adapters' state", "adapter-state", daemon.ErrPermissions},
+		{"the token of an endpoint", "state/endpoints/e.rec", daemon.ErrPermissions},
+		{"the token file of an adapter", "adapter-state/codex/ws-token", daemon.ErrPermissions},
+		{"a key", "keys/identity.key", keys.ErrPermissionsTooBroad},
+		{"a record that holds no secret", "state/in/m.rec", nil},
+		{"a clean tree", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := initialized(t)
+			treeFixture(t, c.Home)
+			p := filepath.Join(c.Home, filepath.FromSlash(tc.path))
+			if tc.path != "" {
+				widen(t, p)
+			}
+			if tc.refused == nil {
+				started(t, c)
+				return
+			}
+			before := snapshot(t, c.Home)
+			_, err := daemon.Start(context.Background(), c)
+			if !errors.Is(err, tc.refused) {
+				t.Fatalf("a start with %s widened: %v; want %v", tc.path, err, tc.refused)
+			}
+			if !strings.Contains(err.Error(), tc.path) && !strings.Contains(err.Error(), p) {
+				t.Errorf("the refusal %q does not name %s", err, p)
+			}
+			if after := snapshot(t, c.Home); !reflect.DeepEqual(before, after) {
+				t.Errorf("a refused start changed the data directory:\n%s", diff(before, after))
+			}
+		})
 	}
 }

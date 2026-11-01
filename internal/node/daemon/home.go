@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/keys"
+	"github.com/aianyai/sidera/internal/node/store"
 )
 
 // lockFile is the instance lock of the data directory, at its root and not in
@@ -44,19 +48,70 @@ func checkRoot(r fsx.Reader, home string) error {
 	case !info.IsDir:
 		return fmt.Errorf("%w: %s is not a directory (a symbolic link is not accepted)", ErrPermissions, home)
 	case !info.OwnerOnly:
-		return fmt.Errorf("%w: %s can be reached by others; only its owner may", ErrPermissions, home)
+		return notPrivate(home, ".", &fsx.NotPrivateError{Path: ".", Detail: reachedByOthers(info)})
 	}
 	return nil
 }
 
+// reachedByOthers is what the file layer says of a path that only its owner may
+// reach, or the plain statement when it says nothing more.
+func reachedByOthers(info fsx.Info) string {
+	if info.Exposure != "" {
+		return info.Exposure
+	}
+	return "can be reached by others; only its owner may"
+}
+
+// notPrivate is the refusal for a path of the data directory that others can
+// reach. It names the path as the operating system does, so that the owner can
+// open it, and carries what the file layer found.
+func notPrivate(home, rel string, e *fsx.NotPrivateError) error {
+	return fmt.Errorf("%w: %s %s", ErrPermissions, filepath.Join(home, filepath.FromSlash(rel)), e.Detail)
+}
+
+// holdsSecret says which files of the data directory are judged one by one, by
+// their own access list, when the tree is checked: the files that hold a token or
+// a key. state/endpoints/ keeps the token of every session endpoint in clear, and
+// everything under adapter-state/ is written by an adapter, which keeps there
+// what it needs to reach its runtime, such as a token (the Codex adapter's
+// ws-token, the console's console.addr). The files of keys/ are judged by the keys
+// package, which owns them. The other files of state/ hold no secret and rely on
+// the directory that holds them, which is judged.
+func holdsSecret(rel string) bool {
+	return strings.HasPrefix(rel, store.EndpointsDir+"/") || strings.HasPrefix(rel, adapterhost.StateRoot+"/")
+}
+
+// checkTree refuses a data directory with a directory, or a file that holds a
+// secret, that someone other than the owner can reach. The root alone is not
+// enough: a directory made protected, as adapter-state/<instance> is, does not
+// inherit from the root, so an entry added to the root or to it by another
+// program (a sandbox's group, say) is seen only on the directory itself. It names
+// the path, the trustee and the rights. Nothing is narrowed or repaired: only
+// the owner knows who already read what.
+func checkTree(r fsx.Reader, home string) error {
+	err := fsx.CheckPrivateTree(r, ".", holdsSecret)
+	var e *fsx.NotPrivateError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &e):
+		return notPrivate(home, e.Path, e)
+	}
+	return fmt.Errorf("%w: %s cannot be examined: %v", ErrPermissions, home, err)
+}
+
 // checkPermissions is the judgment of what the owner has to be the only one to
-// reach: the data directory and keys/. Both refuse before anything is written,
-// before the lock is taken and before a socket is made.
+// reach: the data directory, keys/ and the rest of the tree. All of it refuses
+// before anything is written, before the lock is taken and before a socket is
+// made.
 func checkPermissions(r fsx.Reader, home string) error {
 	if err := checkRoot(r, home); err != nil {
 		return err
 	}
-	return keys.CheckPermissions(r)
+	if err := keys.CheckPermissions(r); err != nil {
+		return err
+	}
+	return checkTree(r, home)
 }
 
 // enterHome makes the data directory the working directory of the daemon, and so

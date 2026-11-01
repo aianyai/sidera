@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
 
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 )
 
 // These tests state requirements and are first run by the Windows job of the CI,
@@ -88,5 +91,22 @@ func TestWindowsASymbolicLinkAsTheDataDirectoryIsRefused(t *testing.T) {
 	}
 	if _, err := daemon.Init(context.Background(), lc); !errors.Is(err, daemon.ErrPermissions) {
 		t.Errorf("init on a symbolic link: %v; want ErrPermissions", err)
+	}
+}
+
+// The refusal of a tree names what the owner needs to find the entry: the path,
+// the trustee as a SID with the name the system resolves it to, and the rights.
+func TestWindowsTheRefusalOfATreeNamesThePathTheTrusteeAndTheRights(t *testing.T) {
+	c, _ := initialized(t)
+	treeFixture(t, c.Home)
+	p := filepath.Join(c.Home, "adapter-state", "codex")
+	fsxtest.GrantForeign(t, p, fsxtest.Modify)
+	_, err := daemon.Start(context.Background(), c)
+	if !errors.Is(err, daemon.ErrPermissions) {
+		t.Fatalf("a start with a foreign group on a state directory: %v; want ErrPermissions", err)
+	}
+	want := p + " grants Modify (0x1301bf) to " + fsxtest.ForeignSID + " (unresolved)"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("the refusal is %q, want it to hold %q", err, want)
 	}
 }

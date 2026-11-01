@@ -194,7 +194,7 @@ func RunConformance(t *testing.T, newFS func(t *testing.T) fsx.FS) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []fsx.Entry{{Name: "a"}, {Name: "b", IsDir: true}, {Name: "m", IsDir: true}, {Name: "z"}}
+			want := []fsx.Entry{{Name: "a", IsRegular: true}, {Name: "b", IsDir: true}, {Name: "m", IsDir: true}, {Name: "z", IsRegular: true}}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("ReadDir = %v, want %v", got, want)
 			}
