@@ -42,7 +42,8 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/sidera-adapter-codex ./cm
 
 The package holds the manifest `sidera-adapter.json` and `bin/sidera-adapter-codex`
 (`.exe` for Windows); install it with `sidera adapter install`. The built-for
-platforms are `darwin/arm64`, `linux/amd64`, `linux/arm64` and `windows/amd64`. The
+platforms are `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64` and
+`windows/amd64`. The
 manifest is generated from the same constants `initialize` answers with, so they
 cannot disagree. Its version is the release version (`internal/release`).
 
