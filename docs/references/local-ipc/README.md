@@ -89,6 +89,12 @@ hash), and the node's private key in `keys/`. An agent that reads another
 session's token acts as that session; one that reads the key signs as the node.
 The agent runs as the owner, so file permissions do not hold it back either.
 
+On Windows the default data directory is `%LOCALAPPDATA%\Sidera`, made with a protected
+access list. A sandbox's elevated setup adds inheritable read entries for its own group
+to most first-level folders of `%USERPROFILE%`, `.sidera` included; a protected list does
+not take them from a folder under `AppData`, and a start that finds one anywhere in the
+tree refuses it (see [daemon](../daemon/README.md)).
+
 The rule for a sandbox is therefore: deny reading and writing `<SIDERA_HOME>`
 entirely, and allow only connecting to `<SIDERA_HOME>/run/agent.sock`. An example
 for Claude Code, with the home at `~/.sidera`:

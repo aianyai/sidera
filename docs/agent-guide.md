@@ -18,8 +18,12 @@ step fails twice.
 
 **One setting for every command.** Every `sidera` and `sidera-adapter-console`
 command, and the daemon, uses the data directory named by `--home`, then by
-`SIDERA_HOME`, then `~/.sidera`. If a command needs another directory, every command
-for that node needs the same `SIDERA_HOME`. A second node on the same machine needs
+`SIDERA_HOME`, then `~/.sidera` (on Windows `%LOCALAPPDATA%\Sidera`). If a command needs another
+directory, every command for that node needs the same `SIDERA_HOME`. A Windows machine
+that has a node in the former place, `%USERPROFILE%\.sidera`, and none in the new one
+is refused by every command that uses the directory, with the `Move-Item` command that
+moves it; nothing is moved for you, and `SIDERA_HOME` set to the former place keeps it
+there. A second node on the same machine needs
 its own `SIDERA_HOME` and its own port.
 
 ## Ask your owner before
@@ -63,7 +67,8 @@ conversation. Ask once, say what you will do and why, and wait.
     profile, changing the Windows user `PATH`, registering a scheduled task. Ask
     once before the first one and name the file or setting.
 
-Also ask before you delete anything under `~/.sidera` (the node's keys and state)
+Also ask before you delete anything under `~/.sidera` (on Windows `%LOCALAPPDATA%\Sidera`; the node's
+keys and state)
 and before you run `sidera identity retire`, which permanently destroys the node's
 identity. Before a data directory is deleted, the Codex App Server it started has to
 be ended too (step 4).
@@ -109,7 +114,7 @@ be ended too (step 4).
 4. Check that no node exists yet.
 
    ```sh
-   ls ~/.sidera          # Windows: dir $env:USERPROFILE\.sidera
+   ls ~/.sidera          # Windows: dir $env:LOCALAPPDATA\Sidera
    ```
 
    If it exists, a node is already here. Ask your owner before you go on, and do not
@@ -229,8 +234,8 @@ Run `sidera identity export-revocation` to export it.
 ```
 
 To use another port (step 1.3), run `sidera init --port <n>` instead. Record the
-`node <node-id>` value: it is this machine's identity. Check: `ls ~/.sidera` shows
-the directory. If `init` says the directory is already initialized, a node exists:
+`node <node-id>` value: it is this machine's identity. Check: `ls ~/.sidera` (Windows:
+`dir $env:LOCALAPPDATA\Sidera`) shows the directory. If `init` says the directory is already initialized, a node exists:
 stop (see step 1.4). `init` never overwrites.
 
 Tell your owner to back up the self-revocation (step 9 does it).
@@ -309,7 +314,7 @@ warning line (the self-revocation is not confirmed yet; step 9). If you get
 `daemon_not_running`, read the log you redirected to. Common causes: port 7744 in
 use (the error names the address and the daemon exits; free the port, or create
 the node again on another port as in step 1.3 if nothing is paired yet and your
-owner agrees to delete `~/.sidera`), or a socket path too long (use a shorter
+owner agrees to delete the data directory), or a socket path too long (use a shorter
 `SIDERA_HOME`).
 
 To stop the daemon, run `sidera daemon stop`. It leaves the **Codex App Server**
@@ -324,7 +329,7 @@ ps -axo pid,command | grep '[a]pp-server --listen unix://.*adapter-state'
 kill <pid>
 ```
 
-On Windows the process id is in `%USERPROFILE%\.sidera\adapter-state\codex\app-server.json`;
+On Windows the process id is in `%LOCALAPPDATA%\Sidera\adapter-state\codex\app-server.json`;
 run `Stop-Process -Id <pid>`.
 
 ## 5. Install and enable adapters
@@ -354,7 +359,7 @@ Expected: the console instance (and Claude, on macOS) shows a probe state of
 preset exists (step 6) it may show `failed`: the probe needs the command-line front
 end, which that sandbox does not offer. This is a known limit of the display, not a
 fault; do not try to fix it, and rely on step 10 to show that Codex works. For any
-other `failed`, read `~/.sidera/logs/adapter-<instance>.log`. A Codex `passed` does
+other `failed`, read `~/.sidera/logs/adapter-<instance>.log` (Windows: `%LOCALAPPDATA%\Sidera\logs\`). A Codex `passed` does
 not prove that `codex` is found; step 10 does.
 
 ## 6. Add a preset
@@ -433,7 +438,7 @@ What the `light` preset gives:
     set `GOCACHE` to a directory inside the workspace). Only modules already in the
     read-only module cache can be used.
   - It limits writes, not reads: the agent can still read outside `cwd`, the whole
-    data directory (`~/.sidera` or `SIDERA_HOME`) included: the node's identity key
+    data directory (`~/.sidera`, on Windows `%LOCALAPPDATA%\Sidera`, or `SIDERA_HOME`) included: the node's identity key
     (`keys/identity.key`) and the tokens of the other sessions on the node, and it
     could send them over Sidera. Tell your owner.
   - On Windows it depends on Codex's own sandbox working. Run
@@ -715,7 +720,7 @@ them there without your owner's yes (see "Ask your owner before").
     check `status <message-id>` for the delivery state and `peers` for `connected`,
     and tell your owner what you found.
 14. **Never send secrets** (tokens, keys, `SIDERA_TOKEN`, the contents of
-    `~/.sidera`) in a message. Under a Codex `workspace-write` preset you can read
+    the data directory) in a message. Under a Codex `workspace-write` preset you can read
     them; that is not permission to send them.
 
 ## An example, step by step

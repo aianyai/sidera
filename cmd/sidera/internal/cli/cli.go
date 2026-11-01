@@ -10,10 +10,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/mcp"
+	"github.com/aianyai/sidera/internal/datahome"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/daemon"
@@ -34,7 +36,7 @@ type Config struct {
 
 type command struct {
 	Config
-	home       string
+	home       string // the value of --home, as given
 	json       bool
 	help       bool
 	random     io.Reader
@@ -155,19 +157,19 @@ func (c *command) globals(args []string, local *flag.FlagSet) ([]string, error) 
 			}
 		}
 	}
-	if c.home == "" {
-		c.home = c.Getenv("SIDERA_HOME")
+	return out, nil
+}
+
+// dataDir is the data directory of the command: --home, then SIDERA_HOME, then
+// the default of the platform, made absolute. It is resolved by the commands that
+// use it and not before, so that version and help work on a machine whose default
+// is refused (see datahome.Resolve).
+func (c *command) dataDir() (string, error) {
+	home, err := datahome.Resolve(c.home, datahome.Host{OS: runtime.GOOS, Getenv: c.Getenv, UserHomeDir: os.UserHomeDir, Lstat: os.Lstat})
+	if err != nil {
+		return "", &failure{err.Error()} // the words are for the owner, as they are
 	}
-	if c.home == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		c.home = filepath.Join(home, ".sidera")
-	}
-	abs, err := filepath.Abs(c.home)
-	c.home = abs
-	return out, err
+	return home, nil
 }
 
 func flags(name string) *flag.FlagSet {
@@ -231,7 +233,11 @@ func (c *command) run(ctx context.Context, args []string) error {
 		}
 	}
 	probeToken := adapterproto.Token(c.Getenv("SIDERA_PROBE_TOKEN"))
-	client, err := agentapi.NewClient(agentapi.ClientConfig{Home: c.home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: probeToken})
+	home, err := c.dataDir()
+	if err != nil {
+		return err
+	}
+	client, err := agentapi.NewClient(agentapi.ClientConfig{Home: home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: probeToken})
 	if err != nil {
 		return err
 	}

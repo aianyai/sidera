@@ -19,9 +19,9 @@ a machine on your network.
 sidera init
 ```
 
-It creates the node's private data directory, `~/.sidera` (choose another place
-with `--home <directory>` or `SIDERA_HOME`), with the node's keys and default
-settings. It prints the node id:
+It creates the node's private data directory, `~/.sidera` (on Windows
+`%LOCALAPPDATA%\Sidera`; choose another place with `--home <directory>` or `SIDERA_HOME`),
+with the node's keys and default settings. It prints the node id:
 
 ```
 Back up your self-revocation outside this device.
@@ -39,7 +39,8 @@ wherever 7744 appears in this guide (see
 [Ports and the firewall](install.md#ports-and-the-firewall)).
 
 Every `sidera` and `sidera-adapter-console` command, and the daemon, uses the data
-directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera`. To run a second
+directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera` (on Windows
+`%LOCALAPPDATA%\Sidera`). To run a second
 node on the same machine, give it its own `SIDERA_HOME` and its own port, and set the
 same `SIDERA_HOME` for every command that talks to it.
 
@@ -231,7 +232,7 @@ What this gives, as measured on real machines:
   set `GOCACHE` to a directory inside the workspace. The module cache is read-only,
   so only modules already in it can be used.
 - `workspace-write` limits writes, not reads. The agent can still read files
-  outside `cwd`, the node's whole data directory (`~/.sidera` or `SIDERA_HOME`)
+  outside `cwd`, the node's whole data directory (`~/.sidera`, on Windows `%LOCALAPPDATA%\Sidera`, or `SIDERA_HOME`)
   included: the node's identity key (`keys/identity.key`) and the tokens of the
   other sessions on the node. It could send them over Sidera, so use this preset only
   where every node you trust may see them.

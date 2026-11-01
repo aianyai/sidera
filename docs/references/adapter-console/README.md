@@ -44,7 +44,9 @@ apply to what arrives.
 | `version` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version. |
 
 `--body-file -` reads standard input. Every client command takes `--home` (the data
-directory: the flag, then `SIDERA_HOME`, then `~/.sidera`, as for `sidera`) and
+directory: the flag, then `SIDERA_HOME`, then `~/.sidera` or on Windows
+`%LOCALAPPDATA%\Sidera`, by the same function as for `sidera`, `datahome.Resolve`, which also
+refuses the former Windows default when it is the only one there) and
 `--instance` (default `console`, the name `adapter enable console` gives). Flags may
 come before or after the positional argument.
 

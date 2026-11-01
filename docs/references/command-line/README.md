@@ -12,8 +12,17 @@ flag's value, even if spelled `--json` or `--home`. The command registers each
 local flag once; both global scanning and local parsing consult that same
 standard-library `FlagSet`, including its boolean-flag convention. `--` ends
 flag parsing.
-Data-directory selection is `--home`, then `SIDERA_HOME`, then `~/.sidera`;
-the selected directory is made absolute. Each command's help describes its
+Data-directory selection is `--home`, then `SIDERA_HOME`, then the default of the
+platform, `~/.sidera`, or `%LOCALAPPDATA%\Sidera` on Windows; the selected directory is
+made absolute. The rule is `datahome.Resolve`, shared with the console bridge, and a
+command resolves the directory only when it uses one, so `version` and `--help` work
+where the default is refused. On Windows the default is refused, with the
+`Move-Item` command that moves it, when `%LOCALAPPDATA%\Sidera` does not exist and the
+former default `%USERPROFILE%\.sidera` does: nothing is moved or made, because a node
+that started empty beside the one that holds the identity would be worse than none.
+`--home` and `SIDERA_HOME` are not subject to the check. The reason for the place is
+that a protected list on a folder of `%LOCALAPPDATA%` does not take the entries that a
+sandbox's setup adds to the first-level folders of `%USERPROFILE%`. Each command's help describes its
 arguments, purpose and one example.
 
 | Command | Purpose |

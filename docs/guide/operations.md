@@ -2,7 +2,7 @@
 
 How to check a node, upgrade it, change its adapters, keep its identity safe and
 fix what commonly goes wrong. Commands run on the machine whose node you manage,
-as the user that owns `~/.sidera`.
+as the user that owns the data directory (`~/.sidera`, on Windows `%LOCALAPPDATA%\Sidera`).
 
 ## Health checks
 
@@ -33,7 +33,8 @@ Notes:
 
 ### Logs and state
 
-Everything of a node is under its data directory, `~/.sidera` by default.
+Everything of a node is under its data directory, `~/.sidera` by default (on Windows
+`%LOCALAPPDATA%\Sidera`; the paths below are written for `~/.sidera`).
 
 | What | Where |
 | ---- | ----- |
@@ -46,7 +47,12 @@ Everything of a node is under its data directory, `~/.sidera` by default.
 
 When an agent does something unexpected, the transcript shows which tool it
 called and with what arguments. On Windows the data directory is
-`%USERPROFILE%\.sidera`.
+`%LOCALAPPDATA%\Sidera`: a protected folder that does not take on the
+access entries that other programs add to the folders of your profile. A node made by an earlier build kept it in
+`%USERPROFILE%\.sidera`; a command that finds the
+former directory and none in the new place refuses, and says how to move it:
+`Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"` with the daemon stopped. Nothing is
+moved for you. Setting `SIDERA_HOME` to the former directory keeps the node there.
 
 ## Upgrade
 
@@ -158,7 +164,7 @@ stays behind with nothing to use it. Ending it ends any turn that runs in it.
   kill <pid>
   ```
 
-- Windows: the process id is in `%USERPROFILE%\.sidera\adapter-state\codex\app-server.json`.
+- Windows: the process id is in `%LOCALAPPDATA%\Sidera\adapter-state\codex\app-server.json`.
   `Stop-Process -Id <pid>` ends that process only; helper processes it started can
   remain.
 
@@ -324,7 +330,7 @@ node is not told.
   was not measured. See
   [Presets and access](getting-started.md#the-management-interface-trusts-the-user-not-the-session).
 - A session's credential is visible to its own user: in Codex's logs and to anything
-  the agent prints. Other processes of the same user can read `~/.sidera`. Treat the
+  the agent prints. Other processes of the same user can read the data directory. Treat the
   account the node runs as the trust boundary.
 - The daemon's log files rotate to one older file; they are not kept indefinitely.
 - The command line cannot show which preset or directory an existing session

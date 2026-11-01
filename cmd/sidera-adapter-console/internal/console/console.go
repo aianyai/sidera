@@ -64,7 +64,7 @@ commands:
   serve                  the adapter role; the daemon starts it, a person does not
 
 flags of every client command:
-  --home <directory>     the node's data directory (default: $SIDERA_HOME, then ~/.sidera)
+  --home <directory>     the node's data directory (default: $SIDERA_HOME, then ~/.sidera, on Windows %LOCALAPPDATA%\Sidera)
   --instance <name>      the adapter instance (default: console)
 
 exit codes: 0 done, 1 failed, 2 usage, 3 not settled yet

@@ -33,7 +33,11 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, err := manageapi.NewClient(manageapi.ClientConfig{Home: c.home})
+	home, err := c.dataDir()
+	if err != nil {
+		return err
+	}
+	client, err := manageapi.NewClient(manageapi.ClientConfig{Home: home})
 	if err != nil {
 		return err
 	}

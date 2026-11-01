@@ -84,6 +84,12 @@ and Windows (amd64).
   The refusal names the path, the account or group by SID and name, and the rights.
   Sidera never changes a permission itself. An adapter's state directory is judged
   again before the adapter is launched.
+- **The Windows data directory is `%LOCALAPPDATA%\Sidera`.** It was
+  `%USERPROFILE%\.sidera`, whose first-level folder some sandboxes grant their own
+  group access to. macOS and Linux keep `~/.sidera`; `SIDERA_HOME` and `--home` choose
+  another directory everywhere. Nothing is moved automatically: a Windows machine with
+  the former directory and none in the new place gets a message with the
+  `Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"` command.
 
 ### Not yet
 

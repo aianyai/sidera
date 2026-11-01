@@ -24,7 +24,11 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 		if apiwire.FromError(err).Code != "daemon_not_running" {
 			return err
 		}
-		reader, err := fsx.OpenOS(c.home, c.random)
+		home, err := c.dataDir()
+		if err != nil {
+			return err
+		}
+		reader, err := fsx.OpenOS(home, c.random)
 		if err != nil {
 			return err
 		}

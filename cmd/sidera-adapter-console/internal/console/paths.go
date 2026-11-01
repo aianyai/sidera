@@ -1,9 +1,11 @@
 package console
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+
+	"github.com/aianyai/sidera/internal/datahome"
 )
 
 // stateDir is where the daemon keeps an instance's private state:
@@ -16,19 +18,9 @@ func stateDir(home, instance string) string {
 	return filepath.Join(home, "adapter-state", instance)
 }
 
-// resolveHome picks the data directory the way the sidera command does: the flag,
-// then SIDERA_HOME, then ~/.sidera, made absolute.
+// resolveHome picks the data directory the way the sidera command does, with the
+// same function: the flag, then SIDERA_HOME, then the default of the platform,
+// made absolute.
 func resolveHome(flagValue string, getenv func(string) string) (string, error) {
-	home := flagValue
-	if home == "" {
-		home = getenv("SIDERA_HOME")
-	}
-	if home == "" {
-		user, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("finding the data directory: %w", err)
-		}
-		home = filepath.Join(user, ".sidera")
-	}
-	return filepath.Abs(home)
+	return datahome.Resolve(flagValue, datahome.Host{OS: runtime.GOOS, Getenv: getenv, UserHomeDir: os.UserHomeDir, Lstat: os.Lstat})
 }

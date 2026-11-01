@@ -179,7 +179,7 @@ sidera daemon
 
 `sidera daemon` runs in the foreground and stops with Ctrl-C or
 `sidera daemon stop`. The node's own log is
-in `~/.sidera/logs/`. Sidera does not start itself at boot and does not install a
+in `~/.sidera/logs/` (on Windows `%LOCALAPPDATA%\Sidera\logs\`). Sidera does not start itself at boot and does not install a
 background service yet; the options below keep it running after you close the
 terminal. Stopping the daemon leaves the Codex App Server that the Codex adapter
 keeps running; see [Stop the daemon](operations.md#stop-the-daemon-and-the-codex-app-server).
@@ -192,7 +192,8 @@ you want to drive (`claude` or `codex`) are on the `PATH`. Start it from a login
 shell, or set the `PATH` yourself.
 
 Every `sidera` and `sidera-adapter-console` command, and the daemon, uses the data
-directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera`. A second node
+directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera` (on Windows
+`%LOCALAPPDATA%\Sidera`). A second node
 on the same machine needs its own data directory and its own port
 (`SIDERA_HOME=<directory> sidera init --port <n>`), and every command for it needs
 the same `SIDERA_HOME`.
@@ -211,7 +212,7 @@ A tmux session starts with the environment of the tmux server, not of the shell 
 type in, and the server may be much older than your shell. `-e PATH="$PATH"` hands
 the session your shell's `PATH` (tmux 3.2 or newer). Run the command in a shell
 where `command -v sidera` and the agent (`command -v claude codex`) print a path.
-When the node uses a data directory other than `~/.sidera`, add
+When the node uses a data directory other than the default, add
 `-e SIDERA_HOME=<directory>` as well.
 
 Check with `tmux ls` right away and again after a few seconds. If the session
