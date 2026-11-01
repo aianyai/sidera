@@ -18,16 +18,18 @@ import (
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Config supplies the process streams and environment. Run borrows them.
 type Config struct {
-	Stdin   io.ReadCloser
-	Stdout  io.WriteCloser
-	Stderr  io.Writer
-	Getenv  func(string) string
-	Version string
+	Stdin  io.ReadCloser
+	Stdout io.WriteCloser
+	Stderr io.Writer
+	Getenv func(string) string
+	// Release is what the program was built from.
+	Release release.Info
 }
 
 type command struct {
@@ -219,6 +221,8 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return c.local(ctx, args)
 	}
 	switch args[0] {
+	case "version":
+		return c.version(args[1:])
 	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust":
 		return c.manage(ctx, args)
 	case "status":
@@ -243,7 +247,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		}
 		return mcp.Run(ctx, mcp.Config{
 			Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr,
-			Agent: client, Version: c.Version, ProbeOnConnect: probeToken != "",
+			Agent: client, Version: c.Release.Version, ProbeOnConnect: probeToken != "",
 		})
 	case "status":
 		p, err := parse(c.arguments.flags, args[1:])

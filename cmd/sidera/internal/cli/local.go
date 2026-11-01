@@ -36,7 +36,7 @@ func (c *command) local(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := daemon.Config{Home: c.home, Clock: clk, Rand: c.random, TempRand: c.tempRandom, Observer: c.observer, Version: c.Version}
+	cfg := daemon.Config{Home: c.home, Clock: clk, Rand: c.random, TempRand: c.tempRandom, Observer: c.observer, Version: c.Release.Version}
 	if args[0] == "init" {
 		if err := config.ValidatePort(c.arguments.init.port); err != nil {
 			return usage("--port: " + err.Error())

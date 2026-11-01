@@ -83,3 +83,19 @@ func jsonText(v any) (string, error) {
 func printDeclaration(w *tabwriter.Writer, d agentapi.Declaration) {
 	fmt.Fprintf(w, "paused %t\nrefuse_multi_recipient %t\nrestrict_senders %t\naccept_from %s\nhidden_from_directory %t\n", d.Paused, d.RefuseMultiRecipient, d.RestrictSenders, strings.Join(d.AcceptFrom, ","), d.HiddenFromDirectory)
 }
+
+// version is `version`: what this program was built from, which needs no node.
+func (c *command) version(args []string) error {
+	p, err := parse(c.arguments.flags, args)
+	if err != nil {
+		return err
+	}
+	if len(p) != 0 {
+		return usage("version takes no arguments")
+	}
+	if c.json {
+		return c.encode(c.Release)
+	}
+	_, err = fmt.Fprintln(c.Stdout, c.Release.Describe("sidera"))
+	return err
+}

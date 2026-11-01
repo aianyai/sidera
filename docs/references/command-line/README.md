@@ -32,6 +32,7 @@ arguments, purpose and one example.
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
+| `version` | Print `sidera <version> (commit <commit>, go<version>)`, with `modified` after the commit when the build's checkout had uncommitted changes; with `--json`, the object `{"version", "commit", "modified", "go_version"}` (`commit` is left out when the build carries none). It needs no running node and takes no arguments. A release build reports the release version; a build without it reports `0.0.0-dev` (see [`internal/release`](../../../internal/release/README.md)). |
 | `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. |
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. |
