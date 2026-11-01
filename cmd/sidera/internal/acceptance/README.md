@@ -123,8 +123,12 @@ termination, unexpected exits, restart after kill, clock and quiet, setup
 ordinals, bootstrap replay after a committed preset's response is lost, trace
 rejection, and ordinary builds rejecting tagged controls while ignoring their
 environment variables. Their short roots are removed after each
-run. Domain recipes, offline damage and crash-walk binding are separate callers
-of this process fixture.
+run. By default, `TestMain` creates its unique root under the checkout's
+`.scratch/bb` (shared with the main checkout for worktrees). Set
+`SIDERA_ACCEPTANCE_ROOT` to an absolute path to an existing directory to choose
+a different parent. `TestMain` consumes and clears it before child builds or
+processes start; an invalid value fails the run. Domain recipes, offline damage
+and crash-walk binding are separate callers of this process fixture.
 
 Plain-build tests require precise `not_found/method_unknown` replies to all four
 test controls while public requests through the same management client succeed.

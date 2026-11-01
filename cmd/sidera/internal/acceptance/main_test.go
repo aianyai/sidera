@@ -22,12 +22,25 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	repo := filepath.Clean(filepath.Join(wd, "../../../.."))
-	scratch := filepath.Join(repo, ".scratch", "bb")
-	if filepath.Base(filepath.Dir(repo)) == ".worktrees" {
-		scratch = filepath.Join(filepath.Dir(repo), ".scratch", "bb")
-	}
-	if err = os.MkdirAll(scratch, 0o700); err != nil {
-		panic(err)
+	scratch, overridden := os.LookupEnv("SIDERA_ACCEPTANCE_ROOT")
+	if overridden {
+		if err := os.Unsetenv("SIDERA_ACCEPTANCE_ROOT"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		info, err := os.Stat(scratch)
+		if !filepath.IsAbs(scratch) || err != nil || !info.IsDir() {
+			fmt.Fprintln(os.Stderr, "SIDERA_ACCEPTANCE_ROOT must be an absolute path to an existing directory")
+			os.Exit(1)
+		}
+	} else {
+		scratch = filepath.Join(repo, ".scratch", "bb")
+		if filepath.Base(filepath.Dir(repo)) == ".worktrees" {
+			scratch = filepath.Join(filepath.Dir(repo), ".scratch", "bb")
+		}
+		if err = os.MkdirAll(scratch, 0o700); err != nil {
+			panic(err)
+		}
 	}
 	testRoot, err = os.MkdirTemp(scratch, "t")
 	if err != nil {
