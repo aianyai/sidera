@@ -34,7 +34,7 @@ config/
 
 | File | Written by | Version |
 | ---- | ---------- | ------- |
-| `node.json`, `presets.json`, `instances.json` | `init`; then only management requests (`node set`, `preset add|remove`, `adapter enable|disable`, `endpoint set`) | one integer each, from 1, for the whole file |
+| `node.json`, `presets.json`, `instances.json` | `init`; then only management requests (`node set`, `preset add|remove`, `adapter enable|config|disable`, `endpoint set`) | one integer each, from 1, for the whole file |
 | `network.json` | `init`; then only management requests (the listen list and the address book) | one integer, from 1, for the whole file |
 | `policy.json` | `init`; the owner by hand while the node is stopped (no command changes it yet) | one integer, from 1 |
 | `endpoint-ids/<instance>.json` | the daemon, when an instance's runtime endpoint or a direct endpoint key is first seen | none |
@@ -246,7 +246,13 @@ instance, because its stable endpoint ids belong to it.
 
 `enable` refuses an adapter that is not installed, an existing instance of
 another adapter, and an existing instance together with a configuration, which
-would be silently ignored or would replace the owner's.
+would be silently ignored or would replace the owner's. The owner replaces the
+configuration of an instance that exists with `adapter config`
+(`Config.SetInstanceConfig`): the document replaces `config` whole, is read as
+`enable` reads one (an object whose values are not `null`; `{}` clears it), works on an
+enabled instance and a disabled one, and changes nothing else of the instance. The
+values reach an adapter only in `adapter.start`, so the caller restarts a running
+instance; this layer only keeps them.
 
 `endpoints` holds the settings an owner gave single endpoints: `max_queue_s` and
 `backlog_limit`, each optional, at least one present. A field that is absent is
@@ -421,7 +427,7 @@ change writes nothing and builds no result.
 | `nothing_to_change` | a patch that names no setting |
 | `preset_exists`, `preset_unknown` | adding a name that is taken, removing one that is not there |
 | `peer_unknown` | removing a node that has no address in the book |
-| `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there; an existing instance given a configuration; an existing instance of another adapter |
+| `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
 | `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; upgrading an adapter with an enabled instance |
 | `endpoint_unknown` | a setting for an endpoint that is neither stable nor open |
 
@@ -480,7 +486,7 @@ Each is declared as data; the table of the program is built from
 | `node-set` | normal | `node` replace | `node.json` rename |
 | `network-set` | normal | `network-config` replace | `network.json` rename |
 | `presets-change` | normal | `presets` replace | `presets.json` rename |
-| `endpoint-set`, `adapter-enable`, `adapter-disable` | normal | `instances` replace | `instances.json` rename |
+| `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable` | normal | `instances` replace | `instances.json` rename |
 | `adapter-stage` | normal | `parent` mkdir (P, O, M), `stage` mkdir (P), `subdir` mkdir (P, O, M), `file` replace (P, M) | none: all preparation |
 | `adapter-unstage` | normal | `stage` discard (O), `version` discard (O), `parent` discard (O) | the first discard |
 | `adapter-gc` | recovery | `dir` discard (M) | the first discard |

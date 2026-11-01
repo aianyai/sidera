@@ -1164,10 +1164,15 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 	if err := manifest.WritePackage(filepath.Join(home, "package"), binary(t)); err != nil {
 		t.Fatal(err)
 	}
+	instanceConfig := filepath.Join(home, "instance-config.json")
+	if err := os.WriteFile(instanceConfig, []byte(`{"workspace":"/tmp/w"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{
 		{"adapter", "install", "package"},
 		{"adapter", "list"},
 		{"adapter", "enable", "cli-adapter", "--instance", "cli-instance"},
+		{"adapter", "config", "cli-instance", "--config", instanceConfig},
 		{"adapter", "disable", "cli-instance"},
 		{"endpoint", "list"},
 		{"alerts", "list", "--all"},

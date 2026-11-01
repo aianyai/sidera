@@ -18,6 +18,7 @@ var helpEntries = map[string]helpEntry{
 	"adapter install":            {"adapter install <package-directory>", "Install an adapter from a local directory, resolved to an absolute path.", "sidera adapter install ./package"},
 	"adapter list":               {"adapter list", "List installed adapters, instances and probes.", "sidera adapter list --json"},
 	"adapter enable":             {"adapter enable <adapter-id> [--instance <name>] [--config <file|->] [--expected-version <n>]", "Enable an adapter instance, creating it if needed.", "sidera adapter enable claude --instance work"},
+	"adapter config":             {"adapter config <instance> --config <file|-> [--expected-version <n>]", "Replace the configuration of an instance, enabled or not; a running instance is restarted to take it.", "sidera adapter config codex --config codex.json"},
 	"adapter disable":            {"adapter disable <instance> [--expected-version <n>]", "Disable an instance and close its endpoints.", "sidera adapter disable work"},
 	"endpoint list":              {"endpoint list [--instance <name>]", "List this node's endpoints, including closed endpoints.", "sidera endpoint list --instance work --json"},
 	"endpoint close":             {"endpoint close <address>", "Close an endpoint.", "sidera endpoint close <address>"},
@@ -54,7 +55,7 @@ var helpEntries = map[string]helpEntry{
 	"probe":                      {"probe", "Present SIDERA_PROBE_TOKEN for the CLI front end.", "sidera probe --json"},
 }
 
-var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "mcp", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "network show", "network address set", "network address remove", "network listen set", "trust expect", "trust forget", "trust reject", "trust request", "trust list", "trust remove", "trust clear", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
+var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "mcp", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter config", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "network show", "network address set", "network address remove", "network listen set", "trust expect", "trust forget", "trust reject", "trust request", "trust list", "trust remove", "trust clear", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
 
 func (c *command) printHelp(args []string) error {
 	if len(args) == 0 {

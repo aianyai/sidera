@@ -59,6 +59,11 @@ func changes(t testing.TB) []change {
 			i, err := c.EnableAdapter(req, "second", "example", nil, open, result(&seen, `{"changed":"instances"}`))
 			return i.Version, i.LastOperation, err
 		}},
+		{"adapter config", config.InstancesPath, 4, func(c *config.Config, req config.Request, open config.OpenEndpoints) (admin.Version, *config.Operation, error) {
+			var seen []config.Instances
+			i, err := c.SetInstanceConfig(req, "example", []byte(`{"workspace": "/tmp/w"}`), open, result(&seen, `{"changed":"instances"}`))
+			return i.Version, i.LastOperation, err
+		}},
 		{"adapter disable", config.InstancesPath, 4, func(c *config.Config, req config.Request, open config.OpenEndpoints) (admin.Version, *config.Operation, error) {
 			var seen []config.Instances
 			i, err := c.DisableAdapter(req, "example", open, result(&seen, `{"changed":"instances"}`))

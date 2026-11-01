@@ -27,7 +27,7 @@ func TestTransactionsAreValid(t *testing.T) {
 	}
 	want := map[string]txn.Kind{
 		"node-set": txn.Normal, "network-set": txn.Normal, "presets-change": txn.Normal, "endpoint-set": txn.Normal,
-		"adapter-enable": txn.Normal, "adapter-disable": txn.Normal,
+		"adapter-enable": txn.Normal, "adapter-config": txn.Normal, "adapter-disable": txn.Normal,
 		"adapter-stage": txn.Normal, "adapter-unstage": txn.Normal,
 		"adapter-gc": txn.Recovery,
 	}
@@ -76,9 +76,11 @@ func TestEveryDeclaredCrashPointIsReached(t *testing.T) {
 	must(err)
 	_, err = c.SetEndpointSettings(request(4, 5), "second", mustEndpoint(t, ep4Text), []byte(`{"backlog_limit": 3}`), open, result(new([]config.Instances), `{}`))
 	must(err)
-	_, err = c.DisableAdapter(request(5, 6), "second", open, result(new([]config.Instances), `{}`))
+	_, err = c.SetInstanceConfig(request(8, 6), "second", []byte(`{"workspace": "/tmp/w"}`), open, result(new([]config.Instances), `{}`))
 	must(err)
-	_, err = c.DisableAdapter(request(6, 7), "example", open, result(new([]config.Instances), `{}`))
+	_, err = c.DisableAdapter(request(5, 7), "second", open, result(new([]config.Instances), `{}`))
+	must(err)
+	_, err = c.DisableAdapter(request(6, 8), "example", open, result(new([]config.Instances), `{}`))
 	must(err)
 
 	// A first installation that is refused after staging: parent, stage, subdir,

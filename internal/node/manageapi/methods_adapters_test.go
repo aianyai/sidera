@@ -94,6 +94,9 @@ func TestTheParamsOfTheMethodsForAdaptersAndPresetsAreReadStrictly(t *testing.T)
 		{"no adapter to enable", "adapters.enable", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.adapter"},
 		{"an instance that is empty", "adapters.enable", `{"operation_id":"` + id + `","expected_version":1,"params":{"adapter":"relay","instance":""}}`, "params.instance"},
 		{"a configuration that is null", "adapters.enable", `{"operation_id":"` + id + `","expected_version":1,"params":{"adapter":"relay","config":null}}`, "params.config"},
+		{"no instance to configure", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"config":{}}}`, "params.instance"},
+		{"no configuration", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"instance":"relay"}}`, "params.config"},
+		{"a configuration that is null", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"instance":"relay","config":null}}`, "params.config"},
 		{"no instance to disable", "adapters.disable", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.instance"},
 		{"a listing that takes a member", "adapters.list", `{"params":{"all":true}}`, "params.all"},
 		{"a preset without a name", "presets.add", `{"operation_id":"` + id + `","expected_version":1,"params":{"preset":{"local_sources":"allow"}}}`, "params.name"},
@@ -166,6 +169,14 @@ func TestTheCommandsOfAdaptersAndPresets(t *testing.T) {
 	cfg1 := send("adapters.enable", `{"operation_id":"`+opID(5)+`","expected_version":3,"params":{"adapter":"relay","instance":"third","config":{"b":1,"a":"x"}}}`)
 	cfg2 := send("adapters.enable", `{"operation_id":"`+opID(6)+`","expected_version":3,"params":{"config":{ "a" : "x" , "b" : 1 },"instance":"third","adapter":"relay"}}`)
 	if cfg1.Fingerprint != cfg2.Fingerprint {
+		t.Error("the same configuration written in another order has another fingerprint")
+	}
+	cfg3 := send("adapters.config", `{"operation_id":"`+opID(10)+`","expected_version":3,"params":{"instance":"relay","config":{"b":1,"a":"x"}}}`)
+	cfg4 := send("adapters.config", `{"operation_id":"`+opID(11)+`","expected_version":3,"params":{"config":{ "a" : "x" , "b" : 1 },"instance":"relay"}}`)
+	if cfg3.Name != "adapters.config" || cfg3.Expected != 3 || cfg3.Operation.Admin().Kind != admin.OpEnableAdapter {
+		t.Errorf("command %+v", cfg3)
+	}
+	if cfg3.Fingerprint != cfg4.Fingerprint {
 		t.Error("the same configuration written in another order has another fingerprint")
 	}
 	disable := send("adapters.disable", `{"operation_id":"`+opID(7)+`","expected_version":5,"params":{"instance":"relay"}}`)

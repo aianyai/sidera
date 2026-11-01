@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -261,6 +262,53 @@ func (e *Engine) instanceClosing(instance string) (ident.EndpointID, bool) {
 		panic("engine: an endpoint identifier of the view does not parse: " + err.Error())
 	}
 	return id, true
+}
+
+// restartInstance stops the running instance of the adapter and starts it again, so
+// that the new process is taken on with the configuration, presets and package as
+// they are now. The engine marks the instance offline as it does for a connection
+// that ended, since the host reports nothing for a stop; the sessions the adapter
+// holds are attached again by the new adapter.start. The instance must be enabled.
+func (e *Engine) restartInstance(now time.Time, instance string) {
+	if err := e.gone(now, instance, adapterhost.GoneConnectionEnded); err != nil {
+		e.log.Warn("an instance could not be marked offline for its restart", "instance", instance, "error", err.Error())
+	}
+	e.d.Adapters.Stop(instance)
+	e.d.Adapters.EnsureRunning(instance)
+}
+
+// ConfigureAdapterOp is the operation that replaces the configuration values of an
+// instance with the ones the owner gives. It is judged as enabling an instance, the
+// operation that decides whether this machine runs an adapter: the values can name
+// the program the adapter runs, so replacing them is no weaker than enabling. The
+// instance may be enabled or not; a running one is stopped and started again after
+// the commit, since an adapter reads its configuration only in adapter.start, and
+// one that is not enabled reads the new values when it is. The version is that of
+// the instances, checked inside the change, the operation and its result kept in the
+// same replacement. encode makes the result; it runs in the loop and must not wait.
+func ConfigureAdapterOp(instance string, instanceConfig []byte, encode func(InstanceChange) ([]byte, error)) Operation {
+	return &configureAdapterOp{instance: instance, config: instanceConfig, encode: encode}
+}
+
+type configureAdapterOp struct {
+	instance string
+	config   []byte
+	encode   func(InstanceChange) ([]byte, error)
+}
+
+func (o *configureAdapterOp) Admin() admin.Operation {
+	return admin.Operation{Kind: admin.OpEnableAdapter}
+}
+func (o *configureAdapterOp) stops() bool { return false }
+func (o *configureAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
+	after, err := e.d.Config.SetInstanceConfig(x.configRequest(), o.instance, o.config, e.endpointOpen, instanceResult(o.encode, o.instance, x))
+	if err != nil {
+		return nil, err
+	}
+	if e.d.Adapters != nil && after.Items[o.instance].Enabled {
+		e.restartInstance(x.now, o.instance)
+	}
+	return after.LastOperation.Result, nil
 }
 
 // DisableAdapterOp is the operation that disables an instance: the instance stays

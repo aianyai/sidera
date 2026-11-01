@@ -120,6 +120,8 @@ type Config interface {
 	RemovePreset(req config.Request, name string, result config.ResultFunc[config.Presets]) (config.Presets, error)
 	EnableAdapter(req config.Request, instance, adapter string, instanceConfig []byte,
 		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+	SetInstanceConfig(req config.Request, instance string, instanceConfig []byte,
+		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
 	DisableAdapter(req config.Request, instance string, open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
 
 	// StageAdapter and Unstage copy a package next to the versions and drop what an

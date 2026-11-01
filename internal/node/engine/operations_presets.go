@@ -7,7 +7,6 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
-	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
 )
 
@@ -49,11 +48,7 @@ func (e *Engine) presetsChanged(now time.Time) {
 		if adm, admitted := e.admission(instance); admitted && !adm.Declares(adapterreg.KindRuntime) {
 			continue // a direct-only adapter is given no presets
 		}
-		if err := e.gone(now, instance, adapterhost.GoneConnectionEnded); err != nil {
-			e.log.Warn("an instance could not be marked offline for its restart", "instance", instance, "error", err.Error())
-		}
-		e.d.Adapters.Stop(instance)
-		e.d.Adapters.EnsureRunning(instance)
+		e.restartInstance(now, instance)
 	}
 }
 

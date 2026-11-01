@@ -371,7 +371,7 @@ func fromChange(c *config.ChangeError) *Error {
 	case config.ChangeInstanceUnknown:
 		return New(CategoryNotFound, "instance_unknown", "there is no adapter instance of this name").named(c)
 	case config.ChangeInstanceExists:
-		return New(CategoryConflict, "instance_exists", "an instance of this name exists; its configuration is not replaced").named(c)
+		return New(CategoryConflict, "instance_exists", "an instance of this name exists; enabling does not replace its configuration, adapters.config does").named(c)
 	case config.ChangeInstanceAdapterMismatch:
 		return New(CategoryConflict, "instance_adapter_mismatch", "the instance belongs to another adapter").named(c)
 	case config.ChangeEndpointUnknown:

@@ -186,6 +186,36 @@ var adaptersEnable = &method{
 	},
 }
 
+// adapters.config: replace the configuration of an instance, enabled or not, with
+// the document in `config`. It is the one way to change the configuration of an
+// instance that exists, since `adapters.enable` takes none for one. The values are
+// `config`'s to read; this layer carries them. It is authorized as enabling, which it
+// resembles in what it can make this machine run, and a running instance is
+// restarted to take the values.
+var adaptersConfig = &method{
+	name: "adapters.config", op: admin.Operation{Kind: admin.OpEnableAdapter},
+	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			Instance string          `json:"instance"`
+			Config   json.RawMessage `json:"config"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		if err := requireText(p.Instance, "params.instance"); err != nil {
+			return nil, err
+		}
+		if len(p.Config) == 0 {
+			return nil, apiwire.Malformed("an instance is configured with a JSON object", "params.config")
+		}
+		if err := refuseNull(p.Config, "params.config"); err != nil {
+			return nil, err
+		}
+		p.Config = canonicalSettings(p.Config)
+		return &plan{canonical: canonical(p), operation: engine.ConfigureAdapterOp(p.Instance, p.Config, instanceResult)}, nil
+	},
+}
+
 // adapters.disable: disable an instance. It stays, with its settings and endpoint
 // ids, so that enabling it again finds the same endpoints.
 var adaptersDisable = &method{

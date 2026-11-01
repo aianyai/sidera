@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -72,6 +73,72 @@ func TestEnableAdapterCreatesOrEnables(t *testing.T) {
 			}
 			var seen []config.Instances
 			_, err := c.EnableAdapter(request(1, 4), r.instance, r.adapter, cfg, nil, result(&seen, `{}`))
+			if ce := changeReason(t, err); ce.Reason != r.want {
+				t.Errorf("reason = %v, want %v (%v)", ce.Reason, r.want, err)
+			}
+			if !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
+				t.Error("a refused change wrote to the disk")
+			}
+		})
+	}
+}
+
+// Replacing the configuration of an instance replaces it whole, whether the instance
+// is enabled or not, and leaves everything else of the instance as it was.
+func TestSetInstanceConfigReplacesTheConfigurationOnly(t *testing.T) {
+	var seen []config.Instances
+	for _, r := range []struct {
+		name     string
+		disable  bool
+		document string
+		want     map[string]string
+	}{
+		{"an enabled instance", false, `{"codex_program": "C:\\codex.exe"}`, map[string]string{"codex_program": `"C:\\codex.exe"`}},
+		{"a disabled instance", true, `{"codex_program": "x"}`, map[string]string{"codex_program": `"x"`}},
+		{"an empty object clears it", false, `{}`, map[string]string{}},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			_, c := loaded(t)
+			before := c.Instances().Items["example"]
+			version := admin.Version(4)
+			if r.disable {
+				if _, err := c.DisableAdapter(request(1, version), "example", nil, result(&seen, `{}`)); err != nil {
+					t.Fatal(err)
+				}
+				version++
+			}
+			after, err := c.SetInstanceConfig(request(2, version), "example", []byte(r.document), nil, result(&seen, `{}`))
+			if err != nil {
+				t.Fatalf("SetInstanceConfig: %v", err)
+			}
+			in := after.Items["example"]
+			got := map[string]string{}
+			for k, v := range in.Config {
+				got[k] = string(v)
+			}
+			if !reflect.DeepEqual(got, r.want) {
+				t.Errorf("config = %v, want %v: the old values must not survive", got, r.want)
+			}
+			if in.Enabled == r.disable || in.Adapter != before.Adapter || !reflect.DeepEqual(in.Endpoints, before.Endpoints) {
+				t.Errorf("instance = %+v: only the configuration changes (was %+v)", in, before)
+			}
+			if after.Version != version+1 {
+				t.Errorf("version = %d, want %d", after.Version, version+1)
+			}
+		})
+	}
+	for _, r := range []struct {
+		name, instance, document string
+		want                     config.ChangeReason
+	}{
+		{"an instance that does not exist", "nobody", `{"a": 1}`, config.ChangeInstanceUnknown},
+		{"a configuration that is not an object", "example", `[1]`, config.ChangeInvalid},
+		{"a configuration value that is null", "example", `{"k": null}`, config.ChangeInvalid},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			rg, c := loaded(t)
+			before := snapshot(t, rg.mem)
+			_, err := c.SetInstanceConfig(request(1, 4), r.instance, []byte(r.document), nil, result(&seen, `{}`))
 			if ce := changeReason(t, err); ce.Reason != r.want {
 				t.Errorf("reason = %v, want %v (%v)", ce.Reason, r.want, err)
 			}

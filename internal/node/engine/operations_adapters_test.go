@@ -256,6 +256,13 @@ func disableCommand(b byte, content string, expected admin.Version, instance str
 	}
 }
 
+func configureCommand(b byte, content string, expected admin.Version, instance, doc string) engine.ManagementCommand {
+	return engine.ManagementCommand{
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.config",
+		Operation: engine.ConfigureAdapterOp(instance, []byte(doc), encodeInstance),
+	}
+}
+
 func encodePreset(c engine.PresetChange) ([]byte, error) {
 	return json.Marshal(struct {
 		Name    string `json:"name"`
@@ -1141,6 +1148,58 @@ func TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun(t *testing.T) {
 				t.Errorf("the new adapter.start carries the presets %v, want %v", names, tc.want)
 			}
 		})
+	}
+}
+
+// Replacing the configuration of an instance restarts it when it runs, so that the
+// next adapter.start carries the new values, and only records it when the instance
+// is not enabled, which reads the values when it is enabled.
+func TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	r := newRig(t, 10, withAdapters(host))
+	r.enableInstance("agent", `{"program":"old"}`)
+	r.enableInstance("idle", `{"program":"old"}`)
+	r.disableInstance("idle")
+	e := r.start()
+	rt := runtimeAdmission(t, 0, adapterproto.FrontendCLI)
+	if _, err := admitFull(ctx, e, "agent", rt); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AdapterStarted(ctx, "agent", adapterproto.StartResult{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Execute(ctx, configureCommand(70, "idle", r.cfg.Instances().Version, "idle", `{"program":"new"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := host.asks(); len(got) != 0 {
+		t.Errorf("the host was asked for %v for an instance that is not enabled", got)
+	}
+	if got := string(r.cfg.Instances().Items["idle"].Config["program"]); got != `"new"` {
+		t.Errorf("the configuration of the disabled instance is %s", got)
+	}
+
+	if _, err := e.Execute(ctx, configureCommand(71, "agent", r.cfg.Instances().Version, "agent", `{"program":"new"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent", "run:agent"}) {
+		t.Errorf("the host was asked for %v, want agent stopped and started again, and nothing else", got)
+	}
+	if v, err := e.Adapter(ctx, "agent"); err != nil || v.Online {
+		t.Errorf("the instance after: %+v, %v; want it offline until the new adapter is taken on", v, err)
+	}
+	got, err := admitFull(ctx, e, "agent", rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Config["program"]) != `"new"` {
+		t.Errorf("the new adapter.start carries %v, want the new values", got.Config)
+	}
+
+	_, err = e.Execute(ctx, configureCommand(72, "ghost", r.cfg.Instances().Version, "ghost", `{}`))
+	if reason := changeReason(t, err); reason != config.ChangeInstanceUnknown {
+		t.Errorf("an instance that does not exist: %v", reason)
 	}
 }
 

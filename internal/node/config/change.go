@@ -236,13 +236,9 @@ func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceCo
 	}
 	var cfg map[string]json.RawMessage
 	if instanceConfig != nil {
-		var raw map[string]json.RawMessage
-		if err := decodeStrict(instanceConfig, &raw); err != nil {
-			return Instances{}, invalidChange(under("config", err))
-		}
 		var err error
-		if cfg, err = checkValues(raw); err != nil {
-			return Instances{}, invalidChange(under("config", err))
+		if cfg, err = decodeInstanceConfig(instanceConfig); err != nil {
+			return Instances{}, err
 		}
 	}
 	existing, exists := st.instances.Items[instance]
@@ -270,6 +266,53 @@ func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceCo
 		next.Items[instance] = Instance{Adapter: adapter, Enabled: true, Config: cfg}
 	}
 	return c.commitInstances(adapterEnable, req, next, open, result)
+}
+
+// decodeInstanceConfig reads the configuration values of an instance, a JSON
+// object, as `enable` and `config` take them. Only their shape is checked here:
+// what a value may be is the manifest's to say, and is judged when the instance
+// starts.
+func decodeInstanceConfig(data []byte) (map[string]json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := decodeStrict(data, &raw); err != nil {
+		return nil, invalidChange(under("config", err))
+	}
+	cfg, err := checkValues(raw)
+	if err != nil {
+		return nil, invalidChange(under("config", err))
+	}
+	return cfg, nil
+}
+
+// SetInstanceConfig replaces the configuration of the instance named instance with
+// instanceConfig, a JSON object read as `enable` reads one, so an empty object
+// clears it. The instance stays as it is otherwise, enabled or not, with its
+// endpoint settings and its stable endpoint ids. The adapter reads the values when
+// it starts, so a running instance takes them only when the caller restarts it.
+func (c *Config) SetInstanceConfig(req Request, instance string, instanceConfig []byte, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	st := c.read()
+	if err := checkVersion(req, st.instances.Version); err != nil {
+		return Instances{}, err
+	}
+	if _, ok := st.instances.Items[instance]; !ok {
+		return Instances{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
+	}
+	cfg, err := decodeInstanceConfig(instanceConfig)
+	if err != nil {
+		return Instances{}, err
+	}
+	next := cloneInstances(st.instances)
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Instances{}, err
+	}
+	next.Version = version
+	in := next.Items[instance]
+	in.Config = cfg
+	next.Items[instance] = in
+	return c.commitInstances(adapterConfig, req, next, open, result)
 }
 
 // DisableAdapter disables the instance named instance. The instance stays, with

@@ -49,6 +49,7 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 		{"adapters.install", admin.OpInstallAdapter, true, false},
 		{"adapters.list", admin.OpRead, false, false},
 		{"adapters.enable", admin.OpEnableAdapter, true, true},
+		{"adapters.config", admin.OpEnableAdapter, true, true},
 		{"adapters.disable", admin.OpDisableAdapter, true, true},
 		{"presets.list", admin.OpRead, false, false},
 		{"presets.add", admin.OpChangePreset, true, true},

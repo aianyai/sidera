@@ -211,6 +211,15 @@ func crashCases(t *testing.T) []crashCase {
 			state: versionState(func(c *config.Config) admin.Version { return c.Instances().Version }, 4),
 		},
 		{
+			name: "adapter-config",
+			disk: treeDisk,
+			run: func(t *testing.T, rg *rig, c *config.Config) error {
+				_, err := c.SetInstanceConfig(request(1, 4), "example", []byte(`{"workspace": "/tmp/w"}`), isOpen(t), result(new([]config.Instances), `{"ok":true}`))
+				return err
+			},
+			state: versionState(func(c *config.Config) admin.Version { return c.Instances().Version }, 4),
+		},
+		{
 			name: "adapter-disable",
 			disk: treeDisk,
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
