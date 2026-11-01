@@ -22,11 +22,11 @@ func TestSessionLifecycleRequiresItsOwnNativeClosure(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newBindings()
-			b.Sessions.Session = func(e scenario.Env, endpoint string) fakeagent.Agent {
+			b.Sessions.Session = func(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
 				if wrapped, ok := e.(unrelatedClosedNativeEnv); ok {
 					e = wrapped.H
 				}
-				return e.(*harness.H).MustSession(endpoint)
+				return e.(*harness.H).Session(endpoint)
 			}
 			for _, r := range recipes.New(b).Scripts {
 				if r.Script.Name != "session-lifecycle" {

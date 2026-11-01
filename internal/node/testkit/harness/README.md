@@ -346,7 +346,7 @@ its stream needs.
 ## Tests
 
 `walk_internal_test.go` checks that a selected runtime cutoff releases and joins
-residual record reads, and that abnormal script-worker exits reach the backend's
+residual record reads and uncached session acquisitions, and that abnormal script-worker exits reach the backend's
 error result both with and without a held target. `harness_test.go` covers down-node
 errors for uncached session acquisition, record reads and signature verification
 before Start and after Stop/Kill, plus invalid and absent session acquisition;

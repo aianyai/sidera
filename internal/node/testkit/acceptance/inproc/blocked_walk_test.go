@@ -59,7 +59,7 @@ func TestBlockedSessionInputsSurviveAdapterRestarts(t *testing.T) {
 func TestBlockedSessionClearedInputsStayClearedAfterRestart(t *testing.T) {
 	b := newBindings()
 	actualSession := b.Sessions.Session
-	b.Sessions.Session = func(e scenario.Env, endpoint string) fakeagent.Agent {
+	b.Sessions.Session = func(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
 		if wrapped, ok := e.(clearedInputsEnv); ok {
 			e = wrapped.Env
 		}

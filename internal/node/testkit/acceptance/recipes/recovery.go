@@ -211,7 +211,11 @@ func recoveryDrain(b Bindings, runtime bool, evidence *DeliveryEvidence) func(sc
 						continue
 					}
 					seen[endpoint] = true
-					if err := evidence.RecvAndAck(e, b.Sessions.Session(e, endpoint)); err != nil {
+					agent, err := b.Sessions.Session(e, endpoint)
+					if err != nil {
+						return err
+					}
+					if err := evidence.RecvAndAck(e, agent); err != nil {
 						return err
 					}
 					controller, err := e.Runtime()

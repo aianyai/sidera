@@ -34,7 +34,11 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 		if readInitialCompleted {
 			return nil
 		}
-		if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+		agent, err := b.Sessions.Session(e, session.endpoint)
+		if err != nil {
+			return err
+		}
+		if err := facts.RecvAndAck(e, agent); err != nil {
 			return err
 		}
 		readInitialCompleted = true
@@ -60,7 +64,11 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 		session.create(b, initial), scenario.Advance("creation-pull", time.Minute), session.resolve(b, initial, facts),
 		readInitial,
 		{Name: "send-from-session", Do: func(e scenario.Env) error {
-			r, err := b.Sessions.Session(e, session.endpoint).Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("sender")}, Body: "Keep my sender sequence until every source record is swept."})
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			r, err := agent.Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("sender")}, Body: "Keep my sender sequence until every source record is swept."})
 			if err == nil {
 				facts.Accepted(r, "Keep my sender sequence until every source record is swept.")
 			}

@@ -68,7 +68,11 @@ func registrationRecipe(b Bindings) ScriptRecipe {
 		session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "declare", Do: func(e scenario.Env) error {
 			hidden := true
-			err := b.Sessions.Session(e, session.endpoint).Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			err = agent.Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
 			declared = err == nil
 			return err
 		}},
@@ -79,7 +83,11 @@ func registrationRecipe(b Bindings) ScriptRecipe {
 		if !declared {
 			return nil
 		}
-		me, err := b.Sessions.Session(e, session.endpoint).Me(e.Ctx())
+		agent, err := b.Sessions.Session(e, session.endpoint)
+		if err != nil {
+			return err
+		}
+		me, err := agent.Me(e.Ctx())
 		if err != nil {
 			return err
 		}
@@ -145,13 +153,23 @@ func secondCheckRecipe(b Bindings) ScriptRecipe {
 		{Name: "narrow", Do: func(e scenario.Env) error {
 			restrict := true
 			allowed := []string{session.address}
-			err := b.Sessions.Session(e, session.endpoint).Declare(e.Ctx(), fakeagent.DeclareInput{RestrictSenders: &restrict, AcceptFrom: &allowed})
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			err = agent.Declare(e.Ctx(), fakeagent.DeclareInput{RestrictSenders: &restrict, AcceptFrom: &allowed})
 			if err == nil {
 				facts.RequireFeedback(message, session.address, delivery.KindRejected)
 			}
 			return err
 		}},
-		{Name: "second-check", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
+		{Name: "second-check", Do: func(e scenario.Env) error {
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			return facts.RecvAndAck(e, agent)
+		}},
 	}}, Drain: session.drain(b, "", facts), Check: facts.Check}
 }
 

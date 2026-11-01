@@ -197,7 +197,10 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 	}
 	sender := e.Agent("sender")
 	endpoint := n.createSession(e, sender)
-	a := sessionAgentFor(e, endpoint)
+	a, err := sessionAgentFor(e, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
 	me, err := a.Me(ctx)
 	if err != nil || me.Kind != "session" {
 		t.Fatalf("plain CLI session identity: %+v %v", me, err)

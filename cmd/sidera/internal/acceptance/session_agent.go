@@ -26,14 +26,14 @@ type sessionAgent struct {
 
 var _ fakeagent.Agent = (*sessionAgent)(nil)
 
-func sessionAgentFor(e scenario.Env, endpoint string) fakeagent.Agent {
+func sessionAgentFor(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
 	env := envFrom(e)
 	if a, ok := env.sessions[endpoint]; ok {
-		return a
+		return a, nil
 	}
 	w, err := env.fixture.files.Open("agent/"+endpoint, 0, env.fixture.Now)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	env.fixture.agentWriters = append(env.fixture.agentWriters, w)
 	a := fakeagent.Recording(&sessionAgent{env: env, endpoint: endpoint}, w, endpoint, fakeagent.RecordingOptions{ModelSaw: true, Feedback: func(from, _ string) (string, bool) {
@@ -41,7 +41,7 @@ func sessionAgentFor(e scenario.Env, endpoint string) fakeagent.Agent {
 		return "notice", err == nil && address.Node == env.node && address.Endpoint == ident.SystemEndpoint()
 	}})
 	env.sessions[endpoint] = a
-	return a
+	return a, nil
 }
 
 // sessionReference reads the fake runtime's published ProcessInfo for current

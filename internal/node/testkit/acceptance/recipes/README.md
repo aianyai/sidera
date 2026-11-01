@@ -60,7 +60,9 @@ reached. Their fresh main-point counts are 7, 52 and 100 respectively, with fixe
 budgets of 11, 78 and 150.
 
 Session recipes bind `SessionOps` for runtime addresses by explicit instance,
-session agents, checkpoint writes and final closed-session checks. They exercise
+session agents, checkpoint writes and final closed-session checks. `Session` returns
+an Agent and an acquisition error; every step, drain and check propagates that
+error before using the Agent, so an interrupted acquisition unwinds normally. They exercise
 creation with an initial body, failed and expired creation, interrupt, prompting,
 checkpoint removal on close and blocked/recovered notices. External runtime and
 agent evidence proves visibility; the final closed-session audit alone reads the

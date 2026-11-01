@@ -385,7 +385,10 @@ on the replacement.
 `newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
 injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.
 They preserve a retained generation error before reporting missing capability.
-`newSessionOps` composes these callbacks with a real CLI session Agent. Each
+`newSessionOps` composes these callbacks with a real CLI session Agent. Session
+acquisition returns the cached proxy or creates its recording writer, propagating
+a writer error without an Agent. Runtime lookup and CLI I/O remain deferred to
+the Agent operation. Each
 Agent call first checks the retained environment error, resolves the requested
 open session and instance through public `endpoints.list`, and reads the fake
 runtime's published `ProcessInfo` from that instance's caller-owned runtime

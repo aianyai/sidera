@@ -236,6 +236,8 @@ recovers transactions nor writes node state. The binary callbacks for source
 update, lost-body retention and creation-settlement filesystem faults explicitly
 return `scenario.ErrNotAvailable`; capability selection excludes those recipes.
 `newSessionOps` supplies a real CLI session Agent alongside these callbacks.
+Acquisition returns an Agent and an error, propagating recording-writer failures
+without an Agent; runtime lookup and CLI I/O remain deferred to Agent operations.
 Before every call its private proxy checks the retained generation error, resolves
 the open session's instance from public `endpoints.list`, and matches the fake
 runtime's published `ProcessInfo` with exactly one current control connection by
@@ -574,6 +576,12 @@ coverage dimensions.
   Returning a cached Agent needs no current process; its operations still check
   the current generation. `H.MustSession` delegates to the same implementation
   and fails the test on error, for callers on the test goroutine only.
+  `recipes.SessionOps.Session` carries the same fallible acquisition boundary;
+  steps, drains and final checks propagate errors before using the Agent. The
+  in-process binding delegates to `H.Session`, so a selected cutoff during first
+  acquisition returns normally to the crash runner. The deterministic residual-read
+  regression checks both record reads and uncached acquisition after a real cutoff;
+  abnormal worker exits remain independently rejected.
 - **Fallible fixture calls share one current-process lookup.** `onProcess`,
   `Records`, `VerifyReport`, `VerifyControlReply` and `quiesce` return
   `engineagent.ErrNodeNotRunning` when there is no running process, before the

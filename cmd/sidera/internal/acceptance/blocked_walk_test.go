@@ -75,7 +75,7 @@ func TestBinaryBlockedSessionInputsSurviveAdapterRestarts(t *testing.T) {
 			clearedScenario = NewWalkScenario(descriptor, func(ops recipes.RecoveryOps) (recipes.ScriptRecipe, error) {
 				b := bindingsWithRecovery(ops)
 				actualSession := b.Sessions.Session
-				b.Sessions.Session = func(e scenario.Env, endpoint string) fakeagent.Agent {
+				b.Sessions.Session = func(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
 					if wrapped, ok := e.(clearedInputsEnv); ok {
 						e = wrapped.Env
 					}

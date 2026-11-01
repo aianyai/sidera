@@ -88,7 +88,9 @@ func feedbackScenario(t *testing.T, name string, waitBeforeReturn bool, events *
 		return e
 	}
 	b.Sessions.RuntimeAddr = func(e scenario.Env, instance string) string { return actualRuntimeAddr(unwrap(e), instance) }
-	b.Sessions.Session = func(e scenario.Env, endpoint string) fakeagent.Agent { return actualSession(unwrap(e), endpoint) }
+	b.Sessions.Session = func(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
+		return actualSession(unwrap(e), endpoint)
+	}
 	for _, r := range recipes.New(b).Scripts {
 		if r.Script.Name != name {
 			continue

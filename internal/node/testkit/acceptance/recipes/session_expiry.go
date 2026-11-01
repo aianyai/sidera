@@ -78,7 +78,11 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 			}
 		}
 		if createdBeforeDeadline && !closeRequested {
-			if err := facts.RecvAndAck(e, b.Sessions.Session(e, endpoint)); err != nil {
+			agent, err := b.Sessions.Session(e, endpoint)
+			if err != nil {
+				return err
+			}
+			if err := facts.RecvAndAck(e, agent); err != nil {
 				return err
 			}
 		}

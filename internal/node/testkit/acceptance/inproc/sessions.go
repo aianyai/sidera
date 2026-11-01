@@ -14,7 +14,9 @@ import (
 func newSessionOps() recipes.SessionOps {
 	return recipes.SessionOps{
 		RuntimeAddr: func(e scenario.Env, instance string) string { return e.(*harness.H).RuntimeAddrOf(instance) },
-		Session:     func(e scenario.Env, endpoint string) fakeagent.Agent { return e.(*harness.H).MustSession(endpoint) },
+		Session: func(e scenario.Env, endpoint string) (fakeagent.Agent, error) {
+			return e.(*harness.H).Session(endpoint)
+		},
 		CheckpointPut: func(e scenario.Env, instance string, p adapterproto.CheckpointPutParams) error {
 			adapter, err := e.Adapter(instance)
 			if err != nil {

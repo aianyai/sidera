@@ -30,7 +30,9 @@ through `Bindings.LocalNode`; evidence resolves it on its first receive and
 retains only the value across restarts. Direct agents need no `Me` for notice
 validation.
 
-`newSessionOps` binds session callbacks to the current fixture process. Its
+`newSessionOps` binds session callbacks to the current fixture process. Session
+acquisition delegates to fallible `H.Session` and propagates its error to the
+recipe worker, including when a cutoff interrupts its first record read. Its
 checkpoint callback uses the adapter Controller and the real `checkpoint.put`
 protocol rather than submitting directly to the engine.
 `checkClosedSession` obtains the current record scan and delegates the read-only

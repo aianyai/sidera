@@ -18,7 +18,7 @@ import (
 // SessionOps binds only session operations missing from scenario.Env.
 type SessionOps struct {
 	RuntimeAddr             func(scenario.Env, string) string
-	Session                 func(scenario.Env, string) fakeagent.Agent
+	Session                 func(scenario.Env, string) (fakeagent.Agent, error)
 	CheckpointPut           func(scenario.Env, string, adapterproto.CheckpointPutParams) error
 	FailCreateSettlement    func(scenario.Env) error
 	HasUnknownCreationAlert func(scenario.Env, string) (bool, error)
@@ -82,7 +82,11 @@ func (s *createdSession) recoverIdentity(e scenario.Env, b Bindings, body string
 	if candidate.endpoint == "" {
 		return nil
 	}
-	if err := facts.RecvAndAck(e, b.Sessions.Session(e, candidate.endpoint)); err != nil {
+	agent, err := b.Sessions.Session(e, candidate.endpoint)
+	if err != nil {
+		return err
+	}
+	if err := facts.RecvAndAck(e, agent); err != nil {
 		return err
 	}
 	log, err = e.Ledger()
@@ -144,7 +148,11 @@ func (s *createdSession) drain(b Bindings, body string, facts *DeliveryEvidence)
 				return err
 			}
 		}
-		if err := facts.RecvAndAck(e, b.Sessions.Session(e, s.endpoint)); err != nil {
+		agent, err := b.Sessions.Session(e, s.endpoint)
+		if err != nil {
+			return err
+		}
+		if err := facts.RecvAndAck(e, agent); err != nil {
 			return err
 		}
 		return receivedFeedback.run(e, facts, "sender")
@@ -238,7 +246,11 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 				return err
 			}
 			if !nativeSessionClosed(log, session.native) {
-				if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+				agent, err := b.Sessions.Session(e, session.endpoint)
+				if err != nil {
+					return err
+				}
+				if err := facts.RecvAndAck(e, agent); err != nil {
 					return err
 				}
 			}
@@ -371,7 +383,11 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 					return err
 				}
 			}
-			return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint))
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			return facts.RecvAndAck(e, agent)
 		}
 		if message != "" {
 			if err := deadline.Do(e); err != nil {
@@ -480,7 +496,13 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			return e.SetAdapterInputs("chat", inputs)
 		}},
 		scenario.Advance("prompt-retry", handoff.DefaultRetryAfterFailure),
-		{Name: "read", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
+		{Name: "read", Do: func(e scenario.Env) error {
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			return facts.RecvAndAck(e, agent)
+		}},
 	}}, Drain: func(e scenario.Env) error {
 		if blocking {
 			e.Advance(handoff.DefaultBlockedThreshold + time.Second)
@@ -497,7 +519,11 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			return err
 		}
 		if session.endpoint != "" {
-			if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+			agent, err := b.Sessions.Session(e, session.endpoint)
+			if err != nil {
+				return err
+			}
+			if err := facts.RecvAndAck(e, agent); err != nil {
 				return err
 			}
 		}

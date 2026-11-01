@@ -344,7 +344,10 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	// Alice's session reads what the node shows an agent of the nodes around it: the
 	// node itself and the one it trusts, connected, and the endpoints the other
 	// node lets it see.
-	session := sessionAgentFor(a.env, a.createSession(a.env, a.env.Agent(a.endpoint)))
+	session, err := sessionAgentFor(a.env, a.createSession(a.env, a.env.Agent(a.endpoint)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	peers, err := session.Peers(ctx)
 	if err != nil {
 		t.Fatal(err)

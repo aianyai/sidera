@@ -349,7 +349,12 @@ func (m *modelRun) walkLease() {
 	var res fakeagent.RecvResult
 	var err error
 	m.inCall(func() {
-		res, err = h.MustSession(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+		var agent fakeagent.Agent
+		agent, err = h.Session(ep.ID.String())
+		if err != nil {
+			return
+		}
+		res, err = agent.Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
 	})
 	if err == nil {
 		m.acked.handedOut(ep.ID, res.Page)

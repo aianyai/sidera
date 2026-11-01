@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
@@ -173,47 +174,57 @@ func TestWalkBackendReleasesAClaimedCallbackWhenWorkAlreadyFailed(t *testing.T) 
 // The engine can select a crash while the script is finishing an earlier call.
 // Its remaining read starts only after the selected callback has been released,
 // which means Kill has removed the process and fenced its disk.
-func TestWalkJoinsResidualRecordsAfterCutoff(t *testing.T) {
-	g := newWalkGeneration(1, nil)
-	point, err := fsx.ParsePoint("intake/out.rename#1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	g.target = crashwalk.Target{Gen: 1, Point: point}
-	h := NewStopped(t, Options{})
-	if crashed, err := h.tryStart(context.Background(), StartOptions{}, g); crashed || err != nil {
-		t.Fatalf("start: %v, %v", crashed, err)
-	}
-	g.serving()
-	h.MustDirect("a")
-	h.MustDirect("b")
-	if err := h.Quiesce(); err != nil {
-		t.Fatal(err)
-	}
-	g.openWindow()
-	sent := make(chan error, 1)
-	go func() {
-		_, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b")}, Body: "concurrent write"})
-		sent <- err
-	}()
-	read := make(chan error, 1)
-	crashed, err := g.work(context.Background(), h, func() error {
-		<-g.release
-		_, err := h.Records()
-		read <- err
-		return err
-	})
-	if sendErr := <-sent; fakeagent.CodeOf(sendErr) != "connection_lost" {
-		t.Errorf("the interrupted send returned %v, want connection_lost", sendErr)
-	}
-	if !crashed || err != nil {
-		t.Fatalf("work: crashed=%v err=%v", crashed, err)
-	}
-	if err := <-read; !errors.Is(err, engineagent.ErrNodeNotRunning) {
-		t.Fatalf("residual Records: %v, want ErrNodeNotRunning", err)
-	}
-	if h.current() != nil || !g.reached() {
-		t.Fatal("the selected crash did not leave the node down")
+func TestWalkJoinsResidualReadsAfterCutoff(t *testing.T) {
+	for _, operation := range []struct {
+		name string
+		read func(*H) error
+	}{
+		{"Records", func(h *H) error { _, err := h.Records(); return err }},
+		{"Session", func(h *H) error { _, err := h.Session(ident.SystemEndpoint().String()); return err }},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			g := newWalkGeneration(1, nil)
+			point, err := fsx.ParsePoint("intake/out.rename#1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.target = crashwalk.Target{Gen: 1, Point: point}
+			h := NewStopped(t, Options{})
+			if crashed, err := h.tryStart(context.Background(), StartOptions{}, g); crashed || err != nil {
+				t.Fatalf("start: %v, %v", crashed, err)
+			}
+			g.serving()
+			h.MustDirect("a")
+			h.MustDirect("b")
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
+			g.openWindow()
+			sent := make(chan error, 1)
+			go func() {
+				_, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b")}, Body: "concurrent write"})
+				sent <- err
+			}()
+			read := make(chan error, 1)
+			crashed, err := g.work(context.Background(), h, func() error {
+				<-g.release
+				err := operation.read(h)
+				read <- err
+				return err
+			})
+			if sendErr := <-sent; fakeagent.CodeOf(sendErr) != "connection_lost" {
+				t.Errorf("the interrupted send returned %v, want connection_lost", sendErr)
+			}
+			if !crashed || err != nil {
+				t.Fatalf("work: crashed=%v err=%v", crashed, err)
+			}
+			if err := <-read; !errors.Is(err, engineagent.ErrNodeNotRunning) {
+				t.Fatalf("residual read: %v, want ErrNodeNotRunning", err)
+			}
+			if h.current() != nil || !g.reached() {
+				t.Fatal("the selected crash did not leave the node down")
+			}
+		})
 	}
 }
 

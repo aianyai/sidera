@@ -50,7 +50,10 @@ func TestBinarySessionBindingRunsSharedRecipeAcrossGeneration(t *testing.T) {
 		var endpoint string
 		for endpoint = range e.sessions {
 		}
-		a := b.Sessions.Session(e, endpoint)
+		a, err := b.Sessions.Session(e, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
 		facts := recipes.NewDeliveryEvidence(b.LocalNode)
 		var ids []adapterproto.MessageID
 		for generation := 1; generation <= 2; generation++ {
@@ -116,7 +119,11 @@ func TestBinarySessionBindingRunsSharedRecipeAcrossGeneration(t *testing.T) {
 				}
 			}
 		}
-		if _, err := b.Sessions.Session(e, "missing-session").Me(ctx); !errors.Is(err, fakeruntime.ErrUnknownSession) {
+		missing, err := b.Sessions.Session(e, "missing-session")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := missing.Me(ctx); !errors.Is(err, fakeruntime.ErrUnknownSession) {
 			t.Fatalf("unknown session did not fail ownership lookup: %v", err)
 		}
 		ref, err := e.sessionReference(endpoint)
