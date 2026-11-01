@@ -117,6 +117,10 @@ var (
 	adapterConfig = &txn.Decl{Name: "adapter-config", Kind: txn.Normal, Writes: []txn.Write{
 		{Role: RoleInstances, Op: txn.OpReplace},
 	}}
+	// adapterRemove removes a disabled instance from instances.json.
+	adapterRemove = &txn.Decl{Name: "adapter-remove", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: RoleInstances, Op: txn.OpReplace},
+	}}
 	// adapterDisable disables an instance. The instance stays, with its
 	// endpoint ids.
 	adapterDisable = &txn.Decl{Name: "adapter-disable", Kind: txn.Normal, Writes: []txn.Write{
@@ -145,5 +149,5 @@ var (
 // Transactions lists the transactions this package runs itself. The composition
 // root puts them in the table of the program.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{nodeSet, networkSet, presetsChange, endpointSet, adapterEnable, adapterConfig, adapterDisable, adapterStage, adapterUnstage, adapterGC}
+	return []*txn.Decl{nodeSet, networkSet, presetsChange, endpointSet, adapterEnable, adapterConfig, adapterDisable, adapterRemove, adapterStage, adapterUnstage, adapterGC}
 }

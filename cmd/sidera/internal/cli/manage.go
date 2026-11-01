@@ -158,6 +158,11 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.change = true
 		plan.versionMethod = "adapters.list"
 		versioned = true
+	case "adapter remove":
+		plan.method = "adapters.remove"
+		plan.change = true
+		plan.versionMethod = "adapters.list"
+		versioned = true
 	case "adapter disable":
 		plan.method = "adapters.disable"
 		plan.change = true
@@ -255,7 +260,7 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.wait = o.wait
 	case "trust.expect", "trust.forget", "trust.reject", "trust.remove", "trust.clear":
 		want = 1
-	case "alerts.ack", "presets.add", "presets.remove", "adapters.install", "adapters.enable", "adapters.config", "adapters.disable", "endpoints.close", "identity.confirm_backup":
+	case "alerts.ack", "presets.add", "presets.remove", "adapters.install", "adapters.enable", "adapters.config", "adapters.disable", "adapters.remove", "endpoints.close", "identity.confirm_backup":
 		want = 1
 	case "node.set":
 		if len(p) < 1 {
@@ -324,7 +329,7 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 			return plan, err
 		}
 		plan.params["instance"], plan.params["config"] = p[0], data
-	case "adapters.disable":
+	case "adapters.disable", "adapters.remove":
 		plan.params["instance"] = p[0]
 	case "endpoints.list":
 		addPresent(f, plan.params, "instance", "instance", o.instance)
@@ -432,7 +437,7 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.BoolVar(&o.yes, "yes", false, "confirm permanent retirement")
 	}
 	switch name {
-	case "preset add", "preset remove", "adapter enable", "adapter config", "adapter disable", "endpoint set", "node set",
+	case "preset add", "preset remove", "adapter enable", "adapter config", "adapter disable", "adapter remove", "endpoint set", "node set",
 		"network address set", "network address remove", "network listen set":
 		f.Uint64Var(&o.version, "expected-version", 0, "version the change is based on")
 	}

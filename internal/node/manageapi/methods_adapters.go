@@ -144,6 +144,16 @@ func instanceResult(c engine.InstanceChange) ([]byte, error) {
 	}{c.Instance, c.Enabled, uint64(c.Version)})
 }
 
+// instanceRemovedResult is the result of adapters.remove: the instance that is gone, and the
+// version of the instances after it.
+func instanceRemovedResult(c engine.InstanceChange) ([]byte, error) {
+	return json.Marshal(struct {
+		Instance string `json:"instance"`
+		Removed  bool   `json:"removed"`
+		Version  uint64 `json:"version"`
+	}{c.Instance, c.Removed, uint64(c.Version)})
+}
+
 // adapters.enable: enable an instance of an installed adapter, making it when it is
 // new. The instance is named after the adapter when the request leaves it out, and
 // the request is then the same as one that writes that name, which is why the
@@ -231,6 +241,26 @@ var adaptersDisable = &method{
 			return nil, err
 		}
 		return &plan{canonical: canonical(p), operation: engine.DisableAdapterOp(p.Instance, instanceResult)}, nil
+	},
+}
+
+// adapters.remove: remove a disabled instance, with its settings. It is refused
+// while the instance is enabled and while session endpoints made through it are open.
+// It is authorized as disabling, since it only withdraws. What the adapter keeps in
+// its state directory stays: see the engine's RemoveAdapterInstanceOp.
+var adaptersRemove = &method{
+	name: "adapters.remove", op: admin.Operation{Kind: admin.OpDisableAdapter},
+	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			Instance string `json:"instance"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		if err := requireText(p.Instance, "params.instance"); err != nil {
+			return nil, err
+		}
+		return &plan{canonical: canonical(p), operation: engine.RemoveAdapterInstanceOp(p.Instance, instanceRemovedResult)}, nil
 	},
 }
 

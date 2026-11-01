@@ -358,6 +358,19 @@ is open or has records not closed waits for that to end (the request is held as 
 registration is) so that the closing never meets an endpoint of an instance that is
 enabled.
 
+**Configuring and removing an instance.** Replacing the configuration of an instance
+(`adapters.config`) is one replacement of `instances.json`, judged as enabling because the
+values can name the program the adapter runs; an instance that is enabled is restarted
+after the commit as a change of the presets restarts it (`restartInstance`), since the
+values reach the adapter only in `adapter.start`, and one that is not enabled reads them
+when it is. Removing an instance (`adapters.remove`) is one replacement too, judged as
+disabling. It needs the instance disabled (`instance_enabled`) and no session endpoint of
+it open (`instance_in_use`, with how many; disabling closes them, so this is the closing
+not having reached one), and, like enabling, it waits for the records of the instance's
+endpoints still being closed. It removes the instance from the configuration and nothing
+else: the adapter's state directory may be in use by a process the adapter started and
+outlived, which only the adapter knows, and the stable endpoint ids stay with the name.
+
 **The probe of an instance.** The adapter's report that its tool probes ran is
 necessary and not enough: the node believes it only for the tokens it has seen
 presented. `AgentService.PresentProbeToken(token, front end)` is what the Agent interface calls: a
@@ -1875,6 +1888,7 @@ reproducible).
 | Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
 | A change of the presets restarts the runtime instances that run, and the new `adapter.start` carries the presets | `operations_presets.go` (`presetsChanged`), `operations_adapters.go` (`restartInstance`) | `TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun` |
 | Replacing the configuration of an instance restarts it when it is enabled, and only records it otherwise | `operations_adapters.go` (`ConfigureAdapterOp`) | `TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns` |
+| An instance is removed only once it is disabled and closed, and can be made again under its name | `operations_adapters.go` (`RemoveAdapterInstanceOp`, `openSessions`) | `TestAnInstanceIsRemovedOnlyOnceItIsDisabled`, `TestRemoveInstanceNeedsADisabledInstanceWithNoOpenSession` (`config`) |
 | The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe`, `TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |

@@ -47,8 +47,7 @@ later is a one-line change of the catalogue guarded by tests, while tightening
 it after remote people depend on it would take their capability away.
 Replacing the configuration of an adapter instance is judged as enabling it: the
 values can name the program the adapter runs, so it is no weaker than letting the
-machine run the adapter. It has no operation of its own, since its level would be the
-same. Enabling and disabling an adapter, and changing an endpoint's and the node's
+machine run the adapter. Removing an instance is judged as disabling it, since it only withdraws. Neither has an operation of its own, since the level would be the same. Enabling and disabling an adapter, and changing an endpoint's and the node's
 settings, are separate operations because their remote levels may differ once
 decided (enabling lets the machine run more code, disabling only withdraws), and
 splitting an operation later would change every call site.

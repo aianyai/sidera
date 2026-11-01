@@ -611,7 +611,8 @@ and of the daemon, so it is also where a lock or a socket that a restarted adapt
 again lives. The daemon never reads or writes inside it, removes nothing from it and does not
 count its size; what the adapter leaves there is the adapter's to clean. The directory exists
 for the life of the instance's configuration, not of one process: it is not removed when the
-adapter stops. It is a path the adapter is given, not a place it chooses, because the layout of
+adapter stops, nor when the owner removes the instance from the configuration, because a
+process the adapter started (a detached server, a turn) may outlive the adapter and still use it. It is a path the adapter is given, not a place it chooses, because the layout of
 the data directory is the daemon's.
 
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of

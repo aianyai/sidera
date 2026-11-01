@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -260,6 +261,13 @@ func configureCommand(b byte, content string, expected admin.Version, instance, 
 	return engine.ManagementCommand{
 		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.config",
 		Operation: engine.ConfigureAdapterOp(instance, []byte(doc), encodeInstance),
+	}
+}
+
+func removeInstanceCommand(b byte, content string, expected admin.Version, instance string) engine.ManagementCommand {
+	return engine.ManagementCommand{
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.remove",
+		Operation: engine.RemoveAdapterInstanceOp(instance, encodeInstance),
 	}
 }
 
@@ -1200,6 +1208,46 @@ func TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns(t *testin
 	_, err = e.Execute(ctx, configureCommand(72, "ghost", r.cfg.Instances().Version, "ghost", `{}`))
 	if reason := changeReason(t, err); reason != config.ChangeInstanceUnknown {
 		t.Errorf("an instance that does not exist: %v", reason)
+	}
+}
+
+// An instance is removed only once it is disabled; the removal asks nothing of the
+// host, which stopped the instance when it was disabled, and the instance can be made
+// again under the same name afterwards.
+func TestAnInstanceIsRemovedOnlyOnceItIsDisabled(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	r := newRig(t, 10, withAdapters(host))
+	r.enableInstance("agent", `{"program":"old"}`)
+	e := r.start()
+
+	_, err := e.Execute(ctx, removeInstanceCommand(80, "enabled", r.cfg.Instances().Version, "agent"))
+	if reason := changeReason(t, err); reason != config.ChangeInstanceEnabled {
+		t.Fatalf("removing an enabled instance: %v", err)
+	}
+	if _, err := e.Execute(ctx, disableCommand(81, "disable", r.cfg.Instances().Version, "agent")); err != nil {
+		t.Fatal(err)
+	}
+	asked := host.asks()
+	res, err := e.Execute(ctx, removeInstanceCommand(82, "remove", r.cfg.Instances().Version, "agent"))
+	if err != nil {
+		t.Fatalf("removing a disabled instance: %v", err)
+	}
+	if _, there := r.cfg.Instances().Items["agent"]; there {
+		t.Error("the instance is still configured")
+	}
+	if got := host.asks(); !reflect.DeepEqual(got, asked) {
+		t.Errorf("the removal asked the host for %v", got[len(asked):])
+	}
+	if want := `{"instance":"agent","enabled":false,"version":` + strconv.FormatUint(uint64(r.cfg.Instances().Version), 10) + `}`; string(res.Result) != want {
+		t.Errorf("result %s, want %s", res.Result, want)
+	}
+	_, err = e.Execute(ctx, removeInstanceCommand(83, "again", r.cfg.Instances().Version, "agent"))
+	if reason := changeReason(t, err); reason != config.ChangeInstanceUnknown {
+		t.Errorf("removing it again: %v", err)
+	}
+	if _, err := e.Execute(ctx, enableCommand(84, "enable again", r.cfg.Instances().Version, "chat", "agent", "")); err != nil {
+		t.Errorf("making the instance again under its name: %v", err)
 	}
 }
 

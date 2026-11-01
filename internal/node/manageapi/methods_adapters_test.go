@@ -97,6 +97,7 @@ func TestTheParamsOfTheMethodsForAdaptersAndPresetsAreReadStrictly(t *testing.T)
 		{"no instance to configure", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"config":{}}}`, "params.instance"},
 		{"no configuration", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"instance":"relay"}}`, "params.config"},
 		{"a configuration that is null", "adapters.config", `{"operation_id":"` + id + `","expected_version":1,"params":{"instance":"relay","config":null}}`, "params.config"},
+		{"no instance to remove", "adapters.remove", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.instance"},
 		{"no instance to disable", "adapters.disable", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.instance"},
 		{"a listing that takes a member", "adapters.list", `{"params":{"all":true}}`, "params.all"},
 		{"a preset without a name", "presets.add", `{"operation_id":"` + id + `","expected_version":1,"params":{"preset":{"local_sources":"allow"}}}`, "params.name"},
@@ -182,6 +183,10 @@ func TestTheCommandsOfAdaptersAndPresets(t *testing.T) {
 	disable := send("adapters.disable", `{"operation_id":"`+opID(7)+`","expected_version":5,"params":{"instance":"relay"}}`)
 	if disable.Name != "adapters.disable" || disable.Expected != 5 || disable.Operation.Admin().Kind != admin.OpDisableAdapter {
 		t.Errorf("command %+v", disable)
+	}
+	removeInstance := send("adapters.remove", `{"operation_id":"`+opID(12)+`","expected_version":5,"params":{"instance":"relay"}}`)
+	if removeInstance.Name != "adapters.remove" || removeInstance.Expected != 5 || removeInstance.Operation.Admin().Kind != admin.OpDisableAdapter {
+		t.Errorf("command %+v", removeInstance)
 	}
 	add := send("presets.add", `{"operation_id":"`+opID(8)+`","expected_version":2,"params":{"name":"tight","preset":{"local_sources":"deny"}}}`)
 	if add.Name != "presets.add" || add.Expected != 2 ||

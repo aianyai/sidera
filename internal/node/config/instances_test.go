@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,6 +142,62 @@ func TestSetInstanceConfigReplacesTheConfigurationOnly(t *testing.T) {
 			_, err := c.SetInstanceConfig(request(1, 4), r.instance, []byte(r.document), nil, result(&seen, `{}`))
 			if ce := changeReason(t, err); ce.Reason != r.want {
 				t.Errorf("reason = %v, want %v (%v)", ce.Reason, r.want, err)
+			}
+			if !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
+				t.Error("a refused change wrote to the disk")
+			}
+		})
+	}
+}
+
+// Removing an instance takes it and its endpoint settings out of instances.json, once it
+// is disabled and no session endpoint of it is open, and leaves its stable endpoint ids.
+func TestRemoveInstanceNeedsADisabledInstanceWithNoOpenSession(t *testing.T) {
+	var seen []config.Instances
+	sessions := func(n int) config.OpenSessions { return func(string) int { return n } }
+	disable := func(t *testing.T, c *config.Config) {
+		t.Helper()
+		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(&seen, `{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("a disabled instance with no open session", func(t *testing.T) {
+		rg, c := loaded(t)
+		disable(t, c)
+		after, err := c.RemoveInstance(request(2, 5), "example", sessions(0), nil, result(&seen, `{}`))
+		if err != nil {
+			t.Fatalf("RemoveInstance: %v", err)
+		}
+		if _, there := after.Items["example"]; there || after.Version != 6 {
+			t.Errorf("instances = %+v, want the instance gone at version 6", after)
+		}
+		if got := rg.load().Instances(); !reflect.DeepEqual(got.Items, after.Items) {
+			t.Error("what a restart reads is not what was returned")
+		}
+		if !exists(rg.mem, config.EndpointIDsPath("example")) {
+			t.Error("the endpoint ids were removed with the instance")
+		}
+	})
+	for _, r := range []struct {
+		name    string
+		prepare func(t *testing.T, c *config.Config)
+		name2   string
+		session int
+		want    config.ChangeReason
+		message string
+	}{
+		{"an instance that is enabled", func(*testing.T, *config.Config) {}, "example", 0, config.ChangeInstanceEnabled, ""},
+		{"an instance that does not exist", disable, "nobody", 0, config.ChangeInstanceUnknown, ""},
+		{"an instance with open sessions", disable, "example", 3, config.ChangeInstanceInUse, "3 session endpoints"},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			rg, c := loaded(t)
+			r.prepare(t, c)
+			before := snapshot(t, rg.mem)
+			_, err := c.RemoveInstance(request(2, c.Instances().Version), r.name2, sessions(r.session), nil, result(&seen, `{}`))
+			ce := changeReason(t, err)
+			if ce.Reason != r.want || !strings.Contains(err.Error(), r.message) {
+				t.Errorf("error = %v, want %v naming %q", err, r.want, r.message)
 			}
 			if !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
 				t.Error("a refused change wrote to the disk")

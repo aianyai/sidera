@@ -27,7 +27,7 @@ func TestTransactionsAreValid(t *testing.T) {
 	}
 	want := map[string]txn.Kind{
 		"node-set": txn.Normal, "network-set": txn.Normal, "presets-change": txn.Normal, "endpoint-set": txn.Normal,
-		"adapter-enable": txn.Normal, "adapter-config": txn.Normal, "adapter-disable": txn.Normal,
+		"adapter-enable": txn.Normal, "adapter-config": txn.Normal, "adapter-disable": txn.Normal, "adapter-remove": txn.Normal,
 		"adapter-stage": txn.Normal, "adapter-unstage": txn.Normal,
 		"adapter-gc": txn.Recovery,
 	}
@@ -81,6 +81,8 @@ func TestEveryDeclaredCrashPointIsReached(t *testing.T) {
 	_, err = c.DisableAdapter(request(5, 7), "second", open, result(new([]config.Instances), `{}`))
 	must(err)
 	_, err = c.DisableAdapter(request(6, 8), "example", open, result(new([]config.Instances), `{}`))
+	must(err)
+	_, err = c.RemoveInstance(request(9, 9), "second", nil, open, result(new([]config.Instances), `{}`))
 	must(err)
 
 	// A first installation that is refused after staging: parent, stage, subdir,

@@ -105,7 +105,8 @@ Only the host makes it, so the adapter never has to know where the data director
 `StateDir(home, instance)` is the one definition, sent in `initialize` and in
 `Instance.StateDir`; a directory that cannot be made fails the pass like a launch that
 failed, and the next pass waits for the backoff. Nothing in it is read, counted or
-removed by the daemon.
+removed by the daemon, and `adapter remove` leaves it as well: what an adapter started may
+still be running and using it, and the host does not know.
 
 ### Requests of the adapter
 

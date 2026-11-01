@@ -34,7 +34,7 @@ config/
 
 | File | Written by | Version |
 | ---- | ---------- | ------- |
-| `node.json`, `presets.json`, `instances.json` | `init`; then only management requests (`node set`, `preset add|remove`, `adapter enable|config|disable`, `endpoint set`) | one integer each, from 1, for the whole file |
+| `node.json`, `presets.json`, `instances.json` | `init`; then only management requests (`node set`, `preset add|remove`, `adapter enable|config|disable|remove`, `endpoint set`) | one integer each, from 1, for the whole file |
 | `network.json` | `init`; then only management requests (the listen list and the address book) | one integer, from 1, for the whole file |
 | `policy.json` | `init`; the owner by hand while the node is stopped (no command changes it yet) | one integer, from 1 |
 | `endpoint-ids/<instance>.json` | the daemon, when an instance's runtime endpoint or a direct endpoint key is first seen | none |
@@ -254,6 +254,15 @@ enabled instance and a disabled one, and changes nothing else of the instance. T
 values reach an adapter only in `adapter.start`, so the caller restarts a running
 instance; this layer only keeps them.
 
+`adapter remove` (`Config.RemoveInstance`) deletes a disabled instance and the endpoint
+settings it holds. It refuses an instance that is enabled (`instance_enabled`) and one
+that session endpoints made through it are open on (`instance_in_use`, saying how many;
+the caller that holds the endpoints counts them for `config`). The stable endpoint ids
+in `endpoint-ids/<instance>.json` stay, as they do when an instance is disabled, so that an
+instance made later under the same name keeps the same endpoints; loading does not require
+an instance for an id file. The state directory of the adapter is outside `config/` and is
+left alone (the adapter-protocol reference says why).
+
 `endpoints` holds the settings an owner gave single endpoints: `max_queue_s` and
 `backlog_limit`, each optional, at least one present. A field that is absent is
 not set, and the node default applies; `Config.EndpointSettings` returns what
@@ -427,7 +436,8 @@ change writes nothing and builds no result.
 | `nothing_to_change` | a patch that names no setting |
 | `preset_exists`, `preset_unknown` | adding a name that is taken, removing one that is not there |
 | `peer_unknown` | removing a node that has no address in the book |
-| `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
+| `instance_enabled`, `instance_in_use` | removing an instance that is enabled; removing one that has session endpoints open |
+| `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config` and `adapter remove`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
 | `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; upgrading an adapter with an enabled instance |
 | `endpoint_unknown` | a setting for an endpoint that is neither stable nor open |
 
@@ -486,7 +496,7 @@ Each is declared as data; the table of the program is built from
 | `node-set` | normal | `node` replace | `node.json` rename |
 | `network-set` | normal | `network-config` replace | `network.json` rename |
 | `presets-change` | normal | `presets` replace | `presets.json` rename |
-| `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable` | normal | `instances` replace | `instances.json` rename |
+| `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable`, `adapter-remove` | normal | `instances` replace | `instances.json` rename |
 | `adapter-stage` | normal | `parent` mkdir (P, O, M), `stage` mkdir (P), `subdir` mkdir (P, O, M), `file` replace (P, M) | none: all preparation |
 | `adapter-unstage` | normal | `stage` discard (O), `version` discard (O), `parent` discard (O) | the first discard |
 | `adapter-gc` | recovery | `dir` discard (M) | the first discard |

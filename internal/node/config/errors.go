@@ -163,6 +163,11 @@ const (
 	ChangeNothingToChange
 	// ChangePeerUnknown: removing a node that has no address in the book.
 	ChangePeerUnknown
+	// ChangeInstanceEnabled: removing an instance that is still enabled.
+	ChangeInstanceEnabled
+	// ChangeInstanceInUse: removing an instance that session endpoints made through
+	// it are still open on.
+	ChangeInstanceInUse
 )
 
 var changeNames = [...]string{
@@ -178,6 +183,8 @@ var changeNames = [...]string{
 	ChangeAdapterInUse:            "adapter_in_use",
 	ChangeNothingToChange:         "nothing_to_change",
 	ChangePeerUnknown:             "peer_unknown",
+	ChangeInstanceEnabled:         "instance_enabled",
+	ChangeInstanceInUse:           "instance_in_use",
 }
 
 // String names the reason.
@@ -195,7 +202,8 @@ type ChangeError struct {
 	// path of the offending value, or for a package being installed the path of
 	// the offending file in it. For the reasons about a name it is that name: the
 	// preset (ChangePresetExists, ChangePresetUnknown), the instance
-	// (ChangeInstanceUnknown, ChangeInstanceExists, ChangeInstanceAdapterMismatch),
+	// (ChangeInstanceUnknown, ChangeInstanceExists, ChangeInstanceAdapterMismatch,
+	// ChangeInstanceEnabled, ChangeInstanceInUse),
 	// the adapter (ChangeAdapterNotInstalled), "instances.<name>" for
 	// ChangeAdapterInUse and the endpoint id for ChangeEndpointUnknown and the node id for
 	// ChangePeerUnknown. It is

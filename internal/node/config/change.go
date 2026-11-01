@@ -340,6 +340,47 @@ func (c *Config) DisableAdapter(req Request, instance string, open OpenEndpoints
 	return c.commitInstances(adapterDisable, req, next, open, result)
 }
 
+// OpenSessions says how many session endpoints made through the instance are
+// still open. Config does not hold endpoints, so the caller that does tells it.
+type OpenSessions func(instance string) int
+
+// RemoveInstance removes the instance named instance from the configuration, with
+// the settings it holds for endpoints. The instance has to be disabled, so that no
+// process of it is meant to run, and no session endpoint made through it may be open:
+// both are the owner's to undo first, and the refusal of the second says how many
+// there are. The stable endpoint ids of the instance stay in endpoint-ids/, as they
+// do when it is disabled: an instance later made under the same name finds the same
+// endpoints. sessions may be nil, which says there are none.
+func (c *Config) RemoveInstance(req Request, instance string, sessions OpenSessions, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	st := c.read()
+	if err := checkVersion(req, st.instances.Version); err != nil {
+		return Instances{}, err
+	}
+	in, ok := st.instances.Items[instance]
+	switch {
+	case !ok:
+		return Instances{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
+	case in.Enabled:
+		return Instances{}, &ChangeError{Reason: ChangeInstanceEnabled, Field: instance}
+	}
+	if sessions != nil {
+		if n := sessions(instance); n > 0 {
+			return Instances{}, &ChangeError{Reason: ChangeInstanceInUse, Field: instance,
+				Err: fmt.Errorf("%d session endpoints made through the instance are still open", n)}
+		}
+	}
+	next := cloneInstances(st.instances)
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Instances{}, err
+	}
+	next.Version = version
+	delete(next.Items, instance)
+	return c.commitInstances(adapterRemove, req, next, open, result)
+}
+
 // SetEndpointSettings changes the settings of one endpoint of an instance: the
 // settings the patch names change and the others stay. The endpoint is a stable
 // endpoint of the instance or one that is open now; a setting for any other

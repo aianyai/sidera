@@ -180,13 +180,16 @@ type InstanceChange struct {
 	Instance string
 	// Enabled is whether the instance is enabled after the change.
 	Enabled bool
+	// Removed is whether the instance is gone after the change.
+	Removed bool
 	// Version is the version of the instances after the change.
 	Version admin.Version
 }
 
 func instanceResult(encode func(InstanceChange) ([]byte, error), instance string, x *opRun) config.ResultFunc[config.Instances] {
 	return func(after config.Instances) (json.RawMessage, error) {
-		b, err := encode(InstanceChange{Instance: instance, Enabled: after.Items[instance].Enabled, Version: after.Version})
+		in, there := after.Items[instance]
+		b, err := encode(InstanceChange{Instance: instance, Enabled: in.Enabled, Removed: !there, Version: after.Version})
 		if err != nil {
 			return nil, fmt.Errorf("the result of %s: %w", x.name, err)
 		}
@@ -340,6 +343,57 @@ func (o *disableAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	}
 	e.instanceDisabled(x.now, o.instance)
 	return after.LastOperation.Result, nil
+}
+
+// RemoveAdapterInstanceOp is the operation that removes an instance from the
+// configuration, with its settings. The owner disables it first, and closes the
+// session endpoints made through it (disabling closes them as well, so one still open
+// is one the closing has not reached): an instance that is enabled, or that has such
+// an endpoint open, is refused, the second with how many there are. The records of an
+// endpoint still being closed are waited for, as enabling waits for them, so that the
+// closing never meets an instance that is gone. The version is that of the
+// instances, checked inside the change, the operation and its result kept in the same
+// replacement. What the adapter keeps in its state directory, and the stable
+// endpoint ids of the instance, are not touched: the adapter may have a process that
+// outlives it and still uses that directory, and only the adapter knows. encode makes
+// the result; it runs in the loop and must not wait.
+func RemoveAdapterInstanceOp(instance string, encode func(InstanceChange) ([]byte, error)) Operation {
+	return &removeAdapterInstanceOp{instance: instance, encode: encode}
+}
+
+type removeAdapterInstanceOp struct {
+	instance string
+	encode   func(InstanceChange) ([]byte, error)
+}
+
+// Admin judges the removal as disabling the instance: it only withdraws.
+func (o *removeAdapterInstanceOp) Admin() admin.Operation {
+	return admin.Operation{Kind: admin.OpDisableAdapter}
+}
+func (o *removeAdapterInstanceOp) stops() bool { return false }
+func (o *removeAdapterInstanceOp) run(e *Engine, x *opRun) ([]byte, error) {
+	if in, ok := e.d.Config.Instances().Items[o.instance]; ok && !in.Enabled && e.openSessions(o.instance) == 0 {
+		if id, busy := e.instanceClosing(o.instance); busy {
+			return nil, &waitForDrain{endpoint: id}
+		}
+	}
+	after, err := e.d.Config.RemoveInstance(x.configRequest(), o.instance, e.openSessions, e.endpointOpen, instanceResult(o.encode, o.instance, x))
+	if err != nil {
+		return nil, err
+	}
+	return after.LastOperation.Result, nil
+}
+
+// openSessions counts the session endpoints made through the instance that are not
+// closed.
+func (e *Engine) openSessions(instance string) int {
+	n := 0
+	for _, s := range e.view.endpoints {
+		if s.rec.Instance == instance && s.rec.Kind == adapterreg.KindSession && s.rec.Status != store.EndpointClosed {
+			n++
+		}
+	}
+	return n
 }
 
 // instanceDisabled is what follows the commit of a disabling, driven by the state

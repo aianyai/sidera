@@ -210,8 +210,21 @@ func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbe
 			t.Errorf("the endpoint %s of the disabled instance is %v", ep.Address, ep.Status)
 		}
 	}
-	if enabled, _, found := listAdapters(t, c.Home).instance(relay); !found || enabled {
+	listed = listAdapters(t, c.Home)
+	if enabled, _, found := listed.instance(relay); !found || enabled {
 		t.Errorf("the disabled instance is listed as found %v, enabled %v; want it kept and disabled", found, enabled)
+	}
+
+	// remove: the disabled instance is gone from the configuration
+	status, body = manage(t, c.Home, "adapters.remove", map[string]any{
+		"operation_id": opID(6), "expected_version": listed.Result.Version, "params": map[string]any{"instance": relay},
+	})
+	removed := answerOf(t, status, body)
+	if want := `{"instance":"relay","removed":true,"version":` + number(listed.Result.Version+1) + `}`; string(removed.Result) != want {
+		t.Fatalf("removing: %s, want %s", removed.Result, want)
+	}
+	if _, _, found := listAdapters(t, c.Home).instance(relay); found {
+		t.Error("the removed instance is still listed")
 	}
 }
 
@@ -265,6 +278,7 @@ func TestWhatTheOwnerGetsWrongInInstallingAndEnablingIsToldInTheWordsOfTheInterf
 		{"a directory that holds no package", "adapters.install", map[string]any{"source": empty}, 0, 400, "config_invalid"},
 		{"an adapter that is not installed", "adapters.enable", map[string]any{"adapter": "ghost"}, 1, 404, "adapter_unknown"},
 		{"an instance that does not exist", "adapters.disable", map[string]any{"instance": "ghost"}, 1, 404, "instance_unknown"},
+		{"an instance to remove that does not exist", "adapters.remove", map[string]any{"instance": "ghost"}, 1, 404, "instance_unknown"},
 		{"an instance to configure that does not exist", "adapters.config", map[string]any{"instance": "ghost", "config": map[string]any{}}, 1, 404, "instance_unknown"},
 		{"a preset that does not exist", "presets.remove", map[string]any{"name": "ghost"}, 1, 404, "preset_unknown"},
 		{"a preset that makes no statement about local sources", "presets.add", map[string]any{"name": "x", "preset": map[string]any{"description": "d"}}, 1, 400, "config_invalid"},

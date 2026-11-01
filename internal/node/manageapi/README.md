@@ -40,7 +40,7 @@ The rows are in `methods.go` (`endpoints.list`, `endpoints.close`,
 the version is that of `network.json`, given by `network.show` and named by a change as
 the expected version, as for `node.set`; the rule for an address is `config`'s and the
 network's, judged by the engine, so a row only words the params and the result) and
-`methods_adapters.go` (`adapters.install|list|enable|config|disable`,
+`methods_adapters.go` (`adapters.install|list|enable|config|disable|remove`,
 `presets.list|add|remove`) and
 `methods_trust.go` (`trust.expect|forget|reject|request|list|remove|clear`: no version; the rules for a node
 and for a pairing are the engine's and `pairing`'s, so a row only reads the node, checks the form of

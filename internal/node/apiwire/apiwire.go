@@ -386,6 +386,14 @@ func fromChange(c *config.ChangeError) *Error {
 			e.with("reason", c.Err.Error())
 		}
 		return e
+	case config.ChangeInstanceEnabled:
+		return New(CategoryConflict, "instance_enabled", "the instance is enabled; disable it first").named(c)
+	case config.ChangeInstanceInUse:
+		e := New(CategoryConflict, "instance_in_use", "session endpoints made through the instance are still open; close them first").named(c)
+		if c.Err != nil {
+			e.with("reason", c.Err.Error())
+		}
+		return e
 	case config.ChangeNothingToChange:
 		return New(CategoryInvalidArgument, "empty_patch", "the patch names no setting")
 	}

@@ -1174,6 +1174,7 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 		{"adapter", "enable", "cli-adapter", "--instance", "cli-instance"},
 		{"adapter", "config", "cli-instance", "--config", instanceConfig},
 		{"adapter", "disable", "cli-instance"},
+		{"adapter", "remove", "cli-instance"},
 		{"endpoint", "list"},
 		{"alerts", "list", "--all"},
 		{"clock", "clear-rollback"},
