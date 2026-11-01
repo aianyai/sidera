@@ -70,11 +70,22 @@ func TestTheNetworkListensOnlyAfterTheNodeServesAndStopsWithTheInterfaces(t *tes
 func TestAStartOnAPortInUseFailsNamingTheAddressAndLeavesNothingRunning(t *testing.T) {
 	noLeaks(t)
 	c, _ := initialized(t)
-	blocker, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", c.InitPort))
+	// Match the configured IPv4 listener. On Windows a dual-stack wildcard
+	// listener does not prevent a separate IPv4 socket from binding this port.
+	blocker, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", c.InitPort))
 	if err != nil {
 		t.Skipf("the port picked for the test is taken: %v", err)
 	}
-	_, err = daemon.Start(context.Background(), c)
+	t.Cleanup(func() { blocker.Close() })
+	d, err := daemon.Start(context.Background(), c)
+	if d != nil {
+		t.Cleanup(func() {
+			d.RequestStop("test over")
+			if err := d.Wait(); err != nil {
+				t.Errorf("the unexpected daemon stopped with an error: %v", err)
+			}
+		})
+	}
 	blocker.Close()
 	if err == nil {
 		t.Fatal("the start succeeded on a port in use")
