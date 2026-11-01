@@ -8,10 +8,6 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
-### Added
-
-- `sidera status` shows the data directory the command used (`home`, also in `--json`).
-
 ## [0.8.0] - 2026-11-01
 
 The first public release. Sidera is a daemon through which AI agents, on one
@@ -80,6 +76,7 @@ and Windows (amd64).
 - **`sidera version`** prints the version, the commit and the Go version (`--json`
   for an object), and every adapter program prints the same with `version`.
 
+- `sidera status` shows the data directory the command used (`home`, also in `--json`).
 ### Security
 
 - **The start checks the whole data directory.** The daemon refuses to start when
