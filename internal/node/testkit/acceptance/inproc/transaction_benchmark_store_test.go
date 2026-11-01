@@ -1,5 +1,6 @@
 package inproc
 
 func transactionBenchmarkStoreCases() []transactionBenchmarkCase {
-	return append(transactionBenchmarkStoreMessageCases(), transactionBenchmarkStoreMaintenanceCases()...)
+	cases := append(transactionBenchmarkStoreMessageCases(), transactionBenchmarkStoreMaintenanceCases()...)
+	return append(cases, transactionBenchmarkStoreTrustCases()...)
 }

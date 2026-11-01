@@ -21,7 +21,7 @@ import (
 )
 
 func transactionBenchmarkEngineCases() []transactionBenchmarkCase {
-	return []transactionBenchmarkCase{
+	return append([]transactionBenchmarkCase{
 		{name: "direct-register", prepare: prepareTransactionDirectRegister},
 		{name: "runtime-admit", prepare: prepareTransactionRuntimeAdmit},
 		{name: "clock-clear", prepare: prepareTransactionClockClear},
@@ -33,7 +33,7 @@ func transactionBenchmarkEngineCases() []transactionBenchmarkCase {
 		{name: "adapter-install-current", prepare: func(b *testing.B, o txn.Observer) transactionBenchmarkFixture {
 			return prepareTransactionEngineInstall(b, o, true)
 		}},
-	}
+	}, transactionBenchmarkEngineTrustCases()...)
 }
 
 func prepareTransactionDirectRegister(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
@@ -118,21 +118,39 @@ func transactionBenchmarkEngineCommand(id byte, name string, op engine.Operation
 	}
 }
 
+// transactionBenchmarkEngineSide is how an owner operation reaches an engine
+// and how the records it left are read back from its disk.
+type transactionBenchmarkEngineSide struct {
+	execute func(engine.ManagementCommand) (engine.StoredResult, error)
+	records func() (*store.Scan, error)
+	cleanup func()
+}
+
 // The result is checked by scanning the actual record file, independently of
 // the engine's in-memory replay cache. Each operation also checks its own effect.
 func transactionBenchmarkEngineOperation(h *harness.H, cmd engine.ManagementCommand, effect func() error) transactionBenchmarkFixture {
+	return transactionBenchmarkOwnerOperation(transactionBenchmarkEngineSide{
+		execute: func(cmd engine.ManagementCommand) (engine.StoredResult, error) {
+			return h.Engine().Execute(h.Ctx(), cmd)
+		},
+		records: h.Records,
+		cleanup: h.Stop,
+	}, cmd, effect)
+}
+
+func transactionBenchmarkOwnerOperation(side transactionBenchmarkEngineSide, cmd engine.ManagementCommand, effect func() error) transactionBenchmarkFixture {
 	var result engine.StoredResult
 	return transactionBenchmarkFixture{
 		invoke: func() error {
 			var err error
-			result, err = h.Engine().Execute(h.Ctx(), cmd)
+			result, err = side.execute(cmd)
 			return err
 		},
 		verify: func() error {
 			if result.Replayed || len(result.Result) == 0 {
 				return fmt.Errorf("management operation returned no new result")
 			}
-			scan, err := h.Records()
+			scan, err := side.records()
 			if err != nil {
 				return err
 			}
@@ -143,7 +161,7 @@ func transactionBenchmarkEngineOperation(h *harness.H, cmd engine.ManagementComm
 			}
 			return fmt.Errorf("management operation has no matching persistent result")
 		},
-		cleanup: h.Stop,
+		cleanup: side.cleanup,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -55,8 +56,11 @@ func transactionBenchmarkConfigCases() []transactionBenchmarkCase {
 			}
 		}},
 		{name: "endpoint-set", prepare: prepareTransactionEndpointSet},
+		{name: "network-set", prepare: prepareTransactionNetworkSet},
 		{name: "adapter-enable", prepare: prepareTransactionAdapterEnable},
+		{name: "adapter-config", prepare: prepareTransactionAdapterConfig},
 		{name: "adapter-disable", prepare: prepareTransactionAdapterDisable},
+		{name: "adapter-remove", prepare: prepareTransactionAdapterRemove},
 		{name: "adapter-stage", prepare: prepareTransactionAdapterStage},
 		{name: "adapter-unstage", prepare: prepareTransactionAdapterUnstage},
 		{name: "adapter-gc", prepare: prepareTransactionAdapterGC},
@@ -95,6 +99,25 @@ func prepareTransactionEndpointSet(b *testing.B, observer txn.Observer) transact
 	}
 }
 
+func prepareTransactionNetworkSet(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
+	_, w, cfg, _ := newTransactionBenchmarkNode(b, observer)
+	listen := []string{"/ip4/127.0.0.1/tcp/7744"}
+	req := transactionBenchmarkRequest(cfg.Network().Version)
+	return transactionBenchmarkFixture{
+		invoke: func() error {
+			_, err := cfg.SetListen(req, listen, transactionBenchmarkResult[config.Network])
+			return err
+		},
+		verify: func() error {
+			loaded, err := config.Load(w)
+			if err == nil && !slices.Equal(loaded.Network().Listen, listen) {
+				return fmt.Errorf("listen addresses were not persisted")
+			}
+			return err
+		},
+	}
+}
+
 func prepareTransactionAdapterEnable(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
 	_, w, cfg, _ := newTransactionBenchmarkNode(b, observer)
 	if _, err := cfg.DisableAdapter(transactionBenchmarkRequest(cfg.Instances().Version), harness.Instance, nil, transactionBenchmarkResult[config.Instances]); err != nil {
@@ -110,6 +133,24 @@ func prepareTransactionAdapterEnable(b *testing.B, observer txn.Observer) transa
 	}
 }
 
+func prepareTransactionAdapterConfig(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
+	_, w, cfg, _ := newTransactionBenchmarkNode(b, observer)
+	req := transactionBenchmarkRequest(cfg.Instances().Version)
+	return transactionBenchmarkFixture{
+		invoke: func() error {
+			_, err := cfg.SetInstanceConfig(req, harness.Instance, []byte(`{"mode":"benchmark"}`), nil, transactionBenchmarkResult[config.Instances])
+			return err
+		},
+		verify: func() error {
+			loaded, err := config.Load(w)
+			if err == nil && string(loaded.Instances().Items[harness.Instance].Config["mode"]) != `"benchmark"` {
+				return fmt.Errorf("instance configuration was not persisted")
+			}
+			return err
+		},
+	}
+}
+
 func prepareTransactionAdapterDisable(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
 	_, w, cfg, _ := newTransactionBenchmarkNode(b, observer)
 	req := transactionBenchmarkRequest(cfg.Instances().Version)
@@ -119,6 +160,27 @@ func prepareTransactionAdapterDisable(b *testing.B, observer txn.Observer) trans
 			return err
 		},
 		verify: func() error { return transactionBenchmarkAdapterEnabled(w, false) },
+	}
+}
+
+func prepareTransactionAdapterRemove(b *testing.B, observer txn.Observer) transactionBenchmarkFixture {
+	_, w, cfg, _ := newTransactionBenchmarkNode(b, observer)
+	if _, err := cfg.DisableAdapter(transactionBenchmarkRequest(cfg.Instances().Version), harness.Instance, nil, transactionBenchmarkResult[config.Instances]); err != nil {
+		b.Fatal(err)
+	}
+	req := transactionBenchmarkRequest(cfg.Instances().Version)
+	return transactionBenchmarkFixture{
+		invoke: func() error {
+			_, err := cfg.RemoveInstance(req, harness.Instance, nil, nil, transactionBenchmarkResult[config.Instances])
+			return err
+		},
+		verify: func() error {
+			loaded, err := config.Load(w)
+			if _, ok := loaded.Instances().Items[harness.Instance]; err == nil && ok {
+				return fmt.Errorf("the instance was not removed")
+			}
+			return err
+		},
 	}
 }
 

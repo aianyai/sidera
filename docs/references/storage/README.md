@@ -622,15 +622,8 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations. The table holds 70 declarations (txn 2, config 9, keys 2,
-store 41, engine 14 and daemon 2), and the suite has fixtures for 53 of them: the
-seventeen of the trust and peer records, the pairing records, the owner's operations
-on trust and the network configuration (`trust-credential`, `trust-revocation`,
-`peer-cert`, `pairing-target-put`, `pairing-target-delete`,
-`pairing-initiator-put`, `pairing-initiator-delete`, `pairing-limits`,
-`pairing-expectations`, `trust-local-revoke`, `trust-expect`, `trust-forget`,
-`trust-reject`, `trust-request`, `trust-clear`, `trust-result`, `network-set`) have none yet, and
-until they do their sub-benchmarks of an unfiltered run fail. It runs one named sub-benchmark per declaration,
+owners' declarations. The table holds 72 declarations (txn 2, config 11, keys 2,
+store 41, engine 14 and daemon 2), and every one has a fixture. It runs one named sub-benchmark per declaration,
 including Recovery declarations. Every selected declaration must have a fixture
 and at least one nonempty successful commit through its owner's existing entry point on
 a real filesystem. An unknown or duplicate fixture fails immediately; a missing
@@ -651,10 +644,10 @@ matrix:
 | Owner | Input profile |
 | ----- | ------------- |
 | txn | settle syncs a root and one child; cleanup removes one temporary file and one discarded directory containing one file |
-| config | one setting, preset, endpoint override or adapter instance; staging copies one manifest and a 128-byte program; recovery repairs one interrupted installation |
+| config | one setting, preset, listen address, endpoint override or adapter instance (its configuration, or its removal once disabled); staging copies one manifest and a 128-byte program; recovery repairs one interrupted installation |
 | keys | renewal advances one certificate serial; clock saving advances one clock record by one minute |
-| store | one source/target endpoint and record per operation, with a 29-byte message body, 20-byte feedback body, 12-byte checkpoint or 16-byte administrative result where applicable; archive operations select one record or day file; recovery handles one damaged record, orphan body/endpoint or control-derived effect |
-| engine | one direct/runtime registration, clock clear, backup confirmation, identity retirement or adapter installation; installation uses the same manifest and 128-byte program, including an already-current sample |
+| store | one source/target endpoint and record per operation, with a 29-byte message body, 20-byte feedback body, 12-byte checkpoint or 16-byte administrative result where applicable; archive operations select one record or day file; trust, peer and pairing records are one credential, revocation, peer certificate, pairing request on each side, counter list or expectation between two deterministic peers, a removal finding its record on disk; recovery handles one damaged record, orphan body/endpoint or control-derived effect |
+| engine | one direct/runtime registration, clock clear, backup confirmation, identity retirement or adapter installation; installation uses the same manifest and 128-byte program, including an already-current sample; the owner's operations on trust run on an engine opened with the node's own keys and a network layer that reaches nobody, over one expectation, one removed node (with one held credential when the removal revokes it), one request held as a target, or one pairing request that a scripted target accepts through the pairing package's own state machine |
 | daemon | initialize one default node, or repair one missing empty layout directory |
 
 Run the complete transaction suite once with:

@@ -245,9 +245,7 @@ clock write in its complete recovery record, retaining the original strict
 feedback and final-instance checks.
 
 `BenchmarkTransactionWrites` and its private owner fixtures are test-only real
-filesystem measurements of 53 of the 58 declarations across the six owners (the four
-declarations of the store's trust and peer records and the engine's removal of a node
-from trust have no fixture yet). The runner
+filesystem measurements of all 72 declarations across the six owners. The runner
 enumerates the complete daemon declaration table through the six owners, so a new
 declaration immediately needs a nonempty
 successful fixture in the unfiltered suite. Unknown and duplicate fixture names

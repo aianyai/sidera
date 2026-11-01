@@ -1523,9 +1523,11 @@ The storage reference defines the [measurement boundary](../storage/README.md#tr
 No shared measurement API or crash-walk backend is involved.
 
 The denominator is the complete `daemon.Table`, grouped by each owner's existing
-declarations. Of the 58 declarations, 53 have fixtures: txn 2, config 8, keys 2, store 32
-(the four of the trust and peer records have none yet), engine 7 (the removal of a node from
-trust has none yet) and daemon 2. A selected declaration without a fixture, nonempty write
+declarations. Each of the 72 declarations has a fixture: txn 2, config 11, keys 2, store 41,
+engine 14 and daemon 2. The owner's operations on trust are the one group that
+needs more than the harness node: they open an engine on the benchmark node's real
+disk with its own keys and a network layer that reaches nobody, because the harness
+node has no network for a pairing request to dial. A selected declaration without a fixture, nonempty write
 window or successful commit fails. Unknown and duplicate fixture names fail as well.
 Ordinary Go sub-benchmark selectors can validate an owner subset, such as
 `-bench '^BenchmarkTransactionWrites$/txn$'`; a subset is not complete-table
