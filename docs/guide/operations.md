@@ -62,8 +62,9 @@ existing nodes, they say so.
    detached on purpose and keeps running, so a running turn continues; the daemon
    finds it again when it starts.
 
-2. Replace the programs with the new release's (`sidera` and the
-   `sidera-adapter-*` clients on your `PATH`).
+2. Replace the programs on your `PATH` with the new release's: `sidera` and
+   `sidera-adapter-console`. The adapter programs of Codex and Claude Code are
+   replaced by installing their packages in step 4.
 
    - macOS and Linux: do not overwrite a running program. Copy to a temporary
      name, then rename:

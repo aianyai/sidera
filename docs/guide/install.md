@@ -37,12 +37,16 @@ An archive holds:
 | Path | What it is |
 | ---- | ---------- |
 | `sidera` | The node program: the daemon and every command. |
-| `sidera-adapter-codex` | The Codex adapter. |
-| `sidera-adapter-console` | The console bridge: the owner's way to start a first session and read replies. |
-| `sidera-adapter-claude` | The Claude Code adapter (darwin archives only). |
-| `adapters/<name>/` | Ready-to-install adapter packages, one directory per adapter. |
+| `sidera-adapter-console` | The console bridge, and the owner's command-line client: the way to start a first session and read replies. Keep it on your `PATH`. |
+| `adapters/codex/` | The ready-to-install package of the Codex adapter. |
+| `adapters/claude/` | The package of the Claude Code adapter (darwin archives only). |
+| `adapters/console/` | The package of the console bridge. |
+| `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt` | The license, the notices of bundled software and a short note. |
 
-On Windows the programs end in `.exe`.
+The adapter programs for Codex and Claude Code are inside their packages; you
+install a package with `sidera adapter install <directory>/adapters/<name>` and do
+not copy those programs yourself. On Windows the programs end in `.exe`. The
+release notes are in `CHANGELOG.md`.
 
 ### Verify the download
 
@@ -81,19 +85,19 @@ macOS and Linux:
 ```sh
 mkdir -p ~/.local/bin
 tar -xzf sidera_0.8.0_<os>_<arch>.tar.gz
-cp sidera sidera-adapter-* ~/.local/bin/
+cp sidera sidera-adapter-console ~/.local/bin/
 ```
 
 Make sure `~/.local/bin` is on your `PATH` (add
 `export PATH="$HOME/.local/bin:$PATH"` to your shell profile if it is not).
-Keep the extracted `adapters/` directory: you install the packages from it in
-[Getting started](getting-started.md#4-install-and-enable-adapters).
+Keep the extracted `adapters/` directory: you install the adapter packages from it in
+[Getting started](getting-started.md#4-install-and-enable-adapters-both).
 
 If macOS refuses to run a program that a browser downloaded, remove its
 quarantine mark:
 
 ```sh
-xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-*
+xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-console
 ```
 
 Windows (PowerShell):
@@ -114,8 +118,11 @@ If the archive extracts into a subdirectory, adjust the `Copy-Item` path.
 sidera version
 ```
 
-It prints the version, the commit the program was built from and the Go version
-that built it. Every node in a cluster should run the same release.
+It prints one line with the version, the commit the program was built from and the
+Go version that built it, for example `sidera 0.8.0 (commit abc123456789, go1.26.10)`.
+`sidera version --json` prints the same as JSON. Every node in a cluster should
+run the same release. A program built from source without release settings reports
+`0.0.0-dev`.
 
 ## Build from source
 
@@ -150,7 +157,7 @@ bin/sidera-adapter-claude package --goos darwin --goarch "$(go env GOARCH)" \
 ## Run the daemon
 
 Every node runs one daemon. Create the node's data directory once, then start the
-daemon (see [Getting started](getting-started.md#1-create-the-node)):
+daemon (see [Getting started](getting-started.md#1-create-the-node-both)):
 
 ```sh
 sidera init

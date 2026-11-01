@@ -120,14 +120,14 @@ Choose A (release archive) or B (source).
    ```sh
    mkdir -p ~/.local/bin ~/sidera-release
    tar -xzf sidera_<version>_<os>_<arch>.tar.gz -C ~/sidera-release
-   cp ~/sidera-release/sidera ~/sidera-release/sidera-adapter-* ~/.local/bin/
+   cp ~/sidera-release/sidera ~/sidera-release/sidera-adapter-console ~/.local/bin/
    export PATH="$HOME/.local/bin:$PATH"
    ```
 
    Make sure `~/.local/bin` is on the `PATH` of the owner's login shell (add the
    `export` line to the shell profile if it is not). On macOS, if a program is
    refused because it was downloaded by a browser, run
-   `xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-*`.
+   `xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-console`.
 
    Windows (PowerShell):
 
@@ -140,7 +140,9 @@ Choose A (release archive) or B (source).
    ```
 
    If the archive extracted into a subdirectory, copy from there. The adapter
-   packages are in the extracted `adapters/<name>/` directories.
+   packages (Codex, Claude Code on macOS, console) are in the extracted
+   `adapters/<name>/` directories; the adapter programs for Codex and Claude Code
+   are inside them and are not copied by hand.
 
 ### B. Build from source
 
@@ -167,8 +169,9 @@ PowerShell and the `.exe` names, and copy the programs into
 sidera version
 ```
 
-Expected: the version, the commit and the Go version. If the command is not found,
-the directory is not on the `PATH`; fix that first.
+Expected: one line such as `sidera 0.8.0 (commit abc123456789, go1.26.10)`. A
+program built from source without release settings prints `0.0.0-dev`. If the
+command is not found, the directory is not on the `PATH`; fix that first.
 
 ## 3. Create the node
 

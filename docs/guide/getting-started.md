@@ -141,7 +141,7 @@ holds anything you would not let another of your agents touch.
 
 ### A restricted preset (recommended)
 
-Claude Code. Save as `claude-dev.json`; `project_dir` must be an existing
+Claude Code. Save as `claude-dev.json`; `project_dir` must be an absolute path to an existing
 directory:
 
 ```json
