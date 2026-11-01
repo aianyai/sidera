@@ -84,6 +84,10 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		state, active := adapterproto.AttachUnreachable, false
 		if c != nil {
 			state, active = a.attach(ctx, c, s, false)
+			if state == adapterproto.AttachUnreachable {
+				// The reconnect loop resumes the sessions still not loaded.
+				a.startReconnect()
+			}
 		}
 		result.Sessions = append(result.Sessions, adapterproto.SessionState{Endpoint: s.endpoint, State: state, TurnActive: active})
 	}

@@ -71,7 +71,7 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 		}
 	}
 	a.mu.Lock()
-	signedIn, lost, busy, status := a.signedIn, s.lost, s.busy(), s.status
+	signedIn, lost, status := a.signedIn, s.lost, s.status
 	a.mu.Unlock()
 	switch {
 	case lost:
@@ -80,21 +80,36 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 		return refused(adapterproto.RefusalNativeUnavailable), nil
 	case !signedIn:
 		return refused(adapterproto.RefusalRuntimeAuth), nil
-	case busy:
-		return refused(adapterproto.RefusalBusy), nil
 	}
+	// A thread the server unloaded is loaded again, with its configuration, before
+	// anything is asked of it: a turn on a thread loaded any other way would run
+	// without the session's credentials. Loading also brings the books on its turns
+	// up to date, so the busy check comes after it.
 	if status == appserver.ThreadNotLoaded {
-		if state, _ := a.attach(ctx, c, s, true); state != adapterproto.AttachAttached {
-			if state == adapterproto.AttachLost {
-				return refused(adapterproto.RefusalSessionLost), nil
-			}
-			return refused(adapterproto.RefusalNativeUnavailable), nil
+		if res, ok := a.reload(ctx, c, s); !ok {
+			return res, nil
 		}
+	}
+	a.mu.Lock()
+	busy := s.busy()
+	a.mu.Unlock()
+	if busy {
+		return refused(adapterproto.RefusalBusy), nil
 	}
 
 	turn, err := a.startTurn(ctx, c, s, preset, string(p.Attempt), p.Text)
+	if err != nil && appserver.IsThreadGone(err) {
+		// "Not found" from turn/start does not show that the thread is gone: the
+		// server may have unloaded it. thread/resume, which reloads a thread that
+		// exists, says so for one that does not.
+		res, ok := a.reload(ctx, c, s)
+		if !ok {
+			return res, nil
+		}
+		turn, err = a.startTurn(ctx, c, s, preset, string(p.Attempt), p.Text)
+	}
 	if err != nil {
-		return a.refusalOrUnknown(s, err)
+		return a.refusalOrUnknown(err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -107,6 +122,18 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	}
 	s.prompts[p.Attempt] = rec
 	return res, nil
+}
+
+// reload loads the session's thread in the connection. When it cannot, ok is false
+// and the result is the refusal to answer the delivery with.
+func (a *App) reload(ctx context.Context, c *appserver.Client, s *session) (res adapterproto.PromptDeliverResult, ok bool) {
+	switch state, _ := a.attach(ctx, c, s, true); state {
+	case adapterproto.AttachAttached:
+		return adapterproto.PromptDeliverResult{}, true
+	case adapterproto.AttachLost:
+		return refused(adapterproto.RefusalSessionLost), false
+	}
+	return refused(adapterproto.RefusalNativeUnavailable), false
 }
 
 func refused(reason adapterproto.PromptRefusal) adapterproto.PromptDeliverResult {
@@ -135,17 +162,13 @@ func (a *App) repeatedDelivery(s *session, p adapterproto.PromptDeliverParams) (
 // refusalOrUnknown maps a failed turn start. A refusal the server worded clearly
 // is the adapter's to report as one, because certainly nothing was delivered; any
 // other failure leaves the outcome unknown, which the daemon settles by asking
-// (prompt.reconcile), and so is an internal error.
-func (a *App) refusalOrUnknown(s *session, err error) (adapterproto.PromptDeliverResult, error) {
+// (prompt.reconcile), and so is an internal error. That includes "not found" after
+// the thread was loaded again, which contradicts the load.
+func (a *App) refusalOrUnknown(err error) (adapterproto.PromptDeliverResult, error) {
 	var rpc *appserver.RPCError
 	if errors.As(err, &rpc) {
 		m := strings.ToLower(rpc.Message)
 		switch {
-		case appserver.IsThreadGone(err):
-			a.mu.Lock()
-			s.lost = true
-			a.mu.Unlock()
-			return refused(adapterproto.RefusalSessionLost), nil
 		case strings.Contains(m, "unauthorized") || strings.Contains(m, "not logged in") || strings.Contains(m, "sign in"):
 			return refused(adapterproto.RefusalRuntimeAuth), nil
 		case strings.Contains(m, "active turn") || strings.Contains(m, "already running") || strings.Contains(m, "busy"):

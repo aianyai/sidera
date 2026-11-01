@@ -107,7 +107,12 @@ taken from a library:
   backoff (starting the server if it is gone), resumes every session with its
   configuration, and settles its books on the turns from the server's list: a turn it
   thought running that ended is reported ended (a turn the server no longer lists is
-  `failed`), and a turn running that it did not know is reported started.
+  `failed`), and a turn running that it did not know is reported started. Every new
+  connection starts with every session's thread marked not loaded, and a thread is
+  marked loaded only by the resume that loaded it. A resume that fails for a reason that
+  says nothing of the thread is tried again by the same reconnect loop, with the same
+  backoff, until every session is loaded, and by the next `prompt.deliver` of the session,
+  which loads the thread before it asks anything of it.
 
 ### Credentials of a session
 
@@ -254,12 +259,19 @@ servers on one socket cannot run.
 text, since the server keeps the id on the prompt's record. A session that runs a turn
 (the server's word, or the adapter's own books) is refused `busy`: the adapter is the
 thread's only writer and neither queues behind nor steers a turn. A thread the server
-unloaded is resumed with its configuration first. The answer is `accepted`, and the
+unloaded is resumed with its configuration first, and that resume brings the session's
+turns up to date before the busy check, so a turn that ended while the connection was
+down does not keep the session busy. A turn on a thread loaded any other way would run
+without the session's credentials. When `turn/start` answers that the thread was not
+found, that is not taken for proof: the adapter resumes the thread, and only a resume
+that says the thread does not exist makes the session lost (`session_lost`); a thread
+that was only unloaded is then started on again. The answer is `accepted`, and the
 adapter sends `prompt.persisted` when the `userMessage` of the attempt completes in
 the record; if that came before the answer, the answer is `persisted`. The same attempt
 and text again gets the same answer, brought up to date; with another text it is
-`1005`. A refusal the server words clearly (the thread is gone, not signed in, a turn
-is running) is `refused` with `session_lost`, `runtime_auth` or `busy`; no account or
+`1005`. A refusal the server words clearly (not signed in, a turn is running) is
+`refused` with `runtime_auth` or `busy`, and a resume that says the thread does not exist
+is `refused` with `session_lost`; no account or
 no connection before the request is `refused` with `runtime_auth` or
 `native_unavailable`; any other failure is an internal error, which the daemon settles
 with `prompt.reconcile`.

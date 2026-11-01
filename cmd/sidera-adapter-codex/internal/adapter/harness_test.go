@@ -52,6 +52,12 @@ type fakeCodex struct {
 	// otherRecordForm makes the record (thread/turns/list) omit what a prompt is
 	// found by, as a server that changed the form of its record would.
 	otherRecordForm bool
+	// resumeFailures makes that many thread/resume calls fail with an error that
+	// says nothing of the thread, as a server that is not ready does.
+	resumeFailures int
+	// turnStartGone makes that many turn/start calls answer that the thread was not
+	// found, as the server does for a thread it has unloaded.
+	turnStartGone int
 }
 
 type fakeThread struct {
@@ -107,6 +113,10 @@ func (f *fakeCodex) install() {
 		p := decode[struct{ ThreadID string }](raw)
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.resumeFailures > 0 {
+			f.resumeFailures--
+			return nil, &appserver.RPCError{Code: -32603, Message: "internal error"}
+		}
 		th := f.threads[p.ThreadID]
 		if th == nil {
 			return nil, &appserver.RPCError{Code: -32600, Message: "no rollout found for thread id " + p.ThreadID}
@@ -155,7 +165,10 @@ func (f *fakeCodex) install() {
 		}](raw)
 		f.mu.Lock()
 		th := f.threads[p.ThreadID]
-		if th == nil {
+		if th == nil || f.turnStartGone > 0 {
+			if th != nil {
+				f.turnStartGone--
+			}
 			f.mu.Unlock()
 			return nil, &appserver.RPCError{Code: -32600, Message: "thread not found: " + p.ThreadID}
 		}

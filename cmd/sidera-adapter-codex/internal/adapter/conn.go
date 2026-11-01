@@ -75,6 +75,13 @@ func (a *App) ensureClient(ctx context.Context) (*appserver.Client, error) {
 	}
 	a.mu.Lock()
 	a.client, a.serverVer, a.signedIn = c, appserver.ServerVersion(init.UserAgent), signedIn
+	// A connection holds only the threads it started or resumed, and the server
+	// unloads a thread when the last connection holding it ends: in a new
+	// connection every thread is unloaded until it is resumed, with its
+	// configuration, which the server keeps none of.
+	for _, s := range a.sessions {
+		s.status = appserver.ThreadNotLoaded
+	}
 	a.mu.Unlock()
 	go a.watch(c)
 	return c, nil
@@ -127,37 +134,54 @@ func (a *App) reconnectLoop() {
 			delay = min(delay*2, a.opts.ReconnectMax)
 			continue
 		}
-		a.resync(c)
+		failed := a.resync(c)
 		a.publishAvailability(false)
 		a.mu.Lock()
-		if a.liveClientLocked() != nil {
+		if a.liveClientLocked() != nil && failed == 0 {
 			a.reconnect = false
 			a.mu.Unlock()
 			return
 		}
-		a.mu.Unlock() // it ended while the sessions were being resumed: again
+		a.mu.Unlock()
+		// The connection ended while the sessions were being resumed, or a session
+		// could not be resumed for now: again, after a wait, for the sessions that
+		// are still not loaded.
+		if failed > 0 {
+			delay = min(delay*2, a.opts.ReconnectMax)
+		}
 	}
 }
 
-// resync resumes every session the adapter holds and reports the turns that began
-// or ended while there was no connection.
-func (a *App) resync(c *appserver.Client) {
+// resync resumes every session whose thread is not loaded and reports the turns
+// that began or ended while there was no connection. It returns how many sessions
+// could not be resumed for now, which the reconnect loop tries again. A session
+// whose thread the server does not have (it is lost) and one whose preset cannot
+// be used are not retried: neither changes by waiting.
+func (a *App) resync(c *appserver.Client) (failed int) {
 	a.mu.Lock()
 	sessions := make([]*session, 0, len(a.sessions))
 	for _, s := range a.sessions {
-		if !s.creating {
+		if !s.creating && s.status == appserver.ThreadNotLoaded {
 			sessions = append(sessions, s)
 		}
 	}
 	a.mu.Unlock()
 	for _, s := range sessions {
+		if _, ok := a.presetOf(s.preset); !ok {
+			a.log.Warn("a session cannot be resumed: its preset is not usable", "endpoint", s.endpoint, "preset", s.preset)
+			continue
+		}
 		ctx, cancel := context.WithTimeout(a.bgCtx, dialTimeout)
 		state, _ := a.attach(ctx, c, s, true)
 		cancel()
 		if state != adapterproto.AttachAttached {
 			a.log.Warn("a session could not be resumed", "endpoint", s.endpoint, "state", state)
 		}
+		if state == adapterproto.AttachUnreachable {
+			failed++
+		}
 	}
+	return failed
 }
 
 // attach loads the session's thread in the connection and brings the adapter's

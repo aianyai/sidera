@@ -496,3 +496,130 @@ func TestUnusableCodexFailsTheProbeAndCreation(t *testing.T) {
 		})
 	}
 }
+
+func (f *fakeCodex) setResumeFailures(n int) {
+	f.mu.Lock()
+	f.resumeFailures = n
+	f.mu.Unlock()
+}
+
+// idleSession creates a session whose first turn has ended.
+func (h *harness) idleSession(codex *fakeCodex) {
+	h.t.Helper()
+	h.start()
+	h.create(attempt1, sessionEP, "dev")
+	first := decode[adapterproto.TurnStartedParams](h.waitNote(adapterproto.MethodTurnStarted, nil))
+	codex.end("th-1", string(first.Turn), "completed")
+	h.waitNote(adapterproto.MethodTurnEnded, nil)
+}
+
+func (h *harness) deliver(attempt string) adapterproto.PromptDeliverResult {
+	h.t.Helper()
+	var res adapterproto.PromptDeliverResult
+	h.mustCall(adapterproto.MethodPromptDeliver, adapterproto.PromptDeliverParams{Endpoint: sessionEP, Attempt: adapterproto.AttemptID(attempt), Text: "next"}, &res)
+	return res
+}
+
+// The server unloads a thread when the connection that holds it ends, and keeps no
+// configuration of it. A prompt delivered after that must not start a turn on the
+// unloaded thread: the thread is resumed with its configuration first, and while
+// that cannot be done the prompt is refused.
+func TestDeliverAfterConnectionLossLoadsTheThreadWithItsConfiguration(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarness(t, codex)
+	h.idleSession(codex)
+	turnStarts := len(codex.callsOf("turn/start"))
+
+	codex.setResumeFailures(1000)
+	codex.srv.DropConnections()
+	h.waitNote(adapterproto.MethodAdapterAvailability, func(r json.RawMessage) bool {
+		c := decode[adapterproto.AvailabilityParams](r).Conditions
+		return len(c) == 1 && c[0].Condition == adapterproto.ConditionNativeUnavailable
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		res := h.deliver(attempt2)
+		if res.Stage == adapterproto.PromptRefused && res.Reason == adapterproto.RefusalNativeUnavailable {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a delivery while the thread cannot be loaded: %+v", res)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := len(codex.callsOf("turn/start")); n != turnStarts {
+		t.Fatalf("%d turn starts, want %d: a turn was started on an unloaded thread", n, turnStarts)
+	}
+
+	codex.setResumeFailures(0)
+	deadline = time.Now().Add(10 * time.Second)
+	for h.deliver(attempt2).Stage == adapterproto.PromptRefused {
+		if time.Now().After(deadline) {
+			t.Fatal("the prompt was never accepted")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Whatever loaded the thread, a resume with the credentials came before the turn.
+	var resumed bool
+	for _, c := range codex.srv.Calls() {
+		switch c.Method {
+		case "thread/resume":
+			resumed = strings.Contains(string(c.Params), token)
+		case "turn/start":
+			if strings.Contains(string(c.Params), attempt2) && !resumed {
+				t.Fatal("the turn was started before the thread was resumed with its configuration")
+			}
+		}
+	}
+}
+
+// A resume that fails for now is tried again, with a wait between tries, without
+// waiting for a delivery: the turn that ended while the adapter was away is
+// reported once the thread is loaded.
+func TestFailedResumeAfterConnectionLossIsRetried(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarness(t, codex)
+	h.start()
+	h.create(attempt1, sessionEP, "dev")
+	first := decode[adapterproto.TurnStartedParams](h.waitNote(adapterproto.MethodTurnStarted, nil))
+
+	codex.setResumeFailures(3)
+	codex.srv.DropConnections()
+	codex.endQuietly("th-1", string(first.Turn), "interrupted")
+	h.waitNote(adapterproto.MethodTurnEnded, func(r json.RawMessage) bool { return ended(r, adapterproto.TurnInterrupted) })
+}
+
+// "Not found" from a turn start does not show the thread is gone: the server may
+// have unloaded it. Only a resume that says so makes the session lost.
+func TestTurnStartThreadNotFoundIsCheckedByResume(t *testing.T) {
+	t.Run("unloaded", func(t *testing.T) {
+		codex := newFakeCodex(t)
+		h := newHarness(t, codex)
+		h.idleSession(codex)
+		codex.mu.Lock()
+		codex.turnStartGone = 1
+		codex.mu.Unlock()
+		if res := h.deliver(attempt2); res.Stage == adapterproto.PromptRefused {
+			t.Fatalf("delivery = %+v, want the prompt taken after the thread was resumed", res)
+		}
+		started := decode[adapterproto.TurnStartedParams](h.waitNote(adapterproto.MethodTurnStarted, func(r json.RawMessage) bool {
+			return decode[adapterproto.TurnStartedParams](r).Attempt == attempt2
+		}))
+		codex.end("th-1", string(started.Turn), "completed")
+		h.waitNote(adapterproto.MethodTurnEnded, func(r json.RawMessage) bool { return decode[adapterproto.TurnEndedParams](r).Turn == started.Turn })
+		if res := h.deliver(attempt3); res.Stage == adapterproto.PromptRefused {
+			t.Fatalf("a later delivery = %+v: the session was taken for lost", res)
+		}
+	})
+	t.Run("gone", func(t *testing.T) {
+		codex := newFakeCodex(t)
+		h := newHarness(t, codex)
+		h.idleSession(codex)
+		codex.mu.Lock()
+		delete(codex.threads, "th-1")
+		codex.mu.Unlock()
+		if res := h.deliver(attempt2); res.Stage != adapterproto.PromptRefused || res.Reason != adapterproto.RefusalSessionLost {
+			t.Fatalf("delivery = %+v, want refused session_lost", res)
+		}
+	})
+}
