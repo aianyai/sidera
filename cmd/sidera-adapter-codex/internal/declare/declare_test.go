@@ -27,9 +27,6 @@ func TestManifestAndCapabilitiesAreValid(t *testing.T) {
 			t.Errorf("%v: platforms = %v", p, m.Platforms)
 		}
 	}
-	if got := Manifest("windows", "amd64").Entry.Program; got != "bin/sidera-adapter-codex.exe" {
-		t.Errorf("windows entry = %s", got)
-	}
 }
 
 func TestVersionTested(t *testing.T) {

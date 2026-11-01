@@ -96,7 +96,7 @@ of the request, so a recv waits as long as the client asked, up to 30 seconds.
 
 `sidera-adapter-console package --goos <os> --goarch <arch> --binary <file> --out
 <directory>` writes a package for one platform: `sidera-adapter.json` and
-`bin/sidera-adapter-console` (`.exe` for Windows). The manifest is built from the
+`bin/sidera-adapter-console` (`.exe` for Windows, in `entry.program` too: `manifest.WritePackage` adds it to both). The manifest is built from the
 constants `initialize` answers from, so the two cannot disagree, and validated with
 `manifest.Validate`. Its `platforms` is the one platform of the package, `entry.args`
 is `["serve"]`, and it declares no budgets (a direct endpoint takes the default)

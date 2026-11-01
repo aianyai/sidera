@@ -21,7 +21,7 @@ func Manifest(goos, goarch string) (manifest.Manifest, error) {
 		ID:              AdapterID,
 		Version:         Version,
 		Protocol:        adapterproto.SupportedRange(),
-		// The Windows file is bin/sidera-adapter-console.exe; the host finds it.
+		// manifest.WritePackage adds .exe to the program of a Windows package.
 		Entry:     manifest.Entry{Program: "bin/" + ProgramName, Args: []string{"serve"}},
 		Platforms: []manifest.Platform{{OS: goos, Arch: goarch}},
 	}
@@ -60,9 +60,5 @@ func writePackage(goos, goarch, binary, out string) error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	program := "bin/" + ProgramName
-	if goos == "windows" {
-		program += ".exe"
-	}
-	return manifest.WritePackage(out, m, binary, program)
+	return manifest.WritePackage(out, m, binary)
 }

@@ -26,7 +26,7 @@ func TestWritePackage(t *testing.T) {
 	}
 
 	dir := filepath.Join(t.TempDir(), "pkg")
-	if err := WritePackage(dir, m, bin, "bin/sidera-adapter-x.exe"); err != nil {
+	if err := WritePackage(dir, m, bin); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, FileName))
@@ -37,7 +37,7 @@ func TestWritePackage(t *testing.T) {
 	if err != nil || got.ID != "x" || got.Entry.Program != "bin/sidera-adapter-x" {
 		t.Fatalf("manifest %+v, %v", got, err)
 	}
-	file := filepath.Join(dir, "bin", "sidera-adapter-x.exe")
+	file := filepath.Join(dir, "bin", "sidera-adapter-x")
 	if data, err := os.ReadFile(file); err != nil || string(data) != "binary" {
 		t.Fatalf("binary %q, %v", data, err)
 	}
@@ -53,11 +53,46 @@ func TestWritePackage(t *testing.T) {
 		"a missing binary":    {m, filepath.Join(t.TempDir(), "none")},
 	} {
 		empty := filepath.Join(t.TempDir(), "pkg")
-		if err := WritePackage(empty, tc.m, tc.binary, "bin/sidera-adapter-x"); err == nil {
+		if err := WritePackage(empty, tc.m, tc.binary); err == nil {
 			t.Errorf("%s: no error", name)
 		}
 		if _, err := os.Stat(empty); !os.IsNotExist(err) {
 			t.Errorf("%s: something was written (%v)", name, err)
+		}
+	}
+}
+
+// A package built for Windows names its program with the extension the file has,
+// whether or not the manifest gave it: the installer looks for the file the
+// manifest names.
+func TestWritePackageForWindowsNamesTheProgramWithItsExtension(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "built")
+	if err := os.WriteFile(bin, []byte("binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, program := range []string{"bin/sidera-adapter-x", "bin/sidera-adapter-x.exe"} {
+		m := Manifest{
+			ManifestVersion: Version,
+			ID:              "x",
+			Version:         "1.0.0",
+			Protocol:        adapterproto.Range{Min: 1, Max: 1},
+			Entry:           Entry{Program: program},
+			Platforms:       []Platform{{OS: "windows", Arch: "amd64"}},
+		}
+		dir := filepath.Join(t.TempDir(), "pkg")
+		if err := WritePackage(dir, m, bin); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, FileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Parse(raw)
+		if err != nil || got.Entry.Program != "bin/sidera-adapter-x.exe" {
+			t.Fatalf("%s: manifest %+v, %v", program, got, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(got.Entry.Program))); err != nil {
+			t.Errorf("%s: the program the manifest names is not in the package: %v", program, err)
 		}
 	}
 }

@@ -42,5 +42,5 @@ func writePackage(dir, binary, goos, goarch string) error {
 		return fmt.Errorf("the manifest does not list the platform %s/%s", goos, goarch)
 	}
 	m.Platforms = []manifest.Platform{platform}
-	return manifest.WritePackage(dir, m, binary, m.Entry.Program)
+	return manifest.WritePackage(dir, m, binary)
 }

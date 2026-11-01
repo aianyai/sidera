@@ -20,7 +20,7 @@ the same rules in JSON Schema.
 | `Parse(data)` | Strict decode and `Validate`; the only way to get a `Manifest` from bytes |
 | `Manifest.Validate()` | Every structural rule; use it on a manifest built in code |
 | `Encode(m)` | The text of `sidera-adapter.json` for a manifest built in code: validated, indented, with a trailing newline |
-| `WritePackage(dir, m, binary, program)` | An installable package directory: the manifest and a copy of the binary built for the platform at `program`; what each adapter's `package` subcommand ends in |
+| `WritePackage(dir, m, binary)` | An installable package directory: the manifest and a copy of the binary built for the platform at the manifest's `entry.program`, with `.exe` added to both for a Windows package; what each adapter's `package` subcommand ends in |
 | `Manifest.Tests(runtime, version)` | Whether a runtime version is inside a tested range |
 | `FieldTypes()`, `BudgetFrontends()`, `Units()`, `KnownOS()`, `KnownArch()` | The vocabularies the schema is compared with |
 
@@ -74,9 +74,12 @@ the same rules in JSON Schema.
 ## What the caller must guarantee
 
 - `WritePackage` replaces files of the same names and keeps others in `dir`; a caller
-  that wants a new directory checks it first. `program` is the file's path in the
-  package, which is the manifest's `entry.program` unless the platform adds an
-  extension the manifest leaves out.
+  that wants a new directory checks it first. The binary is written at the
+  manifest's `entry.program`, which the installer requires the package to hold, so
+  the two cannot differ. A package for one Windows platform gets `.exe` appended to
+  `entry.program` if it lacks it (Windows starts no file without an executable
+  extension), in the file and in the manifest written; an adapter names its program
+  the same way for every platform and does not handle the extension.
 - A `Manifest` that did not come from `Parse` is validated before use.
 - The front ends a budget or a receive wait limit names and the ones the adapter
   declares as capabilities must agree; that check needs both and lives in `internal/adapterreg`.

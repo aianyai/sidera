@@ -3,6 +3,7 @@ package console
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -30,12 +31,12 @@ func TestEveryTargetGetsAManifestTheDaemonAccepts(t *testing.T) {
 			if m.ID != AdapterID || m.Version != Version || len(m.Platforms) != 1 || m.Platforms[0].OS != p[0] || m.Platforms[0].Arch != p[1] {
 				t.Errorf("manifest %+v", m)
 			}
-			file := "sidera-adapter-console"
-			if p[0] == "windows" {
-				file += ".exe"
+			// The installer refuses a package that lacks the file the manifest names.
+			if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(m.Entry.Program))); err != nil {
+				t.Errorf("the program the manifest names is not in the package: %v", err)
 			}
-			if _, err := os.Stat(filepath.Join(out, "bin", file)); err != nil {
-				t.Errorf("the binary is not in the package: %v", err)
+			if p[0] == "windows" && !strings.HasSuffix(m.Entry.Program, ".exe") {
+				t.Errorf("the program of a Windows package is %q", m.Entry.Program)
 			}
 			if err := writePackage(p[0], p[1], bin, out); err == nil {
 				t.Error("a package was written over a directory that is not empty")

@@ -62,14 +62,6 @@ func Tested() manifest.TestedRange {
 // VersionTested reports whether a Codex version is inside the tested range.
 func VersionTested(version string) bool { return Tested().Contains(version) }
 
-// ProgramPath is the entry program of the package for an operating system.
-func ProgramPath(goos string) string {
-	if goos == "windows" {
-		return programName + ".exe"
-	}
-	return programName
-}
-
 // Manifest is the manifest of the package for one platform. A package holds one
 // binary, so its platform list names only that platform: the list is what the
 // installer checks.
@@ -79,7 +71,7 @@ func Manifest(goos, goarch string) manifest.Manifest {
 		ID:              ID,
 		Version:         Version,
 		Protocol:        adapterproto.SupportedRange(),
-		Entry:           manifest.Entry{Program: ProgramPath(goos)},
+		Entry:           manifest.Entry{Program: programName},
 		Platforms:       []manifest.Platform{{OS: goos, Arch: goarch}},
 		Requires:        []manifest.Requirement{{Program: "codex"}},
 		Tested:          []manifest.TestedRange{Tested()},
@@ -99,5 +91,5 @@ func Manifest(goos, goarch string) manifest.Manifest {
 // and a copy of the binary, built for that platform, at the manifest's entry.
 func WritePackage(dir, binary, goos, goarch string) error {
 	m := Manifest(goos, goarch)
-	return manifest.WritePackage(dir, m, binary, m.Entry.Program)
+	return manifest.WritePackage(dir, m, binary)
 }
