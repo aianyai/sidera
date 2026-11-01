@@ -169,7 +169,18 @@ func TestTurnEndedWhileCreatingCountsOnceTheEndpointOpens(t *testing.T) {
 // (first_turn_ended), and the endpoint opens with the unread first prompt repeated
 // once, not left waiting for an end that will never be reported again.
 func TestCreationSettledWithFirstTurnEndedAfterARestartRepeatsTheUnreadPromptOnce(t *testing.T) {
-	h := sessionNode(t, harness.Options{}, "sender")
+	// The adapter the restart starts answers the creation it is asked again with the
+	// end of the first turn. It is set before that process runs: the node asks it as
+	// soon as it has taken it on, before a test could reach its controller.
+	arm := func(_ string, n int, k *fakeadapter.Knobs) {
+		if n != 2 {
+			return
+		}
+		if err := k.QueueCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeFirstTurnEnded}); err != nil {
+			t.Errorf("arming the adapter after the restart: %v", err)
+		}
+	}
+	h := sessionNode(t, harness.Options{Adapter: &harness.AdapterOptions{Arm: arm}}, "sender")
 	rt, err := h.Runtime()
 	if err != nil {
 		t.Fatal(err)
@@ -191,12 +202,6 @@ func TestCreationSettledWithFirstTurnEndedAfterARestartRepeatsTheUnreadPromptOnc
 		t.Fatalf("endpoints %+v, want one creating", eps)
 	}
 	h.Crash(harness.ProcessCrash)
-	if ctrl, err = h.Adapter(harness.Instance); err != nil {
-		t.Fatal(err)
-	}
-	if err := ctrl.QueueOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeFirstTurnEnded}); err != nil {
-		t.Fatal(err)
-	}
 	quiet(t, h)
 	h.Advance(engine.DefaultParams().CreateRetryBackoff + time.Second)
 	quiet(t, h)
