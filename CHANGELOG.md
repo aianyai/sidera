@@ -90,6 +90,28 @@ and Windows (amd64).
   another directory everywhere. Nothing is moved automatically: a Windows machine with
   the former directory and none in the new place gets a message with the
   `Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"` command.
+- **The Codex App Server runs in an empty directory of its own.** Codex takes the
+  working directory of the server as the writable root of a sandboxed command, so a
+  server started in the adapter's state directory let a `workspace-write` command write
+  there, `ws-token` included, on every OS. The server now runs in an empty
+  per-instance directory under the user's cache directory, outside the data
+  directory. A server that an earlier build started in the state directory is reported
+  by the probe as `wrong_version` until it is restarted; the adapter does not end a
+  server it did not start.
+- **Sandboxed Codex presets cannot read the data directory.** A preset with a
+  `workspace-write` or `read-only` sandbox runs under a permission profile that
+  denies reading the data directory (the identity key and every session's token). The
+  operating system enforces it: Seatbelt on macOS and bubblewrap on Linux, where it was
+  verified, and a deny entry for the sandbox's accounts on Windows, where another Codex
+  session can revoke it and the protected data directory is the main guard. A session
+  that does not carry the profile is not used. Presets with `danger-full-access`
+  are unchanged and read everything, and so do the user's own MCP servers and commands
+  approved to run outside the sandbox.
+- **Claude Code's file tools are denied the data directory, as best effort.** Every
+  turn denies `Read` and `Edit` of it, whatever the preset or the user's own settings
+  allow. A Bash command that the user's settings allow and that reads without naming
+  the file (`grep -r` on the parent directory, for example) is not covered; a guarantee
+  needs Claude's operating-system sandbox, which is not used yet.
 
 ### Not yet
 
