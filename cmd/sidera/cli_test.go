@@ -25,6 +25,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -71,6 +72,22 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func privateTempDir(t *testing.T, prefix string) string {
+	t.Helper()
+	parent, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(parent) })
+	root := filepath.Join(parent, "home")
+	// MkdirTemp inherits the parent's ACL on Windows; the node needs a
+	// directory private to its owner before init or a checked IPC listener.
+	if err := fsx.MakeRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 type session struct{ token, address string }
 type cliNode struct {
 	t     *testing.T
@@ -96,12 +113,8 @@ func newNode(t *testing.T, cut ...chan struct{}) *cliNode {
 	}
 	n := &cliNode{t: t, h: h}
 	n.first = n.created(created.MessageID)
-	home, err := os.MkdirTemp("", "cl-")
-	if err != nil {
-		t.Fatal(err)
-	}
+	home := privateTempDir(t, "cl-")
 	n.home = home
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
 	if err := os.Mkdir(filepath.Join(home, "run"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -257,11 +270,7 @@ func TestRecvHandingOutExitsZero(t *testing.T) {
 }
 
 func TestRecvPrintsTheExactPageBytes(t *testing.T) {
-	home, err := os.MkdirTemp("", "cp-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := privateTempDir(t, "cp-")
 	if err := os.Mkdir(filepath.Join(home, "run"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -648,11 +657,7 @@ func TestInitTakesTheListenPort(t *testing.T) {
 }
 
 func TestInitPrintsIdentityAndBackupInstructions(t *testing.T) {
-	parent, err := os.MkdirTemp("", "ci-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(parent) })
+	parent := privateTempDir(t, "ci-")
 	home := filepath.Join(parent, "node")
 	cmd := exec.Command(binary(t), "init", "--home", home)
 	out, err := cmd.CombinedOutput()
@@ -1087,11 +1092,7 @@ func runHome(t *testing.T, home string, args ...string) (int, string, string) {
 
 func startDaemon(t *testing.T) (string, <-chan error) {
 	t.Helper()
-	home, err := os.MkdirTemp("", "cd-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(home) })
+	home := privateTempDir(t, "cd-")
 	// A port of its own: the default is one per machine, and test packages run
 	// daemons side by side.
 	port, err := harness.FreePort()
@@ -1388,11 +1389,7 @@ func TestRevocationExportWritesVerifiedRecords(t *testing.T) {
 func TestRevocationExportRejectsAnInvalidBackupBeforeCreatingAFile(t *testing.T) {
 	for _, mismatch := range []bool{false, true} {
 		t.Run(fmt.Sprint(mismatch), func(t *testing.T) {
-			home, err := os.MkdirTemp("", "ce-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { os.RemoveAll(home) })
+			home := privateTempDir(t, "ce-")
 			if code, out, diag := runHome(t, home, "init", "--json"); code != 0 {
 				t.Fatalf("init: %d %q %q", code, out, diag)
 			}
@@ -1451,11 +1448,7 @@ func TestRevocationExportRejectsAnInvalidBackupBeforeCreatingAFile(t *testing.T)
 func TestRevocationExportCleansItsNewFileWhenOutputReturnsAnError(t *testing.T) {
 	for _, stream := range []string{"stdout", "stderr"} {
 		t.Run(stream, func(t *testing.T) {
-			home, err := os.MkdirTemp("", "co-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { os.RemoveAll(home) })
+			home := privateTempDir(t, "co-")
 			if code, out, diag := runHome(t, home, "init", "--json"); code != 0 {
 				t.Fatalf("init: %d %q %q", code, out, diag)
 			}

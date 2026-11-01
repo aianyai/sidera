@@ -21,7 +21,9 @@ program, connect it to the real Agent handler on checked local IPC, and use
 the engine fixture to create sessions through `session.create`. Every CLI
 process has its own token and runs in the same directory as the other sessions.
 The fixture reads the created endpoint's stored token; it never invents a
-session endpoint or credential.
+session endpoint or credential. CLI fixtures that need an existing private
+data directory create it with `fsx.MakeRoot`; a plain temporary directory can
+inherit access for other users on Windows.
 
 A checked-IPC HTTP peer also serves a deliberately noncanonical receive page;
 the real executable must print its exact bytes in both human and JSON modes.
