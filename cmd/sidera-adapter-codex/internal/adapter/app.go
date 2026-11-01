@@ -33,6 +33,9 @@ func ClientVersion() string { return release.Version() }
 // ServerManager finds or starts the App Server. *server.Server is the real one.
 type ServerManager interface {
 	Connect(ctx context.Context) (appserver.Endpoint, error)
+	// Exposure says why the server Connect last returned may let a sandboxed
+	// command reach the adapter's files, or is empty.
+	Exposure() string
 }
 
 // Options holds what a test replaces. The zero value is the real thing.

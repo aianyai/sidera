@@ -65,6 +65,38 @@ the log says its life then ends with the job. Standard input is the null device;
 standard output and error are appended to `<state_dir>/app-server.log`, which is
 moved to `app-server.log.1` at each start.
 
+**Working directory.** The server runs in an empty directory of the adapter's own,
+`<user cache>/sidera-adapter-codex/<instance>-<hash>` (`os.UserCacheDir`: `~/Library/Caches`
+on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LocalAppData%` on Windows), where
+`<instance>` is the last element of `<state_dir>` and `<hash>` the first 8 hex digits of the
+SHA-256 of its absolute path, so the instances of two Sidera homes never share one. A restart
+of the same instance uses the same directory. The start fails, with a message that says so,
+when there is no user cache directory. Nothing is ever put in it, and nothing reads it.
+
+Codex derives a sandbox's writable roots from a working directory, and the server's own is
+the one it falls back to (measured on 0.166, and in its source):
+
+- `command/exec` with a `sandboxPolicy` takes the server's working directory as the sandbox's
+  workspace, whatever `cwd` the request names; the request's `cwd` is only where the command
+  runs. Only a request with a `permissionProfile` binds the sandbox to its own `cwd`.
+- `thread/start`, `thread/resume` and `command/exec` without a `cwd` use the server's.
+- A thread's turns derive their roots from the thread's (or the turn's) `cwd`.
+- On Windows, under the elevated sandbox, the setup refresh that runs before a sandboxed
+  command grants the sandbox's accounts write access (an ACE) to each writable root.
+
+So a server started in `<state_dir>` would give sandboxed commands write access to
+`ws-token`, with which a command could reach the server and start a thread without a
+sandbox. An empty directory gives a sandbox nothing it can use; `/` or the home directory
+would give it everything the user can write. The socket, the token, the state file and the
+log stay in `<state_dir>`: Codex reads them by the paths it is given and never makes them
+roots. Every thread, turn and command the adapter asks for names the preset's `cwd`.
+
+The state file records the working directory (`work_dir`). A server found running whose
+record has none was started in `<state_dir>` by an earlier adapter; `adapter.probe` then
+reports the `app-server` dependency as `wrong_version` with a detail that says to restart
+it, since the adapter does not end a server it did not start. Restarting it does not take
+back an ACE the Windows sandbox already granted on `<state_dir>`.
+
 **Environment.** The server is started with the adapter's environment less: a pair
 that is not valid UTF-8 (the server refuses to start on one); `SIDERA_TOKEN` and
 `SIDERA_PROBE_TOKEN`, which belong to one session and would be seen by every
@@ -84,7 +116,8 @@ is ended, not what it started.
 **Versions.** `adapter.probe` reports the version of the `codex` program
 (`codex --version`). The server's own version is in the user agent it answers
 `initialize` with. When the two differ (Codex was upgraded under a running server)
-the probe reports the `app-server` dependency as `wrong_version`; the adapter does
+the probe reports the `app-server` dependency as `wrong_version`, as it does for a server
+that runs in the state directory (see "Working directory"); the adapter does
 not restart a server it did not start. Neither the manifest nor the adapter names a
 version it was tested with, and nothing judges one: Codex releases several times a
 day, so a list could not stay true. Whether `prompt.reconcile` may conclude that a
@@ -450,6 +483,11 @@ about ten seconds to the background.
   running turn at each restart of the adapter or the daemon. Detached, the turns go on
   and the restarted adapter finds the server by its address. The managed daemon is not
   used for the reasons above.
+- **The server runs in an empty directory outside `SIDERA_HOME`.** Codex makes the server's
+  working directory a writable root of sandboxed commands, so the directory it runs in must
+  hold nothing a sandboxed command could use: above all no secret of Sidera. A directory under
+  the temporary directory was not taken: the system cleans it while the server runs, and
+  in a shared one (`/tmp`) another user could create the path first.
 - **Credentials in the thread's configuration, not in the server.** One server for all
   sessions is what lets turns outlive the adapter and what keeps the number of
   processes small. The measurement showed the thread's configuration is the one place
@@ -497,7 +535,7 @@ about ten seconds to the background.
 | Client: dial over Unix socket or TCP, frames, read loop, queue | `cmd/sidera-adapter-codex/internal/appserver/client.go` |
 | The subset of types and methods; `IsThreadGone`; `ServerVersion` | `internal/appserver/types.go` |
 | A fake App Server for tests | `internal/appserver/appservertest/` |
-| Start, connect, detach, environment, stop | `internal/server/` (`server.go`, `env.go`, `detach_*.go`, `version.go`) |
+| Start, connect, working directory, detach, environment, stop | `internal/server/` (`server.go`, `env.go`, `detach_*.go`, `version.go`) |
 | Preset and instance configuration, thread configuration, sandbox policy | `internal/codexcfg/` |
 | Creation decisions and the checkpoint | `internal/create/` |
 | Reconciliation | `internal/reconcile/` |
@@ -508,14 +546,15 @@ about ten seconds to the background.
 
 Tests: `TestCallsAndNotificationsOverBothTransports`, `TestServerRequestsAreAnsweredFromTheHandler`,
 `TestPendingCallsFailWhenTheConnectionDrops`, `TestLargeMessagesAreRead` (the client against
-the fake server); `TestEnviron` (the environment of the server); `TestParsePreset`,
+the fake server); `TestEnviron` (the environment of the server); `TestStartRunsTheServerInADirectoryOfItsOwn`,
+`TestConnectReportsAServerThatRunsInTheStateDirectory` (where the server runs); `TestParsePreset`,
 `TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
 `TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
 (the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
 `TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
-`TestCloseSession` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
+`TestCloseSession`, `TestThreadsTurnsAndCommandsNameThePresetDirectory` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
 against a stand-in program).
 
 Against the installed Codex, in `internal/server/realcodex_test.go` and
@@ -532,5 +571,6 @@ has to be decided on, not refused by default), when a method, member or notifica
 adapter uses is missing, or when `clientUserMessageId` or `clientId` is gone.
 `TestThreadEnvironmentAndServerCleanup` starts a real server, gives a thread its
 credentials through its configuration, reads them back from a command the thread runs,
-runs a command under each sandbox policy, checks the words that say a thread is gone, and
+runs a command under each sandbox policy, checks that a sandboxed command cannot write to the
+state directory (Unix), checks the words that say a thread is gone, and
 stops the server and checks that its process group is gone.

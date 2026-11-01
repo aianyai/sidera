@@ -10,7 +10,9 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +35,10 @@ const (
 	stateFileName = "app-server.json"
 	tokenFileName = "ws-token"
 )
+
+// workDirParent is the directory, under the user's cache directory, that holds
+// the working directory of each instance's App Server.
+const workDirParent = "sidera-adapter-codex"
 
 // maxSocketPath is the longest socket path every supported Unix accepts (macOS
 // holds 104 bytes with the terminator).
@@ -63,7 +69,8 @@ type Config struct {
 	Program string
 	// StateDir holds the socket, the log, the state file and, on Windows, the
 	// token file. The same directory is used by every run of the adapter, which is
-	// what lets a restarted adapter find the server it left running.
+	// what lets a restarted adapter find the server it left running. It is never
+	// the server's working directory (see workDir).
 	StateDir string
 	// Environ is the environment of the adapter, from which the server's is made;
 	// nil means the process environment.
@@ -81,12 +88,16 @@ type Server struct {
 
 	mu    sync.Mutex
 	owned *ownedProcess // the server this process started, if any
+	// exposure says why the server Connect last returned may let a sandboxed
+	// command reach the state directory; empty when it cannot.
+	exposure string
 
 	// The platform and the calls that reach outside the process, as fields so that
 	// a test can stand in for them.
 	goos         string
 	probe        func(context.Context, appserver.Endpoint) error
 	processStart func(pid int) (startedNS int64, running bool)
+	userCacheDir func() (string, error)
 	retryWaits   []time.Duration
 }
 
@@ -113,6 +124,7 @@ func New(cfg Config) *Server {
 		goos:         runtime.GOOS,
 		probe:        appserver.Probe,
 		processStart: processStart,
+		userCacheDir: os.UserCacheDir,
 		retryWaits:   defaultRetryWaits,
 	}
 }
@@ -138,6 +150,32 @@ func (s *Server) ownedProcess() *ownedProcess {
 	return s.owned
 }
 
+// Exposure says why the server Connect last returned may let a sandboxed command
+// reach the adapter's files, or is empty. Only a server an earlier adapter left
+// running can: it was started in the state directory, before the server had a
+// working directory of its own (see workDir). The adapter does not end a server
+// it did not start, so this is for someone to restart it.
+func (s *Server) Exposure() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exposure
+}
+
+// noteFound records whether a server that was found, not started, runs in a
+// working directory of its own. Every start records its working directory in
+// the state file; a server whose record has none was started in the state
+// directory.
+func (s *Server) noteFound() {
+	exposure := ""
+	if st, err := s.loadState(); err != nil || st.WorkDir == "" {
+		exposure = "it was started by an earlier adapter in the state directory, where a sandboxed command can be given write access to the adapter's files: restart it"
+		s.log.Warn("the App Server that answers runs in the state directory: restart it")
+	}
+	s.mu.Lock()
+	s.exposure = exposure
+	s.mu.Unlock()
+}
+
 // Connect returns an endpoint a server answers at: the one that is already
 // listening, or the one it starts. Finding one that is up is the normal case after
 // the adapter restarts, and the reason the server is started detached.
@@ -151,6 +189,7 @@ func (s *Server) ownedProcess() *ownedProcess {
 func (s *Server) Connect(ctx context.Context) (appserver.Endpoint, error) {
 	ep, err := s.existing()
 	if err == nil && s.probe(ctx, ep) == nil {
+		s.noteFound()
 		return ep, nil
 	}
 	if err == nil && s.goos == "windows" {
@@ -179,6 +218,7 @@ func (s *Server) awaitRecorded(ctx context.Context, ep appserver.Endpoint, st st
 		err := s.probe(pctx, ep)
 		cancel()
 		if err == nil {
+			s.noteFound()
 			return ep, nil
 		}
 	}
@@ -224,6 +264,9 @@ type state struct {
 	// where the platform can tell (Windows); zero otherwise. With the pid it
 	// identifies the process.
 	StartedNS int64 `json:"started_ns,omitempty"`
+	// WorkDir is the working directory the server was started in. A server an
+	// earlier adapter started has none recorded: it ran in the state directory.
+	WorkDir string `json:"work_dir,omitempty"`
 }
 
 func (s *Server) loadState() (state, error) {
@@ -253,14 +296,16 @@ func (s *Server) readState() (appserver.Endpoint, error) {
 func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	args := []string{"--no-daemon", "app-server"}
 	var ep appserver.Endpoint
+	workDir, err := s.workDir()
+	if err != nil {
+		return ep, fmt.Errorf("%w: %v", ErrStartFailed, err)
+	}
 	if s.goos != "windows" {
-		var err error
 		if ep, err = s.unixEndpoint(); err != nil {
 			return ep, err
 		}
 		args = append(args, "--listen", "unix://"+ep.Address)
 	} else {
-		var err error
 		if ep, err = s.newTCPEndpoint(); err != nil {
 			return ep, err
 		}
@@ -274,7 +319,7 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	}
 	defer logFile.Close()
 
-	cmd, err := s.spawn(args, logFile)
+	cmd, err := s.spawn(args, workDir, logFile)
 	if err != nil {
 		return ep, fmt.Errorf("%w: %v", ErrStartFailed, err)
 	}
@@ -284,10 +329,10 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 		close(owned.exited)
 	}()
 	s.mu.Lock()
-	s.owned = owned
+	s.owned, s.exposure = owned, ""
 	s.mu.Unlock()
-	s.log.Info("started the App Server", "pid", cmd.Process.Pid, "listen", ep.Network)
-	s.writeState(cmd.Process.Pid, ep)
+	s.log.Info("started the App Server", "pid", cmd.Process.Pid, "listen", ep.Network, "dir", workDir)
+	s.writeState(cmd.Process.Pid, ep, workDir)
 
 	deadline := time.NewTimer(s.cfg.StartTimeout)
 	defer deadline.Stop()
@@ -314,22 +359,54 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	}
 }
 
-// spawn starts the server detached. Where the job the adapter runs in forbids
-// breakaway (Windows), it starts without it and says so: the server then ends with
-// the job.
-func (s *Server) spawn(args []string, logFile *os.File) (*exec.Cmd, error) {
-	cmd, err := s.spawnOnce(args, logFile, true)
+// workDir is the working directory the server is started in: an empty directory
+// of the adapter's own under the user's cache directory, one per state
+// directory, so outside SIDERA_HOME.
+//
+// Codex derives a sandbox's writable roots from a working directory, and the
+// server's own is the one it falls back to: `command/exec` takes it whatever cwd
+// the request names, as does a thread started without one, and on Windows the
+// elevated sandbox grants its accounts write access to it. The state directory
+// holds the WebSocket token, with which a sandboxed command could reach the
+// server and start a thread without a sandbox, so the server must never run
+// there. An empty directory gives a sandbox nothing it can use; `/` or the home
+// directory would give it everything. The adapter's threads and commands all
+// name their own cwd, the preset's.
+func (s *Server) workDir() (string, error) {
+	cache, err := s.userCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("no directory to run the App Server in: %v", err)
+	}
+	stateDir, err := filepath.Abs(s.cfg.StateDir)
+	if err != nil {
+		return "", err
+	}
+	// The instance's name says whose directory it is; the hash of the whole path
+	// keeps the instances of two Sidera homes apart.
+	sum := sha256.Sum256([]byte(stateDir))
+	dir := filepath.Join(cache, workDirParent, filepath.Base(stateDir)+"-"+hex.EncodeToString(sum[:4]))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("cannot make the directory to run the App Server in: %v", err)
+	}
+	return dir, nil
+}
+
+// spawn starts the server detached in dir. Where the job the adapter runs in
+// forbids breakaway (Windows), it starts without it and says so: the server then
+// ends with the job.
+func (s *Server) spawn(args []string, dir string, logFile *os.File) (*exec.Cmd, error) {
+	cmd, err := s.spawnOnce(args, dir, logFile, true)
 	if err != nil && breakawayRefused(err) {
 		s.log.Warn("the job the adapter runs in forbids breakaway: the App Server's life ends with the job")
-		cmd, err = s.spawnOnce(args, logFile, false)
+		cmd, err = s.spawnOnce(args, dir, logFile, false)
 	}
 	return cmd, err
 }
 
-func (s *Server) spawnOnce(args []string, logFile *os.File, breakaway bool) (*exec.Cmd, error) {
+func (s *Server) spawnOnce(args []string, dir string, logFile *os.File, breakaway bool) (*exec.Cmd, error) {
 	cmd := exec.Command(s.cfg.Program, args...)
 	cmd.Env = Environ(s.cfg.Environ)
-	cmd.Dir = s.cfg.StateDir
+	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	cmd.SysProcAttr = detachAttr(breakaway)
 	return cmd, cmd.Start()
@@ -345,9 +422,9 @@ func (s *Server) openLog() (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 }
 
-func (s *Server) writeState(pid int, ep appserver.Endpoint) {
+func (s *Server) writeState(pid int, ep appserver.Endpoint, workDir string) {
 	started, _ := s.processStart(pid)
-	raw, _ := json.Marshal(state{PID: pid, Address: ep.Address, StartedNS: started})
+	raw, _ := json.Marshal(state{PID: pid, Address: ep.Address, StartedNS: started, WorkDir: workDir})
 	if err := os.WriteFile(filepath.Join(s.cfg.StateDir, stateFileName), raw, 0o600); err != nil {
 		s.log.Warn("cannot write the state file", "error", err)
 	}

@@ -13,9 +13,11 @@ package server_test
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +66,15 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 			_ = srv.Stop()
 		}
 	}()
+	// The server runs in a directory of its own, recorded in the state file; it is
+	// under the user's cache directory, so the test removes it.
+	var recorded struct {
+		WorkDir string `json:"work_dir"`
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "app-server.json")); err != nil || json.Unmarshal(raw, &recorded) != nil || recorded.WorkDir == "" {
+		t.Fatalf("the state file records no working directory: %v", err)
+	}
+	defer os.RemoveAll(recorded.WorkDir)
 
 	type itemEvent struct {
 		ThreadID string `json:"threadId"`
@@ -129,6 +140,30 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 		})
 		if err != nil || r.ExitCode != 0 {
 			t.Errorf("command/exec under %s: %+v, %v", sandbox, r, err)
+		}
+	}
+
+	// A sandboxed command cannot write to the state directory, which holds the
+	// server's token on Windows. Codex makes the server's working directory a
+	// writable root of command/exec whatever cwd the request names; the temporary
+	// directories, writable by default, are left out because the state directory
+	// of this test is in one.
+	if os.PathSeparator == '/' {
+		project, err := os.MkdirTemp("", "k4p")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(project)
+		probe := filepath.Join(dir, "written-by-sandbox")
+		r, err := client.CommandExec(ctx, appserver.CommandExecParams{
+			Command: []string{"/bin/sh", "-c", "touch " + probe}, CWD: project, TimeoutMs: 20000,
+			SandboxPolicy: map[string]any{"type": "workspaceWrite", "excludeTmpdirEnvVar": true, "excludeSlashTmp": true},
+		})
+		if err != nil {
+			t.Fatalf("command/exec: %v", err)
+		}
+		if _, serr := os.Stat(probe); serr == nil || r.ExitCode == 0 {
+			t.Errorf("a sandboxed command wrote to the state directory: %+v", r)
 		}
 	}
 

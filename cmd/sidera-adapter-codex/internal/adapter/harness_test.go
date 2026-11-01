@@ -269,11 +269,13 @@ func (f *fakeCodex) callsOf(method string) []appservertest.Call {
 }
 
 type fakeManager struct {
-	ep  appserver.Endpoint
-	err error
+	ep       appserver.Endpoint
+	err      error
+	exposure string
 }
 
 func (m *fakeManager) Connect(context.Context) (appserver.Endpoint, error) { return m.ep, m.err }
+func (m *fakeManager) Exposure() string                                    { return m.exposure }
 
 // harness is the daemon's end of a served adapter, with a fake App Server behind
 // the adapter.

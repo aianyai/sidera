@@ -658,3 +658,38 @@ func TestReconcileCountsATurnTheAdapterStartedBeforeItsEventsCame(t *testing.T) 
 		return decode[adapterproto.TurnStartedParams](r).Attempt == attempt2
 	})
 }
+
+// Every thread the adapter starts or resumes, every turn and every command it runs
+// names the preset's directory as its cwd. Codex derives a sandbox's writable roots
+// from that directory and falls back to the server's own working directory when a
+// request names none.
+func TestThreadsTurnsAndCommandsNameThePresetDirectory(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarness(t, codex)
+	h.idleSession(codex)
+	resumes := len(codex.callsOf("thread/resume"))
+	codex.srv.DropConnections()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(codex.callsOf("thread/resume")) == resumes {
+		if time.Now().After(deadline) {
+			t.Fatal("the thread was never resumed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var res adapterproto.ProbeResult
+	h.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{
+		{Preset: "yolo", Frontend: adapterproto.FrontendCLI, Token: token, Env: map[string]string{}},
+	}}, &res)
+
+	for _, method := range []string{"thread/start", "thread/resume", "turn/start", "command/exec"} {
+		calls := codex.callsOf(method)
+		if len(calls) == 0 {
+			t.Errorf("no %s was sent", method)
+		}
+		for _, c := range calls {
+			if cwd := decode[struct{ CWD string }](c.Params).CWD; cwd != h.dir {
+				t.Errorf("%s cwd = %q, want the preset's %q", method, cwd, h.dir)
+			}
+		}
+	}
+}

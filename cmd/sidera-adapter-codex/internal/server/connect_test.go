@@ -53,6 +53,7 @@ func TestConnectWindowsRecordedServer(t *testing.T) {
 
 			srv := New(Config{Program: filepath.Join(dir, "no-such-codex"), StateDir: dir, StartTimeout: time.Second})
 			srv.goos = "windows"
+			srv.userCacheDir = func() (string, error) { return dir, nil }
 			srv.retryWaits = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
 			srv.processStart = func(p int) (int64, bool) { return tc.started, p == pid && tc.running }
 			probes := 0

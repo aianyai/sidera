@@ -28,6 +28,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	codexPath, sideraPath, version := a.codexPath, a.sideraPath, a.codexVer
 	missing := append(missingPrograms(nil), a.missing...)
 	serverVer := a.serverVer
+	srv := a.srv
 	a.mu.Unlock()
 	if !started {
 		return adapterproto.ProbeResult{}, errNotStarted
@@ -75,7 +76,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	res.Dependencies = append(res.Dependencies,
 		codexDependency(codexProblem, version),
 		programDependency("sidera", missing, ""),
-		serverDependency(c != nil, serverVer, version),
+		serverDependency(c != nil, serverVer, version, srv.Exposure()),
 	)
 
 	a.mu.Lock()
@@ -110,14 +111,19 @@ func codexDependency(problem, version string) adapterproto.Dependency {
 	return adapterproto.Dependency{Name: "codex", State: adapterproto.DependencyOK, Detail: version}
 }
 
-func serverDependency(reachable bool, serverVer, installed string) adapterproto.Dependency {
+// serverDependency judges the App Server. A server left running by an earlier
+// adapter may not be the one this adapter would start: it may serve the version
+// that was installed then, or run where a sandboxed command can be given the
+// adapter's files (exposure). The adapter does not end a server it did not start,
+// so either is reported for someone to restart it.
+func serverDependency(reachable bool, serverVer, installed, exposure string) adapterproto.Dependency {
 	d := adapterproto.Dependency{Name: "app-server", State: adapterproto.DependencyOK, Detail: serverVer}
 	switch {
 	case !reachable:
 		d.State, d.Detail = adapterproto.DependencyMissing, "the App Server cannot be reached"
+	case exposure != "":
+		d.State, d.Detail = adapterproto.DependencyWrongVersion, cut(exposure, adapterproto.MaxDetailLen)
 	case serverVer != "" && installed != "" && serverVer != installed:
-		// A server left running by an earlier adapter serves the version that was
-		// installed then. The adapter does not end a server it did not start.
 		d.State, d.Detail = adapterproto.DependencyWrongVersion, fmt.Sprintf("serving %s, installed %s: restart it", serverVer, installed)
 	}
 	return d
