@@ -20,7 +20,9 @@ sidera endpoint list     # console, runtime and session endpoints of this node
 Notes:
 
 - A probe state of `passed` for Codex proves only that the `sidera` front end
-  works. Whether `codex` is found shows when a session is created.
+  works. While a Codex `workspace-write` preset exists the probe may show `failed`,
+  because no command-line front end is offered under that sandbox; sessions still
+  work. Whether `codex` is found shows when a session is created.
 - `connected` in `network show` is whether a connection is up now. It can be
   `false` for a healthy node until one side sends.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
@@ -86,7 +88,9 @@ existing nodes, they say so.
      Delete `sidera.exe.old` after the daemon has started again. Do not kill the
      Codex App Server or its helpers.
 
-3. Start the daemon again, the way you started it before.
+3. Start the daemon again, the way you started it before, from a stable directory
+such as your home directory (never one that may be deleted, such as a git
+worktree).
 
 4. Install each new adapter package from the release's `adapters/` directory:
 
@@ -195,6 +199,13 @@ machine cannot yet accept inbound connections, pair from that machine
 machine send first: it dials out, and the other side can then answer over the
 same connection.
 
+**Claude sessions fail with `native_unavailable` and the adapter log says "The
+current directory no longer exists".** The daemon was started from a directory that
+has since been deleted, such as a git worktree. Stop the daemon, start it from a
+stable directory such as your home directory
+(`tmux new-session -d -s sidera -c "$HOME" "sidera daemon"`), and create the session
+again.
+
 **A session fails with `native_unavailable`, but `adapter list` says `passed`.**
 The daemon cannot find `codex` (or `claude`). It looks the program up on its own
 `PATH`, which is not your interactive shell's. Start the daemon from a login shell
@@ -243,8 +254,14 @@ node is not told.
   middle of a turn is not confirmed until the turn ends.
 - A `send` takes one recipient.
 - A Codex session whose sandbox is `read-only` or `workspace-write` uses the MCP
-  tools only; the `sidera` command needs `danger-full-access`. How the sandboxes
-  behave on every platform has not been verified for each platform.
+  tools only; a `sidera` command run in a shell fails with an unhelpful
+  `internal error`, and the command needs `danger-full-access`. While such a preset
+  exists, `sidera adapter list` may show the Codex probe as `failed`; sessions still
+  work. `workspace-write` has no network and does not stop the agent from reading
+  files outside its directory, including `SIDERA_HOME`. On Windows it depends on
+  Codex's own sandbox working: with `[windows] sandbox = "elevated"` in
+  `~/.codex/config.toml`, every shell command failed, while `unelevated` worked.
+  Check that `codex sandbox -- cmd /c echo hi` works first.
 - A session's credential is visible to its own user: in Codex's logs and to anything
   the agent prints. Other processes of the same user can read `~/.sidera`. Treat the
   account the node runs as the trust boundary.

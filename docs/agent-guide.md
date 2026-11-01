@@ -23,8 +23,9 @@ conversation. Ask once, say what you will do and why, and wait.
 
 1. **Choosing a full-access preset.** Codex `danger-full-access` or Claude
    `bypassPermissions` lets any trusted node in the cluster direct an agent on
-   this machine to run anything on it. Use the restricted presets below unless the
-   owner chose otherwise.
+   this machine to run anything on it, and the session's Sidera token is visible to
+   everything the agent runs. Add only the `light` preset below unless the owner
+   chose otherwise.
 2. **Changing the firewall.** Opening port 7744 or adding a rule is the owner's
    call. Tell the owner the exact command and let them run it, or run it only after
    a yes.
@@ -199,21 +200,26 @@ Tell your owner to back up the self-revocation (step 9 does it).
 The daemon must run with an environment in which `sidera` and the agent runtime
 (`codex` or `claude`) are on the `PATH`, and it must not end when your session ends.
 
+Start the daemon from a stable directory such as the home directory, never from a
+directory that may be deleted later, such as a git worktree: the daemon and its
+adapters run in that directory, and if it disappears sessions fail with
+`native_unavailable`.
+
 **macOS and Linux.** Use `tmux` (or `screen`):
 
 ```sh
-tmux new-session -d -s sidera 'sidera daemon >> ~/sidera-daemon.log 2>&1'
+tmux new-session -d -s sidera -c "$HOME" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
 ```
 
 If you are in a non-login shell (for example over SSH), start it through a login
 shell so that the `PATH` is complete:
 
 ```sh
-tmux new-session -d -s sidera "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"
+tmux new-session -d -s sidera -c "$HOME" "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"
 ```
 
 (Use `bash -lic` if the shell is bash. If `tmux` is an alias, use
-`/usr/bin/env tmux`. Without tmux, `nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &`
+`/usr/bin/env tmux`. Without tmux, `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &`
 also works.)
 
 **Windows.** A process started from your session ends with it. Start the daemon
@@ -242,7 +248,7 @@ $codex = if ($target) { @($target)[0] + '\bin;' } else { '' }
 do not have it.) Then:
 
 ```powershell
-$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd.exe /c `"$env:USERPROFILE\sidera\start-daemon.cmd`""}
+$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd.exe /c `"$env:USERPROFILE\sidera\start-daemon.cmd`""; CurrentDirectory=$env:USERPROFILE}
 $r.ReturnValue
 ```
 
@@ -290,19 +296,21 @@ not prove that `codex` is found; step 10 does.
 ## 6. Add a preset
 
 A preset tells Sidera how to run a session on this machine. Name it the same on
-every machine (this guide uses `dev`), so that agents on other machines can use it.
-Use an existing working directory. Use **restricted** presets unless your owner chose
-otherwise (see "Ask your owner before").
+every machine (this guide uses `light`), so that agents on other machines can use it.
+Use an existing working directory. Add the **`light`** preset (channel and light
+work). Add a **`dev`** preset (full access, for real repository work with network,
+caches, building and testing) only if your owner chose it (see "Ask your owner
+before").
 
 Write the instructions text into the preset exactly as below, so that agents
 treat messages from the owner's own nodes as the owner's tasks and answer them.
 
-For Claude Code, save as `dev.json`:
+For Claude Code, save as `light.json`:
 
 ```json
 {
   "local_sources": "allow",
-  "description": "Claude Code, restricted",
+  "description": "Claude Code, light",
   "config": {
     "claude": {
       "project_dir": "<absolute path of an existing directory>",
@@ -313,19 +321,18 @@ For Claude Code, save as `dev.json`:
 }
 ```
 
-`dontAsk` refuses everything that would ask for permission. The agent can use the
-Sidera tools and read files in its project directory; edits and other commands are
-refused unless the preset's `allowed_tools` (for example `["Edit", "Bash(go test
-*)"]`) or the owner's Claude Code settings allow them.
+`dontAsk` refuses everything that would ask for permission. The adapter always
+allows `Bash(sidera *)` and the Sidera MCP tools, on top of what the owner's Claude
+Code settings allow. The agent can read files in its project directory; edits and
+other commands are refused unless the preset's `allowed_tools` (for example
+`["Edit", "Bash(go test *)"]`) or the owner's settings allow them.
 
-<!-- TODO(verify): the restricted Codex settings below are provisional (workspace-write, approval never). Replace them with the settings confirmed on real macOS, Linux and Windows machines. -->
-
-For Codex, save as `dev.json` (on Windows double the backslashes in `cwd`):
+For Codex, save as `light.json` (on Windows double the backslashes in `cwd`):
 
 ```json
 {
   "local_sources": "allow",
-  "description": "Codex, restricted",
+  "description": "Codex, light",
   "config": {
     "codex": {
       "cwd": "<absolute path of an existing directory>",
@@ -338,20 +345,48 @@ For Codex, save as `dev.json` (on Windows double the backslashes in `cwd`):
 }
 ```
 
-The agent can write only inside `cwd` and never waits for a person. In this sandbox
-it reaches Sidera through MCP tools only. Add `"model"` and `"effort"` (`low`,
-`medium`, `high`, `xhigh`) to keep the cost down; without them the owner's Codex
-defaults apply.
+What this gives (measured on real machines):
 
-Add it:
+- It works on macOS and Linux, **through MCP only**. Under `workspace-write` the
+  session is offered only the MCP tools; a `sidera` command run in a shell fails
+  with an unhelpful `internal error`. Use the MCP tools (`peers`, `directory`,
+  `control`, `recv` with `wait_s` and `ack_lease`, `ack`, `reply`).
+- The agent can edit files and commit inside `cwd`, and never waits for a person.
+- There is no network at all: no module downloads, no package installs. A tool whose
+  cache lives outside the workspace fails until pointed inside it (for Go, set
+  `GOCACHE` to a directory inside the workspace). Only modules already in the
+  read-only module cache can be used.
+- It limits writes, not reads: the agent can still read outside `cwd`, including
+  `SIDERA_HOME`.
+- On Windows it depends on Codex's own sandbox working. Run
+  `codex sandbox -- cmd /c echo hi` first; if it fails, tell your owner. With
+  `[windows] sandbox = "elevated"` in `~/.codex/config.toml` every shell command
+  failed, while `unelevated` worked. That is the owner's Codex setting, not a
+  Sidera key; do not change it without asking.
+- `sidera adapter list` may show the Codex probe as `failed` while a
+  `workspace-write` preset exists, because no command-line front end is offered.
+  Sessions still work.
+
+Add `"model"` and `"effort"` (`low`, `medium`, `high`, `xhigh`) to keep the cost
+down; without them the owner's Codex defaults apply.
+
+If your owner chose full access, add a second preset named `dev`: copy `light.json`
+and set, for Codex, `"sandbox": "danger-full-access"` (keep `"approval_policy":
+"never"` and `"approvals": "deny"`), or, for Claude Code, `"permission_mode":
+"bypassPermissions"`. Tell your owner the risk: any trusted node in the cluster can
+then direct the agent here to run anything on this machine, and the session's Sidera
+token is visible to everything the agent runs.
+
+Add the presets:
 
 ```sh
-sidera preset add dev --file dev.json
+sidera preset add light --file light.json
+sidera preset add dev --file dev.json      # only if the owner chose it
 sidera preset list
 ```
 
-Expected: `dev` is listed. If `preset add` says a name is taken, a preset cannot be
-edited: `sidera preset remove dev`, then add it again. The default preset `default`
+Expected: `light` is listed. If `preset add` says a name is taken, a preset cannot be
+edited: `sidera preset remove light`, then add it again. The default preset `default`
 that `init` made holds no agent settings and cannot start a session.
 
 ## 7. Exchange contact lines with the other machine
@@ -455,7 +490,7 @@ sidera identity confirm-backup <digest>
 2. Start a session there and ask it for something harmless.
 
    ```sh
-   sidera-adapter-console new <node-id>/<endpoint-id> --preset dev --body 'Reply with the output of uname -a.'
+   sidera-adapter-console new <node-id>/<endpoint-id> --preset light --body 'Reply with the output of uname -a.'
    ```
 
    Expected, after 20 to 30 seconds:
@@ -490,7 +525,7 @@ names, and the result of this step.
 These rules apply to an agent that runs inside a Sidera session: a session that
 Sidera started from a preset, which has a credential (`SIDERA_TOKEN`) and the
 `sidera` MCP tools. Use the MCP tools when you have them. Use the `sidera` command
-only when your session offers it (a restricted Codex sandbox offers MCP only). The
+only when your session offers it (a Codex `workspace-write` sandbox offers MCP only). The
 operation names are the same.
 
 If you are not inside a session (you were started by hand), you have no credential:
@@ -526,7 +561,7 @@ If you are not inside a session (you were started by hand), you have no credenti
 7. **Start a session on another node with `control`.**
 
    ```sh
-   sidera control <runtime-address> session.create --preset dev --body-file task.txt
+   sidera control <runtime-address> session.create --preset light --body-file task.txt
    ```
 
    (MCP: `control` with `to`, `signal` set to `session.create`, `preset`, `body`.)
@@ -562,7 +597,7 @@ Your owner asks: "Ask the agent on node `<node-id>` to compute 37*41+11."
 
 1. `sidera directory --node <node-id>`: take the address of the `runtime` endpoint
    that accepts `session.create`.
-2. `sidera control <address> session.create --preset dev --body 'Compute 37*41+11 and reply to me with only the number, using sidera reply.'`
+2. `sidera control <address> session.create --preset light --body 'Compute 37*41+11 and reply to me with only the number, using sidera reply.'`
 3. `sidera recv --wait 60` and read the page; `sidera recv --wait 60 --ack <lease>`
    until the number arrives (this acknowledges the earlier page too).
 4. `sidera reply <owner-message-id> --body '1528'`, naming the result.

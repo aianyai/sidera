@@ -38,8 +38,9 @@ pass `--port <n>`.
 
 ## 2. Start the daemon (both)
 
-Start it in a terminal you keep open, or keep it alive as described in
-[Run the daemon](install.md#run-the-daemon):
+Start it from your home directory (not from a directory that may be deleted later,
+such as a git worktree), in a terminal you keep open, or keep it alive as described
+in [Run the daemon](install.md#run-the-daemon):
 
 ```sh
 sidera daemon
@@ -110,7 +111,7 @@ cannot find `codex` or `claude`, see
 A **preset** is the recipe for a session: where the agent works, what it may do,
 and which instructions it gets. Another machine asks for a session by preset name,
 and the preset lives on the machine that runs the session. Use the same preset
-name, for example `dev`, on every machine, so that agents need not know which
+names, `light` and `dev`, on every machine, so that agents need not know which
 machine has which.
 
 The `default` preset made by `init` holds no agent settings, so neither adapter
@@ -139,15 +140,23 @@ makes the agent act on what those nodes send. Read
 [Presets and access](#presets-and-access) before you use it on a machine that
 holds anything you would not let another of your agents touch.
 
-### A restricted preset (recommended)
+Make two presets by purpose and choose between them on purpose. Both use the
+instructions above.
 
-Claude Code. Save as `claude-dev.json`; `project_dir` must be an absolute path to an existing
-directory:
+| Preset | For | Agent may |
+| ------ | --- | --------- |
+| `light` (start here) | Carrying messages and light work in one directory. | Codex: write inside its directory, no network. Claude Code: use Sidera and what your own Claude settings allow. |
+| `dev` | Real repository work: network, caches, building, testing. | Everything your user account can do. |
+
+### `light`: channel and light work (the default to start with)
+
+Claude Code. Save as `claude-light.json`; `project_dir` must be an absolute path to an
+existing directory:
 
 ```json
 {
   "local_sources": "allow",
-  "description": "Claude Code, restricted",
+  "description": "Claude Code, light",
   "config": {
     "claude": {
       "project_dir": "/Users/me/work/project",
@@ -159,21 +168,20 @@ directory:
 ```
 
 `dontAsk` turns every permission question into a refusal, so nobody has to
-answer one. The agent can always use the Sidera tools; Sidera allows them in
-every mode. It can read files in its project directory. Edits and other commands
-are refused unless the preset's `allowed_tools` (a list of Claude Code permission
-rules such as `["Edit", "Bash(go test *)"]`) or your own Claude Code settings
-allow them. Add only what the work needs.
+answer one. The adapter always allows `Bash(sidera *)` and the Sidera MCP tools,
+on top of whatever your own Claude Code settings allow, so no mode can lock the
+agent out of the channel. The agent can read files in its project directory. Edits
+and other commands are refused unless the preset's `allowed_tools` (a list of
+Claude Code permission rules such as `["Edit", "Bash(go test *)"]`) or your own
+Claude Code settings allow them. Add only what the work needs.
 
-<!-- TODO(verify): the restricted Codex settings below are provisional (workspace-write, approval never). Replace them with the settings confirmed on real macOS, Linux and Windows machines. -->
-
-Codex. Save as `codex-dev.json`; `cwd` must be an existing directory (on Windows,
-write the path with doubled backslashes, `C:\\Users\\me\\work\\project`):
+Codex. Save as `codex-light.json`; `cwd` must be an existing directory (on
+Windows, write the path with doubled backslashes, `C:\\Users\\me\\work\\project`):
 
 ```json
 {
   "local_sources": "allow",
-  "description": "Codex, restricted",
+  "description": "Codex, light",
   "config": {
     "codex": {
       "cwd": "/home/me/work/project",
@@ -186,41 +194,68 @@ write the path with doubled backslashes, `C:\\Users\\me\\work\\project`):
 }
 ```
 
-With `workspace-write` the Codex agent can write inside `cwd` only, and with
-approval policy `never` and `approvals` `deny` it never waits for a person: what
-the sandbox does not allow is refused. In this sandbox the agent reaches Sidera
-through its MCP tools; the `sidera` command is not offered to it. Optional keys:
-`model` and `effort` (`low`, `medium`, `high`, `xhigh`). Without them the agent
-uses your own Codex defaults, which may be an expensive model.
+What this gives, as measured on real machines:
 
-Add the preset on the machine that has the agent:
+- It works on macOS and Linux, through the **MCP front end only**. Under this
+  sandbox Sidera offers the agent only its MCP tools; a `sidera` command run in a
+  shell fails with an unhelpful `internal error`. Over MCP, `peers`, `directory`,
+  `control` (including `session.create` toward another node), `recv` with `wait_s`
+  and `ack_lease`, `ack` and `reply` all work.
+- The agent can edit files and commit inside `cwd`. With approval policy `never`
+  and `approvals` `deny` it never waits for a person: what the sandbox does not
+  allow is refused.
+- The sandbox has **no network at all**: no module downloads, no package installs.
+  Tools whose caches live outside the workspace fail until pointed inside it; for Go,
+  set `GOCACHE` to a directory inside the workspace. The module cache is read-only,
+  so only modules already in it can be used.
+- `workspace-write` limits writes, not reads. The agent can still read files
+  outside `cwd`, including the node's data directory, `SIDERA_HOME`, which holds
+  the tokens of the other sessions on the node.
+- **Windows** depends on Codex's own Windows sandbox working on that machine. With
+  `[windows] sandbox = "elevated"` in `~/.codex/config.toml`, every shell command
+  failed (`timed out ... connecting runner pipe-in`), while `unelevated` worked.
+  That is a Codex setting you control, not a Sidera preset key. Before you choose
+  `light` for Codex on Windows, check that `codex sandbox -- cmd /c echo hi` works.
+- While a `workspace-write` preset exists, `sidera adapter list` may show the Codex
+  probe as `failed`, because the command-line front end is not offered under the
+  sandbox. Sessions still work.
+
+Optional keys: `model` and `effort` (`low`, `medium`, `high`, `xhigh`). Without them
+the agent uses your own Codex defaults, which may be an expensive model.
+
+### `dev`: development work (full access)
+
+Real repository work needs the network, caches, building and testing, which a
+restricted preset takes away. For that, add a second preset named `dev` by copying
+the `light` file and changing these keys. For Codex: `"sandbox":
+"danger-full-access"`, with `"approval_policy": "never"` and `"approvals": "deny"`
+as before. For Claude Code: `"permission_mode": "bypassPermissions"`, or keep
+`dontAsk` and list in `allowed_tools` exactly what the work needs.
+
+**The risk, stated plainly:** with a `dev` preset, any trusted node in your cluster
+can direct the agent on this machine to run anything on it, as your user. The
+session's Sidera token is visible to everything the agent runs, and to anything it
+prints. If one of your machines or agents is compromised or confused, this machine
+follows. Recommend it only for machines and clusters that belong entirely to you.
+A preset that agents on this machine must not use can say
+`"local_sources": "deny"`.
+
+With a full-access Codex preset the session can also use the `sidera` command, not
+just the MCP tools.
+
+### Add the presets
+
+On the machine that has the agent:
 
 ```sh
-sidera preset add dev --file claude-dev.json   # or codex-dev.json
+sidera preset add light --file claude-light.json   # or codex-light.json
+sidera preset add dev --file claude-dev.json       # optional; or codex-dev.json
 sidera preset list
 ```
 
 A preset cannot be edited. To change it, remove it and add it again:
-`sidera preset remove dev`, then `sidera preset add dev --file <file>`. Adding or
+`sidera preset remove light`, then `sidera preset add light --file <file>`. Adding or
 removing a preset restarts the adapters that run.
-
-### Full access (an option, with a risk)
-
-A preset can let the agent do anything the user account can do. For Codex, set
-`"sandbox": "danger-full-access"` with `"approval_policy": "never"` and
-`"approvals": "deny"`; for Claude Code, set `"permission_mode":
-"bypassPermissions"`.
-
-**The risk, stated plainly:** with a full-access preset, any trusted node in
-your cluster can direct the agent on this machine to run anything on it, as your
-user. If one of your machines or one of your agents is compromised or confused,
-this machine follows. Use full access only on a machine and in a directory where
-you accept that, and never as the first thing you try. A preset that must not be
-used by agents on this machine at all can say `"local_sources": "deny"`.
-
-With a full-access Codex preset the session can also use the `sidera` command,
-not just the MCP tools. The session's credential is then visible to anything the
-agent can print.
 
 ## 6. Connect the machines (both)
 
@@ -294,7 +329,7 @@ read it on B.)
 On *(A)*:
 
 ```sh
-sidera-adapter-console new <node-id-b>/<runtime-endpoint-id> --preset dev --body 'Reply with the output of `uname -a` and the name of your working directory.'
+sidera-adapter-console new <node-id-b>/<runtime-endpoint-id> --preset light --body 'Reply with the output of `uname -a` and the name of your working directory.'
 ```
 
 `new` sends a `session.create` request with your text as the first message. It

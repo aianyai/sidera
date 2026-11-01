@@ -119,7 +119,7 @@ that starts sessions), not a console and not an existing session.
    the first message:
 
    ```sh
-   sidera control <runtime-address> session.create --preset dev --body-file task.txt
+   sidera control <runtime-address> session.create --preset light --body-file task.txt
    ```
 
    `session.create` delivers the first message into the new session at once.
@@ -167,7 +167,7 @@ another:
 ```text
 Task from the owner. Node L is <node-id>. Do this:
 1. Run: sidera directory --node <node-id> and take the address of the endpoint of kind runtime (it accepts session.create): that is Node L's Codex runtime.
-2. Create a Codex session there by running: sidera control <that runtime address> session.create --preset dev --body 'Compute 37*41+11 and reply to me with only the number, using sidera reply.'
+2. Create a Codex session there by running: sidera control <that runtime address> session.create --preset light --body 'Compute 37*41+11 and reply to me with only the number, using sidera reply.'
 3. Wait for its reply with the recv tool, with the integer argument wait_s=60 (the argument is named wait_s, not wait), passing ack_lease=<lease of the previous page> after the first call; on the command line this is sidera recv --wait 60 --ack <lease>. An empty page returns after about a minute, not at once; if it returns at once something is wrong with the arguments. Wait until the answer arrives.
 4. Reply to me (the owner message you were woken for) with sidera reply, stating the number from Codex.
 ```
@@ -176,12 +176,14 @@ Task from the owner. Node L is <node-id>. Do this:
 
 The agent does whatever its preset lets it do. By default every trusted node can
 start a session with any preset on a node, so the strength of a preset is the
-strength of every trusted node's reach. Prefer restricted presets, see
-[Getting started](getting-started.md#5-add-a-preset-both), and add a full-access
-preset only on a machine where you accept that any node in your cluster can
-direct its agent to run anything there.
+strength of every trusted node's reach. Start with the `light` preset (channel and
+light work), see [Getting started](getting-started.md#5-add-a-preset-both), and add
+the full-access `dev` preset only on a machine and in a cluster that belong entirely
+to you: any trusted node can then direct its agent to run anything there, and the
+session's Sidera token is visible to everything the agent runs.
 
-Under a restricted Codex sandbox the agent reaches Sidera through the MCP tools
-only; the `sidera` command is not offered. Write instructions that name the MCP
+Under a Codex `workspace-write` sandbox the agent reaches Sidera through the MCP
+tools only; the `sidera` command is not offered and fails with an unhelpful
+`internal error`. Write instructions that name the MCP
 tools (`recv`, `reply`, `ack`, `send`, `control`, `status`) as well as the
 commands, as the text above does.

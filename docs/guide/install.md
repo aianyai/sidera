@@ -170,6 +170,12 @@ in `~/.sidera/logs/`. Sidera does not start itself at boot and does not install 
 background service yet; the options below keep it running after you close the
 terminal.
 
+Start the daemon from a stable directory such as your home directory, never from
+one that may be deleted later, such as a git worktree. The daemon and its adapters
+run in that directory; if it disappears, Claude Code sessions fail with
+`native_unavailable` and the adapter log says "The current directory no longer
+exists".
+
 The daemon must be started with an environment in which `sidera` and the agent
 you want to drive (`claude` or `codex`) are on the `PATH`. Start it from a login
 shell, or set the `PATH` yourself.
@@ -179,17 +185,17 @@ shell, or set the `PATH` yourself.
 `tmux` keeps the daemon alive when you log out or the SSH connection drops.
 
 ```sh
-tmux new-session -d -s sidera 'sidera daemon >> ~/sidera-daemon.log 2>&1'
+tmux new-session -d -s sidera -c "$HOME" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
 tmux ls                  # the session `sidera` is listed
 sidera daemon stop       # stops the daemon; the tmux session ends with it
 ```
 
 If your shell sets an alias for `tmux`, run `/usr/bin/env tmux` instead. When you
 start it over SSH, use a login shell so that the `PATH` is complete:
-`tmux new-session -d -s sidera "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"`
+`tmux new-session -d -s sidera -c "$HOME" "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"`
 (use `bash -lic` if bash is your shell).
 
-`screen` or `nohup sidera daemon &` work the same way.
+`screen` or `cd ~ && nohup sidera daemon &` work the same way.
 
 ### Windows: a detached start that survives logout
 
@@ -232,7 +238,7 @@ $codex = if ($target) { @($target)[0] + '\bin;' } else { '' }
 Start it:
 
 ```powershell
-$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd.exe /c `"$env:USERPROFILE\sidera\start-daemon.cmd`""}
+$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd.exe /c `"$env:USERPROFILE\sidera\start-daemon.cmd`""; CurrentDirectory=$env:USERPROFILE}
 $r.ReturnValue   # 0 means the process was created
 ```
 

@@ -58,10 +58,10 @@ and the reasons, is [Getting started](docs/guide/getting-started.md).
 ```sh
 # On both machines
 sidera init                                    # prints the node id
-tmux new-session -d -s sidera 'sidera daemon'  # keep the daemon running
+tmux new-session -d -s sidera -c "$HOME" 'sidera daemon'  # keep it running
 sidera adapter install <release>/adapters/console && sidera adapter enable console
 sidera adapter install <release>/adapters/codex && sidera adapter enable codex
-sidera preset add dev --file dev.json          # a preset: see the guide
+sidera preset add light --file light.json      # a preset: see the guide
 sidera network show                            # first line: the contact line
 
 # On A, with B's contact line (node id, then addresses); on B the same for A
@@ -70,12 +70,13 @@ sidera trust expect <node-id-b>                # and on B: sidera trust expect <
 sidera trust request <node-id-b> --wait 60s    # on A, once both expect
 
 # On A: the first message across machines, then its reply
-sidera-adapter-console new <runtime-address-on-b> --preset dev --body 'Say hello from B.'
+sidera-adapter-console new <runtime-address-on-b> --preset light --body 'Say hello from B.'
 sidera-adapter-console recv --wait 30
 ```
 
-The preset decides what the agent may do. The guide starts with a restricted one
-and explains the risk of a full-access preset.
+The preset decides what the agent may do. The guide starts with a `light` preset for
+channel and light work, and explains the full-access `dev` preset for real
+repository work and its risk.
 
 ## Guides
 
