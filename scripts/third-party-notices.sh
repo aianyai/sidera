@@ -7,13 +7,20 @@
 # links into the packages given (the programs of a release), built as
 # scripts/release.sh builds them. Each module is listed with its path, its version,
 # the name of its licence and the text of every licence and notice file at the top
-# of its directory in the module cache, verbatim. The Go standard library, which is
-# linked into every program, is listed the same way.
+# of its directory in the module cache, verbatim, followed by those in its
+# subdirectories (LICENSE*, COPYING* and NOTICE* at any depth, leaving out testdata
+# and vendor directories): a module may ship code under a licence of its own in a
+# subdirectory, and its text has to travel with the binary. The Go standard
+# library, which is linked into every program, is listed the same way from the top
+# of GOROOT only, since the rest of that tree is not the library that is linked.
 #
-# The script fails, and lists every offender, when a module has no licence file or a
-# licence file that is not one of the licences below. Those are the ones that allow
-# the module to be bundled into a binary under another licence; any other licence
-# is a decision for the maintainers, not for this script.
+# The script fails, and lists every offender, when a module has no licence file at
+# its top or a licence file at its top that is not one of the licences below. Those
+# are the ones that allow the module to be bundled into a binary under another
+# licence; any other licence is a decision for the maintainers, not for this script.
+# A licence file in a subdirectory that is none of them does not fail the script,
+# since it may license something that is not linked (brand assets, say): its text is
+# included and it is reported on standard error for the maintainers to read.
 set -euo pipefail
 
 allowed="MIT BSD-2-Clause BSD-3-Clause Apache-2.0 ISC MPL-2.0"
@@ -65,27 +72,54 @@ label() {
 }
 
 failed=0
+extra_files=0
 problem() {
   echo "$1" >&2
   failed=1
 }
 
-# notice <name> <version> <dir> adds one module to the index and the body.
+# notice <name> <version> <dir> [deep] adds one module to the index and the body.
+# With a fourth argument, the licence and notice files of the subdirectories are
+# added after those at the top.
 notice() {
-  local name=$1 version=$2 dir=$3 file base lic names="" choice="" mpl=false
+  local name=$1 version=$2 dir=$3 deep=${4:-} file base lic names="" choice="" mpl=false
   local texts="$work/texts"
   : >"$texts"
   # LC_ALL=C sort puts LICENSE before LICENSE-BSD, whatever the machine's locale.
-  local licenses notices
-  licenses=$(find "$dir" -maxdepth 1 -type f \( -iname 'LICEN[SC]E*' -o -iname 'COPYING*' \) | LC_ALL=C sort)
-  notices=$(find "$dir" -maxdepth 1 -type f \( -iname 'NOTICE*' -o -iname 'PATENTS*' \) | LC_ALL=C sort)
+  # Every path is relative to the module, so that a directory called vendor above
+  # the module cache cannot hide the module, and the heading names where a file is.
+  local licenses notices sublicenses="" subnotices=""
+  licenses=$(cd "$dir" && find . -maxdepth 1 -type f \( -iname 'LICEN[SC]E*' -o -iname 'COPYING*' \) | LC_ALL=C sort)
+  notices=$(cd "$dir" && find . -maxdepth 1 -type f \( -iname 'NOTICE*' -o -iname 'PATENTS*' \) | LC_ALL=C sort)
   if [ -z "$licenses" ]; then
     problem "$name $version: no licence file in $dir"
     return
   fi
+  if [ -n "$deep" ]; then
+    sublicenses=$(cd "$dir" && find . -mindepth 2 -type f \( -iname 'LICEN[SC]E*' -o -iname 'COPYING*' \) \
+      -not -path '*/testdata/*' -not -path '*/vendor/*' | LC_ALL=C sort)
+    subnotices=$(cd "$dir" && find . -mindepth 2 -type f -iname 'NOTICE*' \
+      -not -path '*/testdata/*' -not -path '*/vendor/*' | LC_ALL=C sort)
+  fi
+  licenses=${licenses}${sublicenses:+$'\n'$sublicenses}
+  notices=${notices}${subnotices:+$'\n'$subnotices}
+  extra_files=$((extra_files + $(printf '%s' "$sublicenses" | grep -c . || true) + $(printf '%s' "$subnotices" | grep -c . || true)))
   while IFS= read -r file; do
-    base=${file##*/}
+    file=$dir/${file#./}
+    base=${file#"$dir"/}
     lic=$(label "$file")
+    if [ -z "$lic" ] && [ "$base" != "${base##*/}" ]; then
+      # A file below the top may license something that is not linked (brand
+      # assets, test data), so it does not fail the build; its text is included
+      # and it is listed for the maintainers to read.
+      echo "$name $version: $base is not a licence this script recognises; included as it is" >&2
+      {
+        printf -- '--- %s ---\n' "$base"
+        cat "$file"
+        printf '\n'
+      } >>"$texts"
+      continue
+    fi
     if [ -z "$lic" ]; then
       problem "$name $version: $base is not a licence this script recognises"
       continue
@@ -113,8 +147,9 @@ $licenses
 EOF
   while IFS= read -r file; do
     [ -n "$file" ] || continue
+    file=$dir/${file#./}
     {
-      printf -- '--- %s ---\n' "${file##*/}"
+      printf -- '--- %s ---\n' "${file#"$dir"/}"
       cat "$file"
       printf '\n'
     } >>"$texts"
@@ -150,13 +185,14 @@ while IFS='|' read -r name version dir; do
     problem "$name $version: the module is not in the module cache"
     continue
   fi
-  notice "$name" "$version" "$dir"
+  notice "$name" "$version" "$dir" deep
 done <"$work/modules"
 
 if [ "$failed" -ne 0 ]; then
   echo "third-party notices not written" >&2
   exit 1
 fi
+echo "third-party notices: $extra_files licence and notice files found below the top level of modules" >&2
 
 {
   printf 'Third-party software in Sidera\n\n'
