@@ -48,7 +48,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	presets := make(map[string]presetEntry, len(p.Presets))
 	for _, pc := range p.Presets {
 		preset, problems := codexcfg.ParsePreset(pc.Name, pc.Config)
-		presets[pc.Name] = presetEntry{preset: preset, problems: problems}
+		presets[pc.Name] = presetEntry{preset: preset, configured: len(pc.Config) > 0, problems: problems}
 	}
 
 	sessions := make(map[adapterproto.EndpointRef]*session, len(p.Sessions))

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/adapter"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -404,5 +405,44 @@ func TestCloseSession(t *testing.T) {
 	}
 	if code := codeOf(t, h.call(adapterproto.MethodSessionClose, adapterproto.CloseParams{Endpoint: otherEP}, &res)); code != adapterproto.CodeUnknownEndpoint {
 		t.Fatalf("unknown endpoint without a reference: code %d", code)
+	}
+}
+
+// A tool probe is not_run only for a preset that has no section for this adapter;
+// a section that cannot be used is a failure, so that a broken preset is never
+// taken for one that passed or one that does not apply.
+func TestToolProbeOutcomeByPreset(t *testing.T) {
+	h := newHarnessWith(t, newFakeCodex(t), func(o *adapter.Options) {
+		o.MCPProbe = func(context.Context, string, []string) error { return nil }
+	})
+	h.startWith([]adapterproto.PresetConfig{
+		{Name: "good", Config: presetConfig(t, map[string]any{"cwd": h.dir})},
+		{Name: "none", Config: adapterproto.ConfigValues{}},
+		{Name: "relative", Config: presetConfig(t, map[string]any{"cwd": "project", "sandbox": "nowhere"})},
+	})
+	for _, tc := range []struct {
+		preset  string
+		outcome adapterproto.ProbeOutcome
+		detail  []string
+	}{
+		{"good", adapterproto.ProbeRan, nil},
+		{"none", adapterproto.ProbeNotRun, []string{"no section"}},
+		{"unknown", adapterproto.ProbeNotRun, []string{"no section"}},
+		{"relative", adapterproto.ProbeFailed, []string{"not usable", "cwd: the project directory must be an absolute path", "sandbox"}},
+	} {
+		t.Run(tc.preset, func(t *testing.T) {
+			var res adapterproto.ProbeResult
+			h.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{
+				{Preset: tc.preset, Frontend: adapterproto.FrontendMCP, Token: token, Env: map[string]string{}},
+			}}, &res)
+			if len(res.ToolProbes) != 1 || res.ToolProbes[0].Outcome != tc.outcome {
+				t.Fatalf("tool probes = %+v, want outcome %s", res.ToolProbes, tc.outcome)
+			}
+			for _, want := range tc.detail {
+				if !strings.Contains(res.ToolProbes[0].Detail, want) {
+					t.Errorf("detail = %q, want it to contain %q", res.ToolProbes[0].Detail, want)
+				}
+			}
+		})
 	}
 }

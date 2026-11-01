@@ -172,9 +172,13 @@ server did not answer or says it could not reach the daemon. The command-line
 front end runs in the preset's sandbox, so its probe is `command/exec` of
 `sidera probe` under that sandbox policy, through the server, which costs no model
 turn: `ran` with method `sandboxed`, or `failed` with the exit code and the first line
-of its standard error, and `failed` when the server cannot be reached. A preset that is not
-usable (the `default` preset, which has no `codex` section, is one) gives `not_run`: the
-probe did not apply, and the daemon counts it for neither the pass nor the failure.
+of its standard error, and `failed` when the server cannot be reached. A preset that has no
+`codex` section (the `default` preset is one; it reaches the adapter as no values at all) gives
+`not_run`: the probe did not apply, and the daemon counts it for neither the pass nor the
+failure. A `codex` section that cannot be used (a relative `cwd`, developer instructions that
+are too long) gives `failed` with its problems as the detail: the probe applies and cannot be
+run, and reporting it as `not_run` would leave a broken preset looking like one that is not
+configured.
 
 ### Creating a session
 

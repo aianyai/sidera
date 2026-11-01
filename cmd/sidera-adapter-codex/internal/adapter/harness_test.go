@@ -383,13 +383,18 @@ func presetConfig(t *testing.T, kv map[string]any) adapterproto.ConfigValues {
 // start serves adapter.start with one preset called dev and the sessions given.
 func (h *harness) start(sessions ...adapterproto.SessionAttach) adapterproto.StartResult {
 	h.t.Helper()
+	return h.startWith([]adapterproto.PresetConfig{
+		{Name: "dev", Config: presetConfig(h.t, map[string]any{"cwd": h.dir})},
+		{Name: "yolo", Config: presetConfig(h.t, map[string]any{"cwd": h.dir, "approvals": "approve", "sandbox": "danger-full-access"})},
+	}, sessions...)
+}
+
+// startWith serves adapter.start with the presets and sessions given.
+func (h *harness) startWith(presets []adapterproto.PresetConfig, sessions ...adapterproto.SessionAttach) adapterproto.StartResult {
+	h.t.Helper()
 	var res adapterproto.StartResult
 	h.mustCall(adapterproto.MethodAdapterStart, adapterproto.StartParams{
-		Node: "node", RuntimeEndpoint: runtimeEP, Config: adapterproto.ConfigValues{},
-		Presets: []adapterproto.PresetConfig{
-			{Name: "dev", Config: presetConfig(h.t, map[string]any{"cwd": h.dir})},
-			{Name: "yolo", Config: presetConfig(h.t, map[string]any{"cwd": h.dir, "approvals": "approve", "sandbox": "danger-full-access"})},
-		},
+		Node: "node", RuntimeEndpoint: runtimeEP, Config: adapterproto.ConfigValues{}, Presets: presets,
 		Sessions: append([]adapterproto.SessionAttach{}, sessions...), DirectEndpoints: []adapterproto.DirectAttach{},
 	}, &res)
 	return res

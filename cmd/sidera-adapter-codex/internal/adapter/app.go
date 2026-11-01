@@ -128,8 +128,11 @@ type App struct {
 }
 
 type presetEntry struct {
-	preset   codexcfg.Preset
-	problems []string
+	preset codexcfg.Preset
+	// configured is false for a preset that has no section for this adapter, which
+	// reaches the adapter as an empty set of values.
+	configured bool
+	problems   []string
 }
 
 // New returns the adapter.
@@ -195,6 +198,14 @@ func (a *App) threadConfig(s *session, p codexcfg.Preset) map[string]any {
 	sidera := a.sideraPath
 	a.mu.Unlock()
 	return p.ThreadConfig(codexcfg.Access{Program: sidera, Env: s.access})
+}
+
+// presetEntryOf returns what the adapter knows of a preset by name, usable or not.
+func (a *App) presetEntryOf(name string) (presetEntry, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e, ok := a.presets[name]
+	return e, ok
 }
 
 // presetOf returns a usable preset by name.

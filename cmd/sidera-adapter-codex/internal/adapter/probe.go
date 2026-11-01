@@ -115,11 +115,18 @@ func serverDependency(reachable bool, serverVer, installed string) adapterproto.
 // command reach the daemon; it costs no model turn.
 func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath string, req adapterproto.ToolProbeRequest) adapterproto.ToolProbeResult {
 	out := adapterproto.ToolProbeResult{Preset: req.Preset, Frontend: req.Frontend}
-	preset, ok := a.presetOf(req.Preset)
-	if !ok {
-		out.Outcome, out.Detail = adapterproto.ProbeNotRun, "the preset is not usable"
+	entry, known := a.presetEntryOf(req.Preset)
+	switch {
+	case !known || !entry.configured:
+		// Nothing was configured for this adapter: the probe does not apply.
+		out.Outcome, out.Detail = adapterproto.ProbeNotRun, "the preset has no section for this adapter"
+		return out
+	case len(entry.problems) > 0:
+		// The probe applies and cannot be run: that is a failure, not not_run.
+		out.Outcome, out.Detail = adapterproto.ProbeFailed, cut("the preset is not usable: "+strings.Join(entry.problems, "; "), adapterproto.MaxDetailLen)
 		return out
 	}
+	preset := entry.preset
 	env := probeEnv(req)
 	switch req.Frontend {
 	case adapterproto.FrontendMCP:
@@ -197,6 +204,14 @@ func shorten(s string) string {
 		s = s[:200]
 	}
 	return strings.ToValidUTF8(s, "?")
+}
+
+// cut shortens a detail to at most n bytes, dropping a rune the cut broke.
+func cut(s string, n int) string {
+	if len(s) > n {
+		s = s[:n]
+	}
+	return strings.ToValidUTF8(s, "")
 }
 
 // probeGrace is how long the MCP probe waits for the server to say how its own probe
