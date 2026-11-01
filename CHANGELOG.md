@@ -75,8 +75,8 @@ and Windows (amd64).
   is kept outside the device, and retires the identity.
 - **`sidera version`** prints the version, the commit and the Go version (`--json`
   for an object), and every adapter program prints the same with `version`.
-
 - `sidera status` shows the data directory the command used (`home`, also in `--json`).
+
 ### Security
 
 - **The start checks the whole data directory.** The daemon refuses to start when
