@@ -38,13 +38,15 @@ Notes:
 ### Logs and state
 
 Everything of a node is under its data directory, `~/.sidera` by default (on Windows
-`%LOCALAPPDATA%\Sidera`; the paths below are written for `~/.sidera`).
+`%LOCALAPPDATA%\Sidera`; the paths below are written for `~/.sidera`), except the empty
+directory the Codex App Server runs in, which is the last row.
 
 | What | Where |
 | ---- | ----- |
 | Daemon log | `~/.sidera/logs/daemon.log` |
 | One log per adapter instance | `~/.sidera/logs/adapter-<instance>.log` |
 | Codex App Server state and log | `~/.sidera/adapter-state/codex/` (`app-server.log`) |
+| Codex App Server working directory (empty, outside the data directory) | `sidera-adapter-codex/<instance>-<hash>` in your user cache directory (`~/Library/Caches` on macOS, `~/.cache` on Linux, `%LOCALAPPDATA%` on Windows); its path is `work_dir` in `app-server.json` |
 | What your own shell redirect caught | the file you gave `>>` when you started the daemon (normally empty) |
 | Claude Code transcripts | `~/.claude/projects/<working-directory>/*.jsonl` |
 | Codex transcripts | `~/.codex/sessions/` |
@@ -129,10 +131,21 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
 3. Start the daemon again, the way you started it before, from your home directory
    (not from one that may be deleted, such as a git worktree).
 
-4. Move each adapter instance to the new release. A new release has a new adapter
-   version, and `sidera adapter install` refuses another version of an adapter while
-   an instance of it is enabled (`conflict/adapter_in_use`). So, for each instance
-   in `sidera adapter list` (for example `console`, `codex`, `claude`):
+4. Move each adapter instance to the new release. When the new release has the same
+   adapter version as the installed one (a rebuild, which `sidera adapter list`
+   shows by the version it prints), plain `sidera adapter install` is enough:
+
+   ```sh
+   sidera adapter install ~/sidera-release/adapters/<adapter>
+   ```
+
+   It replaces the package and restarts the enabled instances of that adapter, which
+   then run the new files and keep their sessions. Nothing is disabled.
+
+   A new adapter version needs more, because `install` refuses another version of
+   an adapter while an instance of it is enabled (`conflict/adapter_in_use`). If
+   `install` answers that, do the following for each instance in `sidera adapter list`
+   (for example `console`, `codex`, `claude`):
 
    ```sh
    sidera adapter disable <instance>
@@ -160,7 +173,7 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
    - `replaced true`: an installed package of this adapter was replaced, either by
      another version (for example 0.1.0 to 0.8.0, with the instances disabled) or by
      the same version with other contents (a rebuild). A rebuild is not refused
-     while instances run: they restart and keep their sessions.
+     while instances run: they restart and keep their sessions, as above.
    - `already_current true`: the package is the one installed, same version and
      same contents; nothing was changed.
    - neither: the adapter was not installed before.
@@ -193,10 +206,20 @@ own (a sandboxed command can then be given write access to the adapter's files,
 `codex` program. The adapter never ends a server it did not start, so you restart
 it yourself, and the report stays until you do.
 
+The server records the directory it was started in as `work_dir` in
+`app-server.json`, in the adapter's state directory. It is an empty directory of the
+adapter's own in your user cache directory, outside the data directory (see
+[Logs and state](#logs-and-state)). A file without `work_dir` is a server that an older
+adapter started in the state directory, and the probe reports it as `wrong_version`
+until it is restarted; one with `work_dir` is not reported for that reason.
+
 Ending the server ends any turn that runs in it, so do it when no Codex session is
-working. Find it and end it as in
+working, and only after step 4 of the upgrade has installed the new adapter packages.
+While the old adapter still runs, it starts a replacement as soon as it finds no
+server, and the replacement is again one that it started. With the new adapter
+running, find the server and end it as in
 [Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server),
-then either leave the daemon running or restart it: the Codex adapter starts a new
+then either leave the daemon running or restart it: the new Codex adapter starts a new
 server by itself when it finds none, resumes its sessions and records the new
 server's working directory. Check with `sidera adapter list` that the report is gone
 (it can show `pending` or `failed` for another reason, see the notes under
