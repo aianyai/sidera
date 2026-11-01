@@ -44,6 +44,9 @@ type world struct {
 
 	// onLaunch runs after a process was started, with the world unlocked.
 	onLaunch func(w *world, p *fakeProc, l proc.Launch)
+	// afterOpen runs after a file was opened and its content taken, with the
+	// world unlocked: what happens in the world just after a read.
+	afterOpen func(w *world, path string)
 	// onInterrupt runs when a process is interrupted.
 	onInterrupt func(w *world, p *fakeProc)
 	loggedIn    bool
@@ -141,15 +144,21 @@ func (w *world) aliveCount() int {
 
 func (w *world) Open(path string, offset int64) (io.ReadCloser, error) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	b, ok := w.files[path]
 	if !ok {
+		w.mu.Unlock()
 		return nil, &fs.PathError{Op: "open", Path: path, Err: fs.ErrNotExist}
 	}
 	if int(offset) > len(b) {
 		offset = int64(len(b))
 	}
-	return io.NopCloser(bytes.NewReader(slices.Clone(b[offset:]))), nil
+	content := slices.Clone(b[offset:])
+	hook := w.afterOpen
+	w.mu.Unlock()
+	if hook != nil {
+		hook(w, path)
+	}
+	return io.NopCloser(bytes.NewReader(content)), nil
 }
 
 func (w *world) WriteFile(path string, data []byte) error {

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,6 +242,67 @@ func TestReconcile(t *testing.T) {
 	if err != nil || res.Verdict != adapterproto.VerdictIndeterminate || res.Grounds.Code != adapterproto.GroundsTurnRunning {
 		t.Fatalf("running: %+v %v", res, err)
 	}
+}
+
+// The process table is read before the session file. A process that writes the
+// prompt and ends between the two reads would otherwise be seen as gone while the
+// file read before it lacks the prompt, and the prompt would be called absent.
+func TestReconcileReadsTheProcessTableBeforeTheRecord(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	session := openSession(t, w, app)
+	file := filepath.Join(recordDir, session+".jsonl")
+	_, _ = w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: "x"})
+	writer := w.lastProc()
+
+	var once sync.Once
+	w.mu.Lock()
+	w.afterOpen = func(w *world, path string) {
+		if path != file {
+			return
+		}
+		once.Do(func() {
+			w.appendRecord(file, userLine(session, prompt2))
+			w.mu.Lock()
+			writer.alive = false
+			w.mu.Unlock()
+		})
+	}
+	w.mu.Unlock()
+
+	res, err := app.Reconcile(ctxT(t), adapterproto.ReconcileParams{Endpoint: "session-1", Attempt: prompt2, Checkpoint: json.RawMessage(`{"v":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustValid(t, res)
+	if res.Verdict != adapterproto.VerdictIndeterminate || res.Grounds.Code != adapterproto.GroundsTurnRunning {
+		t.Fatalf("verdict %s grounds %s, want a turn that was running when the table was read", res.Verdict, res.Grounds.Code)
+	}
+}
+
+// The turn process the adapter recorded is a running writer whatever its command
+// line says: a claude found at another path is not matched by the table search.
+func TestReconcileCountsTheRecordedTurnProcessAsRunning(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	openSession(t, w, app)
+	if res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}); err != nil || res.Stage != adapterproto.PromptAccepted {
+		t.Fatalf("deliver: %+v %v", res, err)
+	}
+	p := w.lastProc()
+	w.mu.Lock()
+	p.args = append([]string{"/elsewhere/claude"}, p.args[1:]...)
+	w.mu.Unlock()
+
+	res, err := app.Reconcile(ctxT(t), adapterproto.ReconcileParams{Endpoint: "session-1", Attempt: prompt2, Checkpoint: json.RawMessage(`{"v":1}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustValid(t, res)
+	if res.Verdict != adapterproto.VerdictIndeterminate || res.Grounds.Code != adapterproto.GroundsTurnRunning {
+		t.Fatalf("verdict %s grounds %s, want turn_running", res.Verdict, res.Grounds.Code)
+	}
+	w.exit(p, resultOK)
 }
 
 // An attempt is called absent only from a record whose form the lookup reads. A

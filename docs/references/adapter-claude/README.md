@@ -319,7 +319,7 @@ session again), all of them belong to the one turn and the last one decides how 
 file, the attempt has a checkpoint (the adapter puts it before it starts a process), the file
 could be read, every user line of the file carries a uuid and a session id (the form the lookup
 relies on), the attempt's own output stream holds a successful result, and a turn process of
-the session runs.
+the session runs. The process table is read before the file, as for `turn.ended`.
 
 | Facts, in the order they are applied | Verdict | Grounds |
 | ------------------------------------ | ------- | ------- |
@@ -330,6 +330,11 @@ the session runs.
 | the attempt's process ended with a successful result, yet its uuid is not in the file | `indeterminate` | `record_unreadable` |
 | a turn process of the session runs (the recorded one, or any the process table shows) | `indeterminate` | `turn_running` |
 | none of the above: the writer has stopped and the whole file was scanned | `provably_absent` | `record_complete_without_attempt` |
+
+A running turn process is the recorded one (its PID held at the recorded start) or any process
+the table shows with the session's uuid on a command line of the preset's Claude, each counted
+once; the recorded one counts even when its command line is not matched, as for a `claude` found
+at another path.
 
 ## Why
 

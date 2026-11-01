@@ -145,6 +145,26 @@ func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adap
 
 	attempt := string(p.Attempt)
 	in := reconcile.Input{Dispatched: p.Checkpoint != nil || (s.turn != nil && s.turn.Attempt == attempt)}
+
+	// The process table is read before the file: a process seen as gone has
+	// written everything it will, so the file read afterwards is complete.
+	snap, err := a.o.Table.Snapshot()
+	if err != nil {
+		return adapterproto.ReconcileResult{}, err
+	}
+	// The recorded turn process counts as running even when its command line is
+	// not the one the table search looks for, a claude found at another path.
+	recordedAlive := false
+	if s.turn != nil && s.turn.Process.PID != 0 {
+		info := snap.Lookup(s.turn.Process.PID)
+		recordedAlive = info.Alive && info.StartKey() == s.turn.Process.StartKey
+	}
+	in.SessionBusy = recordedAlive || len(a.turnProcesses(snap, s.id)) > 0
+	if s.turn != nil && s.turn.Attempt == attempt {
+		in.TurnAlive = recordedAlive
+		in.Interrupted = s.turn.Interrupted
+	}
+
 	ix := record.NewIndex(s.id, attempt)
 	exists, err := a.scan(s.file(), ix)
 	in.RecordReadable = exists && err == nil
@@ -153,17 +173,6 @@ func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adap
 	}
 	in.RecordRecognized = ix.Recognized()
 	in.InRecord = in.RecordReadable && ix.UserSeen(attempt)
-
-	snap, err := a.o.Table.Snapshot()
-	if err != nil {
-		return adapterproto.ReconcileResult{}, err
-	}
-	in.SessionBusy = len(a.turnProcesses(snap, s.id)) > 0
-	if s.turn != nil && s.turn.Attempt == attempt {
-		info := snap.Lookup(s.turn.Process.PID)
-		in.TurnAlive = info.Alive && info.StartKey() == s.turn.Process.StartKey
-		in.Interrupted = s.turn.Interrupted
-	}
 	if !in.TurnAlive {
 		in.Outcome = a.lastResult(s.id, attempt)
 	}
