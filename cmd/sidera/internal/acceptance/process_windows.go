@@ -103,7 +103,9 @@ func createSuspended(spec processSpec) (*windows.ProcessInformation, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := append([]string{}, spec.env...)
+	// Keep the complete-environment contract even for nil, while applying
+	// exec's case-insensitive last-value-wins and SYSTEMROOT handling.
+	env := (&exec.Cmd{Env: append([]string{}, spec.env...), Dir: spec.dir}).Environ()
 	sort.Slice(env, func(i, j int) bool { return strings.ToUpper(env[i]) < strings.ToUpper(env[j]) })
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 	in, err := os.Open(os.DevNull)

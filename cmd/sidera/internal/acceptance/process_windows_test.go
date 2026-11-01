@@ -236,6 +236,46 @@ func TestProcessScopeExitAndLaunchInputs(t *testing.T) {
 	}
 }
 
+func TestProcessScopeEnvironmentUsesLastCaseInsensitiveValue(t *testing.T) {
+	t.Setenv("SCOPE_VALUE", "parent value")
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"upper-last", []string{"scope_value=aaa first", "SCOPE_VALUE=last value"}, "last value"},
+		{"lower-last", []string{"SCOPE_VALUE=aaa first", "scope_value=last value"}, "last value"},
+		{"nil", nil, ""},
+		{"empty", []string{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestProcessScope(t)
+			spec := scopeSpec(t, s, "exit", "0")
+			spec.env = tc.env
+			p, err := s.start(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := p.wait(ctx); err != nil {
+				t.Fatal(err)
+			}
+			output, err := os.ReadFile(spec.stdout.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct{ Value string }
+			if err := json.Unmarshal(output, &got); err != nil {
+				t.Fatalf("output %q: %v", output, err)
+			}
+			if got.Value != tc.want {
+				t.Fatalf("environment value = %q, want %q", got.Value, tc.want)
+			}
+		})
+	}
+}
+
 func TestProcessScopeSuspendedHalfStart(t *testing.T) {
 	ready, name := scopeEvent(t)
 	_, release := scopeEvent(t)
@@ -244,11 +284,16 @@ func TestProcessScopeSuspendedHalfStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owned := true
+	t.Cleanup(func() {
+		if owned {
+			if err := errors.Join(terminateStarted(pi.Process), windows.CloseHandle(pi.Thread), windows.CloseHandle(pi.Process)); err != nil {
+				t.Error(err)
+			}
+		}
+	})
 	var held windows.Handle
 	if err := windows.DuplicateHandle(windows.CurrentProcess(), pi.Process, windows.CurrentProcess(), &held, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
-		_ = terminateStarted(pi.Process)
-		windows.CloseHandle(pi.Thread)
-		windows.CloseHandle(pi.Process)
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(held)
@@ -258,6 +303,7 @@ func TestProcessScopeSuspendedHalfStart(t *testing.T) {
 	}
 	// Refusing admission exercises the same failure owner as scope.start,
 	// while this duplicate pins the exact process for independent exit proof.
+	owned = false // resumeSuspended takes both creation handles, even on failure.
 	if _, err := (&processScope{}).resumeSuspended(pi); err == nil {
 		t.Fatal("invalid job accepted a suspended process")
 	}
