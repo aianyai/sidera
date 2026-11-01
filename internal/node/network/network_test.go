@@ -337,7 +337,9 @@ func TestOwnIdentityCertificateClosesTheConnection(t *testing.T) {
 func TestCallErrors(t *testing.T) {
 	short := func(c *Config) { c.CallTimeout = 300 * time.Millisecond }
 	t.Run("members", func(t *testing.T) {
-		a, b := pair(t, false, true, true, short)
+		// Only the caller has a short budget: the timeout row must not race
+		// the target's own deadline and the failure answer it can return.
+		a, b := pairTuned(t, false, true, true, short, nil)
 		send := func(ctx context.Context) error {
 			_, err := a.net.Send(ctx, b.id, endpointOf(1), []byte("envelope"))
 			return err
