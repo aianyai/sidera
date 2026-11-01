@@ -177,6 +177,7 @@ shell_environment_policy.set = {SIDERA_TOKEN, SIDERA_HOME}
 mcp_servers.sidera = {command: <sidera program>, args: ["mcp"],
                       env: {SIDERA_TOKEN, SIDERA_HOME},
                       default_tools_approval_mode: "approve", tool_timeout_sec: 120}
+default_permissions, permissions.<profile>   # presets with a sandbox only; see below
 ```
 
 The values are the `tool_access.env` of `session.create` or of the session's entry in
@@ -205,6 +206,71 @@ read it from the thread's environment, Codex's logs hold the environment it gave
 command (`~/.codex/logs_2.sqlite`), and a model that prints its environment shows it.
 It stops working when the session is closed.
 
+### The data directory is denied to the sandbox
+
+A sandboxed command could otherwise read `SIDERA_HOME`, which holds every session's
+token on the node. A preset whose sandbox is `read-only` or `workspace-write` is
+therefore a Codex permission profile of the thread, not a legacy sandbox mode:
+
+```
+default_permissions = "sidera-adapter-codex"
+permissions.sidera-adapter-codex.extends = ":workspace"      # ":read-only" for read-only
+permissions.sidera-adapter-codex.filesystem = {<real SIDERA_HOME>: "deny"}
+```
+
+The profile is part of the thread's `config`, sent at `thread/start` and again at
+every `thread/resume`. The operating system enforces it: Seatbelt on macOS,
+bubblewrap on Linux (the directory is replaced by an empty one that nothing can
+open), and a deny entry in the access list of the sandbox's accounts on Windows. The
+profile is named so that it does not meet one of the owner's own, whose settings Codex
+would merge into it. A deeper entry wins over a shallower one, and at equal depth deny
+wins.
+
+- **The path is the real one, and exists.** The sandbox compares the paths a command
+  opens with the one it is told to deny, so symbolic links in `SIDERA_HOME` (the data
+  directory of the session's `tool_access.env`) are resolved first, and Codex creates a
+  denied path that does not exist. A `SIDERA_HOME` that is unset, relative or missing is
+  refused before anything is sent (the same failure as a profile that did not take, below).
+- **Nothing else may name a sandbox.** When the same `config`, or the `sandbox` member of
+  `thread/start` and `thread/resume`, also names a legacy sandbox mode, Codex accepts the
+  request and silently ignores the profile: the thread then reports no active profile and
+  the data directory is readable. So a preset with a sandbox sends neither, and no per-turn
+  `sandboxPolicy` either: a per-turn policy of `dangerFullAccess` drops the profile, while
+  `workspaceWrite` and `readOnly` keep it, and sending none leaves a single place that says
+  what the sandbox is. A preset without a sandbox sends `sandbox` and `sandboxPolicy` as
+  before and defines no profile. An owner's `sandbox_mode` in `config.toml` does not
+  override the profile.
+- **The thread must report the profile.** The answers of `thread/start` and `thread/resume`
+  carry `activePermissionProfile` (`id` and `extends`) on 0.164 and 0.166 without opting
+  into the experimental interface, though the published schema lists it only with
+  `--experimental`; the schema guard reads it there. The adapter requires the answer to
+  name the profile above with the `extends` of the preset. When it does not, the
+  thread is unsubscribed (the server unloads it) and used for nothing: a creation fails with
+  `native_error` and a detail that says so, a resume leaves the session `unreachable` (the
+  reconnect loop tries again, and a `prompt.deliver` refuses with `native_unavailable`), and
+  there is no fallback to a thread without the protection.
+- **`command/exec` cannot carry the profile.** Its `permissionProfile` is only the name of a
+  profile in the server's own configuration, needs the experimental interface and cannot be
+  combined with `sandboxPolicy`; there is no per-request configuration. The only
+  `command/exec` the adapter sends is the probe of the command-line front end, which only a
+  preset without a sandbox offers.
+
+What stays readable: everything of a preset with `danger-full-access` (no sandbox by
+design); the thread's own token and `SIDERA_HOME` as a variable, which are in its
+environment; the MCP servers Codex starts outside the sandbox, the channel's `sidera mcp`
+and any of the owner's own; and a command that runs outside the sandbox after approval
+(`sandbox_permissions: require_escalated`, which a preset with `approvals: approve`
+grants). The denial protects the other sessions' tokens and the rest of the data
+directory, not the session's own credentials.
+
+The denial was measured on macOS (Codex 0.164 and 0.166) and on Linux (0.166, bubblewrap), where
+a `workspace-write` or `read-only` command gets `Operation not permitted` or `Permission denied`.
+
+**Windows.** The deny entry is tracked per sandbox account in `CODEX_HOME`, so another,
+unrelated Codex session that shares the same `CODEX_HOME` can revoke it. There the
+protected data directory (private to its owner) is the primary guard, and the profile
+a second one. This was not run on Windows.
+
 ### Methods
 
 | Protocol | What the adapter does |
@@ -226,8 +292,8 @@ environment, sends it an MCP `initialize` (which makes it probe the daemon itsel
 waits up to ten seconds for the line on its standard error that says the probe
 succeeded or failed; the result is `ran` with method `unsandboxed`, or `failed` when the
 server did not answer or says it could not reach the daemon. The command-line
-front end runs in the preset's sandbox, so its probe is `command/exec` of
-`sidera probe` under that sandbox policy, through the server, which costs no model
+front end is offered only without a sandbox, so its probe is `command/exec` of
+`sidera probe` under the `dangerFullAccess` policy, through the server, which costs no model
 turn: `ran` with method `sandboxed`, or `failed` with the exit code and the first line
 of its standard error, and `failed` when the server cannot be reached. A preset that has no
 `codex` section (the `default` preset is one; it reaches the adapter as no values at all) gives
@@ -261,9 +327,10 @@ or starting the server), and the adapter logs it, because the daemon maps
 `dependency_missing` to `native_unavailable` and passes no detail on. The
 steps are:
 
-1. `thread/start` with the preset's `cwd`, `approvalPolicy`, `sandbox` and `model`,
-   `ephemeral: false` and the thread's configuration. The thread is registered as the
-   session at once, so its events are reported from the first one.
+1. `thread/start` with the preset's `cwd`, `approvalPolicy` and `model`, the `sandbox` of a
+   preset without one, `ephemeral: false` and the thread's configuration, whose permission
+   profile has to be reported active (see above). The thread is registered as the session at
+   once, so its events are reported from the first one.
 2. `checkpoint.put` (scope `attempt`) of `{"v":1,"thread_id":"…"}`, before anything else
    is done to the thread. Nothing else is ever put: not the credentials, and not that
    the prompt arrived, which the thread's record shows.
@@ -459,8 +526,10 @@ about ten seconds to the background.
 - **No interrupt, and no acknowledgement on the agent's behalf**; `ack_markers` is
   absent for the same reason.
 - **The command-line front end needs `danger-full-access`** (above).
-- **`SIDERA_HOME` is readable from the sandbox**, and holds the other sessions' tokens
-  on the same node; an exact deny is not done.
+- **A session's own token is readable by its commands**, and the data directory is
+  readable wherever no sandbox applies (see "The data directory is denied to the sandbox"),
+  including after an approved escalation. On Windows another Codex session sharing the
+  `CODEX_HOME` can revoke the denial.
 - **The token is in Codex's logs** and in anything a model prints.
 - **A thread's configuration replaces the `-c` layer** of the server's flags and the
   owner's `shell_environment_policy.set` entries of the same name; whether it replaces
@@ -488,6 +557,13 @@ about ten seconds to the background.
   hold nothing a sandboxed command could use: above all no secret of Sidera. A directory under
   the temporary directory was not taken: the system cleans it while the server runs, and
   in a shared one (`/tmp`) another user could create the path first.
+- **The sandbox is a profile that names the data directory.** Codex's legacy sandbox modes
+  cannot exclude a path, and a sandboxed command reading `SIDERA_HOME` would learn every other
+  session's token. The profile is the one mechanism that denies a path in the sandbox itself, and
+  it is enforced by the operating system rather than by the adapter's judgment of commands. It is
+  checked against the thread's own answer because Codex ignores it without an error when anything
+  else names a sandbox; a thread without it is not used, since a silent fallback would be the
+  failure the profile exists to prevent.
 - **Credentials in the thread's configuration, not in the server.** One server for all
   sessions is what lets turns outlive the adapter and what keeps the number of
   processes small. The measurement showed the thread's configuration is the one place
@@ -536,7 +612,8 @@ about ten seconds to the background.
 | The subset of types and methods; `IsThreadGone`; `ServerVersion` | `internal/appserver/types.go` |
 | A fake App Server for tests | `internal/appserver/appservertest/` |
 | Start, connect, working directory, detach, environment, stop | `internal/server/` (`server.go`, `env.go`, `detach_*.go`, `version.go`) |
-| Preset and instance configuration, thread configuration, sandbox policy | `internal/codexcfg/` |
+| Preset and instance configuration, thread configuration and permission profile, sandbox policy | `internal/codexcfg/` |
+| Starting and resuming threads, and checking the profile took | `internal/adapter/thread.go` |
 | Creation decisions and the checkpoint | `internal/create/` |
 | Reconciliation | `internal/reconcile/` |
 | Answers to the server's requests | `internal/serverreq/` |
@@ -548,18 +625,20 @@ Tests: `TestCallsAndNotificationsOverBothTransports`, `TestServerRequestsAreAnsw
 `TestPendingCallsFailWhenTheConnectionDrops`, `TestLargeMessagesAreRead` (the client against
 the fake server); `TestEnviron` (the environment of the server); `TestStartRunsTheServerInADirectoryOfItsOwn`,
 `TestConnectReportsAServerThatRunsInTheStateDirectory` (where the server runs); `TestParsePreset`,
-`TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
+`TestSandboxIsAProfileNotALegacyMode`, `TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
 `TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
 (the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
 `TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
-`TestCloseSession`, `TestThreadsTurnsAndCommandsNameThePresetDirectory` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
+`TestCloseSession`, `TestThreadsTurnsAndCommandsNameThePresetDirectory`,
+`TestSandboxIsAPermissionProfileThatDeniesTheDataDirectory`, `TestThreadWithoutTheProfileIsNotUsed` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
 against a stand-in program).
 
-Against the installed Codex, in `internal/server/realcodex_test.go` and
-`realcodex_schema_test.go`, behind `-tags realcodex` and `SIDERA_REALCODEX=1` (no model
-turn; the temporary directory must be short enough for a socket path):
+Against the installed Codex, in `internal/server/realcodex_test.go`,
+`realcodex_sandbox_test.go` and `realcodex_schema_test.go`, behind `-tags realcodex` and
+`SIDERA_REALCODEX=1` (no account and no quota: the one test that runs turns uses a mock model;
+the temporary directory must be short enough for a socket path):
 
 ```
 SIDERA_REALCODEX=1 go test -tags realcodex -count=1 ./cmd/sidera-adapter-codex/...
@@ -571,6 +650,13 @@ has to be decided on, not refused by default), when a method, member or notifica
 adapter uses is missing, or when `clientUserMessageId` or `clientId` is gone.
 `TestThreadEnvironmentAndServerCleanup` starts a real server, gives a thread its
 credentials through its configuration, reads them back from a command the thread runs,
-runs a command under each sandbox policy, checks that a sandboxed command cannot write to the
+runs a command under each legacy sandbox policy, checks that a sandboxed command cannot write to the
 state directory (Unix), checks the words that say a thread is gone, and
 stops the server and checks that its process group is gone.
+`TestSandboxedCommandsCannotReadTheDataDirectory` (Unix) runs a real server with an isolated
+`CODEX_HOME` that names a mock model provider, which answers each turn with the shell command
+the prompt carries; it checks that a thread reports its permission profile when started and
+when resumed, that a command in a `workspace-write` or `read-only` thread cannot read a secret
+in a throwaway data directory, that a command in a `danger-full-access` thread can, and that the
+profile still lets a `workspace-write` command write to its project and keeps a `read-only` one
+from writing.

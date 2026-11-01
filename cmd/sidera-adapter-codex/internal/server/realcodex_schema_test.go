@@ -104,6 +104,19 @@ func TestSchemaGuard(t *testing.T) {
 			}
 		}
 	}
+	// The permission profile a thread runs under is read from the answer to
+	// thread/start and thread/resume. The server sends it to every client, but only the
+	// experimental schema lists it, so that is the one the member is looked up in.
+	experimental := t.TempDir()
+	if out, err := exec.Command(program, "app-server", "generate-json-schema", "--experimental", "--out", experimental).CombinedOutput(); err != nil {
+		t.Fatalf("generate-json-schema --experimental: %v\n%s", err, out)
+	}
+	for _, file := range []string{"ThreadStartResponse", "ThreadResumeResponse"} {
+		props, _ := readJSON(t, filepath.Join(experimental, "v2", file+".json"))["properties"].(map[string]any)
+		if _, ok := props["activePermissionProfile"]; !ok {
+			t.Errorf("%s has no member activePermissionProfile, which the check that a thread is protected reads", file)
+		}
+	}
 	// A prompt is found again by the client id the server keeps on its record.
 	raw, err := os.ReadFile(filepath.Join(dir, "v2", "ItemCompletedNotification.json"))
 	if err != nil || !strings.Contains(string(raw), `"clientId"`) {

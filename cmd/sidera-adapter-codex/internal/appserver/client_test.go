@@ -44,7 +44,7 @@ func TestCallsAndNotificationsOverBothTransports(t *testing.T) {
 			}
 			defer c.Close()
 			th, err := c.ThreadStart(ctx(t), appserver.ThreadStartParams{CWD: "/x"})
-			if err != nil || th.ID != "t1" || th.Status.Active() {
+			if err != nil || th.Thread.ID != "t1" || th.Thread.Status.Active() {
 				t.Fatalf("ThreadStart = %+v, %v", th, err)
 			}
 			select {

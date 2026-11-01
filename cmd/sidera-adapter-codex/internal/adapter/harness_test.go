@@ -58,6 +58,47 @@ type fakeCodex struct {
 	// turnStartGone makes that many turn/start calls answer that the thread was not
 	// found, as the server does for a thread it has unloaded.
 	turnStartGone int
+	// unprotected makes thread/start and thread/resume answer with no active
+	// permission profile, whatever the request asked for.
+	unprotected bool
+}
+
+// dataDir is the data directory of the sessions the tests create: a real
+// directory, as the adapter needs, named without symbolic links.
+var dataDir = func() string {
+	d, err := os.MkdirTemp("", "dd")
+	if err != nil {
+		panic(err)
+	}
+	if d, err = filepath.EvalSymlinks(d); err != nil {
+		panic(err)
+	}
+	return d
+}()
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = os.RemoveAll(dataDir)
+	os.Exit(code)
+}
+
+// profileAnswer is what Codex reports as the active permission profile: the
+// profile the request's configuration defines, unless the request also gave the
+// legacy sandbox mode, which makes Codex drop it.
+// The caller holds f.mu.
+func (f *fakeCodex) profileAnswer(raw json.RawMessage) any {
+	p := decode[struct {
+		Sandbox string
+		Config  struct {
+			DefaultPermissions string                    `json:"default_permissions"`
+			Permissions        map[string]map[string]any `json:"permissions"`
+		}
+	}](raw)
+	name := p.Config.DefaultPermissions
+	if f.unprotected || p.Sandbox != "" || name == "" {
+		return nil
+	}
+	return map[string]any{"id": name, "extends": p.Config.Permissions[name]["extends"]}
 }
 
 type fakeThread struct {
@@ -99,15 +140,16 @@ func (f *fakeCodex) install() {
 		}
 		return map[string]any{"account": map[string]any{"type": "chatgpt"}, "requiresOpenaiAuth": true}, nil
 	})
-	f.srv.Handle("thread/start", func(json.RawMessage) (any, *appserver.RPCError) {
+	f.srv.Handle("thread/start", func(raw json.RawMessage) (any, *appserver.RPCError) {
 		f.mu.Lock()
 		f.next++
 		th := &fakeThread{id: fmt.Sprintf("th-%d", f.next)}
 		f.threads[th.id] = th
+		profile := f.profileAnswer(raw)
 		f.mu.Unlock()
 		// The channel's MCP server reports before the answer is read.
 		f.srv.Notify("mcpServer/startupStatus/updated", map[string]any{"threadId": th.id, "name": "sidera", "status": "ready"})
-		return map[string]any{"thread": map[string]any{"id": th.id, "status": map[string]string{"type": "idle"}}}, nil
+		return map[string]any{"thread": map[string]any{"id": th.id, "status": map[string]string{"type": "idle"}}, "activePermissionProfile": profile}, nil
 	})
 	f.srv.Handle("thread/resume", func(raw json.RawMessage) (any, *appserver.RPCError) {
 		p := decode[struct{ ThreadID string }](raw)
@@ -125,7 +167,7 @@ func (f *fakeCodex) install() {
 		if n := len(th.turns); n > 0 && th.turns[n-1].status == "inProgress" {
 			status = "active"
 		}
-		return map[string]any{"thread": map[string]any{"id": th.id, "status": map[string]string{"type": status}}}, nil
+		return map[string]any{"thread": map[string]any{"id": th.id, "status": map[string]string{"type": status}}, "activePermissionProfile": f.profileAnswer(raw)}, nil
 	})
 	f.srv.Handle("thread/name/set", func(raw json.RawMessage) (any, *appserver.RPCError) {
 		p := decode[struct{ ThreadID, Name string }](raw)
@@ -424,7 +466,7 @@ func createParams(attempt, endpoint, preset string) adapterproto.SessionCreatePa
 	return adapterproto.SessionCreateParams{
 		Attempt: adapterproto.AttemptID(attempt), RuntimeEndpoint: runtimeEP, SessionEndpoint: adapterproto.EndpointRef(endpoint), Preset: preset,
 		FirstPrompt: adapterproto.FirstPrompt{Attempt: adapterproto.AttemptID(attempt), Text: "hello"},
-		ToolAccess:  adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": "/home/sidera"}},
+		ToolAccess:  adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}},
 	}
 }
 

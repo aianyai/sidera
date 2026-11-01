@@ -223,14 +223,6 @@ func (a *App) sessionByThread(threadID string) *session {
 	return a.byThread[threadID]
 }
 
-// threadConfig is the thread-level configuration of a session.
-func (a *App) threadConfig(s *session, p codexcfg.Preset) map[string]any {
-	a.mu.Lock()
-	sidera := a.sideraPath
-	a.mu.Unlock()
-	return p.ThreadConfig(codexcfg.Access{Program: sidera, Env: s.access})
-}
-
 // presetEntryOf returns what the adapter knows of a preset by name, usable or not.
 func (a *App) presetEntryOf(name string) (presetEntry, bool) {
 	a.mu.Lock()

@@ -81,23 +81,72 @@ func TestFrontendsFollowTheSandbox(t *testing.T) {
 	}
 }
 
-func TestSandboxPolicy(t *testing.T) {
-	for sandbox, want := range map[string]string{SandboxReadOnly: "readOnly", SandboxWorkspaceWrite: "workspaceWrite", SandboxDangerFullAccess: "dangerFullAccess"} {
-		if got := (Preset{Sandbox: sandbox}).SandboxPolicy()["type"]; got != want {
-			t.Errorf("%s: type = %v, want %s", sandbox, got, want)
+// A preset with a sandbox is a permission profile of the thread, and gives Codex no
+// legacy sandbox mode and no per-turn policy: given either, Codex drops the profile.
+func TestSandboxIsAProfileNotALegacyMode(t *testing.T) {
+	for _, tc := range []struct {
+		sandbox, extends, thread string
+		policy                   map[string]any
+	}{
+		{SandboxReadOnly, ":read-only", "", nil},
+		{SandboxWorkspaceWrite, ":workspace", "", nil},
+		{SandboxDangerFullAccess, "", SandboxDangerFullAccess, map[string]any{"type": "dangerFullAccess"}},
+	} {
+		p := Preset{Sandbox: tc.sandbox}
+		name, extends, ok := p.ExpectedProfile()
+		if ok != (tc.extends != "") || extends != tc.extends || ok && name != ProfileName {
+			t.Errorf("%s: expected profile = %q %q %v", tc.sandbox, name, extends, ok)
+		}
+		if got := p.ThreadSandbox(); got != tc.thread {
+			t.Errorf("%s: thread sandbox = %q, want %q", tc.sandbox, got, tc.thread)
+		}
+		if got := p.SandboxPolicy(); !reflect.DeepEqual(got, tc.policy) {
+			t.Errorf("%s: policy = %v, want %v", tc.sandbox, got, tc.policy)
 		}
 	}
 }
 
 // The configuration that carries a session's credentials is the contract with
 // Codex: both places that need them, the approval of the channel's tools and no
-// credentials in the arguments.
+// credentials in the arguments. A preset with a sandbox adds the profile that
+// denies the data directory, as an exact table and without a sandbox key.
 func TestThreadConfig(t *testing.T) {
-	cfg := (Preset{}).ThreadConfig(Access{Program: "/bin/sidera", Env: map[string]string{"SIDERA_TOKEN": "tok", "SIDERA_HOME": "/home"}})
-	raw, _ := json.Marshal(cfg)
-	const want = `{"mcp_servers":{"sidera":{"args":["mcp"],"command":"/bin/sidera","default_tools_approval_mode":"approve","env":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"},"tool_timeout_sec":120}},"shell_environment_policy":{"set":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"}}}`
-	if string(raw) != want {
-		t.Fatalf("config = %s\nwant     %s", raw, want)
+	dir := t.TempDir()
+	access := Access{Program: "/bin/sidera", Env: map[string]string{"SIDERA_TOKEN": "tok", "SIDERA_HOME": "/home"}, DataDir: dir}
+	const base = `"mcp_servers":{"sidera":{"args":["mcp"],"command":"/bin/sidera","default_tools_approval_mode":"approve","env":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"},"tool_timeout_sec":120}},"shell_environment_policy":{"set":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"}}`
+	profile := func(extends string) string {
+		d, _ := json.Marshal(dir)
+		return `"default_permissions":"` + ProfileName + `",` + base + `,"permissions":{"` + ProfileName + `":{"extends":"` + extends + `","filesystem":{` + string(d) + `:"deny"}}}`
+	}
+	for _, tc := range []struct{ sandbox, want string }{
+		{SandboxWorkspaceWrite, "{" + profile(":workspace") + "}"},
+		{SandboxReadOnly, "{" + profile(":read-only") + "}"},
+		{SandboxDangerFullAccess, "{" + base + "}"},
+	} {
+		cfg, err := (Preset{Sandbox: tc.sandbox}).ThreadConfig(access)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.sandbox, err)
+		}
+		raw, _ := json.Marshal(cfg)
+		var got, want any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: config = %s\nwant         %s", tc.sandbox, raw, tc.want)
+		}
+	}
+	// With no data directory to deny, a sandbox would leave it readable: there is
+	// no configuration to give. A preset without a sandbox needs none.
+	access.DataDir = ""
+	if _, err := (Preset{Sandbox: SandboxReadOnly}).ThreadConfig(access); err == nil {
+		t.Error("a configuration was made without a data directory to deny")
+	}
+	if _, err := (Preset{Sandbox: SandboxDangerFullAccess}).ThreadConfig(access); err != nil {
+		t.Errorf("a preset without a sandbox needs no data directory: %v", err)
 	}
 }
 

@@ -181,16 +181,28 @@ type ThreadStartParams struct {
 	DeveloperInstructions string `json:"developerInstructions,omitempty"`
 }
 
+// ActivePermissionProfile names the permission profile a thread runs under: the
+// id of a `[permissions.<id>]` table, or of a built-in profile such as ":workspace".
+type ActivePermissionProfile struct {
+	ID      string  `json:"id"`
+	Extends *string `json:"extends"`
+}
+
 // ThreadResult is the answer of thread/start and thread/resume.
+// ActivePermissionProfile is nil when the thread runs under no named profile (a
+// preset without a sandbox, or a thread whose profile Codex dropped). The server
+// sends it without the experimental API being asked for, though its published
+// schema leaves it out.
 type ThreadResult struct {
-	Thread Thread `json:"thread"`
+	Thread                  Thread                   `json:"thread"`
+	ActivePermissionProfile *ActivePermissionProfile `json:"activePermissionProfile"`
 }
 
 // ThreadStart starts a thread and subscribes this connection to it.
-func (c *Client) ThreadStart(ctx context.Context, p ThreadStartParams) (Thread, error) {
+func (c *Client) ThreadStart(ctx context.Context, p ThreadStartParams) (ThreadResult, error) {
 	var r ThreadResult
 	err := c.Call(ctx, MethodThreadStart, p, &r)
-	return r.Thread, err
+	return r, err
 }
 
 // ThreadResumeParams loads a thread that was stored and subscribes this
@@ -208,10 +220,10 @@ type ThreadResumeParams struct {
 }
 
 // ThreadResume loads a thread and subscribes this connection to it.
-func (c *Client) ThreadResume(ctx context.Context, p ThreadResumeParams) (Thread, error) {
+func (c *Client) ThreadResume(ctx context.Context, p ThreadResumeParams) (ThreadResult, error) {
 	var r ThreadResult
 	err := c.Call(ctx, MethodThreadResume, p, &r)
-	return r.Thread, err
+	return r, err
 }
 
 // ThreadSetName names a thread; the first name also makes it persistent.

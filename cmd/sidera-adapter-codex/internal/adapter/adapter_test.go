@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestCreateSession(t *testing.T) {
 	}
 	env := start.Config["shell_environment_policy"]["set"].(map[string]any)
 	mcp := start.Config["mcp_servers"]["sidera"].(map[string]any)
-	if env["SIDERA_TOKEN"] != token || mcp["env"].(map[string]any)["SIDERA_HOME"] != "/home/sidera" || mcp["command"] != filepath.Join(h.dir, "bin", "sidera") {
+	if env["SIDERA_TOKEN"] != token || mcp["env"].(map[string]any)["SIDERA_HOME"] != dataDir || mcp["command"] != filepath.Join(h.dir, "bin", "sidera") {
 		t.Errorf("thread configuration = %+v", start.Config)
 	}
 	if name := decode[struct{ Name string }](codex.callsOf("thread/name/set")[0].Params).Name; name != "sidera "+attempt1 {
@@ -203,7 +204,7 @@ func TestStartAttachesSessions(t *testing.T) {
 	codex := newFakeCodex(t)
 	codex.seed("th-1", &fakeTurn{id: "tu-1", status: "inProgress", clientID: attempt1})
 	h := newHarness(t, codex)
-	access := adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": "/home/sidera"}}
+	access := adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}}
 	res := h.start(
 		adapterproto.SessionAttach{Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1", ToolAccess: access},
 		adapterproto.SessionAttach{Endpoint: otherEP, Preset: "dev", NativeRef: "th-gone", ToolAccess: access},
@@ -692,4 +693,152 @@ func TestThreadsTurnsAndCommandsNameThePresetDirectory(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A session whose preset has a sandbox is a thread under a permission profile that
+// denies the data directory, and gives Codex no legacy sandbox mode and no per-turn
+// sandbox policy, either of which makes Codex drop the profile. A preset without a
+// sandbox is configured as it always was.
+func TestSandboxIsAPermissionProfileThatDeniesTheDataDirectory(t *testing.T) {
+	type params struct {
+		Sandbox       string
+		SandboxPolicy map[string]any
+		Config        map[string]any
+	}
+	for _, tc := range []struct {
+		preset, sandbox, extends string
+	}{
+		{"dev", "", ":workspace"},
+		{"ro", "", ":read-only"},
+		{"yolo", "danger-full-access", ""},
+	} {
+		t.Run(tc.preset, func(t *testing.T) {
+			codex := newFakeCodex(t)
+			h := newHarness(t, codex)
+			h.startWith([]adapterproto.PresetConfig{
+				{Name: "dev", Config: presetConfig(t, map[string]any{"cwd": h.dir})},
+				{Name: "ro", Config: presetConfig(t, map[string]any{"cwd": h.dir, "sandbox": "read-only"})},
+				{Name: "yolo", Config: presetConfig(t, map[string]any{"cwd": h.dir, "sandbox": "danger-full-access"})},
+			})
+			if got := h.create(attempt1, sessionEP, tc.preset); got.Outcome != adapterproto.CreateCreated {
+				t.Fatalf("result = %+v", got)
+			}
+			// Resume the thread the way a reconnect does and compare it with the start.
+			resumes := len(codex.callsOf("thread/resume"))
+			codex.srv.DropConnections()
+			for len(codex.callsOf("thread/resume")) == resumes {
+				time.Sleep(20 * time.Millisecond)
+			}
+			calls := map[string]params{
+				"thread/start":  decode[params](codex.callsOf("thread/start")[0].Params),
+				"thread/resume": decode[params](codex.callsOf("thread/resume")[resumes].Params),
+				"turn/start":    decode[params](codex.callsOf("turn/start")[0].Params),
+			}
+			for method, p := range calls {
+				if tc.extends == "" {
+					if method != "turn/start" && p.Sandbox != tc.sandbox || method == "turn/start" && p.SandboxPolicy["type"] != "dangerFullAccess" {
+						t.Errorf("%s: sandbox %q, policy %v", method, p.Sandbox, p.SandboxPolicy)
+					}
+					if _, ok := p.Config["default_permissions"]; ok {
+						t.Errorf("%s: a preset without a sandbox got a permission profile", method)
+					}
+					continue
+				}
+				if p.Sandbox != "" || p.SandboxPolicy != nil {
+					t.Errorf("%s: sandbox %q, policy %v: either would make Codex drop the profile", method, p.Sandbox, p.SandboxPolicy)
+				}
+				if method == "turn/start" {
+					continue
+				}
+				if _, ok := p.Config["sandbox"]; ok {
+					t.Errorf("%s: the configuration sets sandbox", method)
+				}
+				raw, _ := json.Marshal(map[string]any{
+					"default_permissions": codexcfg.ProfileName,
+					"permissions":         map[string]any{codexcfg.ProfileName: map[string]any{"extends": tc.extends, "filesystem": map[string]any{dataDir: "deny"}}},
+				})
+				var wantCfg map[string]any
+				_ = json.Unmarshal(raw, &wantCfg)
+				if !reflect.DeepEqual(p.Config["permissions"], wantCfg["permissions"]) || p.Config["default_permissions"] != wantCfg["default_permissions"] {
+					t.Errorf("%s: profile = %v %v, want %v %v", method, p.Config["default_permissions"], p.Config["permissions"], wantCfg["default_permissions"], wantCfg["permissions"])
+				}
+			}
+		})
+	}
+}
+
+// A thread that does not come up under the profile is never used: the creation
+// fails with the reason, the thread is unloaded and gets neither a name nor a turn;
+// a session that cannot be resumed under it is unreachable and refuses prompts. The
+// data directory has to be a path that can be named for the sandbox.
+func TestThreadWithoutTheProfileIsNotUsed(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		codex := newFakeCodex(t)
+		codex.unprotected = true
+		h := newHarness(t, codex)
+		h.start()
+		got := h.create(attempt1, sessionEP, "dev")
+		if got.Outcome != adapterproto.CreateFailed || got.Reason != adapterproto.CreateFailNativeError || !strings.Contains(got.Detail, "permission profile") {
+			t.Fatalf("result = %+v", got)
+		}
+		if n := len(codex.callsOf("thread/unsubscribe")); n != 1 {
+			t.Errorf("%d unsubscribes, want the thread unloaded", n)
+		}
+		if n := len(codex.callsOf("thread/name/set")) + len(codex.callsOf("turn/start")); n != 0 {
+			t.Errorf("%d calls named or ran the unprotected thread", n)
+		}
+		if again := h.create(attempt1, sessionEP, "dev"); again.Reason != adapterproto.CreateFailNativeError {
+			t.Errorf("the same attempt again: %+v, want the same failure", again)
+		}
+	})
+	t.Run("without a sandbox it is not asked for", func(t *testing.T) {
+		codex := newFakeCodex(t)
+		codex.unprotected = true
+		h := newHarness(t, codex)
+		h.start()
+		if got := h.create(attempt1, sessionEP, "yolo"); got.Outcome != adapterproto.CreateCreated {
+			t.Fatalf("result = %+v", got)
+		}
+	})
+	t.Run("resume", func(t *testing.T) {
+		codex := newFakeCodex(t)
+		codex.seed("th-1")
+		codex.unprotected = true
+		h := newHarness(t, codex)
+		res := h.start(adapterproto.SessionAttach{
+			Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1",
+			ToolAccess: adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}},
+		})
+		if len(res.Sessions) != 1 || res.Sessions[0].State != adapterproto.AttachUnreachable {
+			t.Fatalf("start = %+v", res)
+		}
+		if n := len(codex.callsOf("thread/unsubscribe")); n == 0 {
+			t.Error("the thread was left loaded without the profile")
+		}
+		if got := h.deliver(attempt2); got.Stage != adapterproto.PromptRefused {
+			t.Errorf("deliver = %+v, want a refusal", got)
+		}
+		if n := len(codex.callsOf("turn/start")); n != 0 {
+			t.Errorf("%d turns were started on an unprotected thread", n)
+		}
+	})
+	t.Run("data directory", func(t *testing.T) {
+		for name, home := range map[string]string{"unset": "", "relative": "data", "missing": filepath.Join(dataDir, "missing")} {
+			t.Run(name, func(t *testing.T) {
+				codex := newFakeCodex(t)
+				h := newHarness(t, codex)
+				h.start()
+				p := createParams(attempt1, sessionEP, "dev")
+				p.ToolAccess.Env["SIDERA_HOME"] = home
+				var got adapterproto.SessionCreateResult
+				h.mustCall(adapterproto.MethodSessionCreate, p, &got)
+				if got.Outcome != adapterproto.CreateFailed || !strings.Contains(got.Detail, "SIDERA_HOME") && !strings.Contains(got.Detail, "data directory") {
+					t.Fatalf("result = %+v", got)
+				}
+				if n := len(codex.callsOf("thread/start")); n != 0 {
+					t.Errorf("%d threads were started without a data directory to deny", n)
+				}
+			})
+		}
+	})
 }

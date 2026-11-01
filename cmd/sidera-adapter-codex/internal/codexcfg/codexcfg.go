@@ -212,16 +212,57 @@ func (p Preset) Frontends() []adapterproto.Frontend {
 // Approves reports whether the adapter says yes when Codex asks it to approve.
 func (p Preset) Approves() bool { return p.Approvals == ApprovalsApprove }
 
-// SandboxPolicy is the sandbox as a turn or a command is given it.
+// Sandboxed reports whether the preset's commands run in a sandbox, which is then
+// a permission profile of the thread (see ThreadConfig) and not a legacy sandbox
+// mode.
+func (p Preset) Sandboxed() bool {
+	return p.Sandbox == SandboxReadOnly || p.Sandbox == SandboxWorkspaceWrite
+}
+
+// ThreadSandbox is the `sandbox` member of thread/start and thread/resume. Only a
+// preset without a sandbox sets it: when the thread's sandbox is also given as a
+// legacy mode, Codex silently drops the permission profile, and with it the denial
+// of the data directory.
+func (p Preset) ThreadSandbox() string {
+	if p.Sandboxed() {
+		return ""
+	}
+	return p.Sandbox
+}
+
+// SandboxPolicy is the sandbox as a turn or a command is given it. A preset with a
+// sandbox has none: the thread's permission profile governs its turns, and a
+// per-turn policy would replace it. A command/exec cannot carry the profile, so the
+// only command the adapter runs this way is the probe of a preset without a sandbox.
 func (p Preset) SandboxPolicy() map[string]any {
+	if p.Sandboxed() {
+		return nil
+	}
+	return map[string]any{"type": "dangerFullAccess"}
+}
+
+// Permission profile names of the built-in profiles a preset's own profile extends.
+const (
+	profileWorkspace = ":workspace"
+	profileReadOnly  = ":read-only"
+)
+
+// ProfileName is the name of the permission profile the adapter defines in a
+// thread's configuration. It is long enough not to meet a profile of the owner's
+// own, whose settings would otherwise be merged into it.
+const ProfileName = "sidera-adapter-codex"
+
+// ExpectedProfile is the permission profile a thread of the preset must report as
+// active: its name and the built-in profile it extends. A preset without a sandbox
+// has none.
+func (p Preset) ExpectedProfile() (name, extends string, ok bool) {
 	switch p.Sandbox {
 	case SandboxReadOnly:
-		return map[string]any{"type": "readOnly"}
-	case SandboxDangerFullAccess:
-		return map[string]any{"type": "dangerFullAccess"}
-	default:
-		return map[string]any{"type": "workspaceWrite"}
+		return ProfileName, profileReadOnly, true
+	case SandboxWorkspaceWrite:
+		return ProfileName, profileWorkspace, true
 	}
+	return "", "", false
 }
 
 // Access is what a session needs to reach the daemon.
@@ -230,6 +271,11 @@ type Access struct {
 	Program string
 	// Env is SIDERA_TOKEN and SIDERA_HOME, as the daemon gave them.
 	Env map[string]string
+	// DataDir is the data directory (SIDERA_HOME) as the operating system names it:
+	// absolute, with symbolic links resolved, and existing. A sandboxed session is
+	// denied every read under it, and the sandbox compares the paths a command opens
+	// with this one, so a link or a path that does not exist would deny nothing.
+	DataDir string
 }
 
 // ServerName is the name of the MCP server of the channel in a thread's
@@ -242,10 +288,15 @@ const toolTimeoutS = 120
 
 // ThreadConfig is the thread-level configuration of a session: the environment
 // its commands run in and the MCP server of the channel, both carrying the
-// session's credentials. Codex keeps none of it, so it is sent again on every
-// resume. The tools of the channel are approved in advance because with an
-// approval policy of never Codex fails a call that would need approval.
-func (p Preset) ThreadConfig(a Access) map[string]any {
+// session's credentials, and for a preset with a sandbox the permission profile
+// that denies the commands every read of the data directory, which holds every
+// session's token. Codex keeps none of it, so it is sent again on every resume. The
+// tools of the channel are approved in advance because with an approval policy of
+// never Codex fails a call that would need approval.
+//
+// A preset with a sandbox needs a DataDir: without one the sandbox would leave the
+// data directory readable, so there is no configuration to give.
+func (p Preset) ThreadConfig(a Access) (map[string]any, error) {
 	env := func() map[string]any {
 		m := make(map[string]any, len(a.Env))
 		for k, v := range a.Env {
@@ -253,7 +304,7 @@ func (p Preset) ThreadConfig(a Access) map[string]any {
 		}
 		return m
 	}
-	return map[string]any{
+	cfg := map[string]any{
 		"shell_environment_policy": map[string]any{"set": env()},
 		"mcp_servers": map[string]any{
 			ServerName: map[string]any{
@@ -265,6 +316,19 @@ func (p Preset) ThreadConfig(a Access) map[string]any {
 			},
 		},
 	}
+	if name, extends, ok := p.ExpectedProfile(); ok {
+		if !filepath.IsAbs(a.DataDir) {
+			return nil, fmt.Errorf("the data directory %q to deny to the sandbox is not an absolute path", a.DataDir)
+		}
+		cfg["default_permissions"] = name
+		cfg["permissions"] = map[string]any{
+			name: map[string]any{
+				"extends":    extends,
+				"filesystem": map[string]any{a.DataDir: "deny"},
+			},
+		}
+	}
+	return cfg, nil
 }
 
 // ChannelStatement tells the agent what Sidera is and how to use it, as facts: it

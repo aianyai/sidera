@@ -113,14 +113,27 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 	t.Logf("signed in: %v", acct.SignedIn())
 
 	preset := codexcfg.Preset{Sandbox: codexcfg.SandboxReadOnly}
-	cfg := preset.ThreadConfig(codexcfg.Access{Program: "true", Env: map[string]string{"SIDERA_TOKEN": "tok-real", "SIDERA_HOME": "/real/home"}})
-	th, err := client.ThreadStart(ctx, appserver.ThreadStartParams{
-		CWD: dir, ApprovalPolicy: codexcfg.ApprovalNever, Sandbox: codexcfg.SandboxReadOnly, Ephemeral: true, Config: cfg,
+	// The data directory the sandbox is denied is not the thread's own: Codex cannot
+	// read the instructions of a working directory that is denied to it.
+	data, err := os.MkdirTemp("", "k4d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(data)
+	if data, err = filepath.EvalSymlinks(data); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := preset.ThreadConfig(codexcfg.Access{Program: "true", Env: map[string]string{"SIDERA_TOKEN": "tok-real", "SIDERA_HOME": "/real/home"}, DataDir: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := client.ThreadStart(ctx, appserver.ThreadStartParams{
+		CWD: dir, ApprovalPolicy: codexcfg.ApprovalNever, Sandbox: preset.ThreadSandbox(), Ephemeral: true, Config: cfg,
 	})
 	if err != nil {
 		t.Fatalf("thread/start: %v", err)
 	}
-	if err := client.ThreadShellCommand(ctx, th.ID, "env | grep '^SIDERA_' | sort", 20000); err != nil {
+	if err := client.ThreadShellCommand(ctx, started.Thread.ID, "env | grep '^SIDERA_' | sort", 20000); err != nil {
 		t.Fatalf("thread/shellCommand: %v", err)
 	}
 	select {
@@ -132,14 +145,14 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 		t.Fatal("the command did not complete")
 	}
 
-	// A command runs under each sandbox policy a preset can name, which is how the
-	// command-line front end is probed without a model turn.
-	for _, sandbox := range []string{codexcfg.SandboxReadOnly, codexcfg.SandboxWorkspaceWrite, codexcfg.SandboxDangerFullAccess} {
+	// A command runs under each legacy sandbox policy, which is how the command-line
+	// front end is probed without a model turn.
+	for _, policy := range []string{"readOnly", "workspaceWrite", "dangerFullAccess"} {
 		r, err := client.CommandExec(ctx, appserver.CommandExecParams{
-			Command: []string{"/usr/bin/true", "probe"}, CWD: dir, SandboxPolicy: codexcfg.Preset{Sandbox: sandbox}.SandboxPolicy(), TimeoutMs: 20000,
+			Command: []string{"/usr/bin/true", "probe"}, CWD: dir, SandboxPolicy: map[string]any{"type": policy}, TimeoutMs: 20000,
 		})
 		if err != nil || r.ExitCode != 0 {
-			t.Errorf("command/exec under %s: %+v, %v", sandbox, r, err)
+			t.Errorf("command/exec under %s: %+v, %v", policy, r, err)
 		}
 	}
 

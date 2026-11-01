@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
-	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -194,11 +193,7 @@ func (a *App) attach(ctx context.Context, c *appserver.Client, s *session, repor
 	if !ok {
 		return adapterproto.AttachUnreachable, false
 	}
-	th, err := c.ThreadResume(ctx, appserver.ThreadResumeParams{
-		ThreadID: s.threadID, CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy,
-		Sandbox: preset.Sandbox, Model: preset.Model, ExcludeTurns: true,
-		Config: a.threadConfig(s, preset), DeveloperInstructions: codexcfg.DeveloperInstructions(preset.DeveloperInstructions),
-	})
+	th, err := a.threadResume(ctx, c, s, s.threadID, preset)
 	if err != nil {
 		if appserver.IsThreadGone(err) {
 			a.mu.Lock()

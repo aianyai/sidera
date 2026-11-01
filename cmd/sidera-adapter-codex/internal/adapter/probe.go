@@ -177,6 +177,9 @@ func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath, co
 			out.Outcome, out.Detail, out.Method = adapterproto.ProbeFailed, "the App Server cannot be reached", ""
 			return out
 		}
+		// Only a preset without a sandbox offers this front end, so the policy is
+		// dangerFullAccess: command/exec cannot carry the permission profile of a
+		// sandboxed thread, and without a policy it would run under the owner's own.
 		r, err := c.CommandExec(ctx, appserver.CommandExecParams{
 			Command: []string{sideraPath, "probe"}, CWD: preset.CWD, Env: env,
 			SandboxPolicy: preset.SandboxPolicy(), TimeoutMs: 20000,

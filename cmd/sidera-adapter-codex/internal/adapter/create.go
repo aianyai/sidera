@@ -221,12 +221,11 @@ func (a *App) precheck(ctx context.Context, rec *createAttempt) (adapterproto.Se
 // events are reported from the first one.
 func (a *App) startThread(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) (adapterproto.SessionCreateResult, bool, error) {
 	s := newSession(p.SessionEndpoint, p.Preset, "", p.ToolAccess.Env)
-	th, err := c.ThreadStart(ctx, appserver.ThreadStartParams{
-		CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy, Sandbox: preset.Sandbox, Model: preset.Model,
-		Ephemeral: false, Config: a.threadConfig(s, preset),
-		DeveloperInstructions: codexcfg.DeveloperInstructions(preset.DeveloperInstructions),
-	})
+	th, err := a.threadStart(ctx, c, s, preset)
 	if err != nil {
+		if errors.Is(err, errUnprotected) {
+			return a.failUnprotected(ctx, rec, p, err), true, nil
+		}
 		if errors.Is(err, appserver.ErrClosed) {
 			// No thread is known to exist, and a thread that was started on a
 			// connection that ended is gone with it.
@@ -261,12 +260,10 @@ func (a *App) loadThread(ctx context.Context, rec *createAttempt, p adapterproto
 		s = newSession(p.SessionEndpoint, p.Preset, rec.state.ThreadID, p.ToolAccess.Env)
 		s.creating = true
 	}
-	th, err := c.ThreadResume(ctx, appserver.ThreadResumeParams{
-		ThreadID: rec.state.ThreadID, CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy,
-		Sandbox: preset.Sandbox, Model: preset.Model, ExcludeTurns: true, Config: a.threadConfig(s, preset),
-		DeveloperInstructions: codexcfg.DeveloperInstructions(preset.DeveloperInstructions),
-	})
+	th, err := a.threadResume(ctx, c, s, rec.state.ThreadID, preset)
 	switch {
+	case errors.Is(err, errUnprotected):
+		return a.failUnprotected(ctx, rec, p, err), true, nil
 	case err == nil:
 		a.mu.Lock()
 		s.status = th.Status.Type
@@ -301,6 +298,15 @@ func (a *App) forget(ref adapterproto.EndpointRef) {
 		delete(a.mcp, s.threadID)
 		delete(a.sessions, ref)
 	}
+}
+
+// failUnprotected ends the attempt: a thread that cannot be protected from
+// reading the data directory is never used, and trying again would meet the same
+// refusal. The detail says why, since the owner has to act on it.
+func (a *App) failUnprotected(ctx context.Context, rec *createAttempt, p adapterproto.SessionCreateParams, err error) adapterproto.SessionCreateResult {
+	res := a.fail(ctx, rec, p, adapterproto.CreateFailNativeError)
+	res.Detail = cut(err.Error(), adapterproto.MaxDetailLen)
+	return res
 }
 
 // nativeFailure answers a failure of the server that the adapter cannot tell more
