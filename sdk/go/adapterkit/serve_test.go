@@ -247,9 +247,10 @@ func TestAnApplicationThatRefusesInitializeReleasesTheLock(t *testing.T) {
 // After shutdown only ping is served; everything else, initialize included, is
 // shutting_down. The application is told once.
 func TestAfterShutdownOnlyPingIsServed(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "l")
 	app := &stub{}
 	s := serveOn(t, config(app, runtimeCaps()))
-	if err := s.initialize(filepath.Join(t.TempDir(), "l")); err != nil {
+	if err := s.initialize(lock); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.call(adapterproto.MethodShutdown, adapterproto.Empty{}, &adapterproto.Empty{}); err != nil {
@@ -275,9 +276,10 @@ func TestAfterShutdownOnlyPingIsServed(t *testing.T) {
 // the daemon may call but the adapter has no capability for is
 // capability_not_declared, and a second initialize is invalid.
 func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
+	dir := t.TempDir()
 	app := &stub{}
 	s := serveOn(t, config(app, runtimeCaps()))
-	if err := s.initialize(filepath.Join(t.TempDir(), "l")); err != nil {
+	if err := s.initialize(filepath.Join(dir, "runtime.lock")); err != nil {
 		t.Fatal(err)
 	}
 	var raw json.RawMessage
@@ -291,12 +293,12 @@ func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
 	if got := codeOf(t, s.call(adapterproto.MethodSessionCreate, createParams(), &raw)); got != peer.CodeInternalError {
 		t.Errorf("an invalid result: code %d, want %d", got, peer.CodeInternalError)
 	}
-	if got := codeOf(t, s.initialize(filepath.Join(t.TempDir(), "other"))); got != peer.CodeInvalidRequest {
+	if got := codeOf(t, s.initialize(filepath.Join(dir, "other.lock"))); got != peer.CodeInvalidRequest {
 		t.Errorf("a second initialize: code %d, want %d", got, peer.CodeInvalidRequest)
 	}
 
 	direct := serveOn(t, config(&stub{}, adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: 1}}))
-	if err := direct.initialize(filepath.Join(t.TempDir(), "l")); err != nil {
+	if err := direct.initialize(filepath.Join(dir, "direct.lock")); err != nil {
 		t.Fatal(err)
 	}
 	if got := codeOf(t, direct.call(adapterproto.MethodSessionCreate, createParams(), &raw)); got != adapterproto.CodeCapabilityNotDeclared {
@@ -308,9 +310,9 @@ func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
 // the application receives the instance and the typed calls, and what it sends
 // through Conn reaches the daemon after validation.
 func TestAServedAdapterAnswersAndSends(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "state", "instance.lock")
 	app := &stub{}
 	s := serveOn(t, config(app, runtimeCaps()))
-	lock := filepath.Join(t.TempDir(), "state", "instance.lock")
 	var init adapterproto.InitializeResult
 	if err := s.call(adapterproto.MethodInitialize, initParams(lock), &init); err != nil {
 		t.Fatal(err)
