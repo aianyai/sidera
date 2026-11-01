@@ -7,7 +7,6 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
-	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/declare"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/reconcile"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -176,9 +175,7 @@ func (a *App) Reconcile(ctx context.Context, p adapterproto.ReconcileParams) (ad
 			in.TurnRunning = true
 		}
 	}
-	version := a.codexVer
 	a.mu.Unlock()
-	in.VersionUntested = !declare.VersionTested(version)
 
 	turns, complete, err := readTurns(ctx, c, s.threadID, recordMaxPages, func(t appserver.Turn) bool { return hasPrompt(t, p.Attempt) })
 	if err != nil {

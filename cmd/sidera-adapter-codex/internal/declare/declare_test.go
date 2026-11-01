@@ -29,14 +29,6 @@ func TestManifestAndCapabilitiesAreValid(t *testing.T) {
 	}
 }
 
-func TestVersionTested(t *testing.T) {
-	for v, want := range map[string]bool{"0.164.0": true, "0.163.9": false, "0.165.0": false, "garbage": false} {
-		if got := VersionTested(v); got != want {
-			t.Errorf("VersionTested(%s) = %v, want %v", v, got, want)
-		}
-	}
-}
-
 func TestWritePackage(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "built")

@@ -49,6 +49,9 @@ type fakeCodex struct {
 	// turn and its prompt and sends every event of the turn, as a server does while the thread's
 	// MCP servers are still starting.
 	slowStart bool
+	// otherRecordForm makes the record (thread/turns/list) omit what a prompt is
+	// found by, as a server that changed the form of its record would.
+	otherRecordForm bool
 }
 
 type fakeThread struct {
@@ -137,9 +140,11 @@ func (f *fakeCodex) install() {
 			if t.unrecorded {
 				continue
 			}
-			data = append(data, map[string]any{"id": t.id, "status": t.status, "items": []any{
-				map[string]any{"type": "userMessage", "id": "i-" + t.id, "clientId": t.clientID},
-			}})
+			item := map[string]any{"type": "userMessage", "id": "i-" + t.id, "clientId": t.clientID}
+			if f.otherRecordForm {
+				delete(item, "clientId")
+			}
+			data = append(data, map[string]any{"id": t.id, "status": t.status, "itemsView": "full", "items": []any{item}})
 		}
 		return map[string]any{"data": data}, nil
 	})

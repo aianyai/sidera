@@ -28,20 +28,17 @@ type Input struct {
 	// Unreachable says the server could not be asked; the other fields are then
 	// empty.
 	Unreachable bool
-	// VersionUntested says the Codex version is not the one the adapter was tested
-	// with, so a record that does not show the attempt proves little.
-	VersionUntested bool
 }
 
 // Judge answers prompt.reconcile.
 //
 // An attempt in the record is found whatever else holds. Absence is only
-// concluded from a whole record of a thread that is not running a turn, on a
-// version the record's format is known for: a turn still running may be about to
-// record the prompt, and a record that was not read to its end, or that a newer
-// version may write differently, may hold it. A server that was killed while a
-// prompt was being taken in leaves a record that ends in an interrupted turn
-// without the prompt, which is the absent case.
+// concluded from a whole record of a thread that is not running a turn: a turn
+// still running may be about to record the prompt, and a record that was not read
+// to its end, or whose format was not recognized, may hold it (the caller reports
+// both as not complete). A server that was killed while a prompt was being taken
+// in leaves a record that ends in an interrupted turn without the prompt, which is
+// the absent case.
 func Judge(in Input) adapterproto.ReconcileResult {
 	if in.Unreachable {
 		return indeterminate(adapterproto.GroundsNativeUnreachable)
@@ -58,8 +55,6 @@ func Judge(in Input) adapterproto.ReconcileResult {
 		}
 	}
 	switch {
-	case in.VersionUntested:
-		return indeterminate(adapterproto.GroundsRuntimeVersionUntested)
 	case in.ThreadActive || in.TurnRunning:
 		return indeterminate(adapterproto.GroundsTurnRunning)
 	case !in.Complete:

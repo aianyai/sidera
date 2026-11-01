@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -278,10 +279,66 @@ type ThreadTurnsListResult struct {
 	NextCursor *string `json:"nextCursor"`
 }
 
-// ThreadTurnsList reads one page of turns.
+// ErrUnrecognizedRecord is returned when a page of turns asked for with their
+// full items is not in the form the adapter reads a record in. The adapter finds a
+// prompt by the client id on a userMessage item, and decoding ignores what it does
+// not know, so a record written in another form would read as holding no prompts:
+// the answer is an error instead, which callers treat like a record that could not
+// be read.
+var ErrUnrecognizedRecord = errors.New("appserver: the record is not in a form this adapter reads")
+
+// ThreadTurnsList reads one page of turns. With ItemsView "full" the page must
+// also be in the recognized form (see ErrUnrecognizedRecord).
 func (c *Client) ThreadTurnsList(ctx context.Context, p ThreadTurnsListParams) (ThreadTurnsListResult, error) {
+	var raw json.RawMessage
+	if err := c.Call(ctx, MethodThreadTurnsList, p, &raw); err != nil {
+		return ThreadTurnsListResult{}, err
+	}
 	var r ThreadTurnsListResult
-	return r, c.Call(ctx, MethodThreadTurnsList, p, &r)
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return ThreadTurnsListResult{}, fmt.Errorf("appserver: %s result: %w", MethodThreadTurnsList, err)
+	}
+	if p.ItemsView == "full" {
+		if err := checkFullRecord(raw); err != nil {
+			return ThreadTurnsListResult{}, err
+		}
+	}
+	return r, nil
+}
+
+// checkFullRecord verifies the members a prompt is found by: every turn lists its
+// items and says they are all there, and every userMessage item has a clientId
+// (null when the prompt was not given one). The server writes all three always, so
+// an absent one means the form changed, and a missing item list or a renamed id
+// must not be read as "no prompt here".
+func checkFullRecord(page json.RawMessage) error {
+	var turns struct {
+		Data []struct {
+			Items     *[]json.RawMessage `json:"items"`
+			ItemsView *string            `json:"itemsView"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(page, &turns); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnrecognizedRecord, err)
+	}
+	for _, t := range turns.Data {
+		if t.Items == nil || t.ItemsView == nil || *t.ItemsView != "full" {
+			return fmt.Errorf("%w: a turn without its full list of items", ErrUnrecognizedRecord)
+		}
+		for _, raw := range *t.Items {
+			var it struct {
+				Type     string          `json:"type"`
+				ClientID json.RawMessage `json:"clientId"`
+			}
+			if err := json.Unmarshal(raw, &it); err != nil {
+				return fmt.Errorf("%w: %v", ErrUnrecognizedRecord, err)
+			}
+			if it.Type == ItemUserMessage && it.ClientID == nil {
+				return fmt.Errorf("%w: a %s item without clientId", ErrUnrecognizedRecord, ItemUserMessage)
+			}
+		}
+	}
+	return nil
 }
 
 // UserInput is one piece of a prompt.

@@ -169,6 +169,49 @@ func TestLargeMessagesAreRead(t *testing.T) {
 	}
 }
 
+// A page read with full items must show what a prompt is found by; a page in
+// another form is an error, not a page without prompts.
+func TestThreadTurnsListFullRecordForm(t *testing.T) {
+	userMessage := map[string]any{"type": "userMessage", "id": "i", "clientId": "a1", "content": []any{}}
+	for _, tc := range []struct {
+		name      string
+		turn      map[string]any
+		itemsView string
+		ok        bool
+	}{
+		{"recognized", map[string]any{"itemsView": "full", "items": []any{userMessage}}, "full", true},
+		{"a prompt without a client id", map[string]any{"itemsView": "full", "items": []any{map[string]any{"type": "userMessage", "id": "i", "clientId": nil}}}, "full", true},
+		{"a turn without items", map[string]any{"itemsView": "full"}, "full", false},
+		{"items not all loaded", map[string]any{"itemsView": "summary", "items": []any{}}, "full", false},
+		{"a turn that does not say how much it holds", map[string]any{"items": []any{userMessage}}, "full", false},
+		{"a prompt whose client id is renamed", map[string]any{"itemsView": "full", "items": []any{map[string]any{"type": "userMessage", "id": "i", "clientRef": "a1"}}}, "full", false},
+		{"not asked for in full", map[string]any{"itemsView": "notLoaded", "items": []any{}}, "notLoaded", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := appservertest.NewUnix(t)
+			turn := map[string]any{"id": "u1", "status": "completed"}
+			for k, v := range tc.turn {
+				turn[k] = v
+			}
+			srv.Handle("thread/turns/list", func(json.RawMessage) (any, *appserver.RPCError) {
+				return map[string]any{"data": []any{turn}}, nil
+			})
+			c, err := appserver.Dial(ctx(t), srv.Endpoint, appserver.Handlers{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			r, err := c.ThreadTurnsList(ctx(t), appserver.ThreadTurnsListParams{ThreadID: "t", ItemsView: tc.itemsView})
+			if tc.ok && (err != nil || len(r.Data) != 1) {
+				t.Fatalf("turns = %+v, %v", r, err)
+			}
+			if !tc.ok && !errors.Is(err, appserver.ErrUnrecognizedRecord) {
+				t.Fatalf("err = %v, want ErrUnrecognizedRecord", err)
+			}
+		})
+	}
+}
+
 func TestServerVersion(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"sidera/0.164.0 (Mac OS 27.0.1; arm64) unknown (sidera; 0.1.0)", "0.164.0"},

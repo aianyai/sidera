@@ -291,6 +291,16 @@ func TestDeliverPrompt(t *testing.T) {
 	if rec.Verdict != adapterproto.VerdictProvablyAbsent {
 		t.Fatalf("reconcile of an attempt never made: %+v", rec)
 	}
+
+	// A record in a form the adapter does not read proves nothing: even the
+	// delivered attempt is not found, and the answer must not be absence.
+	codex.mu.Lock()
+	codex.otherRecordForm = true
+	codex.mu.Unlock()
+	h.mustCall(adapterproto.MethodPromptReconcile, adapterproto.ReconcileParams{Endpoint: sessionEP, Attempt: attempt2}, &rec)
+	if rec.Verdict != adapterproto.VerdictIndeterminate || rec.Grounds.Code != adapterproto.GroundsRecordUnreadable {
+		t.Fatalf("reconcile over a record in another form: %+v", rec)
+	}
 }
 
 // After the connection to the App Server ends, the adapter says so, reaches the

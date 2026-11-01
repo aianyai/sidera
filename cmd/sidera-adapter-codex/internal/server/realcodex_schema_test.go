@@ -110,7 +110,7 @@ func TestSchemaGuard(t *testing.T) {
 		t.Errorf("a userMessage item no longer carries clientId (%v)", err)
 	}
 	raw, err = os.ReadFile(filepath.Join(dir, "v2", "ThreadTurnsListResponse.json"))
-	if err != nil || !strings.Contains(string(raw), `"clientId"`) {
-		t.Errorf("the turns of a thread no longer carry clientId (%v)", err)
+	if err != nil || !strings.Contains(string(raw), `"clientId"`) || !strings.Contains(string(raw), `"itemsView"`) {
+		t.Errorf("the turns of a thread no longer carry clientId and itemsView, which the reading of the record requires (%v)", err)
 	}
 }

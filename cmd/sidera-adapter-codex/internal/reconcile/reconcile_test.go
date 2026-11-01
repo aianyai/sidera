@@ -24,8 +24,6 @@ func TestJudge(t *testing.T) {
 			adapterproto.VerdictFound, adapterproto.GroundsAttemptInRecord, "u2", adapterproto.TurnStateCompleted},
 		{"found in a running turn", Input{Attempt: "a1", Turns: record, ThreadActive: true},
 			adapterproto.VerdictFound, adapterproto.GroundsAttemptInRecord, "u1", adapterproto.TurnStateRunning},
-		{"found although the version is untested", Input{Attempt: "a2", Turns: record, VersionUntested: true},
-			adapterproto.VerdictFound, adapterproto.GroundsAttemptInRecord, "u2", adapterproto.TurnStateCompleted},
 		{"absent from a whole record of an idle thread", Input{Attempt: "zz", Turns: record, Complete: true},
 			adapterproto.VerdictProvablyAbsent, adapterproto.GroundsRecordCompleteWithoutAttempt, "", ""},
 		{"absent from an empty record", Input{Attempt: "zz", Complete: true},
@@ -38,8 +36,6 @@ func TestJudge(t *testing.T) {
 			adapterproto.VerdictIndeterminate, adapterproto.GroundsRecordUnreadable, "", ""},
 		{"the server cannot be asked", Input{Attempt: "a2", Unreachable: true},
 			adapterproto.VerdictIndeterminate, adapterproto.GroundsNativeUnreachable, "", ""},
-		{"an untested version proves no absence", Input{Attempt: "zz", Turns: record, Complete: true, VersionUntested: true},
-			adapterproto.VerdictIndeterminate, adapterproto.GroundsRuntimeVersionUntested, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Judge(tc.in)

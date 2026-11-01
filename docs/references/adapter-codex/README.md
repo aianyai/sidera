@@ -66,10 +66,11 @@ is ended, not what it started.
 (`codex --version`). The server's own version is in the user agent it answers
 `initialize` with. When the two differ (Codex was upgraded under a running server)
 the probe reports the `app-server` dependency as `wrong_version`; the adapter does
-not restart a server it did not start. The version the adapter was tested with is
-`declare.TestedVersion`; the manifest does not list it and the daemon does not judge a
-version, but `prompt.reconcile` does not conclude that a prompt is absent on any
-other.
+not restart a server it did not start. Neither the manifest nor the adapter names a
+version it was tested with, and nothing judges one: Codex releases several times a
+day, so a list could not stay true. Whether `prompt.reconcile` may conclude that a
+prompt is absent rests on what the adapter can verify of the record (below), not on
+the version.
 
 ### The connection
 
@@ -81,6 +82,15 @@ taken from a library:
   of the server, with a method only a notification, with an id only an answer.
   Unknown members are ignored; the members the adapter depends on are checked by the
   schema guard test.
+- **A page of turns read with full items must be in the recognized form.** A prompt is
+  found by the `clientId` of a `userMessage` item, and decoding ignores what it does
+  not know, so a record in another form would read as holding no prompts. Every turn
+  of such a page must therefore have its `items` and an `itemsView` of `full`, and
+  every `userMessage` item a `clientId` (null when the prompt had none); a page that
+  does not is the error `ErrUnrecognizedRecord`. Callers treat it like a record that
+  could not be read, so `prompt.reconcile` answers `record_unreadable` instead of
+  concluding absence. The server writes these members always, and the schema guard
+  holds them against the installed Codex.
 - **The read limit is 32 MiB.** The server sends messages up to 16 MiB; the WebSocket
   library's default limit of 32 KiB would end the connection on the first large read
   of a thread.
@@ -250,9 +260,8 @@ read page by page until the attempt is found or the record is exhausted:
 | ----- | ------- | ------- |
 | the attempt is in a turn | `found`, with the turn and its state | `attempt_in_record` |
 | the server cannot be asked | `indeterminate` | `native_unreachable` |
-| not found, version is not the tested one | `indeterminate` | `runtime_version_untested` |
 | not found, the thread is active or the adapter's own turn has not ended | `indeterminate` | `turn_running` |
-| not found, the record was not read to its end | `indeterminate` | `record_unreadable` |
+| not found, the record was not read to its end, or not in the recognized form | `indeterminate` | `record_unreadable` |
 | not found, idle, whole record read | `provably_absent` | `record_complete_without_attempt` |
 
 A server that was killed while a prompt was being taken in leaves a record that ends

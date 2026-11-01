@@ -22,7 +22,6 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
-	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/declare"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
 )
 
@@ -34,13 +33,6 @@ func requireRealCodex(t *testing.T) string {
 	program, err := exec.LookPath("codex")
 	if err != nil {
 		t.Fatalf("codex is not installed: %v", err)
-	}
-	v, err := server.CLIVersion(context.Background(), program)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !declare.VersionTested(v) {
-		t.Logf("codex %s is not the tested version %s: a failure below may be the version", v, declare.TestedVersion)
 	}
 	return program
 }
