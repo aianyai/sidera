@@ -4,6 +4,8 @@ Living documents, organized by topic, committed with the code they describe. The
 
 Each topic is a directory `docs/references/<topic>/` whose `README.md` is its entry point. Each document answers three things: **what** (the rule, protocol or format), **why** (the trade-off and the alternatives rejected), **where** (the code paths and tests). A document describes only what is committed and changes in the same commit as the code it describes. When a document and the code disagree, the code wins and the document gets fixed.
 
+To install and use Sidera rather than work on it, see the [user guide](../guide/README.md).
+
 ## Topics
 
 The commit that lands a subsystem's first code adds its directory and a row to this table.
