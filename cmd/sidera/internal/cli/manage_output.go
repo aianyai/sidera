@@ -28,6 +28,34 @@ func managementObject(raw []byte) (map[string]any, error) {
 	return result, nil
 }
 
+// statusWithHome adds the data directory the command resolved to the node's status.
+// The daemon does not report its own: the owner needs the directory that this
+// command reached, and the command knows it from the same resolution that chose
+// which daemon to ask. No field of the daemon's answer changes.
+func statusWithHome(raw []byte, home string) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil || json.Unmarshal(envelope["result"], &result) != nil || result == nil {
+		return nil, apiwire.OutcomeUnknown("")
+	}
+	encode := func(v any) ([]byte, error) {
+		var out bytes.Buffer
+		encoder := json.NewEncoder(&out)
+		encoder.SetEscapeHTML(false)
+		err := encoder.Encode(v)
+		return bytes.TrimSuffix(out.Bytes(), []byte("\n")), err
+	}
+	var err error
+	if result["home"], err = encode(home); err != nil {
+		return nil, err
+	}
+	if envelope["result"], err = encode(result); err != nil {
+		return nil, err
+	}
+	out, err := encode(envelope)
+	return append(out, '\n'), err
+}
+
 func (c *command) managementResult(raw []byte) error {
 	if c.json {
 		_, err := c.Stdout.Write(raw)

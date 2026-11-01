@@ -1158,6 +1158,22 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 	if code != 0 || diag != "" || !strings.Contains(out, "daemon.state running") || !strings.HasPrefix(out, "The statement that can retire this node") {
 		t.Fatalf("status: %d %q %q", code, out, diag)
 	}
+	// The daemon does not report its directory; the command adds the one it used.
+	if !strings.Contains(out, "\nhome "+home+"\n") {
+		t.Fatalf("human status does not show the data directory %q: %q", home, out)
+	}
+	code, out, diag = runHome(t, home, "status", "--json")
+	var node struct {
+		Result struct {
+			Home   string `json:"home"`
+			Daemon struct {
+				State string `json:"state"`
+			} `json:"daemon"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &node); code != 0 || diag != "" || err != nil || node.Result.Home != home || node.Result.Daemon.State != "running" {
+		t.Fatalf("JSON status: %d %q %q %v", code, out, diag, err)
+	}
 	// This executable is deliberately not an adapter: enabling it leaves an
 	// offline instance, while its installation and persisted settings are real.
 	manifest := harness.AdapterManifest(10)

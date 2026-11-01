@@ -29,6 +29,8 @@ and its bound values. A local value stays attached, including a body spelled
   and `network listen set` have three words, which `commandPath` discovers.
 - `manage_output.go`: complete JSON responses and human settings and lists; a `contact`
   line of a result is printed first, on a line of its own, so that it can be copied.
+  `statusWithHome` adds `home`, the directory the command resolved, to a node status, which
+  the daemon does not report.
 - `trust.go`: `trust request` (the answer printed with its code first, then the client-side wait
   that polls `trust.list`; a refusal by the target is an error of category `refused`, a wait that
   ends otherwise is a plain failure, exit 1) and the human `trust list`. The other `trust`

@@ -8,6 +8,10 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- `sidera status` shows the data directory the command used (`home`, also in `--json`).
+
 ## [0.8.0] - 2026-11-01
 
 The first public release. Sidera is a daemon through which AI agents, on one

@@ -72,6 +72,11 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if plan.method == "status" {
+		if raw, err = statusWithHome(raw, home); err != nil {
+			return err
+		}
+	}
 	switch {
 	case plan.method == "trust.request":
 		return c.awaitPairing(ctx, readTrustView(client), raw, plan.wait)

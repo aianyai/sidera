@@ -37,7 +37,7 @@ arguments, purpose and one example.
 | `reply <message-id> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--key <key>]` | Reply to a received message. |
 | `recv [--wait <seconds>] [--msg <id> --part <k>] [--ack <lease>]` | Receive a page with front end `cli`; `next.msg` and `next.part` in a page become `--msg` and `--part`. |
 | `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed. |
-| `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply. |
+| `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply. Node status carries one field the daemon does not send: `home`, the data directory this command resolved and reached, so the owner can confirm which node a command talks to. |
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
@@ -299,7 +299,11 @@ Human output is intentionally small: send and reply print
 me prints identity, declaration and limits; lists use aligned columns. Scripts
 use `--json`. Initialization puts the offline-backup reminder first; JSON init
 returns `node`, `home`, `self_revocation` and `backup_required:true`.
-Human node status prints outstanding reminders before the ordinary facts.
+Human node status prints outstanding reminders before the ordinary facts, and its
+listing includes the line `home <directory>`. With `--json` the management response is
+written with `result.home` added and every other field as the daemon sent it, in the
+keys' sorted order. The CLI adds `home` itself because the daemon does not report its
+directory and the command already holds the one it resolved.
 Human management changes also print their operation identifier and replay flag.
 
 The [Agent interface](../agent-interface/README.md#errors-deadlines-and-clients)
