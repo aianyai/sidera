@@ -8,20 +8,24 @@ import (
 func TestResolve(t *testing.T) {
 	revision := "0123456789abcdef0123456789abcdef01234567"
 	for _, c := range []struct {
-		name     string
-		stamped  string
-		settings []debug.BuildSetting
-		want     Info
+		name                      string
+		stamped, commit, modified string
+		settings                  []debug.BuildSetting
+		want                      Info
 	}{
-		{"development build outside a checkout", "", nil, Info{Version: DevVersion}},
-		{"release build", "0.8.0", []debug.BuildSetting{{Key: "vcs.revision", Value: revision}, {Key: "vcs.modified", Value: "false"}},
+		{"development build outside a checkout", "", "", "", nil, Info{Version: DevVersion}},
+		{"release build", "0.8.0", "", "", []debug.BuildSetting{{Key: "vcs.revision", Value: revision}, {Key: "vcs.modified", Value: "false"}},
 			Info{Version: "0.8.0", Commit: "0123456789ab"}},
-		{"modified checkout", "", []debug.BuildSetting{{Key: "vcs.revision", Value: revision}, {Key: "vcs.modified", Value: "true"}},
+		{"modified checkout", "", "", "", []debug.BuildSetting{{Key: "vcs.revision", Value: revision}, {Key: "vcs.modified", Value: "true"}},
 			Info{Version: DevVersion, Commit: "0123456789ab", Modified: true}},
-		{"short revision is kept whole", "", []debug.BuildSetting{{Key: "vcs.revision", Value: "abc"}}, Info{Version: DevVersion, Commit: "abc"}},
+		{"short revision is kept whole", "", "", "", []debug.BuildSetting{{Key: "vcs.revision", Value: "abc"}}, Info{Version: DevVersion, Commit: "abc"}},
+		{"stated commit wins over the recorded one", "0.8.0", revision, "true", []debug.BuildSetting{{Key: "vcs.revision", Value: "ffff"}, {Key: "vcs.modified", Value: "false"}},
+			Info{Version: "0.8.0", Commit: "0123456789ab", Modified: true}},
+		{"stated commit of a clean tree", "0.8.0", revision, "", []debug.BuildSetting{{Key: "vcs.modified", Value: "true"}},
+			Info{Version: "0.8.0", Commit: "0123456789ab"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := resolve(c.stamped, c.settings)
+			got := resolve(c.stamped, c.commit, c.modified, c.settings)
 			got.GoVersion = ""
 			if got != c.want {
 				t.Errorf("got %+v, want %+v", got, c.want)

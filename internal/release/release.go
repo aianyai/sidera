@@ -7,6 +7,11 @@
 //
 //	go build -ldflags "-X github.com/aianyai/sidera/internal/release.stamped=0.8.0"
 //
+// It may also state the commit (stampedCommit) and whether the tree had uncommitted
+// changes (stampedModified, "true"): Go records the commit itself only for a build
+// made in a repository's own checkout, and records another one for a build made in
+// a linked git worktree.
+//
 // A build without it, such as a plain `go build` on a development machine, reports
 // DevVersion, so that it cannot be taken for a release.
 package release
@@ -23,8 +28,9 @@ import (
 // answer it in initialize, and it sorts before every release.
 const DevVersion = "0.0.0-dev"
 
-// stamped is set at link time, see the package documentation.
-var stamped string
+// stamped, stampedCommit and stampedModified are set at link time, see the package
+// documentation.
+var stamped, stampedCommit, stampedModified string
 
 // commitLength is how many characters of the commit are reported.
 const commitLength = 12
@@ -47,27 +53,36 @@ func Read() Info {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		settings = bi.Settings
 	}
-	return resolve(stamped, settings)
+	return resolve(stamped, stampedCommit, stampedModified, settings)
 }
 
 // Version returns the version of the running program.
 func Version() string { return Read().Version }
 
-func resolve(stampedVersion string, settings []debug.BuildSetting) Info {
-	info := Info{Version: stampedVersion, GoVersion: runtime.Version()}
+// resolve is Read from what the build stated and what Go recorded; a stated commit
+// wins over the recorded one, with its modified flag.
+func resolve(version, commit, modified string, settings []debug.BuildSetting) Info {
+	info := Info{Version: version, GoVersion: runtime.Version()}
 	if info.Version == "" {
 		info.Version = DevVersion
+	}
+	if commit != "" {
+		info.Commit = abbreviate(commit)
+		info.Modified = modified == "true"
+		return info
 	}
 	for _, s := range settings {
 		switch s.Key {
 		case "vcs.revision":
-			info.Commit = s.Value[:min(len(s.Value), commitLength)]
+			info.Commit = abbreviate(s.Value)
 		case "vcs.modified":
 			info.Modified = s.Value == "true"
 		}
 	}
 	return info
 }
+
+func abbreviate(commit string) string { return commit[:min(len(commit), commitLength)] }
 
 // Describe is the one line `version` prints for a program: its name, the version,
 // what it was built from and with.

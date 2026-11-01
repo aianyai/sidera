@@ -17,7 +17,13 @@ own version (v1) and does not follow this one.
 
 - The release version arrives only through the linker:
   `-ldflags "-X github.com/aianyai/sidera/internal/release.stamped=<version>"`,
-  with no leading `v`.
+  with no leading `v`. `scripts/release.sh` stamps every program it builds.
+- The commit comes from the module's build information, which Go fills in only
+  for a build made in a repository's own checkout (a build in a linked git
+  worktree records the commit of the main checkout instead). A build that knows
+  better states it, `-X ...release.stampedCommit=<commit>` and
+  `-X ...release.stampedModified=true` for a tree with uncommitted changes, and
+  the stated commit wins; `scripts/release.sh` does so.
 - A build without it reports `DevVersion`, which is valid SemVer (adapters write
   their version into a manifest and answer it in `initialize`) and sorts before
   every release, so a development build cannot be taken for one. It is
