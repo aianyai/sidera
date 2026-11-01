@@ -10,9 +10,10 @@ import (
 )
 
 func TestCommandsBecomeTheEndpointCallTheyName(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "node")
 	env := Env{Getenv: func(k string) string {
 		if k == "SIDERA_HOME" {
-			return "/data/node"
+			return home
 		}
 		return ""
 	}, Stdin: strings.NewReader("from stdin")}
@@ -46,8 +47,8 @@ func TestCommandsBecomeTheEndpointCallTheyName(t *testing.T) {
 			if string(got) != tc.want {
 				t.Errorf("request\n got %s\nwant %s", got, tc.want)
 			}
-			if want := "/data/node"; inv.home != want || inv.instance != AdapterID {
-				t.Errorf("home %q instance %q, want %q and %q", inv.home, inv.instance, want, AdapterID)
+			if inv.home != home || inv.instance != AdapterID {
+				t.Errorf("home %q instance %q, want %q and %q", inv.home, inv.instance, home, AdapterID)
 			}
 		})
 	}
@@ -73,12 +74,13 @@ func TestCommandsRefuseWhatTheyCannotSend(t *testing.T) {
 }
 
 func TestTheClientFindsTheInstanceInTheStateDirectoryTheDaemonMakes(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "node")
 	env := Env{Getenv: func(string) string { return "" }}
-	inv, err := parseCommand([]string{"whoami", "--home", "/data/node", "--instance", "work"}, env)
+	inv, err := parseCommand([]string{"whoami", "--home", home, "--instance", "work"}, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stateDir(inv.home, inv.instance), filepath.Join("/data/node", "adapter-state", "work"); got != want {
+	if got, want := stateDir(inv.home, inv.instance), filepath.Join(home, "adapter-state", "work"); got != want {
 		t.Errorf("state directory %q, want %q", got, want)
 	}
 	_ = adapterproto.MaxWaitSeconds
