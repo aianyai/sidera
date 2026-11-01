@@ -30,6 +30,10 @@ Notes:
   they fail with `unauthenticated/token_missing`; that is expected. They work
   inside an agent session.
 - `sidera alerts ack <id>` acknowledges an alert once you have dealt with it.
+- In a script, `--json` prints the whole response, with the data under `result`:
+  `sidera endpoint list --json` prints `{"result":{"endpoints":[...]}}`, not a bare
+  list. `sidera-adapter-console recv --wait <s>` waits at most 30 seconds and
+  refuses a larger value; call it again to wait longer.
 
 ### Logs and state
 
@@ -46,13 +50,15 @@ Everything of a node is under its data directory, `~/.sidera` by default (on Win
 | Codex transcripts | `~/.codex/sessions/` |
 
 When an agent does something unexpected, the transcript shows which tool it
-called and with what arguments. On Windows the data directory is
-`%LOCALAPPDATA%\Sidera`: a protected folder that does not take on the
-access entries that other programs add to the folders of your profile. A node made by an earlier build kept it in
-`%USERPROFILE%\.sidera`; a command that finds the
-former directory and none in the new place refuses, and says how to move it:
-`Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"` with the daemon stopped. Nothing is
-moved for you. Setting `SIDERA_HOME` to the former directory keeps the node there.
+called and with what arguments.
+
+On Windows the data directory is `%LOCALAPPDATA%\Sidera`: a protected folder that
+does not take on the access entries that other programs add to the folders of your
+profile (see [Move the Windows data directory](#move-the-windows-data-directory-to-the-new-default)
+and [the troubleshooting entry](#troubleshooting) on foreign entries). Setting
+`SIDERA_HOME` to the former directory, `%USERPROFILE%\.sidera`, keeps a node there,
+but that folder is one that a Codex sandbox's setup may add its own group to; the
+daemon then refuses to start and names the entry.
 
 ## Upgrade
 
@@ -62,16 +68,27 @@ Read the release notes on the release page first: if a release needs a one-time
 manual step on existing nodes, they say so. Let the work that agents are doing on
 the node finish first: the upgrade ends their sessions, as step 4 explains.
 
-1. Stop the daemon and wait until it has exited:
+1. Stop the daemon and wait until it has exited. `sidera daemon stop` returns as
+   soon as the daemon has accepted the request, before the process is gone, so
+   check that it is:
 
    ```sh
    sidera daemon stop
+   pgrep -f '(^|/)sidera daemon$'    # macOS and Linux: no output once it has exited
    ```
 
-   This also stops the adapters it started. The Codex App Server is started
-   detached on purpose and keeps running, so a running turn continues; the daemon
-   finds it again when it starts (see
-   [Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server)).
+   ```powershell
+   # Windows: no output once it has exited
+   Get-CimInstance Win32_Process | ? { $_.Name -eq 'sidera.exe' -and $_.CommandLine -match ' daemon' }
+   ```
+
+   Stopping the daemon also stops the adapters it started. Processes named
+   `sidera mcp` can remain on every OS: Codex starts them outside the daemon's
+   reach, so they are not the daemon, and they end with the Codex sessions that use
+   them. The Codex App Server is started detached on purpose and keeps running, so
+   a running turn continues; the daemon finds it again when it starts (see
+   [Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server)
+   and [the Codex App Server after an upgrade](#the-codex-app-server-after-an-upgrade)).
 
 2. Replace the programs on your `PATH` with the new release's: `sidera` and
    `sidera-adapter-console`. The adapter programs of Codex and Claude Code are
@@ -81,25 +98,33 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
    Windows `Expand-Archive <archive> -DestinationPath $env:USERPROFILE\sidera-release`)
    and copy from there.
 
-   - macOS and Linux: do not overwrite a running program. Copy to a temporary
+   - macOS and Linux: do not overwrite a running program. Copy each to a temporary
      name, then rename:
 
      ```sh
-     cp ~/sidera-release/sidera ~/.local/bin/sidera.new && mv ~/.local/bin/sidera.new ~/.local/bin/sidera
+     for p in sidera sidera-adapter-console; do
+       cp ~/sidera-release/$p ~/.local/bin/$p.new && mv ~/.local/bin/$p.new ~/.local/bin/$p
+     done
      ```
 
      (Linux reports `Text file busy` if you overwrite a program that runs.)
-   - Windows: after the daemon stops, Codex's `sidera mcp` helper processes can
-     remain and lock `sidera.exe`. A running program can be renamed, so rename and
-     copy:
+   - Windows: after the daemon stops, `sidera mcp` helper processes can remain and
+     lock `sidera.exe`. A running program can be renamed, so rename both programs
+     and copy the new ones:
 
      ```powershell
-     Rename-Item $env:USERPROFILE\sidera\bin\sidera.exe sidera.exe.old
-     Copy-Item $env:USERPROFILE\sidera-release\sidera.exe $env:USERPROFILE\sidera\bin\
+     $bin = "$env:USERPROFILE\sidera\bin"
+     Rename-Item $bin\sidera.exe sidera.exe.old
+     Rename-Item $bin\sidera-adapter-console.exe sidera-adapter-console.exe.old
+     Copy-Item $env:USERPROFILE\sidera-release\*.exe $bin\
      ```
 
-     Delete `sidera.exe.old` after the daemon has started again. Do not kill the
+     Delete the two `.old` files after the daemon has started again. Do not kill the
      Codex App Server or its helpers.
+
+   Only these two programs belong in the directory on your `PATH`. A directory
+   filled by an earlier layout of the archive can still hold adapter programs such
+   as `sidera-adapter-codex`; nothing uses them, and you can delete them.
 
 3. Start the daemon again, the way you started it before, from your home directory
    (not from one that may be deleted, such as a git worktree).
@@ -125,10 +150,20 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
    `install` still answers `adapter_in_use` right after `disable`, the old adapter
    process is still ending: wait a few seconds and run it again.
 
-   A package of the same version that differs in contents (a rebuild) is not
-   refused: it is replaced without a disable, the result says `replaced true`, and
-   the running instances restart and keep their sessions. A package that is the same
-   says `already_current`.
+   **Do not send to a node while its instances are disabled.** A message for an
+   endpoint that was closed is rejected with `endpoint_closed`; the sender is told
+   and Sidera does not retry it. Wait until the instances are enabled again and the
+   new sessions exist.
+
+   What `install` prints says what it did to the adapter:
+
+   - `replaced true`: an installed package of this adapter was replaced, either by
+     another version (for example 0.1.0 to 0.8.0, with the instances disabled) or by
+     the same version with other contents (a rebuild). A rebuild is not refused
+     while instances run: they restart and keep their sessions.
+   - `already_current true`: the package is the one installed, same version and
+     same contents; nothing was changed.
+   - neither: the adapter was not installed before.
 
 5. Check: `sidera adapter list` (probes `passed`, except Codex as the notes above
    say), then reconnect the nodes. A restart of the daemon drops its connections to
@@ -145,6 +180,60 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
 
 To upgrade Codex or Claude Code themselves, upgrade them as usual. On Windows,
 restart the daemon once so that it finds the new Codex release.
+
+### The Codex App Server after an upgrade
+
+The App Server outlives the daemon, so the one that is running after an upgrade was
+started by the adapter of the release before. The probe of the Codex instance
+reports its `app-server` dependency as `wrong_version`, with a detail that says to
+restart it, in two cases: the server was started by an earlier build,
+which ran it in the adapter's state directory instead of an empty directory of its
+own (a sandboxed command can then be given write access to the adapter's files,
+`ws-token` among them), or the server runs another version than the installed
+`codex` program. The adapter never ends a server it did not start, so you restart
+it yourself, and the report stays until you do.
+
+Ending the server ends any turn that runs in it, so do it when no Codex session is
+working. Find it and end it as in
+[Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server),
+then either leave the daemon running or restart it: the Codex adapter starts a new
+server by itself when it finds none, resumes its sessions and records the new
+server's working directory. Check with `sidera adapter list` that the report is gone
+(it can show `pending` or `failed` for another reason, see the notes under
+[Health checks](#health-checks)).
+
+### Move the Windows data directory to the new default
+
+A node made by a build before 0.8.0 keeps its data in `%USERPROFILE%\.sidera`. Every
+command that uses the data directory refuses until it is moved, or until
+`SIDERA_HOME` names the former directory. To move it:
+
+1. Stop the daemon and check that it has gone, as in step 1 of the upgrade.
+2. If the Codex App Server is still running from the old directory, end it: it
+   survives the daemon, and it holds the old paths. Read its process id in
+   `%USERPROFILE%\.sidera\adapter-state\codex\app-server.json` and confirm the
+   command line before you stop it. It must be an `app-server` whose `--ws-token-file`
+   is under that directory, not your own Codex's:
+
+   ```powershell
+   $serverPid = (Get-Content $env:USERPROFILE\.sidera\adapter-state\codex\app-server.json | ConvertFrom-Json).pid
+   (Get-CimInstance Win32_Process -Filter "ProcessId=$serverPid").CommandLine
+   Stop-Process -Id $serverPid
+   ```
+
+3. Move the directory:
+
+   ```powershell
+   Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"
+   ```
+
+4. Start the daemon, the way you started it before.
+
+Moved within one volume, the directory keeps the access list it had: a folder that a Codex sandbox's setup had
+already granted its group carries that entry along, and the daemon then refuses to
+start and names it (see [Troubleshooting](#troubleshooting)). A Codex App Server that
+an older adapter started in the state directory and that you did not end is reported
+as `wrong_version` until it is restarted, as in the section above.
 
 ## Stop the daemon and the Codex App Server
 
@@ -238,15 +327,55 @@ that has not paired yet can be created again on a free port with
 `sidera init --port <n>`, after you delete its data directory.
 `daemon_already_running` means a daemon on the same data directory is already up.
 
-**The daemon does not start: `the data directory is not private to its owner`.** The
-start checks the data directory, every directory below it, the key files and the files
-that hold a token, and refuses when anyone but the owner can reach one. The message names
-the path, who can reach it (an account or group by SID and name, or a mode) and with
-which rights, for example `...\adapter-state\codex grants Modify (0x1301bf) to S-1-5-21-... (unresolved)`.
-Sidera never changes a permission itself: only you know who has read the files. Find out
-what added the entry (a sandbox, an installer, a backup tool), treat what the files hold
-as read by that account, then remove the entry (Windows: `icacls <path> /remove <sid>`;
-Unix: `chmod go-rwx <path>`) and start again.
+**The daemon does not start: `the data directory is not private to its owner: <path> grants <rights> to <trustee>`.**
+At every start the daemon checks the whole data directory: the root, every directory
+below it, the key files and the files that hold a token (those under `keys/`,
+`state/endpoints/` and `adapter-state/`). It refuses to start when anyone but the owner
+(and, on Windows, SYSTEM and Administrators) can reach one of them. An adapter whose
+state directory fails the same check while the daemon runs does not start, and the
+message is in `logs/daemon.log`. The message names the path, who can reach it and with
+which rights: on Windows an account or group by SID and name (`unresolved` when the
+system cannot resolve the SID), for example `...\adapter-state\codex grants Modify
+(0x1301bf) to S-1-5-21-... (unresolved)`; on Unix the mode, for example `has mode 0755,
+which lets the group or others reach it`.
+
+Sidera never repairs it. Only you know who has already read what the files hold, and
+rewriting the list would hide that. Find what added the entry (a sandbox, an
+installer, a backup tool), treat what the files hold as read by that account, remove
+the entry and start again. If the daemon names another path, repeat; it names the
+first it finds.
+
+- Inspect. Windows: `icacls <path>` lists the entries; `Get-Acl <path> | Format-List`
+  shows them with their SIDs. Unix: `ls -ld <path>` shows the mode and the owner.
+- Remove, Windows: `icacls <path> /remove:g <group> /T` removes the entries granted
+  to an account or group by name, and from the directory's files too. An entry
+  whose SID the system cannot resolve (a group that no longer exists) is refused by
+  `icacls` with error 1332; remove it by SID in PowerShell:
+
+  ```powershell
+  $path = '<path>'
+  $acl = Get-Acl $path
+  $acl.PurgeAccessRules([System.Security.Principal.SecurityIdentifier]'S-1-5-21-...')
+  Set-Acl $path $acl
+  ```
+
+  `PurgeAccessRules` removes the rules written on that folder for the SID, and
+  `Set-Acl` carries the change to what it contains. An entry that shows as inherited
+  comes from the folder above, so fix that one.
+- Remove, Unix: `chmod go-rwx <path>` (or `chown` when the owner is not you).
+
+A common cause on Windows is the elevated sandbox of Codex (`[windows] sandbox =
+"elevated"`). Its setup grants the sandbox's group read access, inheritable, on most
+first-level folders of your profile, and it grants that group write access to the
+writable roots of sandboxed commands. With the data directory at the default,
+`%LOCALAPPDATA%\Sidera`, the first does not reach Sidera: that folder has a
+protected access list that does not take on what is added above it. It does reach a
+node that was left in `%USERPROFILE%\.sidera` (by `SIDERA_HOME`, or because it was
+not moved), and it can reach `adapter-state\codex` when a Codex App Server that an
+earlier build started in that directory was left running (see
+[the Codex App Server after an upgrade](#the-codex-app-server-after-an-upgrade)).
+Remove the group's entries as above, move the node if it is in the profile, and end
+the old server.
 
 **`socket_path_too_long`.** Sidera's local sockets live under the data directory,
 and a Unix socket path has a limit of about 100 bytes. Use a shorter `--home` or
@@ -315,13 +444,23 @@ node is not told.
   daemon at <socket path>: permission denied (a sandbox may be blocking it)`, and
   the command needs `danger-full-access`. While such a preset exists, `sidera
   adapter list` may show the Codex probe as `pending` and then `failed`; sessions
-  still work. `workspace-write` has no network and does not stop the agent from
-  reading files outside its directory: the whole data directory, including the
-  node's identity key (`keys/identity.key`) and the tokens of the other sessions,
-  which it could send over Sidera. On Windows it depends on
+  still work. `workspace-write` has no network. On Windows it depends on
   Codex's own sandbox working: with `[windows] sandbox = "elevated"` in
   `~/.codex/config.toml`, every shell command failed, while `unelevated` worked.
   Check that `codex sandbox -- cmd /c echo hi` works first.
+- What a session can read of the data directory, which holds the node's identity key
+  and the token of every session, depends on the preset. A Codex `workspace-write` or
+  `read-only` session cannot read it on macOS and Linux: the operating system
+  enforces a denial, except for the user's own MCP servers and for a command that
+  you approved to run outside the sandbox. On Windows the directory's location,
+  `%LOCALAPPDATA%\Sidera`, with an access list for its owner only, is the main
+  guard; a deny entry for the sandbox's accounts is added too, and another Codex
+  session can revoke it. A Claude Code `light` session's file tools cannot read it,
+  but if your own Claude settings allow a Bash file command such as `grep` or `find`,
+  the session can read it; a guarantee needs Claude's operating-system sandbox, which
+  Sidera does not use yet. A full-access session, of either runtime, acts as the local
+  owner and reads everything. See
+  [Presets and access](getting-started.md#what-a-session-can-read-of-the-nodes-data).
 - The management interface trusts the operating-system user, not the session. Under
   a full-access preset an agent session can run every owner command and acts as the
   local owner of the node. A Claude Code `light` session cannot, unless your own

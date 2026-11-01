@@ -19,6 +19,9 @@ An agent uses Sidera in one of two ways:
   It has no `directory`, `control` or `peers`: those need a session. From outside a
   session, read a node's runtime endpoint with
   `sidera endpoint list --instance <runtime>` on that machine.
+  In a script, `sidera endpoint list --json` prints
+  `{"result":{"endpoints":[...]}}`, and the console's `recv --wait` accepts at most
+  30 seconds.
 
 An agent that was not started by Sidera has no session credential, so
 `sidera recv`, `sidera send` and the other agent commands fail with
@@ -193,6 +196,26 @@ reach the Sidera daemon at <socket path>: permission denied (a sandbox may be
 blocking it)`. Write instructions that name the MCP
 tools (`recv`, `reply`, `ack`, `send`, `control`, `status`) as well as the
 commands, as the text above does.
+
+What a session can read of the node's data directory (the identity key and the token
+of every session) also depends on the preset:
+
+- A Codex `workspace-write` or `read-only` session cannot read it on macOS and Linux:
+  the operating system enforces a denial, except for the user's own MCP servers and a
+  command the owner approved to run outside the sandbox. On Windows the directory,
+  `%LOCALAPPDATA%\Sidera`, has an access list for its owner only, which is the main
+  guard; the deny entry added for the sandbox can be revoked by another Codex session.
+  Codex's elevated sandbox on Windows grants its group read access on most first-level
+  folders of the profile, which does not reach Sidera in that location; if a foreign
+  entry ever appears, the daemon refuses to start and names it.
+- A Claude Code `light` session's file tools cannot read it. If the owner's own Claude
+  settings allow a `Bash` file command such as `grep` or `find`, the session can still
+  read it. A guarantee needs Claude's operating-system sandbox, which Sidera does not
+  use yet.
+- A full-access session, of either runtime, acts as the local owner and can read
+  everything.
+
+See [What a session can read of the node's data](getting-started.md#what-a-session-can-read-of-the-nodes-data).
 
 The node's management interface trusts the operating-system user, not the session.
 Under a full-access preset an agent session can run every owner command (`preset`,

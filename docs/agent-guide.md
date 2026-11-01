@@ -424,7 +424,11 @@ What the `light` preset gives:
   settings allow a broader `Bash`, the session gets that too. The agent can read files
   in its project directory; edits and other commands are refused unless the preset's
   `allowed_tools` (for example `["Edit", "Bash(go test *)"]`) or the owner's settings
-  allow them.
+  allow them. Every turn also denies the session's `Read` and `Edit` tools the node's
+  data directory, whatever the preset or those settings allow. That is best effort:
+  if the owner's settings allow a `Bash` file command such as `grep` or `find`, the
+  session can still read it. A guarantee needs Claude's operating-system sandbox,
+  which Sidera does not use yet.
 - **Codex**, measured on real machines:
   - It works on macOS and Linux, **through MCP only**. Under `workspace-write` the
     session is offered only the MCP tools; a `sidera` command run in a shell cannot
@@ -437,15 +441,23 @@ What the `light` preset gives:
     whose cache lives outside the workspace fails until pointed inside it (for Go,
     set `GOCACHE` to a directory inside the workspace). Only modules already in the
     read-only module cache can be used.
-  - It limits writes, not reads: the agent can still read outside `cwd`, the whole
-    data directory (`~/.sidera`, on Windows `%LOCALAPPDATA%\Sidera`, or `SIDERA_HOME`) included: the node's identity key
-    (`keys/identity.key`) and the tokens of the other sessions on the node, and it
-    could send them over Sidera. Tell your owner.
+  - It limits writes, and on macOS and Linux Sidera also denies it every read of the
+    node's data directory (`~/.sidera` or `SIDERA_HOME`: the identity key and the
+    tokens of all sessions); the operating system enforces that. The exceptions are
+    the owner's own MCP servers, which Codex starts outside the sandbox, and a command
+    the owner approved to run outside it. Files elsewhere outside `cwd` can be read.
   - On Windows it depends on Codex's own sandbox working. Run
     `codex sandbox -- cmd /c echo hi` first; if it fails, tell your owner. With
     `[windows] sandbox = "elevated"` in `~/.codex/config.toml` every shell command
     failed, while `unelevated` worked. That is the owner's Codex setting, not a
     Sidera key; do not change it without asking.
+    On Windows the data directory is `%LOCALAPPDATA%\Sidera`, with an access list for
+    its owner only, and that location is the main guard: the deny entry that Sidera
+    also adds for the sandbox's accounts can be revoked by another Codex session.
+    Codex's elevated sandbox grants its group read access on most first-level folders
+    of the user profile; in that location it does not reach Sidera. If a foreign entry
+    ever appears, the daemon refuses to start and names it (see the troubleshooting
+    entry in the [operations guide](guide/operations.md#troubleshooting)).
   - `sidera adapter list` shows the Codex probe as `pending` and may show it as
     `failed` while a `workspace-write` preset exists, because no command-line front
     end is offered. Sessions still work.
@@ -467,7 +479,9 @@ to `dev.json` and set, for Codex, `"sandbox": "danger-full-access"` (keep
 `"approval_policy": "never"` and `"approvals": "deny"`), or, for Claude Code,
 `"permission_mode": "bypassPermissions"` (in a file with both objects, change both). Tell your owner the risk: any trusted
 node in the cluster can then direct the agent here to run anything on this machine,
-and the session's Sidera token is visible to everything the agent runs.
+and the session's Sidera token is visible to everything the agent runs. A full-access
+session, of either runtime, acts as the local owner and can read everything, the data
+directory included.
 
 Add the presets:
 
@@ -478,7 +492,7 @@ sidera preset list --json
 ```
 
 Expected from `preset add`: the preset is accepted. Expected from the list: a
-`presets` array with an entry whose `name` is `light` (and `dev` if you added it). If
+`presets` array, under `result` (`--json` prints the whole response, `{"result":{"presets":[...]}}`), with an entry whose `name` is `light` (and `dev` if you added it). If
 `preset add` says a name is taken, a preset cannot be edited: `sidera preset remove
 light`, then add it again. The default preset `default` that `init` made holds no
 agent settings and cannot start a session. Adding a preset restarts the adapters that
@@ -591,6 +605,8 @@ warning about the unconfirmed backup on every call.
    endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`;
    its address is `<node-id>/<endpoint-id>`. Get that address from the other
    machine's owner or agent.
+   In a script, `sidera endpoint list --json` prints
+   `{"result":{"endpoints":[...]}}`: the rows are under `result.endpoints`.
 
 2. Start a session there and ask it for something harmless.
 
@@ -617,7 +633,8 @@ warning about the unconfirmed backup on every call.
 
    Expected: a message from the new session with its answer. The console's `recv`
    acknowledges what it printed. Run it again if you get `no messages` on standard
-   error; give it up to a minute.
+   error; give it up to a minute. `--wait` accepts at most 30 seconds, so call it
+   again for a longer wait.
 
 4. Close the test session when you are done, on the node that hosts it (the
    `<node-id>` of the session address), from outside any session:
@@ -720,8 +737,9 @@ them there without your owner's yes (see "Ask your owner before").
     check `status <message-id>` for the delivery state and `peers` for `connected`,
     and tell your owner what you found.
 14. **Never send secrets** (tokens, keys, `SIDERA_TOKEN`, the contents of
-    the data directory) in a message. Under a Codex `workspace-write` preset you can read
-    them; that is not permission to send them.
+    the data directory) in a message. Under a full-access preset you can read them, and
+    under a Claude Code `light` preset a `Bash` file command that your owner's settings
+    allow may; that is not permission to send them.
 
 ## An example, step by step
 

@@ -197,6 +197,11 @@ test *)"]`) or your own Claude Code settings allow them. **Your own settings sti
 apply:** if they allow a broader `Bash`, such as `Bash(*)`, every session gets that,
 owner commands included. Add only what the work needs.
 
+Every Claude Code turn also denies the session's `Read` and `Edit` tools the node's data
+directory, whatever the preset or your settings allow. That is best effort: if your
+own settings allow a `Bash` file command such as `grep` or `find`, a session can still
+read the directory with it.
+
 Codex. Save as `codex-light.json`; `cwd` must be an existing directory (on
 Windows, write the path with doubled backslashes, `C:\\Users\\me\\work\\project`):
 
@@ -231,16 +236,20 @@ What this gives, as measured on real machines:
   Tools whose caches live outside the workspace fail until pointed inside it; for Go,
   set `GOCACHE` to a directory inside the workspace. The module cache is read-only,
   so only modules already in it can be used.
-- `workspace-write` limits writes, not reads. The agent can still read files
-  outside `cwd`, the node's whole data directory (`~/.sidera`, on Windows `%LOCALAPPDATA%\Sidera`, or `SIDERA_HOME`)
-  included: the node's identity key (`keys/identity.key`) and the tokens of the
-  other sessions on the node. It could send them over Sidera, so use this preset only
-  where every node you trust may see them.
+- `workspace-write` limits writes, and on macOS and Linux Sidera also denies it every
+  read of the node's data directory (`~/.sidera` or `SIDERA_HOME`), which holds the
+  node's identity key and the tokens of all sessions; the operating system enforces
+  that. The agent can still read other files outside `cwd`. The exceptions are your
+  own MCP servers and a command you approved to run outside the sandbox; see
+  [What a session can read of the node's data](#what-a-session-can-read-of-the-nodes-data).
 - **Windows** depends on Codex's own Windows sandbox working on that machine. With
   `[windows] sandbox = "elevated"` in `~/.codex/config.toml`, every shell command
   failed (`timed out ... connecting runner pipe-in`), while `unelevated` worked.
   That is a Codex setting you control, not a Sidera preset key. Before you choose
   `light` for Codex on Windows, check that `codex sandbox -- cmd /c echo hi` works.
+  On Windows the node's data lives in `%LOCALAPPDATA%\Sidera`, whose access list is
+  protected and names only its owner, and that is the main guard: the deny entry that
+  Sidera also adds for the sandbox's accounts can be revoked by another Codex session.
 - While a `workspace-write` preset exists, `sidera adapter list` may show the Codex
   probe as `failed` (it shows `pending` before that), because the command-line front
   end is not offered under the sandbox. Sessions still work.
@@ -385,6 +394,9 @@ the address of the `runtime` row whose `STATE` is `open`. An address is
 session. For the owner on A there is no directory command, so ask B's owner or
 read it on B.)
 
+In a script, `sidera endpoint list --json` prints `{"result":{"endpoints":[...]}}`: the
+rows are under `result.endpoints`, not a bare list.
+
 On *(A)*:
 
 ```sh
@@ -410,7 +422,8 @@ sidera-adapter-console recv --wait 30
 
 `recv` prints each message with its sender and id, and acknowledges what it
 printed. Without a message it prints `no messages` on standard error and nothing
-on standard output.
+on standard output. `--wait` accepts at most 30 seconds; for a longer wait, run `recv`
+again.
 
 To keep talking to that session:
 
@@ -441,6 +454,34 @@ decide is which presets exist and how powerful each one is, and which nodes you
 pair with. `local_sources` in a preset controls only agents on the same machine:
 `allow` lets them start sessions with it (your console is one of them), `deny`
 does not.
+
+### What a session can read of the node's data
+
+The data directory holds the node's identity key and the token of every session, so
+what a session can read of it decides how far one session can reach another. At
+start the daemon also checks that the whole directory is private to its owner and
+refuses to start otherwise (see [Operations](operations.md#troubleshooting)).
+
+- **Codex `light` (`workspace-write`), macOS and Linux:** cannot read it. Sidera runs
+  the thread under a Codex permission profile that denies the directory, and the
+  operating system enforces it (Seatbelt on macOS, bubblewrap on Linux). The
+  exceptions are the user's own MCP servers, which Codex starts outside the sandbox,
+  and a command you approved to run outside it.
+- **Codex `light`, Windows:** the directory is `%LOCALAPPDATA%\Sidera` with a protected
+  access list for its owner only, and that location is the main guard. A deny entry for
+  the sandbox's accounts is added as well, but another Codex session that shares the
+  same Codex configuration can revoke it. Codex's elevated sandbox grants its sandbox
+  group read access on most first-level folders of your user profile; with Sidera's data
+  in the new location that does not reach it. If a foreign entry ever appears, the
+  daemon refuses to start and names it (see
+  [Operations](operations.md#troubleshooting)).
+- **Claude Code `light`:** its file tools cannot read the directory; every turn denies
+  them. If your own Claude settings allow a `Bash` file command such as `grep` or
+  `find`, a session can still read it that way. A guarantee needs Claude's own
+  operating-system sandbox, which Sidera does not use yet.
+- **Full access, either runtime** (Codex `danger-full-access`, Claude Code
+  `bypassPermissions`, or settings that allow all of `Bash`): the session acts as the
+  local owner and can read everything the user can.
 
 ### The management interface trusts the user, not the session
 

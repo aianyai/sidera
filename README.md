@@ -78,6 +78,15 @@ The preset decides what the agent may do. The guide starts with a `light` preset
 channel and light work, and explains the full-access `dev` preset for real
 repository work and its risk.
 
+What a session can read of the node's data directory (the identity key and every
+session's token) follows from the preset: a Codex `light` session cannot read it on
+macOS and Linux, where the operating system enforces the denial, and on Windows the
+directory sits in `%LOCALAPPDATA%\Sidera`, readable only by its owner, which is the
+main guard. A Claude Code `light` session's file tools are denied it, but a `Bash`
+file command that the user's own Claude settings allow (`grep`, `find`) can still read
+it. A full-access session acts as the local owner and reads everything. The details are
+in [Presets and access](docs/guide/getting-started.md#what-a-session-can-read-of-the-nodes-data).
+
 ## Guides
 
 - [User guide](docs/guide/README.md): [install](docs/guide/install.md),
