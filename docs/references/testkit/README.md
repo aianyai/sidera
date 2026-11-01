@@ -448,6 +448,13 @@ coverage dimensions.
   grounds to delete the record and recreate. Unlike the old stdout-EOF path, it can
   wait until caller cancellation, with no guaranteed finite duration when the
   context has no deadline. The fixture's control connection still owns lifetime.
+  On Windows, ProcessInfo reads allow `FILE_SHARE_DELETE`, because the atomic
+  rename makes the complete file visible before `MoveFileEx` closes its
+  DELETE-access handle. A reader that disallows that access can spuriously reject
+  a valid publication with a sharing violation. This changes neither publication
+  nor readiness, and adds no retry of read errors. The platform test holds that
+  access open and requires creation replay and `Find` to return the same live
+  native identity.
   `TestPendingStartupSurvivesLauncherLoss` holds a real hello response in this
   window, kills and waits for the launcher parent or cancels its caller, and
   requires replay of the same actual live identity, environment and sole native

@@ -133,7 +133,7 @@ func (l *ProcessLauncher) recordExists(ref string) (bool, error) {
 }
 
 func (l *ProcessLauncher) readProcessInfo(ref string) (ProcessInfo, error) {
-	raw, err := os.ReadFile(filepath.Join(l.Dir, ref+".json"))
+	raw, err := readProcessInfoFile(filepath.Join(l.Dir, ref+".json"))
 	if err != nil {
 		return ProcessInfo{}, err
 	}

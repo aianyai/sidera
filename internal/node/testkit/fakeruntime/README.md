@@ -115,6 +115,12 @@ permits only one real session effect. Every returned creation checks the publish
 reference, PID and start key against one live `runtime.state` reply. Invalid
 publication, identity and connection errors fail rather than being retried.
 
+On Windows, ProcessInfo readers share delete access with the atomic publisher.
+The renamed file is complete and visible before `MoveFileEx` necessarily closes
+its rename handle; an ordinary `os.ReadFile` can reject that valid publication
+with a sharing violation. The reader permits the publisher's existing handle,
+without retrying read errors or changing publication or readiness checks.
+
 `(*ProcessLauncher).waitForProcessInfo` in `launcher.go` has the only narrowly
 permitted real-time wait: one direct `time.NewTimer` call paces re-reading that
 same ProcessInfo at 10 ms. There is no existing cross-process publication event.
@@ -186,3 +192,5 @@ test-owned native before publication and confirms actual control departure.
 The pending creation ends on explicit cancellation; a replay with a live,
 deadline-bounded caller returns only its deadline error, retaining the exact
 original record and sole creation effect without inventing readiness.
+`process_info_windows_test.go` holds a publisher's DELETE-access handle open and
+checks that creation replay and `Find` still reach the same actual live session.
