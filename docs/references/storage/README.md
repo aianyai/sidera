@@ -86,6 +86,16 @@ FIFOs have no counterpart among files inside a Windows package directory.
 Directory listings expose `Entry.IsSymlink` and do not treat a link to a directory
 as a directory. This reports the link without deciding a caller's link policy.
 
+`ResolveLink(path)` is the one read that follows a link for a judgment, not for bytes:
+it resolves every link of `path` and reports whether the target is a socket, whether the
+target and the directory that holds it are owned by the user with no group or other
+permission bit (`LinkTarget.Exposure` and `ParentExposure`, empty when private, by the
+rule of `Info.Exposure`), and the path it resolved to. A link that names nothing wraps
+`fs.ErrNotExist`. `CheckPrivateTree` uses it to accept a link to a private socket in a
+private directory and to refuse every other link; Windows reports no socket.
+`TestCheckPrivateTreeJudgesALinkByItsTarget` covers a socket the group or others can
+reach, one in a directory others can reach, a file, a directory and nothing.
+
 `ReadFileLimit(path, maxBytes)` accepts a nonnegative limit. A larger file gives
 an error wrapping `fsx.ErrTooLarge` and no data, never a successful prefix; a
 negative limit wraps `fs.ErrInvalid`. The opened handle's size is checked before

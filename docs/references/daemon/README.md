@@ -50,7 +50,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 
 | Step | Name | What happens | Owner |
 | ---- | ---- | ------------ | ----- |
-| 1 | lock | The data directory is resolved; the root, `keys/` and the rest of the tree are checked to be private to the owner (a directory that is not one, a symbolic link among them, is refused and nothing is narrowed; see "The instance lock and the permissions"); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running"; last, the data directory becomes the daemon's working directory, and failing to change to it fails the start. A daemon over an explicit `Config.FS` does not change it: that home is not necessarily a directory of this machine. | this package |
+| 1 | lock | The data directory is resolved; the root, `keys/` and the rest of the tree are checked to be private to the owner (a directory that is not one, a symbolic link among them other than the Codex socket described there, is refused and nothing is narrowed; see "The instance lock and the permissions"); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running"; last, the data directory becomes the daemon's working directory, and failing to change to it fails the start. A daemon over an explicit `Config.FS` does not change it: that home is not necessarily a directory of this machine. | this package |
 | 2 | config | The transaction layer recovers (settle, then removal of every `.tmp-*`); the layout of `state/`, `run/`, `manage/` and `logs/` is made again where the owner removed it; the log opens; `config/` is loaded strictly and a file that is not valid stops the start and is named. | this package, `txn`, `config` |
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
@@ -263,7 +263,16 @@ tree (`fsx.CheckPrivateTree`) and judges:
   its token, the Claude adapter's files; with the files of `keys/`, which
   `keys.CheckPermissions` judges, these are the files that hold a token or a key;
 - a symbolic link among those files, which is refused: nothing the node writes there is
-  one, and a read follows it to a file nobody judged.
+  one, and a read follows it to a file nobody judged. The one link accepted is the
+  Codex App Server's socket. Codex binds a socket path under a short limit by making
+  the socket in a private directory under `/tmp`, `codex-daemon-<uid>/`, and
+  leaving a symbolic link to it at the path it was given (`adapter-state/codex/app-server.sock`),
+  and the server outlives the daemon, so the link is there at every restart. A link is
+  accepted when it resolves to a socket that is owned by the user running the process
+  and that no group or other can reach, in a directory with the same two properties
+  (`fsx.Reader.ResolveLink`). A link to anything else, or to a socket or a directory
+  that others can reach, is refused, and a refusal of a socket names the link and the
+  socket. On Windows no link is accepted: the Codex App Server listens on TCP there.
 
 A record file of `state/` and every other file holds no secret and relies on its
 directory, which is judged. That is a decision about cost and about what can happen: on

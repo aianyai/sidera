@@ -91,6 +91,12 @@ func openAppend(abs string) (*os.File, error) {
 	return os.NewFile(uintptr(h), abs), nil
 }
 
+// resolveLink names nothing worth accepting: a symbolic link is refused where a
+// secret is kept. The one reason to accept a link is the Unix socket a runtime
+// links to from a path that is too long, and the runtime of this platform
+// listens on TCP.
+func resolveLink(string) (LinkTarget, error) { return LinkTarget{}, nil }
+
 // syncDir does not flush. FlushFileBuffers needs a handle with GENERIC_WRITE and
 // its documentation does not mention directories; Pebble, RocksDB and NATS skip
 // the flush on Windows. It still checks that the directory exists, so a wrong

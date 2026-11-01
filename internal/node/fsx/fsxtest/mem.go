@@ -271,6 +271,11 @@ func (m *Mem) Stat(p string) (fsx.Info, error) {
 	return fsx.Info{Name: path.Base(p), Size: int64(len(n.data)), IsDir: n.dir, OwnerOnly: !n.wide}, nil
 }
 
+// ResolveLink is always an error: Mem has no symbolic links.
+func (m *Mem) ResolveLink(p string) (fsx.LinkTarget, error) {
+	return fsx.LinkTarget{}, pathErr("readlink", p, fs.ErrInvalid)
+}
+
 func (m *Mem) Available(dir string) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -31,8 +31,12 @@ func (e *NotPrivateError) Error() string { return e.Path + " " + e.Detail }
 //     a secret; the rest rely on their directory, which keeps the cost
 //     proportionate to a tree of tens of thousands of record files, each of which
 //     would otherwise cost a read of its access list;
-//   - a symbolic link for which judgeFile is true, which is refused: it is not a
-//     file, and ReadFile follows it to a file nobody here has judged.
+//   - a symbolic link for which judgeFile is true, which is refused unless it
+//     resolves to a socket private to its owner, in a directory private to its
+//     owner (Reader.ResolveLink): a link is not a file, and ReadFile follows it to
+//     a file nobody here has judged, but a runtime that cannot bind a long socket
+//     path links it to a short private one, and a socket is not read. A link to
+//     a file, a directory, nothing, or a socket others can reach is refused.
 //
 // A socket, a device or a junction among the entries is left to the directory
 // that holds it. The first exposure found is returned as a *NotPrivateError; any
@@ -65,7 +69,7 @@ func checkPrivateDir(r Reader, dir string, info Info, judgeFile func(string) boo
 		case e.IsDir:
 			err = checkPrivateEntry(r, p, func(info Info) error { return checkPrivateDir(r, p, info, judgeFile) })
 		case e.IsSymlink && judgeFile(p):
-			err = &NotPrivateError{p, "is a symbolic link, and a file that holds a secret is not one"}
+			err = checkPrivateLink(r, p)
 		case e.IsRegular && judgeFile(p):
 			err = checkPrivateEntry(r, p, func(info Info) error {
 				if !info.OwnerOnly {
@@ -77,6 +81,27 @@ func checkPrivateDir(r Reader, dir string, info Info, judgeFile func(string) boo
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkPrivateLink accepts a symbolic link only to a socket private to its owner
+// in a directory private to its owner, and refuses every other link, which is
+// what a file that holds a secret must not be.
+func checkPrivateLink(r Reader, p string) error {
+	refused := &NotPrivateError{p, "is a symbolic link, and a file that holds a secret is not one"}
+	t, err := r.ResolveLink(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return refused
+	case err != nil:
+		return fmt.Errorf("fsx: examining %s: %w", p, err)
+	case !t.IsSocket:
+		return refused
+	case t.Exposure != "":
+		return &NotPrivateError{p, fmt.Sprintf("is a symbolic link to %s, and that target %s", t.Path, t.Exposure)}
+	case t.ParentExposure != "":
+		return &NotPrivateError{p, fmt.Sprintf("is a symbolic link to %s, whose directory %s %s", t.Path, t.Parent, t.ParentExposure)}
 	}
 	return nil
 }

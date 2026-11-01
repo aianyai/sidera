@@ -213,6 +213,13 @@ func (f *Faulty) Stat(p string) (fsx.Info, error) {
 	return f.base.Stat(p)
 }
 
+func (f *Faulty) ResolveLink(p string) (fsx.LinkTarget, error) {
+	if err := f.checkRead(p); err != nil {
+		return fsx.LinkTarget{}, err
+	}
+	return f.base.ResolveLink(p)
+}
+
 func (f *Faulty) Available(dir string) (uint64, error) {
 	if err := f.checkRead(dir); err != nil {
 		return 0, err

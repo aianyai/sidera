@@ -24,7 +24,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
 | `IsNoSpace` | Whether an error means the volume or the quota is full (`ENOSPC`, `EDQUOT`; `ERROR_DISK_FULL`, `ERROR_HANDLE_DISK_FULL`, `ERROR_DISK_QUOTA_EXCEEDED`), and nothing a platform does not return: a test injects `fsxtest.DiskFull`. The Windows codes are pending verification by CI on main. The one place that knows the codes. |
-| `CheckPrivateTree(r, dir, judgeFile)`, `NotPrivateError` | Refuses a tree in which someone but the owner can reach a directory at any depth or a file `judgeFile` names (the rest of the files rely on their directory); a symbolic link among the named files is refused too. The refusal names the path and, from `Info.Exposure`, who can reach it and how. Nothing is changed. |
+| `CheckPrivateTree(r, dir, judgeFile)`, `NotPrivateError` | Refuses a tree in which someone but the owner can reach a directory at any depth or a file `judgeFile` names (the rest of the files rely on their directory); a symbolic link among the named files is refused unless it resolves (`Reader.ResolveLink`) to a socket private to its owner in a directory private to its owner. The refusal names the path and, from `Info.Exposure`, who can reach it and how; for a link to a socket, it names the link and the socket. Nothing is changed. |
 | `OpenOSReader(root)` | The read side of the real file system rooted at an existing directory, for a caller that makes no write and has no random source. |
 | `Exists(r, path)` | Whether a path is there: `fs.ErrNotExist` is false, any other failure of `Stat` is returned, never read as "absent". |
 | `Leftovers`, `IsLeftover`, `TempPrefix`, `TrashPrefix` | Finding the debris of interrupted operations. |
@@ -83,6 +83,15 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
   lets the owner set them with `chmod -h`) say nothing about who can read what it
   points to. On the `windows-latest` runner `Stat` of a link returned `OwnerOnly`
   false (`TestWindowsOwnerOnlyIsFalseForASymbolicLink`).
+- **A link is judged by its target only through `ResolveLink`.** `Stat` never follows a
+  link and `OwnerOnly` is false for one, so a tree check that names a link as a file that
+  holds a secret refuses it, except for the one link worth accepting: a Unix socket that a
+  runtime links to from the path it was given, because the path was too long to bind. The
+  target must be a socket owned by the user with no group or other bit, and the directory
+  that holds it must be owned by the user and private, by the rule of `Info.Exposure`; a
+  link to a file, a directory or nothing, or to a socket others can reach, stays refused.
+  Windows never accepts one: its runtime listens on TCP. The result is not a read, and the
+  check does not narrow anything.
 - **`Discard` renames before it removes.** If the removal fails the error is
   returned but the directory is already gone from its name; the `.trash-*`
   leftover is removed at startup.

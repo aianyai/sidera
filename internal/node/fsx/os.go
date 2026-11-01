@@ -140,6 +140,14 @@ func (o *osFS) Stat(p string) (Info, error) {
 	return info, nil
 }
 
+func (o *osFS) ResolveLink(p string) (LinkTarget, error) {
+	a, err := o.abs(p)
+	if err != nil {
+		return LinkTarget{}, err
+	}
+	return resolveLink(a)
+}
+
 // ownerOnly is the rule of Info.OwnerOnly for an object that is a regular file or
 // a directory.
 func ownerOnly(abs string, fi fs.FileInfo) bool { return exposure(abs, fi) == "" }

@@ -82,6 +82,14 @@ func (c *cutoff) Stat(p string) (fsx.Info, error) {
 	return c.base.Stat(p)
 }
 
+func (c *cutoff) ResolveLink(p string) (fsx.LinkTarget, error) {
+	if err := c.enter(); err != nil {
+		return fsx.LinkTarget{}, err
+	}
+	defer c.mu.RUnlock()
+	return c.base.ResolveLink(p)
+}
+
 func (c *cutoff) Available(dir string) (uint64, error) {
 	if err := c.enter(); err != nil {
 		return 0, err

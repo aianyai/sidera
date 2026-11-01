@@ -64,6 +64,11 @@ type Reader interface {
 	ReadDir(dir string) ([]Entry, error)
 	// Stat does not follow a final symbolic link.
 	Stat(path string) (Info, error)
+	// ResolveLink follows the symbolic link at path, through every further link,
+	// to what it names and says whether that is a socket private to its owner. A
+	// link that names nothing wraps fs.ErrNotExist. Only Unix has such a link
+	// worth judging; on Windows the result is never a socket.
+	ResolveLink(path string) (LinkTarget, error)
 	// Available is the number of bytes available to this user on the volume of
 	// dir.
 	Available(dir string) (uint64, error)
@@ -115,6 +120,28 @@ type Info struct {
 	// system resolves it to. It is empty when OwnerOnly is true, and for a file
 	// system that has nothing more to say than that the answer is false.
 	Exposure string
+}
+
+// LinkTarget is what a symbolic link names once every link is followed. It
+// exists for one case: a runtime that keeps its socket in a short private
+// directory and links to it from where a path is wanted (Codex does so when a
+// socket path exceeds the system's limit), which is a link whose target can be
+// judged without reading a byte from it.
+type LinkTarget struct {
+	// Path is the path of the target in the notation of the operating system, with
+	// every link resolved, so that its owner can open it.
+	Path string
+	// IsSocket is true when the target is a socket.
+	IsSocket bool
+	// Exposure is empty when the target is owned by the user running the process
+	// and no group or other can reach it, by the rule of Info.Exposure; otherwise
+	// it says which is not so, as a phrase that follows the path.
+	Exposure string
+	// Parent is the path of the directory that holds the target, and
+	// ParentExposure is the same judgment of it: a socket in a directory others
+	// can reach is reachable whatever its own mode says.
+	Parent         string
+	ParentExposure string
 }
 
 // FS is the narrow file system every persistent byte goes through. Paths are

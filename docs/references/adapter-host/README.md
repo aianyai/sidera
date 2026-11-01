@@ -109,9 +109,10 @@ what the adapter put in it, and it is protected on its own, so the owner-only da
 directory around it says nothing of it, and another program (a sandbox's group, say) may
 have added an entry since it was made. The host checks every directory of `adapter-state/`
 and every file of the instance's own directory, by `fsx.CheckPrivateTree`, the walk the
-daemon makes at its start, and a directory or a file that someone else can reach fails
-the pass naming the path, the trustee and the rights, like a launch that failed. It does
-not rewrite the list: that would hide from the owner who could reach the tokens kept
+daemon makes at its start, with its one rule for a symbolic link (the link to the Codex
+App Server's private socket is accepted, any other refused; see the daemon's reference),
+and a directory or a file that someone else can reach fails the pass naming the path,
+the trustee and the rights, like a launch that failed. It does not rewrite the list: that would hide from the owner who could reach the tokens kept
 there (the Codex adapter's `ws-token`), and only the owner knows who already read them.
 Only the host makes it, so no adapter has to make a directory of the data directory.
 `StateDir(home, instance)` is the one definition, sent in `initialize` and in

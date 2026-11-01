@@ -81,6 +81,29 @@ func exposure(_ string, fi fs.FileInfo) string {
 	return ""
 }
 
+// resolveLink follows every link of abs and judges the socket it names and the
+// directory that holds it by the rule of exposure.
+func resolveLink(abs string) (LinkTarget, error) {
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return LinkTarget{}, err
+	}
+	fi, err := os.Lstat(resolved)
+	if err != nil {
+		return LinkTarget{}, err
+	}
+	parent := filepath.Dir(resolved)
+	pfi, err := os.Lstat(parent)
+	if err != nil {
+		return LinkTarget{}, err
+	}
+	t := LinkTarget{Path: resolved, IsSocket: fi.Mode().Type() == fs.ModeSocket, Exposure: exposure(resolved, fi), Parent: parent}
+	if t.ParentExposure = exposure(parent, pfi); t.ParentExposure == "" && !pfi.IsDir() {
+		t.ParentExposure = "is not a directory"
+	}
+	return t, nil
+}
+
 // lockFile takes flock(LOCK_EX|LOCK_NB) on the lock file. The lock belongs to
 // the open file description, so it is released when the description is closed,
 // including by the death of the process, and a second Lock in the same process
