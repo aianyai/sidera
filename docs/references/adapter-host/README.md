@@ -113,7 +113,7 @@ daemon makes at its start, and a directory or a file that someone else can reach
 the pass naming the path, the trustee and the rights, like a launch that failed. It does
 not rewrite the list: that would hide from the owner who could reach the tokens kept
 there (the Codex adapter's `ws-token`), and only the owner knows who already read them.
-Only the host makes it, so the adapter never has to know where the data directory is.
+Only the host makes it, so no adapter has to make a directory of the data directory.
 `StateDir(home, instance)` is the one definition, sent in `initialize` and in
 `Instance.StateDir`; a directory that cannot be made fails the pass like a launch that
 failed, and the next pass waits for the backoff. Nothing in it is read, counted or

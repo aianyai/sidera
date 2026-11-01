@@ -641,7 +641,10 @@ the data directory is the daemon's.
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
 `adapter.start`, holds what the session's tools need to reach the daemon: the token of
 the session endpoint in `SIDERA_TOKEN` and the data directory in `SIDERA_HOME`. The adapter
-puts both into the environment of the agent and interprets neither.
+puts both into the environment of the agent. The token stays opaque: the adapter never
+parses it or acts on its content. The data directory is a path the adapter may use to keep
+the agent's runtime away from it, as the Claude and Codex adapters do (they deny it to the
+runtime's file tools and sandbox).
 
 **Acknowledging on the agent's behalf.** `recv.observed` carries the text of a
 `recv` tool result as the model received it, read from the runtime's durable
