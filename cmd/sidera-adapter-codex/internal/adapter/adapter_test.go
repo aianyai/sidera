@@ -623,3 +623,28 @@ func TestTurnStartThreadNotFoundIsCheckedByResume(t *testing.T) {
 		}
 	})
 }
+
+// While the server holds a turn's events back (its tools are starting) and its
+// record does not hold the turn yet, the thread looks idle to the server, but the
+// adapter has the turn from the answer to its start: an attempt not found is not
+// absent then, since the turn may be about to record it.
+func TestReconcileCountsATurnTheAdapterStartedBeforeItsEventsCame(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarness(t, codex)
+	h.idleSession(codex)
+	codex.mu.Lock()
+	codex.slowStart = true
+	codex.mu.Unlock()
+
+	if res := h.deliver(attempt2); res.Stage == adapterproto.PromptRefused {
+		t.Fatalf("delivery = %+v", res)
+	}
+	var rec adapterproto.ReconcileResult
+	h.mustCall(adapterproto.MethodPromptReconcile, adapterproto.ReconcileParams{Endpoint: sessionEP, Attempt: attempt3}, &rec)
+	if rec.Verdict != adapterproto.VerdictIndeterminate || rec.Grounds.Code != adapterproto.GroundsTurnRunning {
+		t.Fatalf("reconcile while the turn's events are held back: %+v", rec)
+	}
+	h.waitNote(adapterproto.MethodTurnStarted, func(r json.RawMessage) bool {
+		return decode[adapterproto.TurnStartedParams](r).Attempt == attempt2
+	})
+}

@@ -283,7 +283,7 @@ read page by page until the attempt is found or the record is exhausted:
 | ----- | ------- | ------- |
 | the attempt is in a turn | `found`, with the turn and its state | `attempt_in_record` |
 | the server cannot be asked | `indeterminate` | `native_unreachable` |
-| not found, the thread is active or the adapter's own turn has not ended | `indeterminate` | `turn_running` |
+| not found, the server says the thread is active, the adapter's own books hold a turn that has not ended (from the answer to its `turn/start`, before the server's events), or a turn of the record is in progress | `indeterminate` | `turn_running` |
 | not found, the record was not read to its end, or not in the recognized form | `indeterminate` | `record_unreadable` |
 | not found, idle, whole record read | `provably_absent` | `record_complete_without_attempt` |
 

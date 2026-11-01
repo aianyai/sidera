@@ -193,11 +193,9 @@ func (a *App) Reconcile(ctx context.Context, p adapterproto.ReconcileParams) (ad
 	}
 	a.mu.Lock()
 	in.ThreadActive = s.status == appserver.ThreadActive
-	if rec := s.prompts[p.Attempt]; rec != nil {
-		if t := s.turns[rec.turnID]; t != nil && t.started && !t.ended {
-			in.TurnRunning = true
-		}
-	}
+	// The adapter's books count a turn from the answer to its start, before the
+	// server's events for it come.
+	in.TurnRunning = s.activeTurn != ""
 	a.mu.Unlock()
 
 	turns, complete, err := readTurns(ctx, c, s.threadID, recordMaxPages, func(t appserver.Turn) bool { return hasPrompt(t, p.Attempt) })

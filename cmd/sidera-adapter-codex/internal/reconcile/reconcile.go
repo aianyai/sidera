@@ -22,8 +22,9 @@ type Input struct {
 	Complete bool
 	// ThreadActive says the server reports a turn running in the thread.
 	ThreadActive bool
-	// TurnRunning says the adapter knows a turn it started for this attempt that
-	// has not ended.
+	// TurnRunning says the adapter's own books hold a turn of the thread that has
+	// not ended. The server may hold a turn's events back while the thread's tools
+	// start, so the thread can look idle to the server while the turn runs.
 	TurnRunning bool
 	// Unreachable says the server could not be asked; the other fields are then
 	// empty.
@@ -33,8 +34,9 @@ type Input struct {
 // Judge answers prompt.reconcile.
 //
 // An attempt in the record is found whatever else holds. Absence is only
-// concluded from a whole record of a thread that is not running a turn: a turn
-// still running may be about to record the prompt, and a record that was not read
+// concluded from a whole record of a thread that is not running a turn, by the
+// server's word, the adapter's books or a turn of the record that is still in
+// progress: a turn still running may be about to record the prompt, and a record that was not read
 // to its end, or whose format was not recognized, may hold it (the caller reports
 // both as not complete). A server that was killed while a prompt was being taken
 // in leaves a record that ends in an interrupted turn without the prompt, which is
@@ -55,7 +57,7 @@ func Judge(in Input) adapterproto.ReconcileResult {
 		}
 	}
 	switch {
-	case in.ThreadActive || in.TurnRunning:
+	case in.ThreadActive || in.TurnRunning || runningIn(in.Turns):
 		return indeterminate(adapterproto.GroundsTurnRunning)
 	case !in.Complete:
 		return indeterminate(adapterproto.GroundsRecordUnreadable)
@@ -64,6 +66,16 @@ func Judge(in Input) adapterproto.ReconcileResult {
 		Verdict: adapterproto.VerdictProvablyAbsent,
 		Grounds: adapterproto.Grounds{Code: adapterproto.GroundsRecordCompleteWithoutAttempt},
 	}
+}
+
+// runningIn reports whether a turn of the record is still in progress.
+func runningIn(turns []Turn) bool {
+	for _, t := range turns {
+		if t.State == adapterproto.TurnStateRunning {
+			return true
+		}
+	}
+	return false
 }
 
 func indeterminate(code adapterproto.GroundsCode) adapterproto.ReconcileResult {
