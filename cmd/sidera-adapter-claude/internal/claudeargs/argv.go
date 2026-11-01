@@ -3,6 +3,7 @@ package claudeargs
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ChannelToolRules are the `--allowedTools` rules every turn passes: the
@@ -38,6 +39,54 @@ var ChannelToolRules = []string{
 	"mcp__sidera",
 }
 
+// DataDirDenyRules returns the `--disallowedTools` rules that keep Claude's own
+// file tools out of Sidera's data directory: no read, which also covers Grep and
+// Glob, and no edit. The directory holds the endpoint tokens of every session and
+// the daemon's keys, and a session must reach the channel only through its own
+// endpoint. Deny beats allow in every settings scope, so a preset's `allowed_tools`
+// and the owner's own Claude settings cannot lift it. Claude Code checks `Edit`
+// and `Read` rules only: a `Write` rule never matches, and a `Read` deny already
+// stops the Write tool on the same path.
+//
+// The denial is best effort and not a boundary. Claude applies a read rule to its
+// file tools and to the Bash commands it recognises as file commands (`cat`,
+// `head`, `sed`, redirections), but not to a command that reads without naming
+// the file, such as `grep -r pattern <parent of the data directory>` where the
+// owner's settings allow `Bash(grep *)`, nor to a script that opens files itself.
+// A guarantee needs Claude's operating-system sandbox, which the adapter does not
+// use yet.
+//
+// dir is the absolute real path of the data directory, in the form of the
+// platform it names: `/home/u/.sidera` or `C:\Users\u\Sidera`. In a rule an
+// absolute path starts with `//` (a single `/` is relative to the settings
+// source), and on Windows Claude Code matches the POSIX form of the path, so
+// `C:\Users\u\Sidera` is written `//c/Users/u/Sidera`. Rules are gitignore
+// patterns, so `\ * ? [ ]` in the path are escaped to match literally.
+func DataDirDenyRules(dir string) ([]string, error) {
+	var posix string
+	switch {
+	case isWindowsDrivePath(dir):
+		posix = "/" + strings.ToLower(dir[:1]) + strings.ReplaceAll(dir[2:], `\`, "/")
+	case strings.HasPrefix(dir, "/") && !strings.HasPrefix(dir, "//"):
+		posix = dir
+	default:
+		return nil, fmt.Errorf("claudeargs: data directory %q is not an absolute local path", dir)
+	}
+	pattern := "/" + globEscaper.Replace(strings.TrimRight(posix, "/")) + "/**"
+	return []string{"Read(" + pattern + ")", "Edit(" + pattern + ")"}, nil
+}
+
+var globEscaper = strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`, "]", `\]`)
+
+// isWindowsDrivePath reports whether p starts with a drive and a separator.
+func isWindowsDrivePath(p string) bool {
+	if len(p) < 3 || p[1] != ':' || (p[2] != '\\' && p[2] != '/') {
+		return false
+	}
+	c := p[0] | 0x20
+	return c >= 'a' && c <= 'z'
+}
+
 // Turn is one launch of a turn process: `claude -p` for one session.
 type Turn struct {
 	// Claude is the executable, passed as argv[0] as it is. A process of the
@@ -51,7 +100,10 @@ type Turn struct {
 	Resume bool
 	// MCPConfig is the path of the MCP configuration file; see MCPConfig.
 	MCPConfig string
-	Preset    Preset
+	// DataDir is Sidera's data directory, absolute with symbolic links resolved;
+	// see DataDirDenyRules. Every launch denies it.
+	DataDir string
+	Preset  Preset
 }
 
 // SessionFlag returns the flag that names the session, `--resume` or
@@ -94,6 +146,12 @@ func (t Turn) Argv() ([]string, error) {
 		return nil, errors.New("claudeargs: no MCP configuration")
 	case t.Preset.PermissionMode == "":
 		return nil, errors.New("claudeargs: no permission mode")
+	case t.DataDir == "":
+		return nil, errors.New("claudeargs: no data directory")
+	}
+	deny, err := DataDirDenyRules(t.DataDir)
+	if err != nil {
+		return nil, err
 	}
 	argv := []string{
 		t.Claude, "-p", SessionFlag(t.Resume), t.SessionID,
@@ -108,6 +166,8 @@ func (t Turn) Argv() ([]string, error) {
 		argv = append(argv, "--allowedTools")
 		argv = append(argv, t.Preset.AllowedTools...)
 	}
+	argv = append(argv, "--disallowedTools")
+	argv = append(argv, deny...)
 	if t.Preset.Model != "" {
 		argv = append(argv, "--model", t.Preset.Model)
 	}

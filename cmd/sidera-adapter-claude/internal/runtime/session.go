@@ -84,6 +84,23 @@ func (a *App) turnFile(session, attempt, kind string) string {
 	return filepath.Join(dir, "turns", session, attempt+"."+kind+".jsonl")
 }
 
+// dataDir is Sidera's data directory as the turn process must be denied it: the
+// `SIDERA_HOME` of the session's tool access, with symbolic links resolved,
+// because Claude Code checks a path and the file it resolves to against the
+// rules. A session without it cannot reach the daemon either, so a launch
+// without it is an error and not a session that runs undenied.
+func (a *App) dataDir(toolEnv map[string]string) (string, error) {
+	home := toolEnv["SIDERA_HOME"]
+	if home == "" {
+		return "", errors.New("the session's tool access has no SIDERA_HOME")
+	}
+	real, err := a.o.Files.RealDir(home)
+	if err != nil {
+		return "", fmt.Errorf("resolve the data directory: %w", err)
+	}
+	return real, nil
+}
+
 // launch writes the prompt to the turn's input file and starts the process.
 func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	claude, sidera, mcpConfig := a.executables()
@@ -97,7 +114,11 @@ func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	if err != nil {
 		return proc.Started{}, err
 	}
-	argv, err := claudeargs.Turn{Claude: claude, SessionID: l.session, Resume: l.resume, MCPConfig: mcpConfig, Preset: l.preset.Preset}.Argv()
+	dataDir, err := a.dataDir(l.toolEnv)
+	if err != nil {
+		return proc.Started{}, err
+	}
+	argv, err := claudeargs.Turn{Claude: claude, SessionID: l.session, Resume: l.resume, MCPConfig: mcpConfig, DataDir: dataDir, Preset: l.preset.Preset}.Argv()
 	if err != nil {
 		return proc.Started{}, err
 	}

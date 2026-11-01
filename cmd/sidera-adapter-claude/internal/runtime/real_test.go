@@ -88,7 +88,7 @@ func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
 	}
 	defer hold.Close()
 
-	argv, err := claudeargs.Turn{Claude: claude, SessionID: session, MCPConfig: mcpConfig, Preset: claudeargs.Preset{PermissionMode: "dontAsk", Model: "haiku"}}.Argv()
+	argv, err := claudeargs.Turn{Claude: claude, SessionID: session, MCPConfig: mcpConfig, DataDir: dir, Preset: claudeargs.Preset{PermissionMode: "dontAsk", Model: "haiku"}}.Argv()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -219,7 +219,8 @@ the daemon removes the checkpoint.
 
 ### What is not built yet
 
-`session.interrupt` (SIGINT of the turn process on Unix, with the process's end as the confirmation;
+Claude's operating-system sandbox, which would make the denial of the data directory hold against
+Bash (see the turn process), `session.interrupt` (SIGINT of the turn process on Unix, with the process's end as the confirmation;
 the runtime's messaging socket is another way worth testing), `recv.observed` (it needs the
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
@@ -247,6 +248,7 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   --output-format stream-json --verbose --strict-mcp-config --mcp-config <file>
   --permission-mode <mode> --permission-prompts none
   --allowedTools "Bash(sidera me *)" "Bash(sidera peers *)" ... mcp__sidera [--allowedTools <preset rules>]
+  --disallowedTools "Read(//<data dir>/**)" "Edit(//<data dir>/**)"
   [--model M] [--effort E] --append-system-prompt <adapter text + preset text>
 ```
 
@@ -273,6 +275,30 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   message identifier is an agent command, but without one the CLI runs the owner's
   node status, and a rule cannot tell them apart; it is read-only. A preset's own
   `allowed_tools` are the owner's decision and are added after these.
+- The data directory is denied to Claude's own file tools on every turn, as best-effort
+  protection (`claudeargs.DataDirDenyRules`). The directory holds the endpoint tokens
+  of every session and the daemon's keys; a session reaches the channel through its
+  own endpoint and has no business in it. The path is the `SIDERA_HOME` of the
+  session's tool access with symbolic links resolved (Claude Code checks a path and
+  the file it resolves to against the rules); a launch whose tool access has none is
+  an error, not a session that runs undenied. The rules are `Read` and `Edit` only:
+  a `Read` deny also covers Grep, Glob and the Write tool on the same path, and Claude
+  Code never matches a `Write` rule. In a rule an absolute path starts with `//`
+  (`//home/u/.sidera/**`; one `/` is relative to the settings source, which for a
+  command-line rule is the working directory), and on Windows the rule is written
+  against the POSIX form of the path (`C:\Users\u\Sidera` is `//c/Users/u/Sidera/**`);
+  characters that are patterns in a rule (`\ * ? [ ]`) are escaped. The rules are
+  command-line `--disallowedTools` because a deny beats an allow in every settings
+  scope: neither the preset's `allowed_tools` nor the owner's own Claude settings lift
+  it. The channel's `sidera` commands are not file commands, so the rule does not
+  touch them.
+- The denial is not a boundary. Claude Code applies a read rule to its file tools and
+  to the Bash commands it recognises as file commands (`cat`, `head`, `sed`,
+  redirections), but not to a command that reads without naming the file: with the
+  owner's settings allowing `Bash(grep *)`, `grep -r <parent of the data directory>`
+  still returns the files, and a script that opens files itself is not covered either.
+  A guarantee needs Claude's operating-system sandbox (`filesystem.denyRead`, on macOS
+  and Linux only), which the adapter does not use yet.
 - argv[0] is the configured Claude executable as written. A process is recognised
   as a turn process of the session when its argv[0] is that path and its arguments
   hold `--session-id <uuid>` or `--resume <uuid>`; the resolved path of the executable

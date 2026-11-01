@@ -77,6 +77,10 @@ func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	if l.Argv[0] != claudePath || l.Dir != workDir {
 		t.Fatalf("argv[0] %q dir %q", l.Argv[0], l.Dir)
 	}
+	// The data directory of the tool access is denied to the agent's file tools.
+	if !slices.Contains(l.Argv, "Read(/"+toolHome+"/**)") || !slices.Contains(l.Argv, "Edit(/"+toolHome+"/**)") {
+		t.Fatalf("the data directory is not denied: %q", l.Argv)
+	}
 	if in := string(w.files[l.Stdin]); !strings.Contains(in, `"uuid":"`+prompt1+`"`) || !strings.Contains(in, "hello") {
 		t.Fatalf("the prompt on standard input: %s", in)
 	}

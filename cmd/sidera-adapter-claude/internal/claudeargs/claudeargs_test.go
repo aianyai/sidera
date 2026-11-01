@@ -26,7 +26,7 @@ var channelRules = []string{
 
 func TestArgv(t *testing.T) {
 	const id = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
-	base := Turn{Claude: "/bin/claude", SessionID: id, MCPConfig: "/s/mcp.json", Preset: Preset{PermissionMode: "dontAsk"}}
+	base := Turn{Claude: "/bin/claude", SessionID: id, MCPConfig: "/s/mcp.json", DataDir: "/h/sidera", Preset: Preset{PermissionMode: "dontAsk"}}
 	common := func(flag, mode string) []string {
 		return []string{
 			"/bin/claude", "-p", flag, id,
@@ -36,6 +36,9 @@ func TestArgv(t *testing.T) {
 			"--allowedTools",
 		}
 	}
+	// The data directory's denial follows the allowed rules and comes before the
+	// preset's model.
+	const denyFlag, denyRead, denyEdit = "--disallowedTools", "Read(//h/sidera/**)", "Edit(//h/sidera/**)"
 	withChannel := func(flag, mode string, rest ...string) []string {
 		return append(append(common(flag, mode), channelRules...), rest...)
 	}
@@ -49,11 +52,12 @@ func TestArgv(t *testing.T) {
 		want []string
 	}{
 		{"a new session names its uuid with --session-id", base,
-			withChannel("--session-id", "dontAsk", "--append-system-prompt", SystemPrompt(""))},
+			withChannel("--session-id", "dontAsk", denyFlag, denyRead, denyEdit, "--append-system-prompt", SystemPrompt(""))},
 		{"a resumed session names its uuid with --resume", func() Turn { t := base; t.Resume = true; return t }(),
-			withChannel("--resume", "dontAsk", "--append-system-prompt", SystemPrompt(""))},
+			withChannel("--resume", "dontAsk", denyFlag, denyRead, denyEdit, "--append-system-prompt", SystemPrompt(""))},
 		{"preset tools, model, effort and prompt follow the channel's rules", full, withChannel("--resume", "plan",
 			"--allowedTools", "Read", "Bash(git *)",
+			denyFlag, denyRead, denyEdit,
 			"--model", "opus", "--effort", "high",
 			"--append-system-prompt", SystemPrompt("Be brief."),
 		)},
@@ -72,7 +76,7 @@ func TestArgv(t *testing.T) {
 }
 
 func TestArgvRefusesWhatItCannotBuild(t *testing.T) {
-	ok := Turn{Claude: "claude", SessionID: "u", MCPConfig: "m", Preset: Preset{PermissionMode: "plan"}}
+	ok := Turn{Claude: "claude", SessionID: "u", MCPConfig: "m", DataDir: "/h", Preset: Preset{PermissionMode: "plan"}}
 	tests := []struct {
 		name   string
 		mutate func(*Turn)
@@ -81,6 +85,8 @@ func TestArgvRefusesWhatItCannotBuild(t *testing.T) {
 		{"no session", func(t *Turn) { t.SessionID = "" }},
 		{"no MCP configuration", func(t *Turn) { t.MCPConfig = "" }},
 		{"no permission mode", func(t *Turn) { t.Preset.PermissionMode = "" }},
+		{"no data directory", func(t *Turn) { t.DataDir = "" }},
+		{"a relative data directory", func(t *Turn) { t.DataDir = "sidera" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +96,52 @@ func TestArgvRefusesWhatItCannotBuild(t *testing.T) {
 				t.Fatal("want an error")
 			}
 		})
+	}
+}
+
+// The rules of the data directory are written the way Claude Code matches paths:
+// `//` for an absolute path, and the POSIX form of a Windows path.
+func TestDataDirDenyRules(t *testing.T) {
+	tests := []struct {
+		name, dir string
+		want      string // the pattern inside Read( ) and Edit( )
+	}{
+		{"a Unix path", "/home/u/.sidera", "//home/u/.sidera/**"},
+		{"a macOS path with a space", "/Users/u/Library/Application Support/Sidera", "//Users/u/Library/Application Support/Sidera/**"},
+		{"a trailing separator", "/home/u/.sidera/", "//home/u/.sidera/**"},
+		{"a Windows path", `C:\Users\u\AppData\Local\Sidera`, "//c/Users/u/AppData/Local/Sidera/**"},
+		{"a Windows path with forward slashes", "D:/Sidera", "//d/Sidera/**"},
+		{"pattern characters match literally", "/h/a[1]*?", `//h/a\[1\]\*\?/**`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DataDirDenyRules(tc.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"Read(" + tc.want + ")", "Edit(" + tc.want + ")"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %q\nwant %q", got, want)
+			}
+		})
+	}
+	for _, dir := range []string{"", "relative/dir", `\\server\share\sidera`, "//double", "c:relative", "1:/x"} {
+		if rules, err := DataDirDenyRules(dir); err == nil {
+			t.Fatalf("DataDirDenyRules(%q) = %q, want an error", dir, rules)
+		}
+	}
+}
+
+// The denial changes nothing the adapter finds a turn process by.
+func TestArgvIsATurnOfItsSession(t *testing.T) {
+	const id = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
+	for _, resume := range []bool{false, true} {
+		argv, err := Turn{Claude: "/bin/claude", SessionID: id, Resume: resume, MCPConfig: "m", DataDir: "/h/sidera", Preset: Preset{PermissionMode: "plan"}}.Argv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !IsTurnOf(argv, "/bin/claude", id) || IsTurnOf(argv, "/bin/claude", "other") {
+			t.Fatalf("resume=%v: IsTurnOf is wrong for %q", resume, argv)
+		}
 	}
 }
 

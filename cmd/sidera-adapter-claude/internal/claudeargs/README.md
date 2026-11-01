@@ -11,6 +11,7 @@ What a Claude Code turn process is started with, as pure functions. Read
 | `ParsePreset(values)` | Reads the configuration values of a preset into a `Preset`, with one problem per value that cannot be used. |
 | `Preset.Env()` | The environment variables the preset adds to a turn process. |
 | `Turn.Argv()` | The argument vector of `claude -p` for one launch, argv[0] included. |
+| `DataDirDenyRules(dir)` | The `--disallowedTools` rules that deny Claude's file tools the data directory (best effort); every `Turn` carries them. |
 | `SessionFlag(resume)` | `--resume` or `--session-id`: the flag that, with the uuid, marks a process as a turn process of the session. |
 | `IsTurnOf(args, claude, session)` | Whether a process's arguments make it a turn process of the session: argv[0] is the Claude executable as started and the arguments name the session with `--session-id` or `--resume`. |
 | `SystemPrompt(preset)` | The adapter's system prompt followed by the preset's. |
@@ -28,6 +29,9 @@ What a Claude Code turn process is started with, as pure functions. Read
   (`ChannelToolRules`), never as `Bash(sidera *)`: the management interface trusts
   the uid alone, so a session must never be allowed an owner command. A command
   added to the agent interface is added there and in the reference.
+- Every launch denies the data directory to Claude's file tools (`DataDirDenyRules`, from
+  `Turn.DataDir`, which has no default): a deny beats every allow, but it is best effort,
+  not a boundary against Bash.
 - The prompt is never on the command line: it is the `uuid`ed line on standard
   input.
 - `permission_mode` has no default: the owner states it in the preset.
