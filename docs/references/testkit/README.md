@@ -49,7 +49,10 @@ the existing binding. Detach removes only its own binding and never desired stat
 so an old process's exit cannot disconnect its replacement. Receivers cannot call
 back into the registry.
 
-The in-process fixture constructs this owner once from `AdapterOptions.Inputs`.
+The in-process fixture constructs this owner once from `AdapterOptions.Inputs`,
+and passes `AdapterOptions.Arm` to the launcher as its `Arm`: a knob set there is in
+place before a process answers anything, which a controller fetched after a restart
+cannot promise, since the node calls the new process as soon as it is taken on.
 `LauncherConfig.Inputs` attaches after knob creation and `Arm`, before `StartPipe`;
 failed attachment starts no pipe, and actual process exit detaches the binding.
 The binary fixture constructs its owner once from `Options.AdapterInputs` while

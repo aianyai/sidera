@@ -55,6 +55,12 @@ type AdapterOptions struct {
 	// InstanceOptions replaces the default declaration and initial enabled state
 	// of Instance or an ExtraInstances entry. Names outside that set are refused.
 	InstanceOptions map[string]AdapterInstanceOptions
+	// Arm, which may be nil, is LauncherConfig.Arm: it is called with the knobs of
+	// each adapter process before it answers anything, with the instance and the
+	// number of the launch (1 is the first). It is how a test sets what a process
+	// that a restart or the host starts will answer: the controller of a process
+	// exists only once it runs, and by then the node may already have called it.
+	Arm func(instance string, n int, k *fakeadapter.Knobs)
 }
 
 // AdapterInstanceOptions describes one installed fixture-owned adapter instance.

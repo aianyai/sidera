@@ -254,6 +254,7 @@ func NewStopped(t testing.TB, o Options) *H {
 		lc := LauncherConfig{
 			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
 			Instances: map[string]LauncherInstance{}, Order: launchOrder, Inputs: h.adapterInputs,
+			Arm: o.Adapter.Arm,
 		}
 		for i, p := range packages {
 			name := p.instance
