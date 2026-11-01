@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -19,7 +20,7 @@ func Manifest(goos, goarch string) (manifest.Manifest, error) {
 	m := manifest.Manifest{
 		ManifestVersion: manifest.Version,
 		ID:              AdapterID,
-		Version:         Version,
+		Version:         release.Version(),
 		Protocol:        adapterproto.SupportedRange(),
 		// manifest.WritePackage adds .exe to the program of a Windows package.
 		Entry:     manifest.Entry{Program: "bin/" + ProgramName, Args: []string{"serve"}},

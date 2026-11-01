@@ -3,7 +3,7 @@
 // it over standard input and output; standard error is its log.
 //
 // With the subcommand package it instead writes the adapter package for a
-// platform from a binary built for it.
+// platform from a binary built for it, and with version it prints its version.
 package main
 
 import (
@@ -17,14 +17,18 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/adapter"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/declare"
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 )
 
 func main() {
 	var err error
-	if len(os.Args) > 1 && os.Args[1] == "package" {
+	switch {
+	case len(os.Args) > 1 && os.Args[1] == "package":
 		err = packageCommand(os.Args[2:])
-	} else {
+	case len(os.Args) > 1 && os.Args[1] == "version":
+		fmt.Println(release.Read().Describe("sidera-adapter-codex"))
+	default:
 		err = serve()
 	}
 	if err != nil {

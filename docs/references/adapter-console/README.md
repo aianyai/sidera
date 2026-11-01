@@ -4,7 +4,8 @@ How the node's owner starts a first agent and reads what comes back, without
 anything in the core that knows about an owner. The console adapter registers one
 direct endpoint, `owner`, on the node; a client program run in a terminal sends
 from it and reads it. It lives in `cmd/sidera-adapter-console/`, outside the
-top-level `internal/`, and imports only the SDK, as a third-party adapter would.
+top-level `internal/`, and imports only the SDK, as a third-party adapter would, and
+`internal/release` for its version alone.
 
 ## What
 
@@ -40,6 +41,7 @@ apply to what arrives.
 | `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
 | `status <message-id>` | `endpoint.message_status`: the delivery state of each recipient and the control reply. |
 | `package` | Writes an adapter package (below). |
+| `version` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version. |
 
 `--body-file -` reads standard input. Every client command takes `--home` (the data
 directory: the flag, then `SIDERA_HOME`, then `~/.sidera`, as for `sidera`) and
@@ -97,7 +99,7 @@ of the request, so a recv waits as long as the client asked, up to 30 seconds.
 `sidera-adapter-console package --goos <os> --goarch <arch> --binary <file> --out
 <directory>` writes a package for one platform: `sidera-adapter.json` and
 `bin/sidera-adapter-console` (`.exe` for Windows, in `entry.program` too: `manifest.WritePackage` adds it to both). The manifest is built from the
-constants `initialize` answers from, so the two cannot disagree, and validated with
+constants `initialize` answers from (the version is the release version), so the two cannot disagree, and validated with
 `manifest.Validate`. Its `platforms` is the one platform of the package, `entry.args`
 is `["serve"]`, and it declares no budgets (a direct endpoint takes the default)
 and no configuration. The directory must be new or empty (checked here; the files

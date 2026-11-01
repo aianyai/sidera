@@ -33,9 +33,9 @@ func packageCommand(args []string) error {
 // one it is written for, which the manifest must list: the platforms the manifest
 // lists are the ones the adapter runs on, and the installation checks the list.
 func writePackage(dir, binary, goos, goarch string) error {
-	m, err := manifest.Parse(manifestJSON)
+	m, err := loadManifest()
 	if err != nil {
-		return fmt.Errorf("the manifest built into the executable: %w", err)
+		return err
 	}
 	platform := manifest.Platform{OS: goos, Arch: goarch}
 	if !slices.Contains(m.Platforms, platform) {

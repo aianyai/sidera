@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -28,7 +29,7 @@ func TestEveryTargetGetsAManifestTheDaemonAccepts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the manifest is refused: %v", err)
 			}
-			if m.ID != AdapterID || m.Version != Version || len(m.Platforms) != 1 || m.Platforms[0].OS != p[0] || m.Platforms[0].Arch != p[1] {
+			if m.ID != AdapterID || m.Version != release.Version() || len(m.Platforms) != 1 || m.Platforms[0].OS != p[0] || m.Platforms[0].Arch != p[1] {
 				t.Errorf("manifest %+v", m)
 			}
 			// The installer refuses a package that lacks the file the manifest names.

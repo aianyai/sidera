@@ -27,7 +27,8 @@ adapter and the protocol types of `sdk/go/adapterproto`.
 may read and write files, start and watch processes, run goroutines and read the
 clock. Everything it does to the world goes through a small interface, so that
 its flow can be tested with fakes. Runtime packages depend on the standard
-library, `sdk/go`, `golang.org/x/sys` and `golang.org/x/text`, and nothing else.
+library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys` and
+`golang.org/x/text`, and nothing else.
 
 | Path | Holds |
 | ---- | ----- |
@@ -35,8 +36,10 @@ library, `sdk/go`, `golang.org/x/sys` and `golang.org/x/text`, and nothing else.
 | `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and signals. Implemented for macOS; the other platforms compile and fail every call with `ErrUnsupported`. |
 
 `main.go` serves the adapter protocol over the standard input and output with
-`sdk/go/adapterkit`. `sidera-adapter.json` is the package manifest, built into the
-executable so that the identity answered in `initialize` is read from it. The
+`sdk/go/adapterkit`, and prints its version for the subcommand `version`.
+`sidera-adapter.json` is the package manifest, built into the
+executable so that the identity answered in `initialize` is read from it; its version is
+the placeholder `@version@`, replaced by the release version when the manifest is read. The
 executable is started by the daemon and ends when the daemon closes its input; the
 turn processes it started are detached and run on.
 `pack.go` is the `package` subcommand: it writes the package for one platform the

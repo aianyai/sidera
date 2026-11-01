@@ -13,15 +13,14 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+
+	"github.com/aianyai/sidera/internal/release"
 )
 
 const (
 	// AdapterID is the adapter's id in its manifest and in initialize, and the
 	// instance name the client looks for unless it is told another.
 	AdapterID = "console"
-	// Version is the adapter's version, reported in initialize and written in the
-	// manifest of every package.
-	Version = "0.1.0"
 	// ProgramName is the program of the package, without an extension.
 	ProgramName = "sidera-adapter-console"
 
@@ -59,6 +58,7 @@ commands:
   send --to <address>[,<address>...] (--body <text> | --body-file <file>)
   status <message-id>    delivery state of a message sent from the owner endpoint
   whoami                 the address of the owner endpoint
+  version                the version, the commit and the Go version of this program
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
                          write an adapter package for 'sidera adapter install'
   serve                  the adapter role; the daemon starts it, a person does not
@@ -85,6 +85,9 @@ func Main(args []string, env Env) int {
 		return runServe(env)
 	case "package":
 		return runPackage(args[1:], env)
+	case "version":
+		fmt.Fprintln(env.Stdout, release.Read().Describe(ProgramName))
+		return exitOK
 	}
 	return runClient(args, env)
 }

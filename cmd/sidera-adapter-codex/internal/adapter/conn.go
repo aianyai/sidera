@@ -60,7 +60,7 @@ func (a *App) ensureClient(ctx context.Context) (*appserver.Client, error) {
 		return nil, err
 	}
 	init, err := c.Initialize(ctx, appserver.InitializeParams{
-		ClientInfo:   appserver.ClientInfo{Name: "sidera-adapter-codex", Version: ClientVersion},
+		ClientInfo:   appserver.ClientInfo{Name: "sidera-adapter-codex", Version: ClientVersion()},
 		Capabilities: &appserver.InitializeCapabilities{OptOutNotificationMethods: appserver.QuietNotifications},
 	})
 	if err != nil {

@@ -277,7 +277,7 @@ func runMCPProbe(ctx context.Context, program string, env []string) error {
 
 	init, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
 		"protocolVersion": "2025-06-18", "capabilities": map[string]any{},
-		"clientInfo": map[string]any{"name": "sidera-adapter-codex", "version": ClientVersion},
+		"clientInfo": map[string]any{"name": "sidera-adapter-codex", "version": ClientVersion()},
 	}})
 	if _, err := stdin.Write(append(init, '\n')); err != nil {
 		return fmt.Errorf("cannot talk to %s mcp: %w", program, err)

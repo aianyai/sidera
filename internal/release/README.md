@@ -26,3 +26,9 @@ own version (v1) and does not follow this one.
 - This package is the one exception to "no global state" of the contract
   packages: the linker needs a package variable to write. It is never assigned in
   code.
+- Adapters under `cmd/` otherwise import only `sdk/go`; they import this package
+  for the version alone, because a version that every program of a release
+  reports has to have one home, and the SDK is a published module that must not
+  carry the repository's release number. An adapter's manifest and its answer to
+  `initialize` both read `Version()`, so a released package carries the release
+  version.

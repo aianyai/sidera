@@ -20,13 +20,15 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/create"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
-// ClientVersion is the version the adapter reports to the App Server as its own.
-const ClientVersion = "0.1.0"
+// ClientVersion is the version the adapter reports to the App Server as its own:
+// the release's.
+func ClientVersion() string { return release.Version() }
 
 // ServerManager finds or starts the App Server. *server.Server is the real one.
 type ServerManager interface {

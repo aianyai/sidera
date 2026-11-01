@@ -5,14 +5,15 @@ package declare
 
 import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
-// Identity of the adapter and of the runtime it drives.
+// Identity of the adapter and of the runtime it drives. The version of the adapter
+// is the release's, from internal/release.
 const (
 	ID          = "codex"
-	Version     = "0.1.0"
 	RuntimeName = "codex"
 )
 
@@ -36,7 +37,9 @@ const (
 const recvBudget = 8000
 
 // Info is the identity answered in initialize.
-func Info() adapterproto.AdapterInfo { return adapterproto.AdapterInfo{ID: ID, Version: Version} }
+func Info() adapterproto.AdapterInfo {
+	return adapterproto.AdapterInfo{ID: ID, Version: release.Version()}
+}
 
 // Capabilities is what the adapter declares. It cannot interrupt a turn yet and
 // does not acknowledge on the agent's behalf; it does answer the requests Codex
@@ -55,7 +58,7 @@ func Manifest(goos, goarch string) manifest.Manifest {
 	return manifest.Manifest{
 		ManifestVersion: manifest.Version,
 		ID:              ID,
-		Version:         Version,
+		Version:         release.Version(),
 		Protocol:        adapterproto.SupportedRange(),
 		Entry:           manifest.Entry{Program: programName},
 		Platforms:       []manifest.Platform{{OS: goos, Arch: goarch}},

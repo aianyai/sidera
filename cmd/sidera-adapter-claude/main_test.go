@@ -15,7 +15,7 @@ import (
 // The manifest built into the executable is the one the daemon installs the
 // package by, and the adapter declares what the manifest says it provides.
 func TestManifestAndDeclarationAgree(t *testing.T) {
-	m, err := manifest.Parse(manifestJSON)
+	m, err := loadManifest()
 	if err != nil {
 		t.Fatal(err)
 	}

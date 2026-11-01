@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -34,7 +35,7 @@ func serve(ctx context.Context, r io.Reader, w io.WriteCloser, log *slog.Logger)
 	app := newAdapter(log)
 	defer app.close()
 	return adapterkit.Serve(ctx, r, w, adapterkit.Config{
-		Adapter:      adapterproto.AdapterInfo{ID: AdapterID, Version: Version},
+		Adapter:      adapterproto.AdapterInfo{ID: AdapterID, Version: release.Version()},
 		Capabilities: adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: maxEndpoints}},
 		App:          app,
 		Logger:       log,

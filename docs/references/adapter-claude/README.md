@@ -159,7 +159,11 @@ writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-claude` through
 built into the executable, with `platforms` narrowed to the platform asked for, since the
 package holds one binary and the installation checks the list. A platform the manifest does
 not list (today anything but `darwin/arm64` and `darwin/amd64`) is refused and nothing is
-written; adding a platform is adding it to the manifest.
+written; adding a platform is adding it to the manifest. The `version` in the embedded
+`sidera-adapter.json` is the placeholder `@version@`: the executable replaces it with the
+release version (`internal/release`) when it reads the manifest, for `initialize` and for the
+package alike, and a build without the release version writes `0.0.0-dev`. `<binary> version`
+prints the version, the commit and the Go version.
 
 ### Creating a session, as the runtime does it
 
