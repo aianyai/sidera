@@ -296,3 +296,29 @@ jobs:
           cache: false
       - name: go build
         run: go build ./... ./sdk/go/...
+
+  # scripts/release.sh runs for real only when a tag is pushed, so a change that
+  # breaks it (a program that no longer builds as a package, a module whose licence
+  # the notices refuse) would otherwise surface at the first release. This builds the
+  # archives into a directory outside the checkout and publishes nothing. The version
+  # is a placeholder that no tag will carry; the script only needs one that looks
+  # like a version, and a changelog section is not read here.
+  release-dry-run:
+    name: release archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+      - name: scripts/release.sh
+        run: scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"
+      - name: checksums.txt verifies and names the five archives
+        working-directory: ${{ runner.temp }}/dist
+        run: |
+          sha256sum -c checksums.txt
+          test "$(wc -l < checksums.txt)" -eq 5

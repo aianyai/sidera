@@ -25,6 +25,7 @@ test, the crash walks of `internal/node/store` included.
 | `crashwalk` | Linux (3 shards), macOS (2), Windows (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
+| `release-dry-run` | Linux | `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, then `sha256sum -c checksums.txt` in that directory and a check that it names five archives; nothing is published |
 
 Limits of every job, in minutes. `go test -timeout` is set a few minutes under
 the job's limit so that a hang ends with the goroutine dump of the test binary:
@@ -38,9 +39,10 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
 | `sdk-standalone` | 1 | 15 | go default |
 | `cross-compile` | 5 | 15 | none |
+| `release-dry-run` | 1 | 20 | none |
 
-A push to `main` or a pull request starts 16 jobs, three of them on macOS; a
-manual dispatch adds the nine `crashwalk` jobs, 25 in all, five of them on macOS.
+A push to `main` or a pull request starts 17 jobs, three of them on macOS; a
+manual dispatch adds the nine `crashwalk` jobs, 26 in all, five of them on macOS.
 GitHub limits how many jobs of a plan run at once, macOS jobs more tightly than
 the others, so some of them may wait for a runner.
 
@@ -209,6 +211,15 @@ module under another licence therefore stops the release until the maintainers
 decide whether it may be bundled; the script never decides that. A module that
 only says it is under either of two licences (`go-base36` says Apache-2.0 or MIT and
 ships neither text) is listed as `Apache-2.0 OR MIT` with the file it ships.
+
+The `release-dry-run` job runs the script a tag runs, so that a change which breaks
+it, such as a program that no longer packages or a module whose licence the
+notices refuse, fails on the commit that makes it and not at the first release. Its
+version, `0.0.0-dryrun`, is a placeholder that no tag will carry: the script needs
+a well-formed version and nothing else, and reading the latest changelog section
+instead would tie the job to the changelog's layout and to which version was last
+released. It writes into `$RUNNER_TEMP`, outside the checkout, and has no token
+beyond the read-only one of the workflow, so it cannot publish.
 
 ### Not run yet
 
@@ -491,7 +502,8 @@ SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=1/3 go test -count=1 -v -timeout 40
 (cd sdk/go && GOWORK=off go build ./... && GOWORK=off go test ./... && GOWORK=off go mod tidy -diff)
 
 # the release archives: five platforms into an empty directory, then the changelog section
-scripts/release.sh 0.8.0 "$(mktemp -d)"
+dist=$(mktemp -d)
+scripts/release.sh 0.8.0 "$dist" && (cd "$dist" && shasum -a 256 -c checksums.txt)
 scripts/release-notes.sh 0.8.0
 
 for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
