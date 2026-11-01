@@ -26,8 +26,9 @@ type ExecLauncher struct {
 
 var _ Launcher = ExecLauncher{}
 
-// Launch starts the program the manifest names, in the directory of the
-// installed package, with the manifest's arguments. The process is not tied to
+// Launch starts the program the manifest names, found in the directory of the
+// installed package, with the manifest's arguments, in the working directory of the
+// daemon (its data directory: see the daemon reference). The process is not tied to
 // ctx: the host decides when it ends. Its standard error goes to inst.Stderr.
 // Its standard output is delivered through a pipe that is closed after the
 // process has been waited for, so that every byte it wrote is read before the

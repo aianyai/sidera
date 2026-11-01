@@ -112,6 +112,44 @@ func itoa(i int) string {
 // The hooks run inside the step that they belong to, in the state of the engine
 // that the step needs: before the loop exists at step 7, with the loop recovering
 // at steps 9 and 10, running at step 15.
+// The adapter processes inherit the working directory of the daemon, so a daemon
+// started in a directory that is removed later must not keep it: the data
+// directory is where it works, and the hook of the adapters step, which runs before
+// any adapter is started, already sees that.
+func TestTheDaemonWorksInItsDataDirectoryWhateverDirectoryItWasStartedIn(t *testing.T) {
+	c, _ := initialized(t)
+	startDir := t.TempDir()
+	t.Chdir(startDir)
+	var seen string
+	c.Attach.Adapters = func(context.Context, *daemon.Env) error {
+		var err error
+		seen, err = os.Getwd()
+		return err
+	}
+	started(t, c)
+	if err := os.RemoveAll(startDir); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(c.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for when, got := range map[string]string{"in the adapters step": seen, "after the start": mustGetwd(t)} {
+		if got, err = filepath.EvalSymlinks(got); err != nil || got != want {
+			t.Errorf("working directory %s: %q (%v), want the data directory %q", when, got, err, want)
+		}
+	}
+}
+
+func mustGetwd(t testing.TB) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
+}
+
 func TestEachHookRunsInsideItsStepWithTheEngineInTheStateTheStepNeeds(t *testing.T) {
 	noLeaks(t)
 	c, _ := initialized(t)

@@ -42,7 +42,9 @@ const socketPathLimit = 103
 func newHome(t testing.TB) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		return filepath.Join(t.TempDir(), "home")
+		home := filepath.Join(t.TempDir(), "home")
+		restoreWorkingDirectory(t)
+		return home
 	}
 	for _, base := range []string{"", "/tmp"} {
 		dir, err := os.MkdirTemp(base, "sd")
@@ -50,6 +52,7 @@ func newHome(t testing.TB) string {
 			continue
 		}
 		t.Cleanup(func() { os.RemoveAll(dir) })
+		restoreWorkingDirectory(t)
 		home := filepath.Join(dir, "h")
 		if len(filepath.Join(home, "manage", "manage.sock")) <= socketPathLimit {
 			return home
@@ -57,6 +60,20 @@ func newHome(t testing.TB) string {
 	}
 	t.Skip("no temporary directory short enough for a Unix socket path")
 	return ""
+}
+
+// restoreWorkingDirectory puts the working directory of the test process back when
+// the test ends, before the data directory is removed: a daemon that owns its file
+// system makes its data directory the working directory, and a directory that is the
+// working directory cannot be removed on Windows. It is registered after the
+// directory is made, so that it runs before the removal.
+func restoreWorkingDirectory(t testing.TB) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
 }
 
 // seeded is a reader of reproducible bytes, so that keys and tokens are the same

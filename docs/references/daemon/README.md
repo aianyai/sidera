@@ -50,7 +50,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 
 | Step | Name | What happens | Owner |
 | ---- | ---- | ------------ | ----- |
-| 1 | lock | The data directory is resolved; the root and `keys/` are checked to be private to the owner (a directory that is not one, a symbolic link among them, is refused and nothing is narrowed); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running". | this package |
+| 1 | lock | The data directory is resolved; the root and `keys/` are checked to be private to the owner (a directory that is not one, a symbolic link among them, is refused and nothing is narrowed); `keys/init.rec` must exist; then the instance lock `daemon.lock` is taken, and a holder is reported as "a daemon is already running"; last, the data directory becomes the daemon's working directory, and failing to change to it fails the start. A daemon over an explicit `Config.FS` does not change it: that home is not necessarily a directory of this machine. | this package |
 | 2 | config | The transaction layer recovers (settle, then removal of every `.tmp-*`); the layout of `state/`, `run/`, `manage/` and `logs/` is made again where the owner removed it; the log opens; `config/` is loaded strictly and a file that is not valid stops the start and is named. | this package, `txn`, `config` |
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
@@ -538,6 +538,22 @@ interface: a sandbox must deny the socket to an agent.
   safe for concurrent use. The network closes at shutdown step 2 beside the HTTP
   servers: it stops taking connections from other nodes before the adapters and the
   engine go, and its close waits for every goroutine the network started.
+- **The daemon works in its data directory.** An adapter process inherits the daemon's
+  working directory, and the directory the daemon was started from is not the daemon's
+  to keep: a daemon started inside a git worktree that was removed later left every
+  adapter in a directory that no longer exists, and a program started there, such as
+  `claude auth status`, fails with "The current directory no longer exists", so every
+  session failed as unavailable. The data directory is the one directory the node owns
+  for as long as it runs, so the start enters it, after the lock is held (a start that
+  is refused changes nothing) and before any adapter starts. It fails the start when it
+  cannot, rather than run on in a directory nobody chose. Adapters that run a native
+  runtime do it in the directory their preset names (`project_dir`, `cwd`), absolute
+  paths, never in this one; the paths the daemon is given (the data directory, the
+  package directory of `adapter install`, the preset directories) are absolute, so
+  nothing depends on where the daemon was started. The test
+  `TestTheDaemonWorksInItsDataDirectoryWhateverDirectoryItWasStartedIn` starts a
+  daemon in a directory, removes it, and reads the working directory in the adapters
+  step and after the start.
 - **The shutdown is one path.** An orderly stop, a fatal failure and a start that
   failed all take the same five steps, so the order is tested once and a step cannot
   be skipped on one road. The lock is the last thing let go.

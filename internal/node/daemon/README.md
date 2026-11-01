@@ -59,6 +59,12 @@ is read here and no test tooling is imported.
   refuses. A symbolic link as the data directory is refused.
 - **One shutdown path, lock last.** An orderly stop, a fatal failure and a failed
   start take the same five steps; `RequestStop` runs it once.
+- **The daemon works in its data directory.** Step 1 makes the data directory the
+  working directory after the lock is held, so that the adapter processes, which
+  inherit it, never run in a directory the daemon was started from and that may be
+  removed; failing to do so fails the start. A daemon over an explicit `Config.FS`
+  leaves its working directory alone. In tests a daemon over a real home changes the
+  test process's working directory, so `newHome` restores it when the test ends.
 - **The adapter host is wired by field, not by hook.** `Config.AdapterHost` is given to
   the engine (only when not nil), started at step 10 with `Env.Home` the absolute data
   directory (the instance lock files `adapter-<instance>.lock` are at its root, and the host makes

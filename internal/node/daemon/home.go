@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sync/atomic"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -56,6 +57,24 @@ func checkPermissions(r fsx.Reader, home string) error {
 		return err
 	}
 	return keys.CheckPermissions(r)
+}
+
+// enterHome makes the data directory the working directory of the daemon, and so
+// of every adapter process it starts, which inherits it. Without it they would run
+// in whatever directory the daemon was started from, which can be removed while the
+// daemon runs (a git worktree, say), and a program started in a directory that no
+// longer exists fails. The data directory is the one directory the daemon owns and
+// keeps. An explicit Config.FS is not the machine's file system and its home need
+// not be a directory there, so it is left out. Adapters that run a native runtime
+// do it in the directory their preset names, never in this one.
+func (d *Daemon) enterHome() error {
+	if d.cfg.FS != nil {
+		return nil
+	}
+	if err := os.Chdir(d.home); err != nil {
+		return fmt.Errorf("daemon: changing the working directory to the data directory: %w", err)
+	}
+	return nil
 }
 
 // instanceLock is the lock of the data directory, which the listeners ask the

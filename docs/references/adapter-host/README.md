@@ -271,7 +271,8 @@ instance that is still enabled.
 
 `ExecLauncher` starts the program `entry.program` of the manifest, relative to the
 directory of the installed version, with the manifest's arguments and the process's
-own environment plus `ExecLauncher.Env`. Standard error goes to the instance's
+own environment plus `ExecLauncher.Env`, in the working directory of the daemon, which
+is its data directory (see the [daemon](../daemon/README.md) reference). Standard error goes to the instance's
 writer. Standard output is read through a pipe the launcher closes after the process
 has been waited for, so every byte the program wrote is read before the stream ends;
 reading the process's pipe directly and waiting early can drop output that was not

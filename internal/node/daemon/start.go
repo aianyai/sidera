@@ -124,7 +124,8 @@ func (d *Daemon) env() *Env {
 // is taken. The permissions come first and refuse without narrowing; a data
 // directory that init did not finish is not started; and only then is the lock
 // taken, so that a refused start leaves no lock file and a second daemon is told
-// that one is running.
+// that one is running. Last, the daemon makes the data directory its working
+// directory (see enterHome).
 func (d *Daemon) stepLock(context.Context) error {
 	fsys, err := openHome(d.cfg, d.home)
 	if err != nil {
@@ -139,8 +140,10 @@ func (d *Daemon) stepLock(context.Context) error {
 	} else if !done {
 		return fmt.Errorf("%w: %s has no keys/init.rec", ErrNotInitialized, d.home)
 	}
-	d.lock, err = takeLock(fsys, d.home)
-	return err
+	if d.lock, err = takeLock(fsys, d.home); err != nil {
+		return err
+	}
+	return d.enterHome()
 }
 
 // Step 2: the transaction layer recovers (the settle, then the removal of every
