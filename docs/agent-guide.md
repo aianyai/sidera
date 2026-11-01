@@ -16,6 +16,12 @@ check it and what to do if the check fails. Run a step's check before the next
 step. Replace anything in angle brackets. Stop and report to your owner when a
 step fails twice.
 
+**One setting for every command.** Every `sidera` and `sidera-adapter-console`
+command, and the daemon, uses the data directory named by `--home`, then by
+`SIDERA_HOME`, then `~/.sidera`. If a command needs another directory, every command
+for that node needs the same `SIDERA_HOME`. A second node on the same machine needs
+its own `SIDERA_HOME` and its own port.
+
 ## Ask your owner before
 
 Do not do any of the following without your owner's explicit yes in this
@@ -24,11 +30,13 @@ conversation. Ask once, say what you will do and why, and wait.
 1. **Choosing a full-access preset.** Codex `danger-full-access` or Claude
    `bypassPermissions` lets any trusted node in the cluster direct an agent on
    this machine to run anything on it, and the session's Sidera token is visible to
-   everything the agent runs. Add only the `light` preset below unless the owner
-   chose otherwise.
+   everything the agent runs. The node's management interface trusts the operating
+   system user, not the session, so such a session also runs every owner command and
+   acts as the local owner of the node. Add only the `light` preset below unless the
+   owner chose otherwise.
 2. **Changing the firewall.** Opening port 7744 or adding a rule is the owner's
    call. Tell the owner the exact command and let them run it, or run it only after
-   a yes.
+   a yes. Allow the local network only.
 3. **Pairing with a node the owner did not name.** Pair only with the node ids the
    owner gave you. A pairing grants that node the right to start sessions here.
 4. **Closing sessions you did not create.** You may close sessions you created
@@ -36,10 +44,29 @@ conversation. Ask once, say what you will do and why, and wait.
 5. **Installing an adapter from an unknown source.** Install adapter packages only
    from the official release archive of Sidera or from a build the owner gave you.
    An adapter runs as a program with the owner's rights.
+6. **Any owner command from inside a Sidera session.** `preset`, `adapter`, `trust`,
+   `network`, `endpoint close`, `daemon stop` and `identity` manage the node. When
+   you run inside a Sidera session (Part 2) the node would let you run them under a
+   full-access preset, because it trusts the user, but they are the owner's to
+   decide. Do not run them there without a yes.
+7. **Creating a session with a full-access preset on another node.** The agent
+   there then runs anything on that machine. Use `light` unless the owner named the
+   other preset.
+8. **`trust remove` and `trust clear`.** They cut a node off or take it back, and
+   the other node is not told.
+9. **`adapter config` that points at another program.** `codex_program`,
+   `sidera_program`, `claude_path` and `sidera_path` name programs the daemon runs
+   with the owner's rights.
+10. **Choosing the working directory** (`project_dir` for Claude, `cwd` for Codex)
+    that sessions started by trusted nodes will work in. Ask which directory to use.
+11. **Persistent changes outside Sidera's own directories:** editing a shell
+    profile, changing the Windows user `PATH`, registering a scheduled task. Ask
+    once before the first one and name the file or setting.
 
 Also ask before you delete anything under `~/.sidera` (the node's keys and state)
 and before you run `sidera identity retire`, which permanently destroys the node's
-identity.
+identity. Before a data directory is deleted, the Codex App Server it started has to
+be ended too (step 4).
 
 ---
 
@@ -75,8 +102,9 @@ identity.
    Get-NetTCPConnection -LocalPort 7744 -ErrorAction SilentlyContinue   # Windows
    ```
 
-   If it is taken, choose another port with `sidera init --port <n>` in step 4 and
-   use that port everywhere below.
+   If it is taken, create the node on another port in step 3 with
+   `sidera init --port <n>`, and use that port wherever 7744 appears below. This is
+   the one way this guide moves the port; steps 3 and 4 refer back here.
 
 4. Check that no node exists yet.
 
@@ -125,8 +153,10 @@ Choose A (release archive) or B (source).
    export PATH="$HOME/.local/bin:$PATH"
    ```
 
-   Make sure `~/.local/bin` is on the `PATH` of the owner's login shell (add the
-   `export` line to the shell profile if it is not). On macOS, if a program is
+   The `export` lasts for this shell. Make sure `~/.local/bin` is on the `PATH` of
+   the owner's login shell too: if it is not, ask your owner (see "Ask your owner
+   before"), then add the `export` line to the file that shell reads (`~/.zprofile`
+   for zsh, `~/.bash_profile` or `~/.profile` for bash). On macOS, if a program is
    refused because it was downloaded by a browser, run
    `xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-console`.
 
@@ -140,10 +170,12 @@ Choose A (release archive) or B (source).
    $env:Path += ";$env:USERPROFILE\sidera\bin"
    ```
 
+   Changing the user `PATH` is a persistent change (see "Ask your owner before").
    If the archive extracted into a subdirectory, copy from there. The adapter
    packages (Codex, Claude Code on macOS, console) are in the extracted
-   `adapters/<name>/` directories; the adapter programs for Codex and Claude Code
-   are inside them and are not copied by hand.
+   `adapters/<name>/` directories, `~/sidera-release/adapters/<name>` on macOS and
+   Linux and `%USERPROFILE%\sidera-release\adapters\<name>` on Windows; the adapter
+   programs for Codex and Claude Code are inside them and are not copied by hand.
 
 ### B. Build from source
 
@@ -151,7 +183,7 @@ You need Go 1.26 or newer.
 
 ```sh
 git clone https://github.com/aianyai/sidera.git && cd sidera
-mkdir -p bin packages
+mkdir -p bin packages ~/.local/bin
 CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex
 CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude      # macOS only
 for a in console codex; do bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-$a --out packages/$a; done
@@ -160,19 +192,26 @@ bin/sidera-adapter-claude package --goos darwin --goarch "$(go env GOARCH)" --bi
 cp bin/sidera bin/sidera-adapter-console ~/.local/bin/
 ```
 
-The packages are then in `packages/<name>/`. On Windows, use the same commands in
-PowerShell and the `.exe` names, and copy the programs into
-`%USERPROFILE%\sidera\bin`.
+The packages are then in `packages/<name>/`. On macOS and Linux, put `~/.local/bin`
+on the `PATH` as in A.3 (`export PATH="$HOME/.local/bin:$PATH"`, and the login shell
+file with your owner's yes). On Windows, use the same commands in PowerShell and the
+`.exe` names, and copy the programs into `%USERPROFILE%\sidera\bin` and onto the
+user `PATH` as in A.3.
 
 ### Check
 
 ```sh
 sidera version
+"$SHELL" -l -c 'command -v sidera'      # macOS and Linux
+(Get-Command sidera).Source             # Windows
 ```
 
 Expected: one line such as `sidera 0.8.0 (commit abc123456789, go1.26.10)`. A
-program built from source without release settings prints `0.0.0-dev`. If the
-command is not found, the directory is not on the `PATH`; fix that first.
+program built from source without release settings prints `0.0.0-dev`. The second
+command starts a login shell and must print the path of the binary you just
+installed (`~/.local/bin/sidera` expanded), not another one and not nothing: the
+daemon and the owner's other shells find `sidera` the way a login shell does. If
+`sidera` is not found, the directory is not on the `PATH`; fix that first.
 
 ## 3. Create the node
 
@@ -189,9 +228,10 @@ home <home>
 Run `sidera identity export-revocation` to export it.
 ```
 
-Record the `node <node-id>` value: it is this machine's identity. Check: `ls
-~/.sidera` shows the directory. If `init` says the directory is already
-initialized, a node exists: stop (see step 1.4). `init` never overwrites.
+To use another port (step 1.3), run `sidera init --port <n>` instead. Record the
+`node <node-id>` value: it is this machine's identity. Check: `ls ~/.sidera` shows
+the directory. If `init` says the directory is already initialized, a node exists:
+stop (see step 1.4). `init` never overwrites.
 
 Tell your owner to back up the self-revocation (step 9 does it).
 
@@ -200,27 +240,31 @@ Tell your owner to back up the self-revocation (step 9 does it).
 The daemon must run with an environment in which `sidera` and the agent runtime
 (`codex` or `claude`) are on the `PATH`, and it must not end when your session ends.
 
-Start the daemon from a stable directory such as the home directory, never from a
-directory that may be deleted later, such as a git worktree: the daemon and its
-adapters run in that directory, and if it disappears sessions fail with
-`native_unavailable`.
+Start the daemon from your home directory, not from a directory that may be deleted
+later, such as a git worktree.
 
 **macOS and Linux.** Use `tmux` (or `screen`):
 
 ```sh
-tmux new-session -d -s sidera -c "$HOME" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
+tmux new-session -d -s sidera -c "$HOME" -e PATH="$PATH" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
 ```
 
-If you are in a non-login shell (for example over SSH), start it through a login
-shell so that the `PATH` is complete:
+A tmux session starts with the environment of the tmux server, not of your shell, and
+the server may be much older. `-e PATH="$PATH"` hands the session your shell's
+`PATH` (tmux 3.2 or newer), so run the command in a shell where `command -v sidera`
+and `command -v codex claude` print paths. If the node uses a `SIDERA_HOME`, add
+`-e SIDERA_HOME=<directory>`. If `tmux` is an alias, use `/usr/bin/env tmux`.
+Without tmux, `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &` also works.
+
+Check right away and again after a few seconds:
 
 ```sh
-tmux new-session -d -s sidera -c "$HOME" "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"
+tmux ls
 ```
 
-(Use `bash -lic` if the shell is bash. If `tmux` is an alias, use
-`/usr/bin/env tmux`. Without tmux, `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &`
-also works.)
+Expected: a line for the session `sidera`. If it is gone, the daemon exited: run
+`sidera daemon` once in the foreground, in the same shell, read the error, and
+stop it with Ctrl-C.
 
 **Windows.** A process started from your session ends with it. Start the daemon
 through WMI instead. First create `%USERPROFILE%\sidera\start-daemon.cmd` (CRLF
@@ -260,12 +304,28 @@ Expected: `0`.
 sidera status
 ```
 
-Expected: node status, not an error. If you get `daemon_not_running`, read the
-log you redirected to. Common causes: port 7744 in use (the error names the
-address; use `sidera network listen set` to move it and restart), or a socket
-path too long (use a shorter `SIDERA_HOME`).
+Expected: a listing that contains the line `daemon.state running`, possibly after a
+warning line (the self-revocation is not confirmed yet; step 9). If you get
+`daemon_not_running`, read the log you redirected to. Common causes: port 7744 in
+use (the error names the address and the daemon exits; free the port, or create
+the node again on another port as in step 1.3 if nothing is paired yet and your
+owner agrees to delete `~/.sidera`), or a socket path too long (use a shorter
+`SIDERA_HOME`).
 
-To stop the daemon, run `sidera daemon stop`.
+To stop the daemon, run `sidera daemon stop`. It leaves the **Codex App Server**
+running, by design: the Codex adapter starts it detached so that a running turn
+survives a restart of the daemon. Before you delete a data directory, end it, after
+the daemon has stopped. On macOS and Linux, find the process whose command line
+names this node's `adapter-state` directory and end it (do not touch an App Server
+of the owner's own Codex):
+
+```sh
+ps -axo pid,command | grep '[a]pp-server --listen unix://.*adapter-state'
+kill <pid>
+```
+
+On Windows the process id is in `%USERPROFILE%\.sidera\adapter-state\codex\app-server.json`;
+run `Stop-Process -Id <pid>`.
 
 ## 5. Install and enable adapters
 
@@ -289,51 +349,45 @@ Check, after a few seconds:
 sidera adapter list
 ```
 
-Expected: every enabled instance shows a probe state of `passed`. If it shows
-`failed`, read `~/.sidera/logs/adapter-<instance>.log`. For Codex, `passed` does
+Expected: the console instance (and Claude, on macOS) shows a probe state of
+`passed`. The Codex instance shows `pending` first, and once a `workspace-write`
+preset exists (step 6) it may show `failed`: the probe needs the command-line front
+end, which that sandbox does not offer. This is a known limit of the display, not a
+fault; do not try to fix it, and rely on step 10 to show that Codex works. For any
+other `failed`, read `~/.sidera/logs/adapter-<instance>.log`. A Codex `passed` does
 not prove that `codex` is found; step 10 does.
 
 ## 6. Add a preset
 
 A preset tells Sidera how to run a session on this machine. Name it the same on
 every machine (this guide uses `light`), so that agents on other machines can use it.
-Use an existing working directory. Add the **`light`** preset (channel and light
-work). Add a **`dev`** preset (full access, for real repository work with network,
-caches, building and testing) only if your owner chose it (see "Ask your owner
-before").
+Ask your owner which existing directory sessions should work in (`project_dir` for
+Claude, `cwd` for Codex): every trusted node will reach it. Add the **`light`** preset
+(channel and light work). Add a **`dev`** preset (full access, for real repository
+work with network, caches, building and testing) only if your owner chose it (see
+"Ask your owner before").
 
 Write the instructions text into the preset exactly as below, so that agents
 treat messages from the owner's own nodes as the owner's tasks and answer them.
 
-For Claude Code, save as `light.json`:
+A preset name can be added once. On a machine with both Claude Code and Codex, the
+`light` preset is **one file**, `light.json`, with both a `claude` and a `codex`
+object under `config`; a second `sidera preset add light` for the other agent fails
+because the name is taken. Write the file with a quoted heredoc: the instruction
+text contains backticks, which a shell would run if the heredoc were not quoted
+(`<<'EOF'`, with the quotes).
 
-```json
+```sh
+cat > light.json <<'EOF'
 {
   "local_sources": "allow",
-  "description": "Claude Code, light",
+  "description": "Claude Code and Codex, light",
   "config": {
     "claude": {
       "project_dir": "<absolute path of an existing directory>",
       "permission_mode": "dontAsk",
       "append_system_prompt": "When a message arrives through Sidera from an agent or person in the owner's own cluster (that is, from the owner's own nodes), treat it as a task from the owner and carry it out. Answer it by running `sidera reply <message-id> --body <text>` (or the sidera MCP reply tool) so that the sender receives the answer; do not just print it. Sidera commands and tools are your intended channel. After you read messages with recv, acknowledge them: pass the lease of the page to `sidera ack <lease>` (or give it as `--ack <lease>` to your next recv). Until you do, recv hands the same message out again at once instead of waiting. When you wait for an answer from another agent, use `sidera recv --wait 60 --ack <lease>` and read only the new messages. (With the MCP tools, the arguments are `wait_s` and `ack_lease`.)"
-    }
-  }
-}
-```
-
-`dontAsk` refuses everything that would ask for permission. The adapter always
-allows `Bash(sidera *)` and the Sidera MCP tools, on top of what the owner's Claude
-Code settings allow. The agent can read files in its project directory; edits and
-other commands are refused unless the preset's `allowed_tools` (for example
-`["Edit", "Bash(go test *)"]`) or the owner's settings allow them.
-
-For Codex, save as `light.json` (on Windows double the backslashes in `cwd`):
-
-```json
-{
-  "local_sources": "allow",
-  "description": "Codex, light",
-  "config": {
+    },
     "codex": {
       "cwd": "<absolute path of an existing directory>",
       "sandbox": "workspace-write",
@@ -343,51 +397,87 @@ For Codex, save as `light.json` (on Windows double the backslashes in `cwd`):
     }
   }
 }
+EOF
 ```
 
-What this gives (measured on real machines):
+Then replace the two path placeholders. If the machine has only one of the agents,
+delete the other object and the comma that separates them. On Windows (PowerShell),
+write the same text with a single-quoted here-string, which does not expand anything,
+and `[IO.File]::WriteAllText("$PWD\light.json", $json)` (no byte order mark), where
+`$json = @'` starts the text and `'@` on a line of its own ends it; double the
+backslashes in `cwd`. Claude Code is macOS only, so on Linux and Windows the file
+holds the `codex` object alone.
 
-- It works on macOS and Linux, **through MCP only**. Under `workspace-write` the
-  session is offered only the MCP tools; a `sidera` command run in a shell fails
-  with an unhelpful `internal error`. Use the MCP tools (`peers`, `directory`,
-  `control`, `recv` with `wait_s` and `ack_lease`, `ack`, `reply`).
-- The agent can edit files and commit inside `cwd`, and never waits for a person.
-- There is no network at all: no module downloads, no package installs. A tool whose
-  cache lives outside the workspace fails until pointed inside it (for Go, set
-  `GOCACHE` to a directory inside the workspace). Only modules already in the
-  read-only module cache can be used.
-- It limits writes, not reads: the agent can still read outside `cwd`, including
-  `SIDERA_HOME`.
-- On Windows it depends on Codex's own sandbox working. Run
-  `codex sandbox -- cmd /c echo hi` first; if it fails, tell your owner. With
-  `[windows] sandbox = "elevated"` in `~/.codex/config.toml` every shell command
-  failed, while `unelevated` worked. That is the owner's Codex setting, not a
-  Sidera key; do not change it without asking.
-- `sidera adapter list` may show the Codex probe as `failed` while a
-  `workspace-write` preset exists, because no command-line front end is offered.
-  Sessions still work.
+What the `light` preset gives:
 
-Add `"model"` and `"effort"` (`low`, `medium`, `high`, `xhigh`) to keep the cost
-down; without them the owner's Codex defaults apply.
+- **Claude Code**: `dontAsk` refuses everything that would ask for permission. The
+  adapter always allows the Sidera MCP tools and the agent commands of `sidera`
+  (`recv`, `ack`, `reply`, `send`, `status`, `control`, `directory`, `peers`, `me`
+  and the like), on top of what the owner's Claude Code settings allow. It does not
+  allow the owner commands (`preset`, `adapter`, `trust`, `identity`, `daemon` and
+  the rest), so a `light` session cannot manage the node. If the owner's own Claude
+  settings allow a broader `Bash`, the session gets that too. The agent can read files
+  in its project directory; edits and other commands are refused unless the preset's
+  `allowed_tools` (for example `["Edit", "Bash(go test *)"]`) or the owner's settings
+  allow them.
+- **Codex**, measured on real machines:
+  - It works on macOS and Linux, **through MCP only**. Under `workspace-write` the
+    session is offered only the MCP tools; a `sidera` command run in a shell cannot
+    reach the daemon and fails with `cannot reach the Sidera daemon at <socket
+    path>: permission denied (a sandbox may be blocking it)`. Use the MCP tools
+    (`peers`, `directory`, `control`, `recv` with `wait_s` and `ack_lease`, `ack`,
+    `reply`).
+  - The agent can edit files and commit inside `cwd`, and never waits for a person.
+  - There is no network at all: no module downloads, no package installs. A tool
+    whose cache lives outside the workspace fails until pointed inside it (for Go,
+    set `GOCACHE` to a directory inside the workspace). Only modules already in the
+    read-only module cache can be used.
+  - It limits writes, not reads: the agent can still read outside `cwd`, the whole
+    data directory (`~/.sidera` or `SIDERA_HOME`) included: the node's identity key
+    (`keys/identity.key`) and the tokens of the other sessions on the node, and it
+    could send them over Sidera. Tell your owner.
+  - On Windows it depends on Codex's own sandbox working. Run
+    `codex sandbox -- cmd /c echo hi` first; if it fails, tell your owner. With
+    `[windows] sandbox = "elevated"` in `~/.codex/config.toml` every shell command
+    failed, while `unelevated` worked. That is the owner's Codex setting, not a
+    Sidera key; do not change it without asking.
+  - `sidera adapter list` shows the Codex probe as `pending` and may show it as
+    `failed` while a `workspace-write` preset exists, because no command-line front
+    end is offered. Sessions still work.
+
+**The management interface trusts the user, not the session.** Any process that runs
+as the operating-system user of the node may use the owner commands. Under a
+full-access preset (Codex `danger-full-access`, Claude `bypassPermissions`, or Claude
+settings that allow all of `Bash`) an agent session can run every owner command and
+acts as the local owner. Under `light`, Claude cannot (above), and a Codex
+`workspace-write` session has only MCP and cannot reach the daemon socket from its
+shell on Linux and macOS. On Windows this was not measured. For that reason the
+owner commands are on the "Ask your owner before" list when you run in a session.
+
+Add `"model"` and `"effort"` (`low`, `medium`, `high`, `xhigh`) to the Codex object
+to keep the cost down; without them the owner's Codex defaults apply.
 
 If your owner chose full access, add a second preset named `dev`: copy `light.json`
-and set, for Codex, `"sandbox": "danger-full-access"` (keep `"approval_policy":
-"never"` and `"approvals": "deny"`), or, for Claude Code, `"permission_mode":
-"bypassPermissions"`. Tell your owner the risk: any trusted node in the cluster can
-then direct the agent here to run anything on this machine, and the session's Sidera
-token is visible to everything the agent runs.
+to `dev.json` and set, for Codex, `"sandbox": "danger-full-access"` (keep
+`"approval_policy": "never"` and `"approvals": "deny"`), or, for Claude Code,
+`"permission_mode": "bypassPermissions"` (in a file with both objects, change both). Tell your owner the risk: any trusted
+node in the cluster can then direct the agent here to run anything on this machine,
+and the session's Sidera token is visible to everything the agent runs.
 
 Add the presets:
 
 ```sh
 sidera preset add light --file light.json
 sidera preset add dev --file dev.json      # only if the owner chose it
-sidera preset list
+sidera preset list --json
 ```
 
-Expected: `light` is listed. If `preset add` says a name is taken, a preset cannot be
-edited: `sidera preset remove light`, then add it again. The default preset `default`
-that `init` made holds no agent settings and cannot start a session.
+Expected from `preset add`: the preset is accepted. Expected from the list: a
+`presets` array with an entry whose `name` is `light` (and `dev` if you added it). If
+`preset add` says a name is taken, a preset cannot be edited: `sidera preset remove
+light`, then add it again. The default preset `default` that `init` made holds no
+agent settings and cannot start a session. Adding a preset restarts the adapters that
+run.
 
 ## 7. Exchange contact lines with the other machine
 
@@ -398,8 +488,10 @@ that `init` made holds no agent settings and cannot start a session.
    ```
 
    The first line is `<node-id> <multiaddr> <multiaddr>...`. Each address ends in
-   `/p2p/<peer-id>`. If some addresses cannot be reached from the other machine (a
-   VPN or proxy interface), note which ones to leave out.
+   `/p2p/<peer-id>`. Some addresses cannot be reached from the other machine: those
+   of a VPN or proxy interface, or of a network the other machine is not on. Note
+   which ones to leave out; the other machine enters only the addresses it can
+   reach. The port in them is the one from step 1.3.
 
 2. Give that line to your owner (or, through the owner, to the agent on the other
    machine) and get the other machine's contact line in return. Do not guess an
@@ -411,19 +503,23 @@ that `init` made holds no agent settings and cannot start a session.
    sidera network address set <other-node-id> <multiaddr> <multiaddr>
    ```
 
-   Check: `sidera network show` lists `<other-node-id>` under `peers` with its
-   addresses.
+   Check: `sidera network show` lists `<other-node-id>` under `peers` with exactly
+   the addresses you entered. If an address you meant to leave out is listed, run
+   `network address set` again with only the right ones (it replaces the list).
 
-4. If the firewall blocks port 7744, ask your owner (see "Ask your owner before").
-   The commands are, on Windows (administrator PowerShell):
+4. If the firewall blocks port 7744 (or the port from step 1.3), ask your owner (see
+   "Ask your owner before"). Allow the local network only. The commands are, on
+   Windows (administrator PowerShell):
 
    ```powershell
-   New-NetFirewallRule -DisplayName "Sidera TCP" -Direction Inbound -Protocol TCP -LocalPort 7744 -Action Allow -Profile Private
-   New-NetFirewallRule -DisplayName "Sidera QUIC" -Direction Inbound -Protocol UDP -LocalPort 7744 -Action Allow -Profile Private
+   New-NetFirewallRule -DisplayName "Sidera TCP" -Direction Inbound -Protocol TCP -LocalPort 7744 -Action Allow -Profile Private -RemoteAddress LocalSubnet
+   New-NetFirewallRule -DisplayName "Sidera QUIC" -Direction Inbound -Protocol UDP -LocalPort 7744 -Action Allow -Profile Private -RemoteAddress LocalSubnet
    ```
 
-   on Linux with ufw: `sudo ufw allow 7744/tcp` and `sudo ufw allow 7744/udp`. On
-   macOS, allow incoming connections for `sidera` if the system asks.
+   and on Linux with ufw, for both TCP and UDP (use the address range of the owner's
+   network for `<lan-cidr>`, for example `192.168.1.0/24`):
+   `sudo ufw allow from <lan-cidr> to any port 7744`. On macOS, allow incoming
+   connections for `sidera` if the system asks.
 
 ## 8. Pair
 
@@ -480,12 +576,16 @@ contents into the conversation. Once the owner confirms it is stored, run:
 sidera identity confirm-backup <digest>
 ```
 
+If `confirm-backup` is never run, nothing stops working, but `sidera status` keeps
+warning about the unconfirmed backup on every call.
+
 ## 10. Verify end to end
 
 1. From this machine's console, find the other machine's agent runtime. On the
-   other machine, `sidera endpoint list --instance codex` (or `claude`) shows a line
-   whose `KIND` is `runtime`; its address is `<node-id>/<endpoint-id>`. Get that
-   address from the other machine's owner or agent.
+   other machine, `sidera endpoint list --instance codex` (or `claude`) lists
+   endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`;
+   its address is `<node-id>/<endpoint-id>`. Get that address from the other
+   machine's owner or agent.
 
 2. Start a session there and ask it for something harmless.
 
@@ -493,12 +593,16 @@ sidera identity confirm-backup <digest>
    sidera-adapter-console new <node-id>/<endpoint-id> --preset light --body 'Reply with the output of uname -a.'
    ```
 
-   Expected, after 20 to 30 seconds:
+   Expected, after 10 to 30 seconds:
 
    ```
    message: <message-id>
    session: <node-id>/<session-endpoint-id>
    ```
+
+   The `session:` line is the address to use for follow-ups, for example
+   `sidera-adapter-console send --to <that address> --body '...'` (`--to` also takes
+   a comma-separated list of addresses).
 
 3. Read the reply.
 
@@ -506,12 +610,20 @@ sidera identity confirm-backup <digest>
    sidera-adapter-console recv --wait 30
    ```
 
-   Expected: a message from the new session with its answer. Run it again if you
-   get `no messages` on standard error; give it up to a minute.
+   Expected: a message from the new session with its answer. The console's `recv`
+   acknowledges what it printed. Run it again if you get `no messages` on standard
+   error; give it up to a minute.
+
+4. Close the test session when you are done, on the node that hosts it (the
+   `<node-id>` of the session address), from outside any session:
+
+   ```sh
+   sidera endpoint close <session-address>
+   ```
 
 If `new` fails with `native_unavailable`, the daemon on the other machine cannot
-find `codex` or `claude` on its `PATH`: restart that daemon through a login shell,
-or on Windows through the script in step 4. If it fails with `preset_unknown` or
+find `codex` or `claude` on its `PATH`: restart that daemon with the `PATH` set as in
+step 4 (on Windows through the script there). If it fails with `preset_unknown` or
 `preset_invalid`, the preset does not exist there under that name or its directory
 does not exist.
 
@@ -525,13 +637,22 @@ names, and the result of this step.
 These rules apply to an agent that runs inside a Sidera session: a session that
 Sidera started from a preset, which has a credential (`SIDERA_TOKEN`) and the
 `sidera` MCP tools. Use the MCP tools when you have them. Use the `sidera` command
-only when your session offers it (a Codex `workspace-write` sandbox offers MCP only). The
+only when your session offers it (a Codex `workspace-write` sandbox offers MCP only; a
+`sidera` command there fails with `cannot reach the Sidera daemon`). The
 operation names are the same.
 
 If you are not inside a session (you were started by hand), you have no credential:
 `sidera recv`, `send` and the other agent commands fail with
 `unauthenticated/token_missing`. Use the owner's console instead:
-`sidera-adapter-console new | send | reply | recv | status | whoami`.
+`sidera-adapter-console new | send | reply | recv | status | whoami`. The console has
+no `directory`, `control` or `peers`: those need a session. From outside a session,
+find a node's runtime endpoint by running `sidera endpoint list --instance codex` (or
+`claude`) on that machine and taking the `runtime` row whose `STATE` is `open`.
+
+Inside a session, the owner commands (`preset`, `adapter`, `trust`, `network`,
+`endpoint close`, `daemon stop`, `identity`) may work, depending on the preset,
+because the node's management interface trusts the user, not the session. Do not run
+them there without your owner's yes (see "Ask your owner before").
 
 ## The rules
 
@@ -544,12 +665,15 @@ If you are not inside a session (you were started by hand), you have no credenti
 3. **Always acknowledge the page.** `recv` does not acknowledge. Until you do, the
    next `recv` returns the same page again at once. Acknowledge with
    `ack` (`sidera ack <lease>`), or pass the page's lease to your next `recv`
-   (`ack_lease` in MCP, `--ack <lease>` on the command line).
+   (`ack_lease` in MCP, `--ack <lease>` on the command line). The exception is the
+   owner's console: `sidera-adapter-console recv` acknowledges what it printed for
+   you.
 4. **Answer with `reply`, not by printing.** `reply` takes the message id and the
    body (`sidera reply <message-id> --body <text>`). The node sends it to the
    message's sender. Reply even when you only report a failure.
 5. **Send with `send`.** `send` takes exactly one address (`<node-id>/<endpoint-id>`)
-   and a non-empty body. Use `--body-file <file>` for a long body (`-` reads
+   and a non-empty body. (The console's `send --to <address>,<address>` takes a
+   comma-separated list.) Use `--body-file <file>` for a long body (`-` reads
    standard input). A successful `send` means the message was accepted, not
    delivered; check with `status <message-id>`.
 6. **Find where to send.** `peers` lists the nodes you can see. `directory --node
@@ -584,12 +708,15 @@ If you are not inside a session (you were started by hand), you have no credenti
     sender of its first message with `reply`. Its preset already carries the
     instructions to do so; ask for a short, concrete answer in the task text.
 12. **Close only what you created.** `control <session-address> session.close` closes
-    a session you started when it is done. Ask your owner before closing any other.
+    a session you started when it is done. From outside a session, run
+    `sidera endpoint close <session-address>` on the node that hosts it. Ask your
+    owner before closing any other.
 13. **Do not wait forever.** If a node does not answer after several `recv` rounds,
     check `status <message-id>` for the delivery state and `peers` for `connected`,
     and tell your owner what you found.
 14. **Never send secrets** (tokens, keys, `SIDERA_TOKEN`, the contents of
-    `~/.sidera`) in a message.
+    `~/.sidera`) in a message. Under a Codex `workspace-write` preset you can read
+    them; that is not permission to send them.
 
 ## An example, step by step
 
