@@ -8,7 +8,9 @@ Read [../../README.md](../../README.md) and
 record, the state of the turn it started. The order of the rules is the order of
 the evidence: the record first (a prompt in it was delivered, whatever else is
 true), then the checkpoint (no checkpoint proves nothing was started), then an
-unreadable record, then a running turn process, and only then "absent".
+unreadable record, a record whose user lines are not in the form the lookup reads and a turn
+that succeeded on a prompt the record does not show (both `record_unreadable`: the lookup misses
+what is there), then a running turn process, and only then "absent".
 
 The grounds always belong to the verdict as the protocol requires; the test
 validates every row as a protocol result.

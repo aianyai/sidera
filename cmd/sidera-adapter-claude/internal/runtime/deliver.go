@@ -151,6 +151,7 @@ func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adap
 	if err != nil {
 		a.log.Warn("the session file cannot be read", "endpoint", s.endpoint, "error", err)
 	}
+	in.RecordRecognized = ix.Recognized()
 	in.InRecord = in.RecordReadable && ix.UserSeen(attempt)
 
 	snap, err := a.o.Table.Snapshot()
@@ -158,15 +159,13 @@ func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adap
 		return adapterproto.ReconcileResult{}, err
 	}
 	in.SessionBusy = len(a.turnProcesses(snap, s.id)) > 0
-	if in.InRecord {
-		if s.turn != nil && s.turn.Attempt == attempt {
-			info := snap.Lookup(s.turn.Process.PID)
-			in.TurnAlive = info.Alive && info.StartKey() == s.turn.Process.StartKey
-			in.Interrupted = s.turn.Interrupted
-		}
-		if !in.TurnAlive {
-			in.Outcome = a.lastResult(s.id, attempt)
-		}
+	if s.turn != nil && s.turn.Attempt == attempt {
+		info := snap.Lookup(s.turn.Process.PID)
+		in.TurnAlive = info.Alive && info.StartKey() == s.turn.Process.StartKey
+		in.Interrupted = s.turn.Interrupted
+	}
+	if !in.TurnAlive {
+		in.Outcome = a.lastResult(s.id, attempt)
 	}
 	v := reconcile.Decide(in)
 	res := adapterproto.ReconcileResult{Verdict: v.Verdict, Grounds: adapterproto.Grounds{Code: v.Grounds}}

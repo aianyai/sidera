@@ -15,14 +15,23 @@ import (
 // The runtime writes the uuid of a stream-json user message as the uuid of its
 // user record; only a line of type "user" counts, because other lines (queue
 // operations, attachments) carry uuids or none and are not prompts.
+//
+// A third fact says whether the first two can be trusted: whether every user
+// line carries a uuid and a session id, as the lookup assumes. A prompt that is
+// not found proves nothing about a file whose user lines are not in that form.
 type Index struct {
-	session string
-	watched map[string][]byte
-	seen    map[string]bool
-	hasID   bool
-	partial []byte
-	read    int64
+	session      string
+	watched      map[string][]byte
+	seen         map[string]bool
+	hasID        bool
+	unrecognized bool
+	partial      []byte
+	read         int64
 }
+
+// userMarker is in every line of type "user", whatever spaces the writer puts
+// around the type's colon.
+var userMarker = []byte(`"user"`)
 
 // NewIndex returns an Index for a session that watches the given user uuids; more
 // can be added with Watch.
@@ -72,8 +81,13 @@ func (ix *Index) SessionSeen() bool { return ix.hasID }
 // UserSeen reports whether a user record with the watched uuid was fed.
 func (ix *Index) UserSeen(uuid string) bool { return ix.seen[uuid] }
 
+// Recognized reports whether every user line fed carried a uuid and a session id,
+// both strings. When it is false the record is in a form this package does not
+// read, and no prompt may be called absent from it.
+func (ix *Index) Recognized() bool { return !ix.unrecognized }
+
 func (ix *Index) judge(line []byte) {
-	interesting := !ix.hasID && bytes.Contains(line, []byte(ix.session))
+	interesting := bytes.Contains(line, userMarker) || (!ix.hasID && bytes.Contains(line, []byte(ix.session)))
 	if !interesting {
 		for _, u := range ix.watched {
 			if bytes.Contains(line, u) {
@@ -85,13 +99,17 @@ func (ix *Index) judge(line []byte) {
 	if !interesting {
 		return
 	}
-	var rec struct {
-		Type      string `json:"type"`
-		UUID      string `json:"uuid"`
-		SessionID string `json:"sessionId"`
+	var raw struct {
+		Type      string          `json:"type"`
+		UUID      json.RawMessage `json:"uuid"`
+		SessionID json.RawMessage `json:"sessionId"`
 	}
-	if json.Unmarshal(line, &rec) != nil {
+	if json.Unmarshal(line, &raw) != nil {
 		return
+	}
+	rec := struct{ Type, UUID, SessionID string }{raw.Type, text(raw.UUID), text(raw.SessionID)}
+	if rec.Type == "user" && (rec.UUID == "" || rec.SessionID == "") {
+		ix.unrecognized = true
 	}
 	if rec.SessionID == ix.session {
 		ix.hasID = true
@@ -100,6 +118,15 @@ func (ix *Index) judge(line []byte) {
 		ix.seen[rec.UUID] = true
 		ix.hasID = true
 	}
+}
+
+// text is the value of a JSON string; anything else, absent included, is "".
+func text(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // Write feeds p, so that an Index can be the destination of io.Copy.

@@ -243,6 +243,46 @@ func TestReconcile(t *testing.T) {
 	}
 }
 
+// An attempt is called absent only from a record whose form the lookup reads. A
+// Claude Code release that wrote its user records differently would otherwise
+// show every prompt absent and the daemon would send each one again.
+func TestReconcileDoesNotConcludeAbsenceFromARecordFormItDoesNotRead(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	session := openSession(t, w, app)
+	file := filepath.Join(recordDir, session+".jsonl")
+	reconcile := func() adapterproto.ReconcileResult {
+		t.Helper()
+		res, err := app.Reconcile(ctxT(t), adapterproto.ReconcileParams{Endpoint: "session-1", Attempt: prompt2, Checkpoint: json.RawMessage(`{"v":1,"stage":"dispatching"}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustValid(t, res)
+		return res
+	}
+	want := func(res adapterproto.ReconcileResult, verdict adapterproto.ReconcileVerdict, grounds adapterproto.GroundsCode) {
+		t.Helper()
+		if res.Verdict != verdict || res.Grounds.Code != grounds {
+			t.Fatalf("verdict %s grounds %s, want %s %s", res.Verdict, res.Grounds.Code, verdict, grounds)
+		}
+	}
+
+	want(reconcile(), adapterproto.VerdictProvablyAbsent, adapterproto.GroundsRecordCompleteWithoutAttempt)
+
+	// The attempt's process finished a turn, yet its uuid is nowhere in the record.
+	w.mu.Lock()
+	w.files[outFile(session, prompt2)] = []byte(resultOK)
+	w.mu.Unlock()
+	want(reconcile(), adapterproto.VerdictIndeterminate, adapterproto.GroundsRecordUnreadable)
+	w.mu.Lock()
+	delete(w.files, outFile(session, prompt2))
+	w.mu.Unlock()
+
+	// A user line without the uuid the lookup reads.
+	w.appendRecord(file, `{"type":"user","sessionId":"`+session+`"}`)
+	want(reconcile(), adapterproto.VerdictIndeterminate, adapterproto.GroundsRecordUnreadable)
+}
+
 // A restarted adapter takes its sessions back from their checkpoints.
 func TestStartTakesSessionsBack(t *testing.T) {
 	const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"

@@ -105,6 +105,36 @@ func TestIndex(t *testing.T) {
 	}
 }
 
+// The lookup assumes every user line carries a uuid and a session id; a file
+// whose user lines do not is in a form the lookup cannot judge a missing prompt by.
+func TestIndexRecognizesTheFormOfUserLines(t *testing.T) {
+	user := `{"type":"user","uuid":"` + prompt + `","sessionId":"` + sess + `"}`
+	tests := []struct {
+		name string
+		file string
+		want bool
+	}{
+		{"an empty file", "", true},
+		{"user lines with a uuid and a session id", user + "\n" + user + "\n", true},
+		{"lines of other types need neither", `{"type":"queue-operation"}` + "\n" + `{"type":"assistant","message":"say \"user\""}` + "\n", true},
+		{"spaces around the colon do not matter", `{"type" : "user", "uuid" : "` + prompt + `", "sessionId" : "` + sess + `"}` + "\n", true},
+		{"a user line without a uuid", `{"type":"user","sessionId":"` + sess + `"}` + "\n", false},
+		{"a user line without a session id", `{"type":"user","uuid":"` + prompt + `"}` + "\n", false},
+		{"a uuid that is not a string", `{"type":"user","uuid":7,"sessionId":"` + sess + `"}` + "\n", false},
+		{"one bad user line among good ones", user + "\n" + `{"type":"user","message":{}}` + "\n" + user + "\n", false},
+		{"a corrupt line is skipped, as it is for the lookup", `{"type":"user"` + "\n" + user + "\n", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ix := NewIndex(sess, prompt)
+			ix.Feed([]byte(tc.file))
+			if ix.Recognized() != tc.want {
+				t.Fatalf("Recognized() = %v, want %v", ix.Recognized(), tc.want)
+			}
+		})
+	}
+}
+
 func TestIndexWatchesUUIDsAddedLater(t *testing.T) {
 	ix := NewIndex(sess)
 	ix.Feed([]byte(`{"type":"user","uuid":"` + prompt + `","sessionId":"` + sess + `"}` + "\n"))

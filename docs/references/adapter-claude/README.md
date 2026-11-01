@@ -315,15 +315,21 @@ session again), all of them belong to the one turn and the last one decides how 
 
 ### Reconciliation
 
-`prompt.reconcile` is answered from four facts: the prompt's user record is in the session
-file, the attempt has a checkpoint (the adapter puts it before it starts a process),
-the file could be read, and a turn process of the session runs. A prompt in the file is
-`found`, with the turn `running` while its process runs and otherwise `interrupted`,
-`completed` or `failed` as for `turn.ended`. Without a checkpoint it is `provably_absent`
-(`never_dispatched`). A file that cannot be read, or a running process that may yet write the
-prompt, is `indeterminate` (`record_unreadable`, `turn_running`). Otherwise the writer has
-stopped and the whole file was scanned: `provably_absent`
-(`record_complete_without_attempt`).
+`prompt.reconcile` is answered from these facts: the prompt's user record is in the session
+file, the attempt has a checkpoint (the adapter puts it before it starts a process), the file
+could be read, every user line of the file carries a uuid and a session id (the form the lookup
+relies on), the attempt's own output stream holds a successful result, and a turn process of
+the session runs.
+
+| Facts, in the order they are applied | Verdict | Grounds |
+| ------------------------------------ | ------- | ------- |
+| the prompt's user record is in the file | `found`, the turn `running` while its process runs, otherwise `interrupted`, `completed` or `failed` as for `turn.ended` | `attempt_in_record` |
+| no checkpoint | `provably_absent` | `never_dispatched` |
+| the file is missing or cannot be read | `indeterminate` | `record_unreadable` |
+| a user line has no uuid or no session id | `indeterminate` | `record_unreadable` |
+| the attempt's process ended with a successful result, yet its uuid is not in the file | `indeterminate` | `record_unreadable` |
+| a turn process of the session runs (the recorded one, or any the process table shows) | `indeterminate` | `turn_running` |
+| none of the above: the writer has stopped and the whole file was scanned | `provably_absent` | `record_complete_without_attempt` |
 
 ## Why
 
@@ -439,6 +445,16 @@ stopped and the whole file was scanned: `provably_absent`
 - **The record is judged by uuid and type.** Queue operations and attachments carry no prompt
   and other uuids, and the line is looked for in the raw file, because a later branch of the
   conversation does not remove it from disk.
+- **Absence is concluded only from a record form that was verified.** The lookup relies on a
+  user line carrying the stream-json uuid as its `uuid` and the session in `sessionId`. A Claude
+  Code release that changed that would leave every prompt unfound: each turn would end
+  abandoned, reconciliation would call each prompt absent and the daemon would send it again,
+  for ever and without a sound. Two checks turn that into `record_unreadable`: a user line
+  without a string `uuid` and `sessionId` (every user line of the records read so far has both),
+  and a turn whose own output ends in a successful result although its prompt is not in the file
+  (a process that worked on a prompt wrote it). An error result does not count, because a
+  process that fails before it writes anything, such as a resume of a session that is gone, also
+  ends in one.
 
 - **The checkpoint before the process.** Stored first, the dispatch checkpoint makes "none" a proof:
   the adapter never starts a turn process for an attempt it has not recorded, so a reconciliation of
