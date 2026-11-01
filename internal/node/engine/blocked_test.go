@@ -626,6 +626,48 @@ func TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait(t *testin
 	waitUntil(t, func() bool { return host.prompts.Load() == 1 })
 }
 
+// serviceAfterStart is an adapter host that, as the real one does, puts a connection in
+// service only after it has told the engine that the adapter started: until the test
+// says the connection is in service, a prompt is refused with nothing sent.
+type serviceAfterStart struct {
+	*promptRecorder
+	inService atomic.Bool
+}
+
+func (h *serviceAfterStart) DeliverPrompt(ctx context.Context, instance string, p adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	if !h.inService.Load() {
+		return adapterproto.PromptDeliverResult{}, adapterhost.ErrNotConnected
+	}
+	return h.promptRecorder.DeliverPrompt(ctx, instance, p)
+}
+
+// An adapter that reports a session idle as it starts gives the session an event (the
+// end of a turn while the node had no connection), and the session is woken by it
+// only once the connection is in service. A prompt sent on the start would be refused
+// with nothing sent, recorded as failed and held back for the retry time of the prompt
+// rules, so the session would wait a minute for nothing.
+func TestSessionReportedIdleAtTheStartIsPromptedOnceTheConnectionIsInService(t *testing.T) {
+	host := &serviceAfterStart{promptRecorder: &promptRecorder{hostDouble: newHostDouble()}}
+	r, session, _ := waitingSession(t, host)
+	e := r.start()
+	idle := adapterproto.SessionState{Endpoint: adapterproto.EndpointRef(session.String()), State: adapterproto.AttachAttached}
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{idle}}); err != nil {
+		t.Fatal(err)
+	}
+	rigQuiet(t, e)
+	host.inService.Store(true)
+	if err := e.AdapterProbed(ctx, "chat", probeResult("", "")); err != nil {
+		t.Fatal(err)
+	}
+	rigQuiet(t, e)
+	if n := host.prompts.Load(); n != 1 {
+		t.Errorf("%d prompts reached the adapter once its connection was in service, want 1", n)
+	}
+	if a := headOf(t, r, session); a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+		t.Errorf("the attempts are %+v, want one delivered and none failed", a)
+	}
+}
+
 // blockedSession is a session whose adapter has been away for more than the threshold
 // with messages waiting, the block reported to the sender: the adapter stays away for
 // the rest of the test.

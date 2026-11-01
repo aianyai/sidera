@@ -187,12 +187,14 @@ func (e *Engine) notePromptDelivered(now time.Time, ref adapterproto.EndpointRef
 // noteInstanceProbed is the event of an adapter whose connection is in service, which
 // its probe having been answered shows: the host puts the connection in service after
 // it has told the node that the adapter started, so a prompt sent on the start would
-// find nobody to call. The turns the adapter reports are those that are running, so a
-// turn that was counted and is not among them is over, every attempt in flight is
-// asked of it, and every endpoint of the instance is judged, since what waited for an
-// adapter that was away has had no other event to be judged by.
+// find nobody to call: the endpoints of the instance are judged only from now on. The
+// turns the adapter reports are those that are running, so a turn that was counted and
+// is not among them is over, every attempt in flight is asked of it, and every endpoint
+// of the instance is judged, since what waited for an adapter that was away has had no
+// other event to be judged by.
 func (e *Engine) noteInstanceProbed(instance string, now time.Time) {
 	st := e.adapters[instance]
+	st.inService = true
 	for id, es := range e.view.endpoints {
 		if es.rec.Instance != instance || !promptable(es) {
 			continue
@@ -250,8 +252,10 @@ func (e *Engine) promptParams() handoff.PromptParams {
 // is neither waiting (a prompt for it is bound to fail, and the failure would be
 // taken for a reason to call delivery blocked) nor running (the state of its turn is
 // unknown, and a turn nobody can observe must not stop the node); it is judged again
-// when the adapter comes back. An endpoint with nothing that waits has no event left
-// to be judged by.
+// when the adapter comes back. One whose adapter is online but whose connection is not
+// yet known to be in service counts its turn but is not judged: a prompt sent now
+// could be refused with nothing sent and recorded as failed. Its event is kept for
+// the probe. An endpoint with nothing that waits has no event left to be judged by.
 func (e *Engine) promptRound(now time.Time) promptRound {
 	r := promptRound{covers: map[ident.EndpointID][]store.TargetKey{}}
 	// A turn can end before the adapter answers a close or interrupt. Until the
@@ -276,7 +280,7 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 		if flying {
 			r.running++
 		}
-		if p.trigger == 0 {
+		if p.trigger == 0 || !a.inService {
 			continue
 		}
 		pending := e.pendingOf(now, st)

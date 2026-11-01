@@ -61,6 +61,13 @@ type adapterState struct {
 	// that has not been online since the engine started.
 	online       bool
 	offlineSince time.Time
+	// inService is true once the connection is known to take calls: its probe has
+	// answered, or the wait after adapter.start for a probe that failed has passed. The
+	// host tells the node that the adapter started before it puts the connection in
+	// service, so a call made between the two finds nobody to call. Prompts wait for
+	// it, because a prompt refused that way would be recorded as failed and held back
+	// for the retry time of the prompt rules.
+	inService bool
 
 	// snapshot is the last availability the adapter reported, and received the
 	// engine's own time of receiving it.
@@ -382,7 +389,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	if err != nil {
 		return err
 	}
-	st.online, st.offlineSince = true, time.Time{}
+	st.online, st.offlineSince, st.inService = true, time.Time{}, false
 	// The busy state is what the result lists, not that and what was known before.
 	st.busy = nil
 	for _, s := range r.Sessions {
@@ -549,6 +556,7 @@ func (st *adapterState) goOffline(now time.Time) {
 	if st.online {
 		st.online, st.offlineSince = false, now
 	}
+	st.inService = false
 	st.busy = nil
 }
 

@@ -112,7 +112,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   rules make the item of feedback.
 - **A turn counts against the cap from the dispatch of its prompt until it ends or the prompt is
   known not to have started one, and only while its adapter is online.** An endpoint whose
-  adapter is offline is not judged.
+  adapter is offline is not judged, and neither is one whose adapter's connection is not yet in
+  service (its probe has not answered, nor has the wait for a probe that failed passed): a prompt
+  sent then is refused with nothing sent and recorded as failed.
 - **A lease is extended before it runs out, only while the adapter reports a turn running, and
   one that ran out is always released.** `serveLeases` (`lease.go`) extends what is due with
   `delivery.Record.Renew`, which refuses an expired lease and one at the cap, so the tick of a record

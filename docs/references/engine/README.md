@@ -1831,11 +1831,15 @@ reproducible).
   stop the node; an endpoint whose adapter is away is not judged, because a prompt for it is
   bound to fail and its failure would be taken for a reason to call delivery blocked. When the
   adapter returns, the turns it reports running are the ones that still count.
-- **A prompt that found the adapter not in service waits for the probe, not for the next
-  message.** The host tells the node that an adapter started before it puts the connection in
-  service, so the first judgment after a connection can find the call refused with nothing sent.
-  That is a failure the next event cures, and the adapter's probe is that event: without it the
-  message would wait for the next arrival or turn end, which may never come.
+- **No prompt goes on a connection before it is in service.** The host tells the node that an
+  adapter started before it puts the connection in service, so a call made in between is refused
+  with nothing sent, and a refused prompt is a failed attempt, which holds the endpoint back for
+  the retry time of the prompt rules: the session would wait a minute for nothing. The endpoints of
+  an instance are therefore judged only once its probe has answered, or once the wait for a probe
+  that failed has passed (`adapterState.inService`, cleared by each start and each end of a
+  connection). An event that comes before, such as the end of a turn the start result reports, is
+  kept and judged then. The turns of the instance are counted from the start all the same: a turn
+  that runs takes its place of the node's cap whether or not the connection takes calls yet.
 
 ## Where
 
@@ -2005,6 +2009,7 @@ reproducible).
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| A session the starting adapter reports idle is prompted once the connection is in service, and no prompt is refused for being sent before | `prompts.go` (`promptRound`, `noteInstanceProbed`), `adapters.go` (`markStarted`, `inService`) | `TestSessionReportedIdleAtTheStartIsPromptedOnceTheConnectionIsInService` |
 | A session is not prompted while a close or interrupt is being carried out, even when its turn ends before the adapter answers; an interrupt's settlement judges the waiting messages again | `prompts.go` (`promptRound`), `execute.go` (`forgetExecution`) | `TestSessionIsNotPromptedWhileCloseOrInterruptIsBeingCarriedOut` |
 | The endpoints and turns of an adapter that is offline take no place of the node's cap: another adapter's waiting endpoint is prompted in the free place, and a turn that went on while its adapter was away is counted again when the adapter reports it, two adapter instances on one node | `prompts.go` (`promptRound`) | `TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`, `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning` |
 | After a restart the time of the last recv is taken from the newest lease of the endpoint's messages, so a prompt the agent had read still looks read | `prompts.go` (`approximateLastRecv`) | `TestARestartDoesNotMakeAReadPromptLookUnread` |
