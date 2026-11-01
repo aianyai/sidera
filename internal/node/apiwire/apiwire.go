@@ -326,6 +326,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryRefused, "expectations_full", "the list of expectations is full; forget one before entering another")
 	case engine.ReasonNodeUnreachable:
 		return New(CategoryUnavailable, "node_unreachable", "the node could not be reached, or the pairing ended without an answer; check its address and try again")
+	case engine.ReasonNotPermitted:
+		return New(CategoryRefused, "not_permitted", "this request is not permitted to do what it would do here")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

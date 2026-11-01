@@ -21,6 +21,7 @@ import (
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -666,7 +667,19 @@ func TestInstallingTheSameVersionWithOtherContentsReplacesItAndRestartsTheInstan
 	}
 	asked := len(host.asks())
 
-	if _, err := e.Execute(ctx, installCommandSeeing(92, "install rebuilt", "/src/rebuilt", &did)); err != nil {
+	// The management interface made the actor of every request: a person with full
+	// control may install, but not replace what an enabled instance runs.
+	remote := installCommandSeeing(94, "install rebuilt remotely", "/src/rebuilt", &did)
+	remote.Actor = admin.RemotePerson(ident.PersonID{}, admin.DeviceCert{})
+	if _, err := e.Execute(ctx, remote); err == nil || !reasonIs(err, engine.ReasonNotPermitted) {
+		t.Fatalf("a remote actor replacing the package of an enabled instance: %v, want ReasonNotPermitted", err)
+	}
+	if got := host.asks()[asked:]; len(got) != 0 {
+		t.Errorf("the host was asked for %v although the replacement was refused", got)
+	}
+	owner := installCommandSeeing(92, "install rebuilt", "/src/rebuilt", &did)
+	owner.Actor = admin.LocalOwner()
+	if _, err := e.Execute(ctx, owner); err != nil {
 		t.Fatalf("installing the rebuilt package: %v", err)
 	}
 	if !did.Replaced || did.AlreadyCurrent {
@@ -2060,4 +2073,10 @@ func FuzzPresentProbeToken(f *testing.F) {
 			t.Fatalf("the token %q for %q was accepted as %+v; the node issued %v", token, frontend, target, issued)
 		}
 	})
+}
+
+// reasonIs says whether err is a refusal for the reason.
+func reasonIs(err error, want engine.Reason) bool {
+	got, ok := engine.ReasonOf(err)
+	return ok && got == want
 }

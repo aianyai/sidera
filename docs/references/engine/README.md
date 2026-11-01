@@ -317,7 +317,10 @@ the result, discard the package that was replaced. A package that is the install
 the same version with the same contents (the digest staging computed), stores only its
 result (`adapter-install-current`), and `AdapterInstalled.AlreadyCurrent` lets the
 interface say so in that result. The same version with other contents is not refused for
-the instances that run: after the commit every enabled instance of the adapter is stopped
+the instances that run, but it is for an actor who is not the local owner when an instance is
+enabled (`ReasonNotPermitted`, `refused/not_permitted`, checked before anything is replaced
+with `admin.Authorize` of `Operation.ReplacesEnabled`): it runs new code where the owner
+enabled the old, as enabling does. After the commit every enabled instance of the adapter is stopped
 and started again (`restartInstancesOf`, the restart a change of the presets uses), so
 that it runs the new files, and `AdapterInstalled.Replaced` says so; the directory of the
 package that was replaced is left to the repair while a process may still hold it. Last, the worker drops

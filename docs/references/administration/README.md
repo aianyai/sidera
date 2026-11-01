@@ -37,7 +37,7 @@ connection on the agent interface is never the local owner (see
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | view          | Read; query the result of an operation (the requester's own).                                                                                                      |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
-| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter; add or loosen a preset; loosen policy. |
+| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter (one that replaces the package of an enabled instance is the local owner's, below); add or loosen a preset; loosen policy. |
 | local owner   | Modify the authorized-persons list; enable an adapter instance; disable an adapter instance; change an endpoint's settings; change the node's settings; acknowledge an alert; clear the clock-rollback pause; confirm the revocation backup; retire the identity; export the revocation statement; stop the daemon (the operations for managing a single node). |
 
 The operations for managing a single node are held to the local owner until
@@ -45,6 +45,12 @@ remote management exists: a level that cannot yet be exercised
 remotely cannot be validated, setting it now would be a guess, and loosening it
 later is a one-line change of the catalogue guarded by tests, while tightening
 it after remote people depend on it would take their capability away.
+Installing a package that replaces the one an enabled instance runs (the same version with
+other contents) is judged as enabling it: the instance restarts on the new program, so it is
+no weaker than letting the machine run that code. Only the installation knows it is one, so
+the interface authorizes the request as an installation and the installation authorizes it
+again as the replacing one (`Operation.ReplacesEnabled`), refusing a request whose actor is
+not the local owner with `refused/not_permitted` before anything is replaced.
 Replacing the configuration of an adapter instance is judged as enabling it: the
 values can name the program the adapter runs, so it is no weaker than letting the
 machine run the adapter. Removing an instance is judged as disabling it, since it only withdraws. Neither has an operation of its own, since the level would be the same. Enabling and disabling an adapter, and changing an endpoint's and the node's

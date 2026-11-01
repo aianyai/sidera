@@ -115,6 +115,11 @@ const (
 	// reached, or the pairing ended without a request saved and without the node's
 	// refusal. Nothing is stored, so the owner can ask again.
 	ReasonNodeUnreachable
+	// ReasonNotPermitted: the actor may make the request but not have it do what
+	// it would do here, which only the operation can tell once it runs (an
+	// installation that replaces the package of an enabled instance is for the
+	// local owner). Nothing of the request was done.
+	ReasonNotPermitted
 
 	reasonEnd
 )
@@ -153,6 +158,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonPairingInProgress:    "pairing_in_progress",
 	ReasonExpectationsFull:     "expectations_full",
 	ReasonNodeUnreachable:      "node_unreachable",
+	ReasonNotPermitted:         "not_permitted",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

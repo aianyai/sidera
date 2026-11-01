@@ -31,7 +31,7 @@ there may be mapped to it, never one on the agent interface (see
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | view          | `OpRead`, `OpQueryOperationResult` (the requester's own results).                                                                                                                                                           |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
-| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter; add or loosen a preset; loosen policy. A policy change is manage only when the policy package classifies it `Unchanged` or `Tighten`; `Loosen`, an unset or an unknown classification, and an unclassified preset change count as loosening. |
+| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter (one that replaces the package of an enabled instance is the local owner's); add or loosen a preset; loosen policy. A policy change is manage only when the policy package classifies it `Unchanged` or `Tighten`; `Loosen`, an unset or an unknown classification, and an unclassified preset change count as loosening. |
 | local owner   | `OpModifyAuthorizedList`; and the operations for managing a single node: `OpEnableAdapter`, `OpDisableAdapter`, `OpChangeEndpointSettings`, `OpChangeNodeSettings`, `OpAcknowledgeAlert`, `OpClearClockRollback`, `OpConfirmRevocationBackup`, `OpRetireIdentity`, `OpExportRevocation`, `OpStopDaemon`. |
 
 Operations added for single-node management are held to the local owner until
@@ -136,6 +136,10 @@ own `KeyFor`, so nobody sees another person's results.
   declaration fields that have no operation of their own; flipping inheritance
   through the declaration is `OpEnableInheritance` or `OpDisableInheritance`,
   and relay settings are `OpChangeRelaySettings`.
+- `Operation.ReplacesEnabled` marks an `OpInstallAdapter` that replaces the package of an
+  adapter with an enabled instance; it needs the local owner, as enabling does, because the
+  instance then runs new code. Only the installation can tell, so the management interface
+  authorizes the install without it and the installation authorizes again with it.
 - `Operation.PolicyChange` is an `authz.Change`, the policy package's own
   classification of the change (`authz.Classify`). `Unchanged` and `Tighten`
   need manage; `Loosen`, the zero value (not a classification) and any value out

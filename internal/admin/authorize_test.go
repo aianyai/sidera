@@ -46,6 +46,11 @@ var catalogue = []struct {
 	{"a policy change with the classification unset (zero value) needs full control", Operation{Kind: OpChangePolicy}, RequireFullControl},
 	{"an out-of-range policy classification needs full control", Operation{Kind: OpChangePolicy, PolicyChange: 99}, RequireFullControl},
 
+	// Replacing the package of an enabled instance runs new code where the owner
+	// enabled the old, which is what enabling asks the local owner for.
+	{"an installation that replaces the package of an enabled instance is for the local owner only", Operation{Kind: OpInstallAdapter, ReplacesEnabled: true}, RequireLocalOwner},
+	{"the replacing flag changes nothing for another operation", Operation{Kind: OpDisableInheritance, ReplacesEnabled: true}, RequireManage},
+
 	// The list itself belongs to the local owner.
 	{"modifying the authorized-persons list is for the local owner only", Operation{Kind: OpModifyAuthorizedList}, RequireLocalOwner},
 
@@ -432,6 +437,15 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 			op:         Operation{Kind: OpModifyAuthorizedList},
 			now:        t0,
 			wantReason: ReasonLocalOwnerOnly,
+		},
+		{
+			name:  "full control installs an adapter, but not one that replaces the package of an enabled instance",
+			list:  mustList(t, Entry{Person: a, Level: LevelFullControl}),
+			actor: RemotePerson(a, validCert(LevelFullControl)),
+			op:    Operation{Kind: OpInstallAdapter, ReplacesEnabled: true},
+			now:   t0,
+
+			wantOK: false, wantReason: ReasonLocalOwnerOnly,
 		},
 		{
 			name:   "the local owner may modify the authorized list, even on an empty list",

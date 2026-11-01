@@ -70,6 +70,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonPairingInProgress: {"conflict", "pairing_in_progress"},
 	engine.ReasonExpectationsFull:  {"refused", "expectations_full"},
 	engine.ReasonNodeUnreachable:   {"unavailable", "node_unreachable"},
+	engine.ReasonNotPermitted:      {"refused", "not_permitted"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {

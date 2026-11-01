@@ -67,6 +67,9 @@ not import it: the words of the wire never enter the engine.
   and an unreachable target map to `unavailable/directory_unavailable`. This
   stable code means try again later; it is never renamed, removed or reused for
   another meaning. It is not an uncertain message outcome, nor an inbox timeout.
+- **`not_permitted` is `refused`**: the actor may make the request but not have it do
+  what it would do here (an installation that replaces the package of an enabled instance
+  is the local owner's). It is `-32603` for an adapter, which makes no such request.
 - **The owner's operations on trust have a reason for each way they are refused.**
   `pairing_paused` is `backpressure` (nothing was done and the node takes it again
   later), `pairing_in_progress` is `conflict` (one pairing with a node at a time, as one

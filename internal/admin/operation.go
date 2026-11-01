@@ -153,6 +153,12 @@ type Operation struct {
 	// PresetChange classifies the change for OpChangePreset and is ignored for
 	// every other kind.
 	PresetChange PresetChangeClass
+	// ReplacesEnabled marks an OpInstallAdapter that replaces the package of an
+	// adapter with an enabled instance, so the instance restarts on the new
+	// program; it is ignored for every other kind. Only the installation itself
+	// knows it, so the interface authorizes the request without it and the
+	// installation authorizes again with it.
+	ReplacesEnabled bool
 }
 
 // Requirement is who may perform an operation.
@@ -211,8 +217,16 @@ func RequirementOf(op Operation) (Requirement, bool) {
 			return RequireManage, true
 		}
 		return RequireFullControl, true
+	case OpInstallAdapter:
+		// Replacing the package of an enabled instance runs new code on a
+		// machine whose owner enabled the old: that is what enabling asks the
+		// local owner for.
+		if op.ReplacesEnabled {
+			return RequireLocalOwner, true
+		}
+		return RequireFullControl, true
 	case OpConfirmTrust, OpEnableInheritance, OpExtendGracePeriod,
-		OpClearLocallyRevoked, OpInstallAdapter:
+		OpClearLocallyRevoked:
 		return RequireFullControl, true
 	case OpModifyAuthorizedList,
 		OpEnableAdapter, OpDisableAdapter, OpChangeEndpointSettings,

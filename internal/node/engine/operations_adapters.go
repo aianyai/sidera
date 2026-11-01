@@ -128,6 +128,16 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Only now is it known whether the installation restarts enabled instances on
+	// new code, which the interface that authorized the request could not tell. The
+	// list is empty because what the catalogue asks for then is the local owner,
+	// whom no list level stands in for.
+	if plan.Replaced && len(e.enabledInstancesOf(o.staged.ID)) > 0 {
+		replacing := admin.Operation{Kind: admin.OpInstallAdapter, ReplacesEnabled: true}
+		if !admin.Authorize(admin.List{}, x.actor, replacing, x.now).Allowed {
+			return nil, refuse(ReasonNotPermitted)
+		}
+	}
 	result, err := o.encode(AdapterInstalled{ID: o.staged.ID, Version: o.staged.Version, AlreadyCurrent: plan.AlreadyCurrent, Replaced: plan.Replaced})
 	if err != nil {
 		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)
@@ -182,11 +192,20 @@ func (e *Engine) restartInstancesOf(now time.Time, adapter string) {
 	if e.d.Adapters == nil {
 		return
 	}
+	for _, instance := range e.enabledInstancesOf(adapter) {
+		e.restartInstance(now, instance)
+	}
+}
+
+// enabledInstancesOf lists, in order, the enabled instances of the adapter.
+func (e *Engine) enabledInstancesOf(adapter string) []string {
+	var out []string
 	for _, instance := range sortedKeys(e.d.Config.Instances().Items) {
 		if in, ok := e.enabledInstance(instance); ok && in.Adapter == adapter {
-			e.restartInstance(now, instance)
+			out = append(out, instance)
 		}
 	}
+	return out
 }
 
 // settle drops the staging when the commit did not take it over (refused, found

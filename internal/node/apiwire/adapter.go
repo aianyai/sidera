@@ -203,6 +203,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonPairingInProgress: internalCode,
 	engine.ReasonExpectationsFull:  internalCode,
 	engine.ReasonNodeUnreachable:   internalCode,
+	engine.ReasonNotPermitted:      internalCode,
 
 	engine.ReasonNodeQueueFull:      backPressure,
 	engine.ReasonStorageFull:        backPressure,
