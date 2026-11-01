@@ -58,7 +58,7 @@ and the reasons, is [Getting started](docs/guide/getting-started.md).
 ```sh
 # On both machines
 sidera init                                    # prints the node id
-tmux new-session -d -s sidera -c "$HOME" 'sidera daemon'  # keep it running
+tmux new-session -d -s sidera -c "$HOME" -e PATH="$PATH" 'sidera daemon'  # keep it running
 sidera adapter install <release>/adapters/console && sidera adapter enable console
 sidera adapter install <release>/adapters/codex && sidera adapter enable codex
 sidera preset add light --file light.json      # a preset: see the guide
