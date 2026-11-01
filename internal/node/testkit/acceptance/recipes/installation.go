@@ -32,7 +32,7 @@ type InstalledPackage struct {
 // before returning the first result. Inspection reads only package state.
 type InstallOps struct {
 	Install     func(scenario.Env, admin.OperationID, PackageSpec) (InstallOutcome, error)
-	FailPointer func(scenario.Env, bool) error
+	FailPointer func(scenario.Env) error
 	Inspect     func(scenario.Env, string) (InstalledPackage, error)
 }
 
@@ -56,9 +56,12 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 		}
 		return checkInstalled(e, b.Installation, id, spec.Version, []string{spec.Version})
 	}
-	failed := func(cleanup bool, request byte) func(scenario.Env) error {
+	// A failed pointer leaves the version directory that was renamed in: nothing
+	// outside the loop may remove it, so it stays for the next installation of that
+	// version to discard, or for the repair at the next start.
+	failed := func(request byte) func(scenario.Env) error {
 		return func(e scenario.Env) error {
-			if err := b.Installation.FailPointer(e, cleanup); err != nil {
+			if err := b.Installation.FailPointer(e); err != nil {
 				return err
 			}
 			out, err := b.Installation.Install(e, admin.OperationID{request}, v2)
@@ -68,11 +71,7 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 			if out.Code != "pointer_failed" || out.Replayed {
 				return fmt.Errorf("%w: failed pointer returned %+v", ErrInstallationEffect, out)
 			}
-			versions := []string{v1.Version}
-			if cleanup {
-				versions = append(versions, v2.Version)
-			}
-			return checkInstalled(e, b.Installation, id, v1.Version, versions)
+			return checkInstalled(e, b.Installation, id, v1.Version, []string{v1.Version, v2.Version})
 		}
 	}
 
@@ -84,7 +83,7 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 		name, budget = "installation-rollback", 111
 		needs.FSFaults = []FSFault{FaultInstallPointer}
 		cases = nil
-		steps = append(steps, scenario.Step{Name: "rollback-failed-pointer", Do: failed(false, 32)}, scenario.Step{Name: "leave-failed-cleanup", Do: failed(true, 33)})
+		steps = append(steps, scenario.Step{Name: "leave-failed-pointer", Do: failed(32)})
 	}
 	steps = append(steps, scenario.Step{Name: "upgrade", Do: func(e scenario.Env) error { return install(e, 34, v2, false) }})
 	if !rollback {

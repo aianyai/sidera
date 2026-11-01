@@ -95,8 +95,8 @@ The installation recipes share typed actions and final installed-version checks.
 The ordinary recipe installs, upgrades and reinstalls the current version, then
 rejects a package for another platform, without filesystem faults. Its interrupted
 staging and unstaging supply adapter-garbage and transaction-trash recovery cases.
-The rollback recipe observes two recoverable pointer failures with successful and
-failed version cleanup, then retries through the real stale-version discard. Only
+The rollback recipe observes a recoverable pointer failure, which leaves the version
+directory that was renamed in, then retries through the real stale-version discard. Only
 that recipe requires the pointer-failure capability. Every observed success is
 replayed and checked against its stored result, installed current pointer and
 version directories. Package specifications describe caller-owned input files;

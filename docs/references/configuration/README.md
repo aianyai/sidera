@@ -433,10 +433,16 @@ invalid, like any optional field written empty.
    installed.
 3. An installation that did not install is unstaged by the install worker: when
    the result is "already installed", when it is refused, and when it failed
-   with an error that is not fatal. The staging directory, a package directory
-   that was renamed in and did not become current, and, for an adapter never
-   installed, its whole directory are dropped, so that no `adapters/<id>/`
-   without a `current` is left. After a fatal error the next start removes them.
+   with an error that is not fatal. Only the worker's own staging directory is dropped,
+   and, for an adapter never installed whose directory holds nothing else, that
+   directory, so that no `adapters/<id>/` without a `current` is left by a refused
+   first installation. A package directory that was renamed in and did not become
+   current is not dropped here: the unstaging runs outside the loop and cannot tell
+   it from one an installation committed in the meantime, and a directory removed
+   under a pointer that names it would stop the next start. It is garbage like any
+   other directory the pointer does not name: the next installation of that name
+   discards it first, and the repair removes it at the next start. After a fatal
+   error the next start removes what is left.
 
 **The repair.** An adapter directory without `current`, a staging directory, and
 a version directory the pointer does not name are garbage. `AdapterGCWork(r)`
@@ -522,7 +528,7 @@ Each is declared as data; the table of the program is built from
 | `presets-change` | normal | `presets` replace | `presets.json` rename |
 | `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable`, `adapter-remove` | normal | `instances` replace | `instances.json` rename |
 | `adapter-stage` | normal | `parent` mkdir (P, O, M), `stage` mkdir (P), `subdir` mkdir (P, O, M), `file` replace (P, M) | none: all preparation |
-| `adapter-unstage` | normal | `stage` discard (O), `version` discard (O), `parent` discard (O) | the first discard |
+| `adapter-unstage` | normal | `stage` discard (O), `parent` discard (O) | the first discard |
 | `adapter-gc` | recovery | `dir` discard (M) | the first discard |
 
 Transactions that span owners are declared by the package that composes them,

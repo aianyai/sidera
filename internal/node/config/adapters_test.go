@@ -49,6 +49,11 @@ func suffixReader() *bytes.Reader {
 
 const stageSuffix = "abcd010203040506"
 
+// otherSuffixReader draws a staging suffix that suffixReader does not.
+func otherSuffixReader() *bytes.Reader {
+	return bytes.NewReader([]byte{0xef, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07})
+}
+
 func ensureState(t testing.TB, mem *fsxtest.Mem) { mkdirAll(t, mem, "state") }
 
 // install runs the installation of a staged package as the engine composes it.
@@ -419,7 +424,7 @@ func TestUnstage(t *testing.T) {
 			t.Error("the installed version was touched")
 		}
 	})
-	t.Run("a version directory that was renamed in and did not become current", func(t *testing.T) {
+	t.Run("a version directory that was renamed in and did not become current is not its own", func(t *testing.T) {
 		rg, c := loaded(t)
 		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(new([]config.Instances), `{}`)); err != nil {
 			t.Fatal(err)
@@ -437,17 +442,20 @@ func TestUnstage(t *testing.T) {
 			t.Fatal(err)
 		}
 		tx.Close() // the commit failed or was refused after the rename
-		if !exists(rg.mem, config.AdapterVersionDir("example", "2.0.0")) {
-			t.Fatal("the version directory is not there to be dropped")
-		}
 		if err := c.Unstage(staged); err != nil {
 			t.Fatalf("Unstage: %v", err)
 		}
-		if exists(rg.mem, config.AdapterVersionDir("example", "2.0.0")) {
-			t.Error("the version directory that never became current is still there")
+		// An installation that committed meanwhile has such a directory too, for a
+		// moment before its pointer names it, and Unstage cannot tell the two apart.
+		if !exists(rg.mem, config.AdapterVersionDir("example", "2.0.0")) {
+			t.Error("Unstage removed a version directory that is not its staging directory")
 		}
 		if !exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
 			t.Error("the installed version was removed")
+		}
+		// The repair removes it at the next start.
+		if work, err := config.AdapterGCWork(rg.mem); err != nil || len(work) != 1 || work[0].Reason != config.GCSuperseded {
+			t.Errorf("the garbage the repair removes = %+v, %v; want the version directory", work, err)
 		}
 	})
 	t.Run("a first installation that failed leaves no adapter directory", func(t *testing.T) {
@@ -461,6 +469,23 @@ func TestUnstage(t *testing.T) {
 		}
 		if exists(rg.mem, config.AdapterDir("fresh")) {
 			t.Error("the adapter directory of an adapter that was never installed is still there")
+		}
+	})
+	t.Run("a first installation that is not alone in the adapter directory leaves it", func(t *testing.T) {
+		rg, c := loaded(t)
+		first, err := c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), suffixReader())
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), otherSuffixReader())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Unstage(first); err != nil {
+			t.Fatalf("Unstage: %v", err)
+		}
+		if exists(rg.mem, first.Dir) || !exists(rg.mem, second.Dir) {
+			t.Error("Unstage must drop its own staging directory and only that")
 		}
 	})
 	t.Run("the current version restaged is kept", func(t *testing.T) {

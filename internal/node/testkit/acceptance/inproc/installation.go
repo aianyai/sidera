@@ -22,7 +22,6 @@ import (
 var errPointerFailure = errors.New("acceptance: recoverable current pointer failure")
 
 func newInstallOps() recipes.InstallOps {
-	failures := 0
 	return recipes.InstallOps{
 		Install: func(e scenario.Env, id admin.OperationID, spec recipes.PackageSpec) (recipes.InstallOutcome, error) {
 			h := e.(*harness.H)
@@ -69,14 +68,10 @@ func newInstallOps() recipes.InstallOps {
 			}
 			return recipes.InstallOutcome{ID: installed.ID, Version: installed.Version, AlreadyCurrent: installed.AlreadyCurrent, Replayed: out.Replayed}, nil
 		},
-		FailPointer: func(e scenario.Env, cleanup bool) error {
+		FailPointer: func(e scenario.Env) error {
 			h := e.(*harness.H)
-			// These ordinals follow the recipe's first install and two failed upgrades.
-			failures++
-			h.Faults().Fail(fsxtest.Match{Tx: "adapter-install", Role: "current", Step: fsx.StepCreate, Hit: 1 + failures}, errPointerFailure)
-			if cleanup {
-				h.Faults().Fail(fsxtest.Match{Tx: "adapter-unstage", Role: "version", Step: fsx.StepRenameDir, Hit: 2}, errors.New("acceptance: recoverable version cleanup failure"))
-			}
+			// The ordinal follows the recipe's first install: the failed upgrade is the second.
+			h.Faults().Fail(fsxtest.Match{Tx: "adapter-install", Role: "current", Step: fsx.StepCreate, Hit: 2}, errPointerFailure)
 			return nil
 		},
 		Inspect: func(e scenario.Env, id string) (recipes.InstalledPackage, error) {

@@ -54,7 +54,7 @@ func newInstallOps() recipes.InstallOps {
 			out.ID, out.Version, out.AlreadyCurrent = result.Adapter.ID, result.Adapter.Version, result.AlreadyCurrent
 			return out, nil
 		},
-		FailPointer: func(e scenario.Env, _ bool) error {
+		FailPointer: func(e scenario.Env) error {
 			if err := envFrom(e).check(); err != nil {
 				return err
 			}

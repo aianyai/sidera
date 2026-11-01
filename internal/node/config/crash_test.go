@@ -318,42 +318,6 @@ func crashCases(t *testing.T) []crashCase {
 			},
 		},
 		{
-			// An upgrade whose version directory was renamed in and never made
-			// current: the unstage discards it as well as the staging directory.
-			name:      "adapter-unstage/version renamed in but not current",
-			invisible: true,
-			disk:      disabledTree,
-			prepare: func(t *testing.T, rg *rig, c *config.Config) {
-				staged = stagedFresh(t, c, "example", "2.0.0")
-				plan, err := c.PlanInstall(staged, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				tx := rg.w.Begin(testAdapterInstall)
-				if err := plan.Promote(tx); err != nil {
-					t.Fatal(err)
-				}
-				tx.Close() // the rename is a preparatory write: the installation never committed
-			},
-			run: func(t *testing.T, rg *rig, c *config.Config) error {
-				return c.Unstage(staged)
-			},
-			state: func(t *testing.T, where string, c *config.Config) string {
-				if ads := c.Adapters(); len(ads) != 1 || ads[0].Version != "1.0.0" {
-					t.Errorf("%s: adapters = %+v", where, ads)
-				}
-				return "before"
-			},
-			done: func(t *testing.T, rg *rig, c *config.Config) {
-				if exists(rg.mem, config.AdapterVersionDir("example", "2.0.0")) {
-					t.Error("the version directory that never became current survived Unstage")
-				}
-				if !exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
-					t.Error("Unstage removed the installed version")
-				}
-			},
-		},
-		{
 			name: "adapter-install/upgrade",
 			disk: disabledTree, prepare: prepStage("example", "2.0.0"),
 			run: func(t *testing.T, rg *rig, c *config.Config) error {

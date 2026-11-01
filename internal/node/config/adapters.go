@@ -354,50 +354,35 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) (string, erro
 	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
-// Unstage drops what an installation that did not complete left: the staging
-// directory; a version directory that was renamed in and did not become
-// current; and, when the adapter was never installed, its whole directory. It
-// never touches the version the current pointer names. What is not there is not
-// an error, and with nothing to drop it writes nothing.
+// Unstage drops the staging directory of an installation that did not complete,
+// and, when the adapter was never installed and nothing else is staged beside it,
+// the directory of the adapter that the staging made. It touches nothing else: a
+// version directory that was renamed in and did not become current, like one a
+// crash left, is the repair's and the next installation's (DiscardStale), because
+// Unstage runs outside the writer loop and cannot tell such a directory from one
+// that an installation committed meanwhile. What is not there is not an error,
+// and with nothing to drop it writes nothing.
 func (c *Config) Unstage(s Staged) error {
 	return c.unstage(s)
 }
 
 func (c *Config) unstage(s Staged) error {
 	r := c.w.Reader()
-	var current AdapterCurrent
-	hasCurrent := false
-	switch data, err := r.ReadFile(AdapterCurrentPath(s.ID)); {
-	case err == nil:
-		v, derr := DecodeAdapterCurrent(s.ID, data)
-		if derr != nil {
-			return derr
-		}
-		current, hasCurrent = v, true
-	case !missing(err):
-		return &FileError{Path: AdapterCurrentPath(s.ID), Kind: KindAdapterCurrent, Reason: FileUnreadable, Err: err}
+	installed, err := fsx.Exists(r, AdapterCurrentPath(s.ID))
+	if err != nil {
+		return err
 	}
-	// The directory the staged package would be renamed to. It is never the one the
-	// pointer names: the revision is taken from the pointer, so that a package of
-	// the version that is installed gets a directory of another name.
-	versionDir := ""
 	dropStage, err := fsx.Exists(r, s.Dir)
 	if err != nil {
 		return err
 	}
-	dropVersion, dropParent := false, false
-	if hasCurrent {
-		versionDir = AdapterRevisionDir(s.ID, s.Version, nextRevision(current, s.Version))
-		if dropVersion, err = fsx.Exists(r, versionDir); err != nil {
+	dropParent := false
+	if !installed {
+		if dropParent, err = stagedAlone(r, s); err != nil {
 			return err
 		}
 	}
-	if !hasCurrent {
-		if dropParent, err = fsx.Exists(r, AdapterDir(s.ID)); err != nil {
-			return err
-		}
-	}
-	if !dropStage && !dropVersion && !dropParent {
+	if !dropStage && !dropParent {
 		return nil
 	}
 	tx := c.w.Begin(adapterUnstage)
@@ -407,17 +392,35 @@ func (c *Config) unstage(s Staged) error {
 			return err
 		}
 	}
-	if dropVersion {
-		if err := tx.Discard(RoleVersion, versionDir); err != nil {
-			return err
-		}
-	}
 	if dropParent {
 		if err := tx.Discard(roleParent, AdapterDir(s.ID)); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// stagedAlone says whether the directory of the adapter exists and holds nothing
+// but the staging directory of s (or nothing at all), which is what a first
+// installation leaves when it is dropped.
+func stagedAlone(r fsx.Reader, s Staged) (bool, error) {
+	there, err := fsx.Exists(r, AdapterDir(s.ID))
+	if err != nil || !there {
+		return false, err
+	}
+	versions, err := r.ReadDir(AdapterVersionsDir(s.ID))
+	switch {
+	case missing(err):
+		return true, nil
+	case err != nil:
+		return false, &FileError{Path: AdapterVersionsDir(s.ID), Kind: KindDir, Reason: FileUnreadable, Err: err}
+	}
+	for _, v := range versions {
+		if v.Name != path.Base(s.Dir) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // Install is the plan of the writes that make a staged package the current

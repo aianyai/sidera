@@ -188,7 +188,11 @@ The prompt turns and the endpoint defaults are not here: they are
   judged. `StageAdapter` and `Unstage` are
   called only by the single install worker, one at a time, and may run
   concurrently with the writer loop: they take no lock of `Config` and touch
-  only staging and version directories that no change reads.
+  only staging directories that no change reads. `Unstage` therefore drops only
+  the staging directory it is given, and the adapter directory when that held nothing
+  else and the adapter is not installed; a version directory that was renamed in and
+  never became current is left to `DiscardStale` and the repair, since `Unstage`
+  cannot tell it from one an installation committed meanwhile.
 - Run `PlanInstall` and the transaction it plans in the same loop command, so
   that nothing changes between the plan and its writes. Pass it the `StillEnding`
   that asks the adapter host whether a process of an instance is still ending

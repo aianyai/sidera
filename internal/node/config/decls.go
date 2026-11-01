@@ -134,10 +134,9 @@ var (
 		{Role: roleSubdir, Op: txn.OpMakeDir, Many: true, Optional: true, Prepare: true},
 		{Role: roleFile, Op: txn.OpReplace, Many: true, Prepare: true},
 	}}
-	// adapterUnstage drops what a refused or failed installation left.
+	// adapterUnstage drops the staging of a refused or failed installation.
 	adapterUnstage = &txn.Decl{Name: "adapter-unstage", Kind: txn.Normal, Writes: []txn.Write{
 		{Role: roleStage, Op: txn.OpDiscard, Optional: true},
-		{Role: RoleVersion, Op: txn.OpDiscard, Optional: true},
 		{Role: roleParent, Op: txn.OpDiscard, Optional: true},
 	}}
 	// adapterGC repairs what a crash left among the adapter packages.
