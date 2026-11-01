@@ -72,12 +72,15 @@ sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi
 }
 
-# The archives carry no user or group of the machine that built them. GNU tar and
-# bsdtar (macOS) spell the option differently.
+# The archives carry no user or group of the machine that built them, and no extended
+# attributes: bsdtar (macOS) stores attributes such as com.apple.provenance as pax
+# headers, and GNU tar prints a warning for each one when it lists or extracts the
+# archive. GNU tar stores none unless asked, so its options need no such flag. GNU tar
+# and bsdtar spell the owner options differently.
 if tar --version | grep -q GNU; then
-  tar_owner=(--owner=0 --group=0 --numeric-owner)
+  tar_options=(--owner=0 --group=0 --numeric-owner)
 else
-  tar_owner=(--uid 0 --gid 0 --uname root --gname root)
+  tar_options=(--uid 0 --gid 0 --uname root --gname root --no-xattrs)
 fi
 
 # The adapters' `package` subcommand has to run here, on the machine that builds,
@@ -139,13 +142,13 @@ Install guide:
 https://github.com/aianyai/sidera/blob/v$version/docs/guide/install.md
 README
 
-  # The archive has no directory around its files, and no extended attributes of
-  # the build machine (macOS tar would add them).
+  # The archive has no directory around its files. COPYFILE_DISABLE keeps macOS tar
+  # from adding AppleDouble entries (._name) for the attributes of the build machine.
   files+=(adapters LICENSE THIRD_PARTY_NOTICES README.txt)
   if [ "$goos" = windows ]; then
     (cd "$stage" && zip -qr "$outdir/$name.zip" "${files[@]}")
   else
-    COPYFILE_DISABLE=1 tar "${tar_owner[@]}" -czf "$outdir/$name.tar.gz" -C "$stage" "${files[@]}"
+    COPYFILE_DISABLE=1 tar "${tar_options[@]}" -czf "$outdir/$name.tar.gz" -C "$stage" "${files[@]}"
   fi
 done
 
