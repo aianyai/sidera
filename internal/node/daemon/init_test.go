@@ -137,7 +137,7 @@ func TestInitTakesTheInstanceLockAndLetsItGo(t *testing.T) {
 	clk := clocktest.NewFake(t0)
 	home := newHome(t)
 	c := config(home, clk)
-	if err := os.MkdirAll(home, 0o700); err != nil {
+	if err := fsx.MakeRoot(home); err != nil {
 		t.Fatal(err)
 	}
 	fsys, err := fsx.OpenOS(home, bytes.NewReader(bytes.Repeat([]byte{2}, 4096)))
@@ -148,6 +148,11 @@ func TestInitTakesTheInstanceLockAndLetsItGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := unlock(); err != nil {
+			t.Error(err)
+		}
+	})
 	if _, err := daemon.Init(context.Background(), c); !errors.Is(err, daemon.ErrAlreadyRunning) {
 		t.Fatalf("init while the lock is held: %v; want ErrAlreadyRunning", err)
 	}

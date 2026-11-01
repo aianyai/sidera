@@ -38,7 +38,7 @@ func TestTemporaryRandomnessIsOwnedByTheConfiguredFilesystem(t *testing.T) {
 		case "separate":
 			cfg.TempRand = temporary
 		case "filesystem":
-			if err := os.Mkdir(cfg.Home, 0o700); err != nil {
+			if err := fsx.MakeRoot(cfg.Home); err != nil {
 				t.Fatal(err)
 			}
 			var err error
