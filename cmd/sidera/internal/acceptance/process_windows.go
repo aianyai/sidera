@@ -144,24 +144,121 @@ func createSuspended(spec processSpec) (*windows.ProcessInformation, error) {
 }
 
 func terminateStarted(handle windows.Handle) error {
-	err := windows.TerminateProcess(handle, 1)
-	status, waitErr := windows.WaitForSingleObject(handle, 10000)
-	if waitErr == nil && status != windows.WAIT_OBJECT_0 {
-		waitErr = fmt.Errorf("acceptance: terminated process wait returned %d", status)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return waitTerminatedProcess(ctx, handle, windows.TerminateProcess(handle, 1))
+}
+
+func waitTerminatedProcess(ctx context.Context, handle windows.Handle, terminateErr error) error {
+	waitErr := waitProcessExit(ctx, handle)
+	// TerminateProcess can deny access when this process is already ending.
+	// Only a successful wait on this exact handle proves that benign case.
+	if waitErr == nil && errors.Is(terminateErr, windows.ERROR_ACCESS_DENIED) {
+		terminateErr = nil
 	}
-	return errors.Join(err, waitErr)
+	return errors.Join(terminateErr, waitErr)
 }
 
-// x/sys exposes the information class but not this Win32 structure.
-type jobAccounting struct {
-	totalUserTime, totalKernelTime, periodUserTime, periodKernelTime int64
-	pageFaults, totalProcesses, activeProcesses, terminatedProcesses uint32
+// The cleanup context always has a deadline, shared by all process waits.
+func waitProcessExit(ctx context.Context, handle windows.Handle) error {
+	deadline, _ := ctx.Deadline()
+	remaining := max(time.Until(deadline), 0)
+	ms := uint32((remaining + time.Millisecond - 1) / time.Millisecond)
+	status, err := windows.WaitForSingleObject(handle, ms)
+	if err != nil {
+		return err
+	}
+	if status == uint32(windows.WAIT_TIMEOUT) {
+		return fmt.Errorf("acceptance: process exit wait: %w", context.DeadlineExceeded)
+	}
+	if status != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("acceptance: process exit wait returned %d", status)
+	}
+	return nil
 }
 
-func (s *processScope) activeProcesses() (uint32, error) {
-	var info jobAccounting
-	err := windows.QueryInformationJobObject(s.job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil)
-	return info.activeProcesses, err
+// x/sys exposes the information class but not this variable-length structure.
+type jobProcessList struct {
+	assigned, count uint32
+	pids            [1]uintptr
+}
+
+func (s *processScope) processIDs(ctx context.Context) ([]uintptr, error) {
+	const word = unsafe.Sizeof(uintptr(0))
+	const header = unsafe.Offsetof(jobProcessList{}.pids) / word
+	for capacity := uint32(16); ; {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		buffer := make([]uintptr, int(header)+int(capacity))
+		info := (*jobProcessList)(unsafe.Pointer(&buffer[0]))
+		err := windows.QueryInformationJobObject(s.job, windows.JobObjectBasicProcessIdList, uintptr(unsafe.Pointer(info)), uint32(uintptr(len(buffer))*word), nil)
+		if errors.Is(err, windows.ERROR_MORE_DATA) || err == nil && info.assigned > info.count {
+			capacity = max(capacity*2, info.assigned)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("acceptance: list process job: %w", err)
+		}
+		return buffer[header : header+uintptr(info.count)], nil
+	}
+}
+
+var isProcessInJob = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
+
+// openProcesses returns only handles verified against this job. The caller owns
+// every returned handle, including when another listed PID cannot be opened.
+func (s *processScope) openProcesses(pids []uintptr) ([]windows.Handle, error) {
+	var handles []windows.Handle
+	var errs []error
+	for _, pid := range pids {
+		handle, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			continue // The process disappeared between enumeration and OpenProcess.
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("acceptance: open job process %d: %w", pid, err))
+			continue
+		}
+		// A PID can be reused before OpenProcess. Pin the identity with its
+		// handle and check membership before requesting any termination.
+		var member int32
+		ok, _, checkErr := isProcessInJob.Call(uintptr(handle), uintptr(s.job), uintptr(unsafe.Pointer(&member)))
+		if ok == 0 {
+			errs = append(errs, fmt.Errorf("acceptance: check job process %d: %w", pid, checkErr))
+		}
+		if ok == 0 || member == 0 {
+			errs = append(errs, windows.CloseHandle(handle))
+			continue
+		}
+		handles = append(handles, handle)
+	}
+	return handles, errors.Join(errs...)
+}
+
+func (s *processScope) reclaim(ctx context.Context) error {
+	for {
+		pids, err := s.processIDs(ctx)
+		if err != nil || len(pids) == 0 {
+			return err
+		}
+		handles, openErr := s.openProcesses(pids)
+		errs := []error{openErr}
+		// Request every termination before waiting, so all members can unwind
+		// concurrently. Accounting zero after job termination is not an exit wait.
+		termination := make([]error, len(handles))
+		for i, handle := range handles {
+			termination[i] = windows.TerminateProcess(handle, 1)
+		}
+		for i, handle := range handles {
+			errs = append(errs, waitTerminatedProcess(ctx, handle, termination[i]), windows.CloseHandle(handle))
+		}
+		if err := errors.Join(errs...); err != nil {
+			return err
+		}
+		// A member could have created descendants during the preceding round.
+		// Enumerate again after actual exits rather than trusting one snapshot.
+	}
 }
 
 func (s *processScope) close(ctx context.Context) error {
@@ -174,30 +271,12 @@ func (s *processScope) close(ctx context.Context) error {
 	// Caller cancellation remains an error, but cannot abandon owned children.
 	cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	s.err = windows.TerminateJobObject(s.job, 1)
-	tick := time.NewTicker(5 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		active, err := s.activeProcesses()
-		if err != nil {
-			s.err = errors.Join(s.err, err)
-			break
-		}
-		if active == 0 {
-			break
-		}
-		select {
-		case <-tick.C:
-		case <-cleanup.Done():
-			// A final query, rather than an event or elapsed time, proves emptiness.
-			active, err = s.activeProcesses()
-			if err != nil || active != 0 {
-				s.err = errors.Join(s.err, fmt.Errorf("acceptance: process job still has %d active processes: %w", active, cleanup.Err()), err)
-			}
-			goto waited
-		}
+	s.err = s.reclaim(cleanup)
+	if s.err != nil {
+		// Best-effort fallback; neither this request nor kill-on-close proves
+		// actual exit, so the reclamation failure must remain visible.
+		s.err = errors.Join(s.err, windows.TerminateJobObject(s.job, 1))
 	}
-waited:
 	for _, p := range s.processes {
 		select {
 		case <-p.done:

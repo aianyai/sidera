@@ -112,12 +112,24 @@ status; there is no intermediary launcher process.
 
 `Close` first attempts the existing orderly daemon stop and closes the control
 listener, then reclaims the process scope with its own bounded cleanup context.
-It waits for the entire Windows job to become empty before closing local ledger
-files or allowing the caller to remove the root. Setup failures also close the
-scope. Stop, job termination and wait failures remain visible to the caller;
+On Windows it enumerates job PIDs, opens process handles and verifies each handle's
+membership before terminating it, protecting unrelated processes from PID reuse.
+Every round requests all terminations before waiting for each actual exit against
+one shared deadline, then enumerates again for descendants created during cleanup.
+Job accounting zero after asynchronous job termination is not an exit barrier.
+Direct process `Wait` owners also finish before local ledger files close or the
+caller removes the root. Setup failures also close the scope. Termination and
+kill-on-close remain error-path fallbacks; their requests cannot turn a failed
+exit wait into success. Stop, job termination and wait failures remain visible;
 final reclamation does not add scenario kill or crash evidence. A daemon `Kill`
 leaves the scope open, so an existing runtime can survive and reconnect after a
 daemon restart.
+
+The Windows scope regression holds a real descendant handle through daemon-like
+ancestor replacement and checks its signaled state with a zero-timeout wait
+immediately after `Close`. It also ends every directly launched process before
+closing the scope, so direct `Wait` completion cannot mask a still-exiting
+descendant. A post-close wait with its own budget would miss this race.
 
 `ReadTrace` requires completed `Wait`. It validates generations, the full
 declaration table's kinds, contiguous per-key ordinals and complete JSON lines;

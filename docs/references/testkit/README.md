@@ -195,12 +195,33 @@ On Windows the scope is a Job Object. The actual child is created suspended and
 assigned before it runs, so adapter, runtime and tool descendants are owned even
 before their control hello. Real process handles provide exit and abnormal-status
 evidence. Killing a daemon leaves the scope and native runtime alive. Final
-`Close` attempts the ordinary stop, closes control connections and then terminates
-and waits for the whole job with an independent bounded context before closing
-local ledger files. Setup failure follows the same reclamation path. Cleanup
+`Close` attempts the ordinary stop, closes control connections and then drains
+the job with an independent bounded context before closing local ledger files.
+It dynamically sizes `JobObjectBasicProcessIdList`, opens each listed process
+with query, synchronization and termination rights, and verifies `IsProcessInJob`
+on that handle before terminating it. This prevents a reused PID from targeting
+an unrelated process. Each round requests every termination, waits for actual
+process-handle signaling under one shared deadline, closes those handles and
+enumerates again to catch descendants created during cleanup. Direct `Wait`
+owners must finish too. Job accounting zero after asynchronous termination cannot
+replace these exit waits. A termination or enumeration failure remains an error
+even when best-effort job termination and kill-on-close fallback are requested.
+Setup failure follows the same reclamation path. Cleanup
 errors are returned and final reclamation records no scenario kill or crash.
 The real-runtime lifecycle regression checks survival across daemon replacement,
 cleanup after caller cancellation and immediate deletion of the complete root.
+`TestProcessScopeContainsChildBeforeHelloAcrossGenerations` checks an independently
+held descendant handle with a zero-timeout wait immediately after scope close,
+both with a live replacement and after all direct processes have already ended.
+An additional timed wait after close would hide an early return.
+
+Microsoft documents [process termination as asynchronous](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)
+and requires a process-handle wait to establish completion. The
+[job PID list](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_process_id_list)
+reports when its buffer is incomplete; enumeration grows it rather than accepting
+a truncated snapshot. [Membership checking](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob)
+uses the opened process identity and this fixture's job, rather than trusting a
+PID alone.
 
 `NewWalkBackend` in that same binary support package runs scripts and actual
 startup and terminal lifecycles through this fixture. It accepts prebuilt programs

@@ -17,11 +17,23 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 const scopeHelperArg = "--sidera-acceptance-process-helper"
+
+type jobAccounting struct {
+	totalUserTime, totalKernelTime, periodUserTime, periodKernelTime int64
+	pageFaults, totalProcesses, activeProcesses, terminatedProcesses uint32
+}
+
+func (s *processScope) activeProcesses() (uint32, error) {
+	var info jobAccounting
+	err := windows.QueryInformationJobObject(s.job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil)
+	return info.activeProcesses, err
+}
 
 // The self-reexec helper must run before TestMain: it neither builds fixture
 // binaries nor inherits the outer test's fixture configuration.
@@ -315,6 +327,15 @@ func TestProcessScopeSuspendedHalfStart(t *testing.T) {
 }
 
 func TestProcessScopeContainsChildBeforeHelloAcrossGenerations(t *testing.T) {
+	for _, endReplacement := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replacement-ended=%t", endReplacement), func(t *testing.T) {
+			testProcessScopeTree(t, endReplacement)
+		})
+	}
+}
+
+func testProcessScopeTree(t *testing.T, endReplacement bool) {
+	t.Helper()
 	s := newTestProcessScope(t)
 	_, childReady := scopeEvent(t)
 	_, release := scopeEvent(t)
@@ -354,6 +375,13 @@ func TestProcessScopeContainsChildBeforeHelloAcrossGenerations(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitScopeHandle(t, replacementReady)
+	if endReplacement {
+		// Leave only the descendant alive: completed direct Wait owners must
+		// not hide a close that returns before job termination finishes.
+		if killed, err := replacement.killAndWait(); err != nil || !killed {
+			t.Fatalf("replacement kill: %v, %v", killed, err)
+		}
+	}
 	var job windows.Handle
 	if err := windows.DuplicateHandle(windows.CurrentProcess(), s.job, windows.CurrentProcess(), &job, 0, false, windows.DUPLICATE_SAME_ACCESS); err != nil {
 		t.Fatal(err)
@@ -362,7 +390,10 @@ func TestProcessScopeContainsChildBeforeHelloAcrossGenerations(t *testing.T) {
 	if err := s.close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	waitScopeHandle(t, child)
+	status, err = windows.WaitForSingleObject(child, 0)
+	if err != nil || status != windows.WAIT_OBJECT_0 {
+		t.Fatalf("close returned before descendant exit: status=%d err=%v", status, err)
+	}
 	if !replacement.exited() {
 		t.Fatal("close returned before replacement wait")
 	}
