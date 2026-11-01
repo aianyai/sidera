@@ -27,7 +27,8 @@ func TestRunMCPProbe(t *testing.T) {
 		{"answers, probe failed", `read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; echo 'level=WARN msg="MCP probe failed"' >&2; cat >/dev/null`, "could not reach the daemon"},
 		{"answers, says nothing of its probe", `read line; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; cat >/dev/null`, ""},
 		{"refuses initialize", `read line; echo '{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"no"}}'; cat >/dev/null`, "refused initialize"},
-		{"ends at once", `exit 3`, "without answering"},
+		// Read initialize before exiting so the probe can diagnose a missing response.
+		{"ends without answering initialize", `read line; exit 3`, "without answering"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			program := filepath.Join(t.TempDir(), "sidera")
