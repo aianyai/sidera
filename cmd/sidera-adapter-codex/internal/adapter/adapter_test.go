@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func TestCreateSession(t *testing.T) {
 	}
 	env := start.Config["shell_environment_policy"]["set"].(map[string]any)
 	mcp := start.Config["mcp_servers"]["sidera"].(map[string]any)
-	if env["SIDERA_TOKEN"] != token || mcp["env"].(map[string]any)["SIDERA_HOME"] != "/home/sidera" || mcp["command"] != "/bin/sidera" {
+	if env["SIDERA_TOKEN"] != token || mcp["env"].(map[string]any)["SIDERA_HOME"] != "/home/sidera" || mcp["command"] != filepath.Join(h.dir, "bin", "sidera") {
 		t.Errorf("thread configuration = %+v", start.Config)
 	}
 	if name := decode[struct{ Name string }](codex.callsOf("thread/name/set")[0].Params).Name; name != "sidera "+attempt1 {

@@ -307,7 +307,7 @@ func newHarnessWith(t *testing.T, codex *fakeCodex, mutate func(*adapter.Options
 	opts := adapter.Options{
 		NewServer:    func(server.Config) adapter.ServerManager { return h.mgr },
 		CodexVersion: func(context.Context, string) (string, error) { return "0.164.0", nil },
-		LookPath:     func(name string) (string, error) { return "/bin/" + name, nil },
+		LookPath:     func(name string) (string, error) { return filepath.Join(dir, "bin", name), nil },
 		MCPWait:      300 * time.Millisecond,
 		PollEvery:    30 * time.Millisecond,
 		ReconnectMin: 20 * time.Millisecond, ReconnectMax: 100 * time.Millisecond,
