@@ -111,14 +111,13 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
 
    **Disabling ends that instance's sessions.** Their endpoints in Sidera are
    closed, so no message reaches them or comes from them any more. The sessions of
-   the agent itself are kept as history:
-   when the instance runs again, the node asks the adapter to release them. A Codex
-   thread is archived and unloaded, and its record stays; the running turn of a Claude
-   Code session is interrupted and its transcript stays. A Codex session in the
-   middle of a turn is released only after the turn ends. Start new sessions
-   afterwards: a closed endpoint stays closed. If `install` still answers
-   `adapter_in_use` right after `disable`, the old adapter process is still ending:
-   wait a few seconds and run it again.
+   the agent itself are kept as history: when the instance runs again, the node asks
+   the adapter to release them. A Codex thread is archived and unloaded, and its
+   record stays; the running turn of a Claude Code session is interrupted and its
+   transcript stays. A Codex session in the middle of a turn is released only after
+   the turn ends. Start new sessions afterwards: a closed endpoint stays closed. If
+   `install` still answers `adapter_in_use` right after `disable`, the old adapter
+   process is still ending: wait a few seconds and run it again.
 
    A package of the same version that differs in contents (a rebuild) is not
    refused: it is replaced without a disable, the result says `replaced true`, and
@@ -126,10 +125,9 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
    says `already_current`.
 
 5. Check: `sidera adapter list` (probes `passed`, except Codex as the notes above
-   say), then reconnect the nodes. A
-   restart of the daemon drops its connections to other nodes, and a connection is
-   opened only when something needs it. Send one message from each node, for
-   example from the console:
+   say), then reconnect the nodes. A restart of the daemon drops its connections to
+   other nodes, and a connection is opened only when something needs it. Send one
+   message from each node, for example from the console:
 
    ```sh
    sidera-adapter-console send --to <other-node-id>/<its-console-endpoint> --body reconnect
