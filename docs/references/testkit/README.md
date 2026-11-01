@@ -567,6 +567,13 @@ coverage dimensions.
   saving it must succeed before the engine opens. False leaves the restored state
   alone. An owner clear therefore survives ordinary restart and periodic saving,
   while a forced fixture pauses again on its next start.
+- **Session acquisition is fallible.** `H.Session(endpoint)` returns an Agent and
+  an error. Invalid identifiers, absent open sessions, record reads and ledger
+  writer failures return no Agent; wrapped read errors preserve their cause. A
+  successfully acquired Agent is cached for the fixture lifetime across restarts.
+  Returning a cached Agent needs no current process; its operations still check
+  the current generation. `H.MustSession` delegates to the same implementation
+  and fails the test on error, for callers on the test goroutine only.
 - **Fallible fixture calls share one current-process lookup.** `onProcess`,
   `Records`, `VerifyReport`, `VerifyControlReply` and `quiesce` return
   `engineagent.ErrNodeNotRunning` when there is no running process, before the

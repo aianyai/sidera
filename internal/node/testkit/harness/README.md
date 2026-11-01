@@ -29,7 +29,7 @@ layer.
 | `AdapterInstanceOptions`, `AdapterOptions.InstanceOptions` | Replaces the full manifest and initial enabled state for an already listed instance. One normalized descriptor supplies installation, launching and runtime ownership; disabled instances stay installed without launching until a real enable. |
 | `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `LauncherInstance`, `AdapterManifest`, `AdapterManifestOf`, `RuntimeAdapterManifestOf` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. `LauncherConfig.Instances` gives an instance a manifest and runtime other than the default pair. |
 | `H.Direct`, `H.DirectOn`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry (`DirectOn` on a named instance of the fixture), its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`, calling as the endpoint's own instance. A name stands for one endpoint of the whole fixture. |
-| `H.Session` | The agent of a session endpoint the node made by a creation, by the identifier the reply to the creation names. The token is read from the endpoint's record on the disk, so a session is reached only through what the node made. Every agent of the fixture also writes a `model.saw` entry for each message or part a page showed, the notices of the node's own system endpoint told from the messages of others. The fake runtimes of the fixture carry out the actions of a turn (`recv`, `recv_part`, `ack`) by calling the engine as the session the turn belongs to, with the token of its tool access, so the adapter is told what the model was shown and acknowledges on the agent's behalf. |
+| `H.Session`, `H.MustSession` | The fallible session acquisition and its strict test-goroutine convenience wrapper. They return the agent of a session endpoint the node made by a creation, by the identifier the reply to the creation names. The token is read from the endpoint's record on the disk, so a session is reached only through what the node made. Every agent of the fixture also writes a `model.saw` entry for each message or part a page showed, the notices of the node's own system endpoint told from the messages of others. The fake runtimes of the fixture carry out the actions of a turn (`recv`, `recv_part`, `ack`) by calling the engine as the session the turn belongs to, with the token of its tool access, so the adapter is told what the model was shown and acknowledges on the agent's behalf. |
 | `NewControlGen`, `ControlGen.Next`, `ControlGen.Paths`, `ControlPaths` | The generator of control signals for a model test of what becomes of every record: creations with and without an initial message, creations the node refuses, statuses of every kind of endpoint, interrupts and closes of the sessions it made, of one it closed and of endpoints that do not take them. The draw is a function of the seed; `Paths` counts how often each path was taken, so a test asserts that none stopped being reached. |
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
 | `H.Quiesce(opts...)`, `QuiesceError` | Waits for quiet, fails with a report. |
@@ -296,6 +296,13 @@ By default the node has one instance, `Instance`, and every accessor without a n
 - **No stand-in for what is missing.** `Adapter` (without `Options.Adapter`) and
   `Runtime` (when that instance declares no runtime) return an error that is `scenario.ErrNotAvailable`; a script that needs them
   fails with that and says what is missing.
+- **Session acquisition returns errors.** `Session` returns no agent on an invalid
+  identifier, a failed record read, an absent open session or a ledger-writer
+  failure. Record-read errors retain their cause. Successful acquisitions keep the
+  same cached agent across restarts; acquiring that cached agent needs no running
+  process, and its later calls still report current process errors. `MustSession`
+  delegates to `Session` and fails the test on error, so only the test goroutine
+  uses it.
 - **Fallible process operations report a down node.** `Records`, `VerifyReport`,
   `VerifyControlReply` and `Direct` return `engineagent.ErrNodeNotRunning` when no
   process is running, including before the first Start and after Stop or Kill.
@@ -341,7 +348,8 @@ its stream needs.
 `walk_internal_test.go` checks that a selected runtime cutoff releases and joins
 residual record reads, and that abnormal script-worker exits reach the backend's
 error result both with and without a held target. `harness_test.go` covers down-node
-errors for record reads and signature verification before Start and after Stop/Kill;
+errors for uncached session acquisition, record reads and signature verification
+before Start and after Stop/Kill, plus invalid and absent session acquisition;
 existing stopped-node and controlled-start tests cover `Quiesce`.
 
 `walk_startup_test.go` and its internal tests check real Init and Start targets,

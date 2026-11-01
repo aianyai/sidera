@@ -748,22 +748,22 @@ func (h *H) recordingOptions() fakeagent.RecordingOptions {
 // session, as the tools of a session do. The token is read from the endpoint's record
 // on the disk, so a test reaches a session only through what the node has made, never
 // by registering one. The same agent is returned for the same endpoint for the life of
-// the fixture, across restarts.
-func (h *H) Session(endpointID string) fakeagent.Agent {
-	h.t.Helper()
+// the fixture, across restarts. Acquisition failures return no agent; errors from
+// reading the current process retain their cause.
+func (h *H) Session(endpointID string) (fakeagent.Agent, error) {
 	id, err := ident.ParseEndpointID(endpointID)
 	if err != nil {
-		h.t.Fatalf("harness: Session(%q): %v", endpointID, err)
+		return nil, fmt.Errorf("harness: Session(%q): %w", endpointID, err)
 	}
 	h.mu.Lock()
 	a, ok := h.agent["session/"+endpointID]
 	h.mu.Unlock()
 	if ok {
-		return a
+		return a, nil
 	}
 	sc, err := h.Records()
 	if err != nil {
-		h.t.Fatalf("harness: Session(%q): %v", endpointID, err)
+		return nil, fmt.Errorf("harness: Session(%q): %w", endpointID, err)
 	}
 	var token adapterproto.Token
 	for _, ep := range sc.Endpoints {
@@ -772,16 +772,27 @@ func (h *H) Session(endpointID string) fakeagent.Agent {
 		}
 	}
 	if token == "" {
-		h.t.Fatalf("harness: Session(%q): the node holds no open session endpoint of that identifier", endpointID)
+		return nil, fmt.Errorf("harness: Session(%q): the node holds no open session endpoint of that identifier", endpointID)
 	}
 	w, err := h.led.Open("agent/"+id.String(), 0, h.clk.Now)
 	if err != nil {
-		h.t.Fatalf("harness: ledger writer of the session %s: %v", id, err)
+		return nil, fmt.Errorf("harness: ledger writer of the session %s: %w", id, err)
 	}
 	a = fakeagent.Recording(engineagent.New(currentEngine{h}, engine.ByToken(token)), w, id.String(), h.recordingOptions())
 	h.mu.Lock()
 	h.agent["session/"+endpointID] = a
 	h.mu.Unlock()
+	return a, nil
+}
+
+// MustSession returns Session's agent and fails the test if acquisition fails.
+// Use it only from the test goroutine; script and drain workers return errors.
+func (h *H) MustSession(endpointID string) fakeagent.Agent {
+	h.t.Helper()
+	a, err := h.Session(endpointID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
 	return a
 }
 

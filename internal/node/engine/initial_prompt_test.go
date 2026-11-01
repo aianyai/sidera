@@ -82,7 +82,7 @@ func TestCreationFirstPromptIsCountedAndRecoveredOnlyWithAnInitialMessage(t *tes
 			}
 			quiet(t, h)
 			h.Advance(time.Second)
-			agent := h.Session(ep.ID.String())
+			agent := h.MustSession(ep.ID.String())
 			page := recvAs(t, h, agent, fakeagent.RecvInput{})
 			if body != "" {
 				wantOnly(t, page, msg)
@@ -158,7 +158,7 @@ func TestTurnEndedWhileCreatingCountsOnceTheEndpointOpens(t *testing.T) {
 	if got := attemptKinds(t, h, addr); !slices.Equal(got, []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}) {
 		t.Errorf("delivered prompt kinds %v, want the first prompt and one repeat", got)
 	}
-	agent := h.Session(eps[0].ID.String())
+	agent := h.MustSession(eps[0].ID.String())
 	page := recvAs(t, h, agent, fakeagent.RecvInput{})
 	wantOnly(t, page, msg)
 }
@@ -209,5 +209,5 @@ func TestCreationSettledWithFirstTurnEndedAfterARestartRepeatsTheUnreadPromptOnc
 	if got := attemptKinds(t, h, addr); !slices.Equal(got, []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}) {
 		t.Errorf("delivered prompt kinds %v, want the first prompt and one repeat", got)
 	}
-	wantOnly(t, recvAs(t, h, h.Session(eps[0].ID.String()), fakeagent.RecvInput{}), msg)
+	wantOnly(t, recvAs(t, h, h.MustSession(eps[0].ID.String()), fakeagent.RecvInput{}), msg)
 }

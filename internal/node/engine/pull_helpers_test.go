@@ -92,7 +92,7 @@ func newSessionOn(t testing.TB, h *harness.H, instance, from string) (fakeagent.
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h.Session(string(r.Create.SessionEndpoint)), ident.Address{Node: harness.NodeID(), Endpoint: id}.String()
+	return h.MustSession(string(r.Create.SessionEndpoint)), ident.Address{Node: harness.NodeID(), Endpoint: id}.String()
 }
 
 // sendToAddr sends a text from the endpoint registered as from to an address.

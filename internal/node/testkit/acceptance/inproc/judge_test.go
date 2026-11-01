@@ -138,7 +138,7 @@ func TestCreationJudgementRequiresTheRequestedInitialBody(t *testing.T) {
 						return fmt.Errorf("creation has no actual created reply: %+v", status)
 					}
 					endpoint := string(status.ControlReply.Create.SessionEndpoint)
-					if err := facts.RecvAndAck(h, h.Session(endpoint)); err != nil {
+					if err := facts.RecvAndAck(h, h.MustSession(endpoint)); err != nil {
 						return err
 					}
 					log, err := h.Ledger()

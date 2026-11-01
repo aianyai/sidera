@@ -61,7 +61,7 @@ func startedSession(t testing.TB, h *harness.H, from, body string) (fakeagent.Ag
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h.Session(id.String()), id, msg
+	return h.MustSession(id.String()), id, msg
 }
 
 func sortedIDs(ids []adapterproto.MessageID) []adapterproto.MessageID {
@@ -178,7 +178,7 @@ func TestReplyFromNewSessionBeforeControlReplyIsAdmitted(t *testing.T) {
 		t.Fatalf("a's record of the signal is %+v: it has learned nothing yet, the premise of the test", o.Outbound)
 	}
 
-	answer, err := h.Session(eps[0].ID.String()).Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: msg, Body: "started"})
+	answer, err := h.MustSession(eps[0].ID.String()).Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: msg, Body: "started"})
 	if err != nil {
 		t.Fatalf("the reply of the session: %v", err)
 	}

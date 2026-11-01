@@ -66,7 +66,7 @@ func TestLeaseIsRenewedOnlyWhileTheEndpointHasAnActiveTurn(t *testing.T) {
 	t.Run("a running turn extends the lease to the cap and not beyond", func(t *testing.T) {
 		h := sessionNode(t, harness.Options{}, "a")
 		_, addr := newSession(t, h, "a") // the first turn of a session is running
-		s := h.Session(endpointOfAddr(t, addr).String())
+		s := h.MustSession(endpointOfAddr(t, addr).String())
 		msg := sendToAddr(t, h, "a", addr, "read, and not acknowledged")
 		quiet(t, h)
 		recvAs(t, h, s, fakeagent.RecvInput{})
@@ -84,7 +84,7 @@ func TestLeaseIsRenewedOnlyWhileTheEndpointHasAnActiveTurn(t *testing.T) {
 	t.Run("a turn that has ended leaves the lease to run out", func(t *testing.T) {
 		h := sessionNode(t, harness.Options{}, "a")
 		_, addr := newSession(t, h, "a")
-		s := h.Session(endpointOfAddr(t, addr).String())
+		s := h.MustSession(endpointOfAddr(t, addr).String())
 		msg := sendToAddr(t, h, "a", addr, "read after the turn is over")
 		quiet(t, h)
 		recvAs(t, h, s, fakeagent.RecvInput{})
@@ -117,7 +117,7 @@ func TestLeaseIsRenewedWhenTheTurnIsReportedAfterTheLease(t *testing.T) {
 		_, addr := newSession(t, h, "a")
 		msg := sendToAddr(t, h, "a", addr, "read, and not acknowledged")
 		quiet(t, h)
-		recvAs(t, h, h.Session(endpointOfAddr(t, addr).String()), fakeagent.RecvInput{})
+		recvAs(t, h, h.MustSession(endpointOfAddr(t, addr).String()), fakeagent.RecvInput{})
 		return msg
 	}
 	for _, tc := range []struct {
@@ -130,7 +130,7 @@ func TestLeaseIsRenewedWhenTheTurnIsReportedAfterTheLease(t *testing.T) {
 			holdBackTurn(t, h, addr) // the prompt the message wakes the session with starts no turn yet
 			msg := sendToAddr(t, h, "a", addr, "read between two turns")
 			quiet(t, h)
-			recvAs(t, h, h.Session(endpointOfAddr(t, addr).String()), fakeagent.RecvInput{})
+			recvAs(t, h, h.MustSession(endpointOfAddr(t, addr).String()), fakeagent.RecvInput{})
 			if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
 				t.Fatal(err)
 			}
@@ -178,7 +178,7 @@ func TestLeaseRenewalCapEndsInDeliveryUnknownOnce(t *testing.T) {
 	// end before the queue time does: it is the number of leases that ends the delivery.
 	h := sessionNode(t, harness.Options{NodeSettings: `{"endpoint_defaults":{"max_queue_s":7200}}`}, "a")
 	_, addr := newSession(t, h, "a")
-	s := h.Session(endpointOfAddr(t, addr).String())
+	s := h.MustSession(endpointOfAddr(t, addr).String())
 	msg := sendToAddr(t, h, "a", addr, "never acknowledged")
 	quiet(t, h)
 	for i := 1; i <= delivery.MaxLeases; i++ {
@@ -211,7 +211,7 @@ func TestLeaseRenewalCapEndsInDeliveryUnknownOnce(t *testing.T) {
 func TestLongestQueueThenLeaseToTheCapSettlesBeforeReportBy(t *testing.T) {
 	h := sessionNode(t, harness.Options{NodeSettings: `{"endpoint_defaults":{"max_queue_s":7200}}`}, "a")
 	_, addr := newSession(t, h, "a")
-	s := h.Session(endpointOfAddr(t, addr).String())
+	s := h.MustSession(endpointOfAddr(t, addr).String())
 	sent := h.Clock().Now()
 	msg := sendToAddr(t, h, "a", addr, "queued as long as a queue may be")
 	quiet(t, h)
@@ -296,7 +296,7 @@ func TestTruncatedOrReplacedResultIsNotAcknowledged(t *testing.T) {
 			// Nobody acknowledges: the lease runs out and the message is handed out again,
 			// as one the agent may have seen.
 			leasedFor(t, h, msg)
-			s := h.Session(endpointOfAddr(t, addr).String())
+			s := h.MustSession(endpointOfAddr(t, addr).String())
 			m := wantOnly(t, recvAs(t, h, s, fakeagent.RecvInput{}), msg)
 			if !m.PossiblyDuplicate {
 				t.Error("the message handed out again is not marked as possibly seen")
@@ -338,9 +338,9 @@ func TestObservedIsAcknowledgedOnlyForTheEndpointsOwnPageSeenInFull(t *testing.T
 	h := sessionNode(t, harness.Options{}, "a")
 	_, addr := newSession(t, h, "a")
 	ref := adapterproto.EndpointRef(endpointOfAddr(t, addr).String())
-	s := h.Session(string(ref))
+	s := h.MustSession(string(ref))
 	_, otherAddr := newSession(t, h, "a")
-	other := h.Session(string(endpointOfAddr(t, otherAddr).String()))
+	other := h.MustSession(string(endpointOfAddr(t, otherAddr).String()))
 
 	mine := sendToAddr(t, h, "a", addr, "for this session")
 	theirs := sendToAddr(t, h, "a", otherAddr, "for the other session")

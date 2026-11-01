@@ -26,7 +26,7 @@ func TestSessionLifecycleRequiresItsOwnNativeClosure(t *testing.T) {
 				if wrapped, ok := e.(unrelatedClosedNativeEnv); ok {
 					e = wrapped.H
 				}
-				return e.(*harness.H).Session(endpoint)
+				return e.(*harness.H).MustSession(endpoint)
 			}
 			for _, r := range recipes.New(b).Scripts {
 				if r.Script.Name != "session-lifecycle" {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -738,6 +739,7 @@ func TestFallibleFixtureReadsReportADownNode(t *testing.T) {
 				call func() error
 			}{
 				{"Records", func() error { _, err := h.Records(); return err }},
+				{"Session", func() error { _, err := h.Session(ident.SystemEndpoint().String()); return err }},
 				{"VerifyReport", func() error { _, err := h.VerifyReport(record.Record{}); return err }},
 				{"VerifyControlReply", func() error { _, err := h.VerifyControlReply(record.Record{}); return err }},
 			} {
@@ -746,6 +748,18 @@ func TestFallibleFixtureReadsReportADownNode(t *testing.T) {
 						t.Fatalf("returned %v, want ErrNodeNotRunning", err)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestSessionAcquisitionReturnsErrorsWithoutAnAgent(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	for _, endpoint := range []string{"not-an-endpoint", ident.SystemEndpoint().String()} {
+		t.Run(endpoint, func(t *testing.T) {
+			agent, err := h.Session(endpoint)
+			if err == nil || agent != nil {
+				t.Fatalf("Session(%q) = %v, %v, want no agent and an error", endpoint, agent, err)
 			}
 		})
 	}

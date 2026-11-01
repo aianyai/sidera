@@ -266,7 +266,7 @@ func (m *modelRun) step(i int) {
 	case n < 45:
 		if ep, ok := m.pickSession(); ok {
 			m.awaitAdmitted(ep.Instance)
-			m.recv(h.Session(ep.ID.String()), ep.ID)
+			m.recv(h.MustSession(ep.ID.String()), ep.ID)
 		}
 	case n < 59:
 		m.modelTurn()
@@ -349,7 +349,7 @@ func (m *modelRun) walkLease() {
 	var res fakeagent.RecvResult
 	var err error
 	m.inCall(func() {
-		res, err = h.Session(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+		res, err = h.MustSession(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
 	})
 	if err == nil {
 		m.acked.handedOut(ep.ID, res.Page)
