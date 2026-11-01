@@ -354,8 +354,8 @@ func TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing(t *testi
 	}
 	if cur, err := r.mem.ReadFile(config.AdapterCurrentPath("relay")); err != nil {
 		t.Errorf("the current pointer: %v", err)
-	} else if v, err := config.DecodeAdapterCurrent("relay", cur); err != nil || v != "1.0.0" {
-		t.Errorf("the pointer names %q (%v)", v, err)
+	} else if v, err := config.DecodeAdapterCurrent("relay", cur); err != nil || v.Version != "1.0.0" {
+		t.Errorf("the pointer names %+v (%v)", v, err)
 	}
 	if work, err := config.AdapterGCWork(r.mem); err != nil || len(work) != 0 {
 		t.Errorf("garbage left in the adapter directory: %v (%v)", work, err)
@@ -635,6 +635,71 @@ func TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersio
 	}
 	if work, err := config.AdapterGCWork(r.mem); err != nil || len(work) != 0 {
 		t.Errorf("garbage left: %v (%v)", work, err)
+	}
+}
+
+// A package of the version that is installed whose contents differ replaces it, with
+// the instances that run restarted to run the new files; the same contents again are
+// installed already and restart nothing; and the result says which of the three it was.
+func TestInstallingTheSameVersionWithOtherContentsReplacesItAndRestartsTheInstance(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	rebuilt := relayPackage(t, "1.0.0")
+	if err := fsx.Replace(rebuilt, setupTag, "lib/data.txt", []byte("rebuilt\n"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	r := newRig(t, 10, withAdapters(host), withPackage("/src/relay", relayPackage(t, "1.0.0")), withPackage("/src/rebuilt", rebuilt))
+	e := r.start()
+	var did engine.AdapterInstalled
+	if _, err := e.Execute(ctx, installCommandSeeing(90, "install", "/src/relay", &did)); err != nil || did.AlreadyCurrent || did.Replaced {
+		t.Fatalf("the first installation: %+v, %v, want a new adapter", did, err)
+	}
+	if _, err := e.Execute(ctx, enableCommand(91, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+		t.Fatal(err)
+	}
+	adm, info := relayAdmission(t)
+	if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AdapterStarted(ctx, "relay", adapterproto.StartResult{}); err != nil {
+		t.Fatal(err)
+	}
+	asked := len(host.asks())
+
+	if _, err := e.Execute(ctx, installCommandSeeing(92, "install rebuilt", "/src/rebuilt", &did)); err != nil {
+		t.Fatalf("installing the rebuilt package: %v", err)
+	}
+	if !did.Replaced || did.AlreadyCurrent {
+		t.Errorf("the installation did %+v, want the package replaced", did)
+	}
+	if got := host.asks()[asked:]; !reflect.DeepEqual(got, []string{"stop:relay", "run:relay"}) {
+		t.Errorf("the host was asked for %v, want the instance stopped and started again", got)
+	}
+	if v, err := e.Adapter(ctx, "relay"); err != nil || v.Online {
+		t.Errorf("the instance after: %+v, %v; want it offline until the new process is taken on", v, err)
+	}
+	var relay config.Adapter
+	for _, a := range r.cfg.Adapters() {
+		if a.ID == "relay" {
+			relay = a
+		}
+	}
+	if relay.Version != "1.0.0" || relay.Revision == 0 {
+		t.Fatalf("relay = %+v, want 1.0.0 installed again under a revision", relay)
+	}
+	if got, err := r.mem.ReadFile(path.Join(relay.Dir(), "lib/data.txt")); err != nil || string(got) != "rebuilt\n" {
+		t.Errorf("the file of the installed package = %q, %v", got, err)
+	}
+
+	asked = len(host.asks())
+	if _, err := e.Execute(ctx, installCommandSeeing(93, "install rebuilt again", "/src/rebuilt", &did)); err != nil {
+		t.Fatal(err)
+	}
+	if !did.AlreadyCurrent || did.Replaced {
+		t.Errorf("the same contents again did %+v, want them found installed", did)
+	}
+	if got := host.asks()[asked:]; len(got) != 0 {
+		t.Errorf("the host was asked for %v although nothing was replaced", got)
 	}
 }
 

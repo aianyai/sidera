@@ -228,8 +228,8 @@ func prepareTransactionEngineInstall(b *testing.B, observer txn.Observer, curren
 		if err != nil {
 			return err
 		}
-		if gotVersion != version {
-			return fmt.Errorf("installed version = %s, want %s", gotVersion, version)
+		if gotVersion.Version != version {
+			return fmt.Errorf("installed version = %s, want %s", gotVersion.Version, version)
 		}
 		program, err := h.Faults().ReadFile(path.Join(config.AdapterVersionDir("benchmark", version), "adapter"))
 		if err == nil && !bytes.Equal(program, bytes.Repeat([]byte{'x'}, 128)) {

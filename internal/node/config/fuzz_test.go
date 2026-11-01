@@ -131,7 +131,8 @@ func FuzzDecodeBackup(f *testing.F) {
 }
 
 func FuzzDecodeAdapterCurrent(f *testing.F) {
-	seeds(f, goldenCurrent, `{"format":1,"version":"1.2.3-rc.1+build.5"}`)
+	seeds(f, goldenCurrent, `{"format":1,"version":"1.2.3-rc.1+build.5"}`,
+		`{"format":1,"version":"1.0.0","digest":"`+strings.Repeat("ab", 32)+`","revision":2}`)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		v, err := config.DecodeAdapterCurrent("example", data)
 		if err != nil {
@@ -146,7 +147,7 @@ func FuzzDecodeAdapterCurrent(f *testing.F) {
 		}
 		v2, err := config.DecodeAdapterCurrent("example", enc)
 		if err != nil || v2 != v {
-			t.Fatalf("the canonical text decodes to %q, %v, want %q", v2, err, v)
+			t.Fatalf("the canonical text decodes to %+v, %v, want %+v", v2, err, v)
 		}
 	})
 }

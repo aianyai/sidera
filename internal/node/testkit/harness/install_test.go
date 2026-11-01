@@ -60,7 +60,7 @@ func TestPackageSourceCanInstallAndUpgradeAfterRestart(t *testing.T) {
 		if err := json.Unmarshal(result.Result, &installed); err != nil {
 			t.Fatal(err)
 		}
-		if want := (engine.AdapterInstalled{ID: manifest.ID, Version: version}); installed != want {
+		if want := (engine.AdapterInstalled{ID: manifest.ID, Version: version, Replaced: i > 0}); installed != want {
 			t.Fatalf("install %s returned %+v, want %+v", version, installed, want)
 		}
 		if err := h.Quiesce(); err != nil {
@@ -70,8 +70,8 @@ func TestPackageSourceCanInstallAndUpgradeAfterRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, err := config.DecodeAdapterCurrent(manifest.ID, current); err != nil || got != version {
-			t.Fatalf("current version is %q (%v), want %s", got, err, version)
+		if got, err := config.DecodeAdapterCurrent(manifest.ID, current); err != nil || got.Version != version {
+			t.Fatalf("current version is %q (%v), want %s", got.Version, err, version)
 		}
 		program := path.Join(config.AdapterVersionDir(manifest.ID, version), manifest.Program)
 		if got, err := h.Disk().ReadFile(program); err != nil || string(got) != "program "+version {

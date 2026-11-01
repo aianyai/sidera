@@ -32,7 +32,7 @@ func InspectInstalledPackage(r fsx.Reader, id string) (recipes.InstalledPackage,
 	if err != nil {
 		return recipes.InstalledPackage{}, err
 	}
-	out := recipes.InstalledPackage{Current: current}
+	out := recipes.InstalledPackage{Current: current.Version}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name, ".") {
 			return recipes.InstalledPackage{}, fmt.Errorf("%w: unfinished package directory %s", recipes.ErrInstallationEffect, entry.Name)

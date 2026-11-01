@@ -123,8 +123,8 @@ func TestInstanceInputSeedCacheIncludesManifestAndDisabledState(t *testing.T) {
 			t.Fatal(err)
 		}
 		version, err := config.DecodeAdapterCurrent(instance, raw)
-		if err != nil || version != tt.version {
-			t.Fatalf("cached manifest: version=%s want=%s err=%v", version, tt.version, err)
+		if err != nil || version.Version != tt.version {
+			t.Fatalf("cached manifest: version=%s want=%s err=%v", version.Version, tt.version, err)
 		}
 	}
 }

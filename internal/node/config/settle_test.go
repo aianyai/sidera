@@ -3,6 +3,7 @@ package config_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"path"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // installedVersion reads the version the current pointer of an adapter names,
@@ -22,12 +24,13 @@ func installedVersion(t *testing.T, where string, disk *fsxtest.Mem, id string) 
 		t.Errorf("%s: the current pointer of %s: %v", where, id, err)
 		return ""
 	}
-	version, err := config.DecodeAdapterCurrent(id, data)
+	current, err := config.DecodeAdapterCurrent(id, data)
 	if err != nil {
 		t.Errorf("%s: the current pointer of %s: %v", where, id, err)
 		return ""
 	}
-	if !exists(disk, config.AdapterManifestPath(id, version)) {
+	version := current.Version
+	if !exists(disk, path.Join(config.AdapterRevisionDir(id, version, current.Revision), manifest.FileName)) {
 		t.Errorf("%s: current names %s %s, whose directory is gone", where, id, version)
 	}
 	return version

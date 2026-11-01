@@ -53,7 +53,7 @@ func installChat(t testing.TB, fsys fsx.FS, m fakeadapter.ManifestOptions) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur, err := nodeconfig.EncodeAdapterCurrent(m.Version)
+	cur, err := nodeconfig.EncodeAdapterCurrent(nodeconfig.AdapterCurrent{Version: m.Version})
 	if err != nil {
 		t.Fatal(err)
 	}

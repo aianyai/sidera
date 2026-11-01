@@ -192,7 +192,10 @@ The prompt turns and the endpoint defaults are not here: they are
 - Run `PlanInstall` and the transaction it plans in the same loop command, so
   that nothing changes between the plan and its writes. Pass it the `StillEnding`
   that asks the adapter host whether a process of an instance is still ending
-  (nil when nothing runs adapters), so that an adapter is not upgraded under it. Call `Unstage` when the
+  (nil when nothing runs adapters), so that an adapter is not upgraded under it. The
+  plan's `Replaced` tells the caller to restart the instances that run: the same version
+  with other contents is installed under the next revision without refusing them. A
+  package is found at `Adapter.Dir()`, never at a path built from the version alone. Call `Unstage` when the
   result is `AlreadyCurrent`, when the installation is refused and when it
   failed with an error that is not fatal; after a fatal error the next start
   removes what is left.

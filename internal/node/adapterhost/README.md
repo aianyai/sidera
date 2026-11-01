@@ -141,7 +141,7 @@ and its own log goes through the handle the daemon gives it.
 - The engine answers requests and notifications with the context it is given,
   and returns when that context ends: the host ends everything with it.
 - Home is an absolute path; the installed adapters are at
-  `config.AdapterVersionDir` under it.
+  `config.Adapter.Dir()` under it.
 - The engine can be told `GoneStartFailed` for a connection while an earlier call
   of the same connection (`AdapterAdmitted`, `AdapterStarted`) is still running,
   when `StartWait` passes during it.

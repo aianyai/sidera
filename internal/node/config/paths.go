@@ -1,6 +1,8 @@
 package config
 
 import (
+	"strconv"
+
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -49,7 +51,19 @@ func AdapterVersionsDir(id string) string { return AdapterDir(id) + "/" + versio
 // AdapterVersionDir is the immutable package directory of one version.
 func AdapterVersionDir(id, version string) string { return AdapterVersionsDir(id) + "/" + version }
 
-// AdapterManifestPath is the manifest of one version.
+// AdapterRevisionDir is the immutable package directory of one version at one
+// revision. Revision 0 is the directory of the version itself; installing the
+// same version again with other contents needs a directory of another name, so
+// that the pointer's replacement is what switches packages and no directory is
+// ever replaced in place. The "~" cannot be part of a version.
+func AdapterRevisionDir(id, version string, revision uint32) string {
+	if revision == 0 {
+		return AdapterVersionDir(id, version)
+	}
+	return AdapterVersionDir(id, version) + "~" + strconv.FormatUint(uint64(revision), 10)
+}
+
+// AdapterManifestPath is the manifest of the first package of one version.
 func AdapterManifestPath(id, version string) string {
 	return AdapterVersionDir(id, version) + "/" + manifest.FileName
 }

@@ -2,7 +2,9 @@ package config
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
@@ -181,40 +183,87 @@ func DecodeRevocation(name string, data []byte) (revocation.Revocation, record.R
 	return rev, rec, nil
 }
 
-// currentWire is the current pointer of an adapter.
+// currentWire is the current pointer of an adapter. digest and revision are
+// absent in a pointer written before a package was told apart by its contents:
+// digest is then unknown and revision is 0.
 type currentWire struct {
-	Format  int    `json:"format"`
-	Version string `json:"version"`
+	Format   int     `json:"format"`
+	Version  string  `json:"version"`
+	Digest   *string `json:"digest,omitempty"`
+	Revision *uint32 `json:"revision,omitempty"`
 }
 
-func decodeAdapterCurrent(data []byte) (string, error) {
+// digestHexLen is the length of a package digest in hex: SHA-256.
+const digestHexLen = 64
+
+func decodeAdapterCurrent(data []byte) (AdapterCurrent, error) {
 	var w currentWire
 	if err := decodeStrict(data, &w); err != nil {
-		return "", err
+		return AdapterCurrent{}, err
 	}
 	if err := checkHeader(w.Format, 0, false); err != nil {
-		return "", err
+		return AdapterCurrent{}, err
 	}
 	if err := adapterproto.ValidateSemVer(w.Version); err != nil {
-		return "", invalid("version", err)
+		return AdapterCurrent{}, invalid("version", err)
 	}
-	return w.Version, nil
+	out := AdapterCurrent{Version: w.Version}
+	if w.Digest != nil {
+		if *w.Digest == "" {
+			return AdapterCurrent{}, invalid("digest", errors.New("an empty digest is not a value: leave it out"))
+		}
+		if err := checkDigest(*w.Digest); err != nil {
+			return AdapterCurrent{}, invalid("digest", err)
+		}
+		out.Digest = *w.Digest
+	}
+	if w.Revision != nil {
+		if *w.Revision == 0 {
+			return AdapterCurrent{}, invalid("revision", errors.New("revision 0 is not a value: leave it out"))
+		}
+		out.Revision = *w.Revision
+	}
+	return out, nil
 }
 
-// DecodeAdapterCurrent decodes the current pointer of an adapter and returns the
-// version it names. The error is a *FileError that names the file.
-func DecodeAdapterCurrent(id string, data []byte) (string, error) {
+// checkDigest accepts no digest (unknown) or one in lower case hex.
+func checkDigest(d string) error {
+	if d == "" {
+		return nil
+	}
+	if len(d) != digestHexLen || strings.ToLower(d) != d {
+		return fmt.Errorf("a package digest is %d characters of lower case hex", digestHexLen)
+	}
+	if _, err := hex.DecodeString(d); err != nil {
+		return fmt.Errorf("a package digest is %d characters of lower case hex", digestHexLen)
+	}
+	return nil
+}
+
+// DecodeAdapterCurrent decodes the current pointer of an adapter. The error is a
+// *FileError that names the file.
+func DecodeAdapterCurrent(id string, data []byte) (AdapterCurrent, error) {
 	v, err := decodeAdapterCurrent(data)
 	if err != nil {
-		return "", fileErrorFor(AdapterCurrentPath(id), KindAdapterCurrent, err)
+		return AdapterCurrent{}, fileErrorFor(AdapterCurrentPath(id), KindAdapterCurrent, err)
 	}
 	return v, nil
 }
 
 // EncodeAdapterCurrent returns the bytes of a current pointer.
-func EncodeAdapterCurrent(version string) ([]byte, error) {
-	if err := adapterproto.ValidateSemVer(version); err != nil {
+func EncodeAdapterCurrent(c AdapterCurrent) ([]byte, error) {
+	if err := adapterproto.ValidateSemVer(c.Version); err != nil {
 		return nil, err
 	}
-	return encodeJSON(currentWire{Format: FormatVersion, Version: version})
+	if err := checkDigest(c.Digest); err != nil {
+		return nil, err
+	}
+	w := currentWire{Format: FormatVersion, Version: c.Version}
+	if c.Digest != "" {
+		w.Digest = &c.Digest
+	}
+	if c.Revision != 0 {
+		w.Revision = &c.Revision
+	}
+	return encodeJSON(w)
 }

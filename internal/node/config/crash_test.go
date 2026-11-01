@@ -381,6 +381,45 @@ func crashCases(t *testing.T) []crashCase {
 			},
 		},
 		{
+			name: "adapter-install/same version with other contents",
+			disk: disabledTree,
+			prepare: func(t *testing.T, rg *rig, c *config.Config) {
+				var err error
+				staged, err = c.StageAdapter(srcPackage(t, "example", "1.0.0", map[string]string{"README": "changed\n"}), suffixReader())
+				if err != nil {
+					t.Fatalf("StageAdapter: %v", err)
+				}
+			},
+			run: func(t *testing.T, rg *rig, c *config.Config) error {
+				return install(t, rg, c, staged)
+			},
+			// Whatever the crash, the pointer names a package that is there and whole:
+			// the old one or the new one, never a directory that is missing.
+			state: func(t *testing.T, where string, c *config.Config) string {
+				ads := c.Adapters()
+				if len(ads) != 1 || ads[0].Version != "1.0.0" {
+					t.Errorf("%s: adapters = %+v", where, ads)
+					return "?"
+				}
+				switch ads[0].Revision {
+				case 0:
+					return "before"
+				case 1:
+					return "after"
+				}
+				t.Errorf("%s: revision %d", where, ads[0].Revision)
+				return "?"
+			},
+			done: func(t *testing.T, rg *rig, c *config.Config) {
+				if exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+					t.Error("the replaced package survived")
+				}
+				if got, err := rg.mem.ReadFile(path.Join(c.Adapters()[0].Dir(), "README")); err != nil || string(got) != "changed\n" {
+					t.Errorf("README of the installed package = %q, %v", got, err)
+				}
+			},
+		},
+		{
 			name: "adapter-install/first installation",
 			disk: treeDisk, prepare: prepStage("fresh", "0.1.0"),
 			run: func(t *testing.T, rg *rig, c *config.Config) error {

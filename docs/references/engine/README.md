@@ -312,10 +312,15 @@ enabled instance, or a disabled one whose process the host still reports as endi
 current, and a process that is ending may still hold its files, which a running
 executable does not allow to be removed on Windows),
 and commits one transaction, `adapter-install`: discard a leftover directory of the
-version, rename the copy to the version, replace the pointer (the commit point), store
-the result, discard the previous version. A package whose version is already the
-current one stores only its result (`adapter-install-current`), and `AdapterInstalled.AlreadyCurrent`
-lets the interface say so in that result. Last, the worker drops
+package, rename the copy to its directory, replace the pointer (the commit point), store
+the result, discard the package that was replaced. A package that is the installed one,
+the same version with the same contents (the digest staging computed), stores only its
+result (`adapter-install-current`), and `AdapterInstalled.AlreadyCurrent` lets the
+interface say so in that result. The same version with other contents is not refused for
+the instances that run: after the commit every enabled instance of the adapter is stopped
+and started again (`restartInstancesOf`, the restart a change of the presets uses), so
+that it runs the new files, and `AdapterInstalled.Replaced` says so; the directory of the
+package that was replaced is left to the repair while a process may still hold it. Last, the worker drops
 what the commit did not take over (a refusal, a version found current, a resend that was
 answered) and only then is the request answered, so that a refused package leaves
 nothing and the answer never comes with staging still on the disk. After a fatal failure of the disk the worker

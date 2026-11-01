@@ -9,7 +9,6 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/node/clock"
-	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -48,7 +47,7 @@ func (s *supervisor) instance() (Instance, error) {
 			return Instance{
 				ID:       s.id,
 				Adapter:  a,
-				Dir:      filepath.Join(env.Home, filepath.FromSlash(config.AdapterVersionDir(a.ID, a.Version))),
+				Dir:      filepath.Join(env.Home, filepath.FromSlash(a.Dir())),
 				LockPath: LockPath(env.Home, s.id),
 				StateDir: StateDir(env.Home, s.id),
 			}, nil

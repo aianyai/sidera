@@ -281,10 +281,10 @@ func TestGoldenBackup(t *testing.T) {
 
 func TestGoldenAdapterCurrent(t *testing.T) {
 	v, err := config.DecodeAdapterCurrent("example", []byte(goldenCurrent))
-	if err != nil || v != "1.0.0" {
-		t.Fatalf("DecodeAdapterCurrent = %q, %v", v, err)
+	if err != nil || v != (config.AdapterCurrent{Version: "1.0.0"}) {
+		t.Fatalf("DecodeAdapterCurrent = %+v, %v", v, err)
 	}
-	enc, err := config.EncodeAdapterCurrent("1.0.0")
+	enc, err := config.EncodeAdapterCurrent(v)
 	if err != nil || string(enc) != goldenCurrent {
 		t.Errorf("EncodeAdapterCurrent = %q, %v, want %q", enc, err, goldenCurrent)
 	}

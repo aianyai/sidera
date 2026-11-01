@@ -29,22 +29,32 @@ import (
 type AdapterInstalled struct {
 	ID      string
 	Version string
-	// AlreadyCurrent: the version was the installed one, and nothing was done but
-	// storing the result.
+	// AlreadyCurrent: the package was the installed one (the same version with the
+	// same contents), and nothing was done but storing the result.
 	AlreadyCurrent bool
+	// Replaced: the package replaced one that was installed, another version or the
+	// same version with other contents. Neither this nor AlreadyCurrent: the adapter
+	// was not installed before.
+	Replaced bool
 }
 
 // InstallAdapterOp is the operation that installs the adapter package in the
-// directory the owner names, or upgrades the adapter to its version. The package is
-// copied outside the loop into a directory next to the versions of its adapter, and
+// directory the owner names, or upgrades the adapter to its version, or replaces the
+// package of the same version when its contents differ (a rebuilt package that kept
+// its version). The package is copied outside the loop into a directory next to the
+// versions of its adapter, and
 // the copy is what is parsed and checked (the manifest, and that the package runs
 // on this platform), so that what is installed is what was checked and not what the
 // source may have become; the loop only renames the copy into place and makes it
 // current. A request that was done before is answered without reading the package.
 // An adapter that has an enabled instance, or a disabled one whose process is
-// still ending, is not upgraded: the process runs the version that is current and
-// keeps its files. encode makes the result; it runs in the loop and must
-// not wait.
+// still ending, is not upgraded to another version: the process runs the version that
+// is current and keeps its files. The same version with other contents is installed
+// under a directory of its own and the instances that run are restarted after the
+// commit, as a change of the presets restarts them, to run the new files. Contents
+// that are the same (by the digest staging computed) are installed already and only
+// the result is stored. encode makes the result; it runs in the loop and must not
+// wait.
 func InstallAdapterOp(source string, encode func(AdapterInstalled) ([]byte, error)) Operation {
 	return &installAdapterOp{source: source, encode: encode}
 }
@@ -118,7 +128,7 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	result, err := o.encode(AdapterInstalled{ID: o.staged.ID, Version: o.staged.Version, AlreadyCurrent: plan.AlreadyCurrent})
+	result, err := o.encode(AdapterInstalled{ID: o.staged.ID, Version: o.staged.Version, AlreadyCurrent: plan.AlreadyCurrent, Replaced: plan.Replaced})
 	if err != nil {
 		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)
 	}
@@ -160,7 +170,23 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	}
 	after()
 	o.committed = true
+	if plan.Replaced {
+		e.restartInstancesOf(x.now, o.staged.ID)
+	}
 	return result, nil
+}
+
+// restartInstancesOf restarts the enabled instances of the adapter, which run the
+// package that was installed before, to run the one that is installed now.
+func (e *Engine) restartInstancesOf(now time.Time, adapter string) {
+	if e.d.Adapters == nil {
+		return
+	}
+	for _, instance := range sortedKeys(e.d.Config.Instances().Items) {
+		if in, ok := e.enabledInstance(instance); ok && in.Adapter == adapter {
+			e.restartInstance(now, instance)
+		}
+	}
 }
 
 // settle drops the staging when the commit did not take it over (refused, found

@@ -564,15 +564,92 @@ func TestInstallBecomesCurrent(t *testing.T) {
 			t.Errorf("the new version's README = %q, %v", got, err)
 		}
 	})
-	t.Run("the version that is current is already installed", func(t *testing.T) {
+	t.Run("a package of unknown contents is replaced by the same version", func(t *testing.T) {
 		_, c := loaded(t)
 		staged, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", nil), suffixReader())
 		if err != nil {
 			t.Fatal(err)
 		}
 		plan, err := c.PlanInstall(staged, nil)
-		if err != nil || !plan.AlreadyCurrent {
-			t.Errorf("PlanInstall = %+v, %v, want AlreadyCurrent", plan, err)
+		if err != nil || plan.AlreadyCurrent || !plan.Replaced {
+			t.Errorf("PlanInstall = %+v, %v, want the package replaced", plan, err)
+		}
+	})
+	t.Run("the same version with the same contents is already installed, with other contents it is replaced", func(t *testing.T) {
+		rg, c := loaded(t)
+		// The golden tree holds a package whose contents were not recorded; the first
+		// installation of the version makes them known, as a replacement.
+		staged, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", nil), suffixReader())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := install(t, rg, c, staged); err != nil {
+			t.Fatal(err)
+		}
+		again, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", nil), bytes.NewReader([]byte{1, 1, 1, 1, 1, 1, 1, 1}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again.Digest != staged.Digest {
+			t.Errorf("the same package has the digests %s and %s", staged.Digest, again.Digest)
+		}
+		if plan, err := c.PlanInstall(again, nil); err != nil || !plan.AlreadyCurrent || plan.Replaced {
+			t.Errorf("PlanInstall of the same contents = %+v, %v, want AlreadyCurrent", plan, err)
+		}
+		if err := c.Unstage(again); err != nil {
+			t.Fatal(err)
+		}
+
+		changed, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", map[string]string{"README": "changed\n"}), bytes.NewReader([]byte{2, 2, 2, 2, 2, 2, 2, 2}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if changed.Digest == staged.Digest {
+			t.Fatal("other contents have the same digest")
+		}
+		plan, err := c.PlanInstall(changed, nil)
+		if err != nil || plan.AlreadyCurrent || !plan.Replaced {
+			t.Fatalf("PlanInstall of other contents = %+v, %v, want the package replaced", plan, err)
+		}
+		if err := install(t, rg, c, changed); err != nil {
+			t.Fatal(err)
+		}
+		if ads := c.Adapters(); len(ads) != 1 || ads[0].Version != "1.0.0" || ads[0].Digest != changed.Digest || ads[0].Revision != 2 {
+			t.Errorf("adapters = %+v, want 1.0.0 at revision 2 with the new digest", ads)
+		}
+		if got, err := rg.mem.ReadFile(path.Join(c.Adapters()[0].Dir(), "README")); err != nil || string(got) != "changed\n" {
+			t.Errorf("README of the installed package = %q, %v", got, err)
+		}
+		// The enabled instance may still run the package that was replaced, so its
+		// directory is left for the repair.
+		if !exists(rg.mem, config.AdapterRevisionDir("example", "1.0.0", 1)) {
+			t.Error("the directory an enabled instance may run from was discarded")
+		}
+		restarted := rg.load()
+		if exists(rg.mem, config.AdapterRevisionDir("example", "1.0.0", 1)) || exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+			t.Error("the repair at the next start left a package the pointer does not name")
+		}
+		if got := restarted.Adapters(); len(got) != 1 || got[0].Revision != 2 {
+			t.Errorf("after a restart adapters = %+v", got)
+		}
+	})
+	t.Run("a package replaced with no instance holding it is discarded", func(t *testing.T) {
+		rg, c := loaded(t)
+		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(new([]config.Instances), `{}`)); err != nil {
+			t.Fatal(err)
+		}
+		staged, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", map[string]string{"README": "changed\n"}), suffixReader())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := install(t, rg, c, staged); err != nil {
+			t.Fatal(err)
+		}
+		if exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+			t.Error("the replaced package was left although no instance runs")
+		}
+		if !exists(rg.mem, config.AdapterRevisionDir("example", "1.0.0", 1)) {
+			t.Error("the new package is not in its directory")
 		}
 	})
 	t.Run("an adapter with an enabled instance is not upgraded", func(t *testing.T) {

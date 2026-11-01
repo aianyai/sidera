@@ -33,7 +33,8 @@ func refuseNull(raw json.RawMessage, path string) error {
 }
 
 // adapters.install: install the package in a directory of this machine, or upgrade
-// the adapter to its version. The owner and the daemon are the same user on the
+// the adapter to its version, or replace the package of the version that is installed
+// when the contents differ. The owner and the daemon are the same user on the
 // same machine, so the package is named by an absolute path and the daemon copies it
 // itself; nothing is uploaded.
 var adaptersInstall = &method{
@@ -52,18 +53,22 @@ var adaptersInstall = &method{
 			return nil, apiwire.Malformed("the package is named by an absolute path", "params.source")
 		}
 		op := engine.InstallAdapterOp(p.Source, func(a engine.AdapterInstalled) ([]byte, error) {
-			return json.Marshal(installResult{Adapter: installedJSON{ID: a.ID, Version: a.Version}, AlreadyCurrent: a.AlreadyCurrent})
+			return json.Marshal(installResult{Adapter: installedJSON{ID: a.ID, Version: a.Version}, AlreadyCurrent: a.AlreadyCurrent, Replaced: a.Replaced})
 		})
 		return &plan{canonical: canonical(p), operation: op}, nil
 	},
 }
 
 // installResult is the result of adapters.install: the adapter and version that are
-// installed, and, only when the version was already the current one and nothing
-// was replaced, already_current.
+// installed, and what the installation did. already_current is present, and true,
+// when the package was installed already (the same version with the same contents)
+// and nothing was replaced; replaced is present when a package that was installed
+// was replaced (another version, or the same version with other contents). With
+// neither the adapter was new.
 type installResult struct {
 	Adapter        installedJSON `json:"adapter"`
 	AlreadyCurrent bool          `json:"already_current,omitempty"`
+	Replaced       bool          `json:"replaced,omitempty"`
 }
 
 // adapters.list: the installed adapters, the instances and the probe of each enabled

@@ -174,18 +174,41 @@ type Backup struct {
 // the confirmation of an earlier identity says nothing about this one.
 func (b Backup) Confirms(selfRevocation record.Digest) bool { return b.Digest == selfRevocation }
 
+// AdapterCurrent is what the current pointer of an adapter says: the installed
+// version, the digest of the package's contents and the revision of the version
+// whose directory holds it.
+type AdapterCurrent struct {
+	Version string
+	// Digest is the digest of the contents of the installed package in lower case
+	// hex; empty for a package installed before the contents were told apart,
+	// whose contents are then unknown.
+	Digest string
+	// Revision counts the times the same version was installed again with other
+	// contents; 0 for the first package of a version.
+	Revision uint32
+}
+
 // Adapter is an installed adapter package.
 type Adapter struct {
-	ID       string
-	Version  string
+	ID      string
+	Version string
+	// Digest and Revision are those of the current pointer.
+	Digest   string
+	Revision uint32
 	Manifest manifest.Manifest
 }
+
+// Dir is the directory of the package, relative to the data directory root.
+func (a Adapter) Dir() string { return AdapterRevisionDir(a.ID, a.Version, a.Revision) }
 
 // Staged is a package copied into a staging directory next to the versions,
 // parsed there, and not installed yet.
 type Staged struct {
-	ID       string
-	Version  string
+	ID      string
+	Version string
+	// Digest is the digest of the contents of the copy in lower case hex: every
+	// directory and file by relative path, and every file's bytes.
+	Digest   string
 	Dir      string
 	Manifest manifest.Manifest
 }

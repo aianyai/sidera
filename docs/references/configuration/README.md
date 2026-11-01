@@ -27,8 +27,9 @@ config/
   endpoint-ids/<instance>.json   the ids of an instance's runtime and direct endpoints
   revocation-backup.json     the owner's confirmation that the self-revocation is kept offline
   revocations/<digest>.rec   revocation records the node keeps (record wire bytes)
-  adapters/<id>/current                 {"format": 1, "version": "1.2.3"}
+  adapters/<id>/current                 {"format": 1, "version": "1.2.3", "digest"?, "revision"?}
   adapters/<id>/versions/<version>/     one installed package, never changed
+  adapters/<id>/versions/<version>~<n>/ the same version installed again with other contents, revision n
   adapters/<id>/versions/.stage-<hex>/  a package being installed
 ```
 
@@ -369,15 +370,28 @@ because deleting `state/` must not make a retired identity usable again.
 ### Adapter packages
 
 ```
-adapters/example/current                 {"format": 1, "version": "1.2.3"}
+adapters/example/current                 {"format": 1, "version": "1.2.3", "digest": "<64 hex>", "revision": 1}
 adapters/example/versions/1.2.3/         sidera-adapter.json, bin/…, any files
+adapters/example/versions/1.2.3~1/       the same version installed again, other contents
 adapters/example/versions/.stage-<hex>/  a copy being installed
 ```
 
 At start every adapter directory that has a `current` pointer is read: the
-pointer must name a version whose `sidera-adapter.json` exists and parses, and
-whose id and version are those of the directory. A package never changes after
-it is installed.
+pointer must name a version, and a revision, whose directory has a
+`sidera-adapter.json` that exists and parses, and whose id and version are those
+of the directory. A package never changes after it is installed.
+
+`digest` is the SHA-256, in lower case hex, of the package's contents as staging
+copied them: every directory by its relative path and every file by its path, length
+and bytes, in sorted order. A file's mode is not part of it (the program's follows from
+the manifest, which is). It is how an installation tells the same package from a
+rebuilt one of the same version. `revision` is the number of times the version was
+installed again with other contents: the directory of revision 0 is `versions/<version>`
+and of revision n `versions/<version>~n` (a `~` is not part of a version, so the
+names never meet). Both are absent in a pointer written before they existed: the
+digest is then unknown, so the first installation of the version replaces that package,
+and the revision is 0. A pointer that carries `"digest": ""` or `"revision": 0` is
+invalid, like any optional field written empty.
 
 **Installing** (`adapter install` of a package directory):
 
@@ -398,18 +412,28 @@ it is installed.
 2. In the loop, `PlanInstall` and the transaction it plans in the same command,
    so that nothing changes between the plan and its writes. The transaction:
    discard a leftover directory of the version if
-   there is one; rename the staging directory to `versions/<version>`; replace
+   there is one; rename the staging directory to its directory (`versions/<version>`,
+   or `versions/<version>~n` with n one more than the revision installed when the
+   version is the one that is installed); replace
    `current` (the commit point); the caller's own result write; discard the
-   previous version. An adapter that has an enabled instance is not upgraded
-   (`adapter_in_use`): it runs the version that is current, and the owner
-   disables it first. Nor is one whose disabled instance still has a process
+   previous package. An adapter that has an enabled instance is not upgraded to
+   another version (`adapter_in_use`): it runs the version that is current, and the
+   owner disables it first. Nor is one whose disabled instance still has a process
    ending, which the caller that runs the adapters says through the `StillEnding`
    it passes to `PlanInstall`: the process may hold the files of the version the
-   installation discards. The same version that is already current is "already
-   installed" and writes nothing.
+   installation discards. The same version with the same digest as the one that is
+   current is "already installed" and writes nothing. The same version with another
+   digest (a rebuilt package that kept its version) replaces the package under the next
+   revision, and the instances that run are not refused: they keep running the files they
+   were started from, the pointer names the new directory, and the caller restarts them.
+   While an instance of the adapter is enabled, or its process is ending, the
+   directory of the package that was replaced is not discarded, since a running
+   executable does not allow that on every platform; the repair at the next start
+   removes it. The result says whether the package is new, replaced or already
+   installed.
 3. An installation that did not install is unstaged by the install worker: when
    the result is "already installed", when it is refused, and when it failed
-   with an error that is not fatal. The staging directory, a version directory
+   with an error that is not fatal. The staging directory, a package directory
    that was renamed in and did not become current, and, for an adapter never
    installed, its whole directory are dropped, so that no `adapters/<id>/`
    without a `current` is left. After a fatal error the next start removes them.
@@ -438,7 +462,7 @@ change writes nothing and builds no result.
 | `peer_unknown` | removing a node that has no address in the book |
 | `instance_enabled`, `instance_in_use` | removing an instance that is enabled; removing one that has session endpoints open |
 | `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config` and `adapter remove`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
-| `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; upgrading an adapter with an enabled instance |
+| `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; installing another version of an adapter with an enabled instance |
 | `endpoint_unknown` | a setting for an endpoint that is neither stable nor open |
 
 The management layer owns the shape of a result. Because the version it
@@ -520,8 +544,8 @@ restart removes:
   next load; unstaging may be cut anywhere, and what is left is removed the same
   way;
 - an installation before the replacement of `current` leaves preparation (the
-  staging directory, or a version directory the pointer does not name), the
-  previous version intact; after it, the new version is installed and a
+  staging directory, or a package directory the pointer does not name), the
+  previous package intact, the same version installed again included; after it, the new version is installed and a
   previous version that was not yet discarded is removed by the repair;
 - an id minted for `direct-register` or `runtime-admit` and written before the
   endpoint record is an id with no endpoint, which costs nothing: the adapter
@@ -603,7 +627,15 @@ Replacing one small file is the commit point and everything before it is
 preparation, so a crash leaves nothing that needs a rule other than "remove what
 the pointer does not name". The alternative, two renames (old out, new in),
 leaves a state with the package missing and needs a rule for it, and for a while
-there is no usable version.
+there is no usable version. The same holds when the same version is installed again with
+other contents: the new package takes a directory of another name (the revision) so that
+the pointer, which then differs, is still the commit point, and no directory is ever
+replaced in place.
+
+**The digest is kept in the pointer, not recomputed.** Telling a rebuilt package from
+the installed one by reading the installed directory again would read up to
+`MaxPackageBytes` in the loop. The staging, which reads every file anyway, computes the
+digest, and the pointer keeps it.
 
 **The copy is checked, not the source.** A package directory can change between
 checking it and installing it; the copy cannot. The manifest that is judged is the one
