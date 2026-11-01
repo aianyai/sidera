@@ -184,11 +184,31 @@ client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 
 | File | Holds |
 | ---- | ----- |
-| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
 does not report the version it was given.
+
+`THIRD_PARTY_NOTICES` is written by `scripts/third-party-notices.sh` before anything
+is built, and every archive holds the same file. It lists the Go standard library
+and every module that `go list -deps` reports for the four programs
+(`sidera` and the three adapters) on all five platforms, built with
+`CGO_ENABLED=0` as the release is, so a module that only one platform or one
+program links is listed. For each it gives the path, the version, the name of the
+licence and the text of every licence file (`LICENSE*`, `COPYING*`) and notice file
+(`NOTICE*`, `PATENTS*`) at the top of the module's directory in the module cache,
+verbatim. A module with an MPL-2.0 licence (`github.com/libp2p/go-yamux`) also
+carries the statement that its source code, at that version, is available at its
+repository. Nothing modifies the module, so the repository is its source.
+
+The script fails, listing every module concerned, when a linked module has no
+licence file, when a licence file is none of the texts the script knows, or when a
+licence is not MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or MPL-2.0. A new
+module under another licence therefore stops the release until the maintainers
+decide whether it may be bundled; the script never decides that. A module that
+only says it is under either of two licences (`go-base36` says Apache-2.0 or MIT and
+ships neither text) is listed as `Apache-2.0 OR MIT` with the file it ships.
 
 ### Not run yet
 
@@ -202,16 +222,6 @@ tagged: its `go.mod` does not require the SDK, so without the workspace the
 build and the tidy check cannot resolve `github.com/aianyai/sidera/sdk/go/...`.
 Once the SDK is tagged, the root `go.mod` requires it and both checks are added
 to the workflow.
-
-### Before the first release
-
-The third-party licences of everything the binaries link must be listed with the
-release. The networking library brings about fifty modules; almost all are MIT,
-BSD, Apache-2.0 or ISC, and `github.com/libp2p/go-yamux` is MPL-2.0, a file-level
-copyleft that allows linking into a program under another licence on the
-condition that the source of those files stays available and its notice is
-included. Nothing modifies it. The list is written before the first tag, from
-`go list -m all` and the licence file of each module the build uses.
 
 ## Why
 
@@ -340,6 +350,15 @@ included. Nothing modifies it. The list is written before the first tag, from
   `cancel-in-progress: true`, which pull requests need, and with
   `cancel-in-progress` given as an expression the documentation leaves the
   combination undefined.
+- **A script for the notices, not a licence tool**: the build list is what `go list
+  -deps` prints for the programs, the licence files are in the module cache, and the
+  licences allowed are six texts told apart by a phrase each, which is a few lines
+  of shell. A tool such as go-licenses would be a dependency of the release for
+  that, and would guess a licence from a text where the script refuses to.
+- **The notices cover every platform and program together**: one file is
+  shipped with every archive, so a platform's archive never lacks a notice for a
+  module that another platform links, and the file does not change with the
+  platform it was built on.
 - **A script, not a release tool**: the build is a static cross-compile and each
   adapter's own `package` subcommand, which a short script says plainly, runs
   the same on a development machine as on the runner, and adds no tool to learn;
@@ -436,7 +455,8 @@ and its hosted timings must be verified separately; focused tests do not establi
 
 - Workflow: `.github/workflows/ci.yml`.
 - Release: `.github/workflows/release.yml`, `scripts/release.sh`,
-  `scripts/release-notes.sh` (prints the changelog section of a version) and
+  `scripts/release-notes.sh` (prints the changelog section of a version),
+  `scripts/third-party-notices.sh` (writes `THIRD_PARTY_NOTICES`) and
   `CHANGELOG.md`.
 - Line endings: `.gitattributes`.
 

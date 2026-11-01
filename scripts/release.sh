@@ -8,7 +8,7 @@
 # and checksums.txt, the SHA-256 of every archive. Nothing else is left in it.
 #
 # An archive holds, at its top level, sidera, sidera-adapter-console (which is also
-# the owner's command-line client), LICENSE and README.txt. The adapters' programs
+# the owner's command-line client), LICENSE, THIRD_PARTY_NOTICES and README.txt. The adapters' programs
 # are only inside their packages, adapters/<name>/, ready for `sidera adapter
 # install`; the Claude adapter is built for darwin only.
 # The workflow .github/workflows/release.yml runs this script, and so can anyone
@@ -44,6 +44,14 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+
+# The licences of every module any program links, on any platform. It comes before
+# the builds because a module without an acceptable licence stops the release.
+packages="./cmd/sidera"
+for adapter in $adapters; do
+  packages="$packages ./cmd/sidera-adapter-$adapter"
+done
+scripts/third-party-notices.sh "$work/THIRD_PARTY_NOTICES" "$platforms" "$packages"
 
 # Every program reports the release version, set by the linker, and the commit the
 # tree is at. The commit is stated here because Go records the wrong one for a build
@@ -115,6 +123,7 @@ for platform in $platforms; do
   done
 
   cp LICENSE "$stage/LICENSE"
+  cp "$work/THIRD_PARTY_NOTICES" "$stage/THIRD_PARTY_NOTICES"
   cat >"$stage/README.txt" <<README
 Sidera $version ($goos/$goarch)
 
@@ -123,6 +132,8 @@ sidera-adapter-console   the console adapter, which is also the owner's command-
                          client
 adapters/                the packages of the adapters, ready for 'sidera adapter
                          install' (each holds its own program)
+LICENSE                  the licence of Sidera
+THIRD_PARTY_NOTICES      the licences of the software the programs are built from
 
 Install guide:
 https://github.com/aianyai/sidera/blob/v$version/docs/guide/install.md
@@ -130,7 +141,7 @@ README
 
   # The archive has no directory around its files, and no extended attributes of
   # the build machine (macOS tar would add them).
-  files+=(adapters LICENSE README.txt)
+  files+=(adapters LICENSE THIRD_PARTY_NOTICES README.txt)
   if [ "$goos" = windows ]; then
     (cd "$stage" && zip -qr "$outdir/$name.zip" "${files[@]}")
   else

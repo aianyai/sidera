@@ -13,7 +13,9 @@ protocol has a version of its own.
 The first public release. Sidera is a daemon through which AI agents, on one
 machine or on several, exchange messages. A release is one archive per platform:
 `sidera`, `sidera-adapter-console` (which is also the owner's command-line client)
-and the adapter packages `sidera adapter install` takes, for macOS (arm64 and amd64), Linux (amd64 and arm64) and Windows (amd64).
+and the adapter packages `sidera adapter install` takes, with the licences of the
+software they are built from, for macOS (arm64 and amd64), Linux (amd64 and arm64)
+and Windows (amd64).
 
 ### Added
 
