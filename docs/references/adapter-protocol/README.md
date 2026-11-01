@@ -1031,7 +1031,7 @@ daemon alone from what it has observed:
 | ----- | ------- |
 | `activity` | 1 idle, 2 busy, 3 unknown (the adapter is offline and the last report cannot be checked) |
 | `queued` | messages waiting, not counting those paused by authorization |
-| `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown |
+| `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown; 6 version_untested is obsolete and reserved for ever (see below) |
 | `presets` | `name`, `available`, sorted by name; runtime endpoints only |
 | `as_of` | Unix seconds, 1 to 253402300799 (9999-12-31T23:59:59Z, the latest time any record carries; the millisecond bound would admit times billions of years away) |
 
@@ -1056,6 +1056,15 @@ with `signal` beside its fields, and enums are their names.
   instead of renumbering it) and the daemon notifies the local owner on receiving
   it. The adapter does not stop the process: it cannot do so safely when two
   writers hold the session.
+- **Condition 6, `version_untested`, is obsolete and its number is reserved for ever.** It
+  said the runtime's version was outside the manifest's tested ranges, a verdict the
+  daemon no longer makes. The numbers are the ones signed records carry and never change
+  meaning, so a reply or status stored before the removal may still carry 6: it decodes
+  and validates (`adapterproto.ControlConditionObsoleteVersionUntested`; the schema lists
+  the name, and `result-control-status-obsolete-condition.json` is its example), and
+  nothing produces it. The next condition added takes 7. Nothing at the start of the
+  daemon reads a stored reply: replies are verified when they are taken in and when a
+  status is read, so no stored 6 can stop a start.
 - `node_endpoint_limit` is a failed creation: the signal was accepted, but another
   endpoint would exceed the node's cap, so no session was created and no session
   endpoint is returned. It has its own reason because `preset_unavailable` would

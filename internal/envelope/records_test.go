@@ -425,6 +425,11 @@ func TestControlReplyRules(t *testing.T) {
 		w.Create.Reason = uint64(adapterproto.CreateReasonControlUnknown)
 		requireNoErr(t, checkReplyWire(t, w))
 	})
+	t.Run("a stored status reply with the obsolete condition 6 is still valid", func(t *testing.T) {
+		w := status(t)
+		w.Status.Conditions = []uint64{1, uint64(adapterproto.ControlConditionObsoleteVersionUntested)}
+		requireNoErr(t, checkReplyWire(t, w))
+	})
 	t.Run("a status reply with nothing to report is valid", func(t *testing.T) {
 		w := status(t)
 		w.Status.Conditions, w.Status.Presets, w.Status.Queued = nil, nil, 0

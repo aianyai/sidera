@@ -152,7 +152,10 @@ or 8 status, so the key says which signal the reply is for.
 | status (8) | `{1: activity, 2: queued, 3: conditions, 4: presets, 5: as_of}` |
 
 The integer codes and the rules between a result's fields are those of the
-adapter protocol (`adapterproto`); there is no second set of codes. Both records
+adapter protocol (`adapterproto`); there is no second set of codes. A status
+condition that was retired keeps its number reserved: a stored reply that carries the
+obsolete condition 6 (`version_untested`) still decodes and verifies, and is never
+produced. Both records
 carry the network key signature only: the signer is not in the payload, because
 the verifier already knows from its own record which node the message went to,
 and verifies against that node's accepted network key. A verified report or

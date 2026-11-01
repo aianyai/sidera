@@ -384,7 +384,10 @@
             "queued": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
             "conditions": {
               "type": "array", "minItems": 1, "uniqueItems": true,
-              "items": { "enum": ["adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown"] }
+              "items": {
+                "enum": ["adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown", "version_untested"],
+                "description": "version_untested is obsolete: a reply stored before it was removed may carry it, and nothing produces it."
+              }
             },
             "presets": {
               "type": "array", "minItems": 1,

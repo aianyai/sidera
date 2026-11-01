@@ -47,12 +47,12 @@ func TestControlEnumCodes(t *testing.T) {
 	check("activity", names(func(i uint8) bool { return adapterproto.ControlActivity(i).Valid() }, func(i uint8) string { return adapterproto.ControlActivity(i).String() }),
 		map[string]uint8{"idle": 1, "busy": 2, "unknown": 3})
 	check("condition", names(func(i uint8) bool { return adapterproto.ControlCondition(i).Valid() }, func(i uint8) string { return adapterproto.ControlCondition(i).String() }),
-		map[string]uint8{"adapter_offline": 1, "runtime_auth": 2, "native_unavailable": 3, "server_request_rejected": 4, "control_unknown": 5})
+		map[string]uint8{"adapter_offline": 1, "runtime_auth": 2, "native_unavailable": 3, "server_request_rejected": 4, "control_unknown": 5, "version_untested": 6})
 	// The constants carry those numbers.
 	if adapterproto.CreateReplyCreated != 1 || adapterproto.CreateReplyUnconfirmed != 2 || adapterproto.CreateReplyFailed != 3 ||
 		adapterproto.CreateReasonReadyTimeout != 7 || adapterproto.CreateReasonAdapterLost != 8 || adapterproto.CreateReasonControlUnknown != 9 || adapterproto.CreateReasonNodeEndpointLimit != 10 ||
 		adapterproto.CloseReplyUnsupported != 3 || adapterproto.InterruptReplyUnsupported != 5 || adapterproto.ActivityUnknown != 3 ||
-		adapterproto.ControlConditionControlUnknown != 5 {
+		adapterproto.ControlConditionControlUnknown != 5 || adapterproto.ControlConditionObsoleteVersionUntested != 6 {
 		t.Error("a control constant moved")
 	}
 }
@@ -201,7 +201,10 @@ func TestControlStatusReplyRules(t *testing.T) {
 		{"all five conditions", func(v *adapterproto.ControlStatusReply) {
 			v.Conditions = []adapterproto.ControlCondition{1, 2, 3, 4, 5}
 		}, "", false},
-		{"condition out of range", func(v *adapterproto.ControlStatusReply) { v.Conditions = []adapterproto.ControlCondition{6} }, "conditions", false},
+		{"the obsolete condition of a stored reply is accepted", func(v *adapterproto.ControlStatusReply) {
+			v.Conditions = []adapterproto.ControlCondition{adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionObsoleteVersionUntested}
+		}, "", false},
+		{"condition out of range", func(v *adapterproto.ControlStatusReply) { v.Conditions = []adapterproto.ControlCondition{7} }, "conditions", false},
 		{"presets are for runtime endpoints only, so optional", func(v *adapterproto.ControlStatusReply) { v.Presets = nil }, "", false},
 		{"presets out of order", func(v *adapterproto.ControlStatusReply) {
 			v.Presets = []adapterproto.PresetAvailability{{Name: "b"}, {Name: "a"}}

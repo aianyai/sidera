@@ -296,19 +296,27 @@ func (v *ControlActivity) UnmarshalText(b []byte) error { return activityText.un
 // reports.
 type ControlCondition uint8
 
+// The numbers are explicit because they are signed into stored replies and never
+// change meaning: a number that is retired stays reserved and is never given to
+// another condition.
 const (
-	ControlConditionAdapterOffline ControlCondition = iota + 1
-	ControlConditionRuntimeAuth
-	ControlConditionNativeUnavailable
+	ControlConditionAdapterOffline    ControlCondition = 1
+	ControlConditionRuntimeAuth       ControlCondition = 2
+	ControlConditionNativeUnavailable ControlCondition = 3
 	// ControlConditionServerRequestRejected: the adapter rejected a request of the native
 	// runtime recently.
-	ControlConditionServerRequestRejected
+	ControlConditionServerRequestRejected ControlCondition = 4
 	// ControlConditionControlUnknown: the outcome of an earlier control action is unknown.
-	ControlConditionControlUnknown
+	ControlConditionControlUnknown ControlCondition = 5
+	// ControlConditionObsoleteVersionUntested was "the runtime's version is outside
+	// the tested ranges". It is reserved for ever and 6 is never reused: a reply stored
+	// before it was removed may carry it, so it is accepted on decode and shown as
+	// "version_untested", and nothing produces it.
+	ControlConditionObsoleteVersionUntested ControlCondition = 6
 )
 
 var conditionText = enumText[ControlCondition]{[]string{
-	"adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown",
+	"adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown", "version_untested",
 }}
 
 func (v ControlCondition) String() string                { return conditionText.name(v) }
