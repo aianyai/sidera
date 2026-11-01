@@ -18,8 +18,8 @@ const (
 	// OutcomeFail: a creation fails with Reason, a CreateFailure.
 	OutcomeFail OutcomeKind = iota + 1
 	// OutcomeIndeterminate: the answer is "cannot tell"; Reason is a grounds code
-	// (turn_running, record_unreadable, native_unreachable or
-	// runtime_version_untested; native_unreachable when empty).
+	// (turn_running, record_unreadable or native_unreachable; native_unreachable
+	// when empty).
 	OutcomeIndeterminate
 	// OutcomeRefuse: the request is refused with Reason, a PromptRefusal or an
 	// InterruptRefusal.

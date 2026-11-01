@@ -347,13 +347,11 @@ const (
 	GroundsRecordUnreadable GroundsCode = "record_unreadable"
 	// GroundsNativeUnreachable (indeterminate).
 	GroundsNativeUnreachable GroundsCode = "native_unreachable"
-	// GroundsRuntimeVersionUntested (indeterminate).
-	GroundsRuntimeVersionUntested GroundsCode = "runtime_version_untested"
 )
 
 var groundsCodes = []GroundsCode{
 	GroundsAttemptInRecord, GroundsRecordCompleteWithoutAttempt, GroundsNeverDispatched,
-	GroundsTurnRunning, GroundsRecordUnreadable, GroundsNativeUnreachable, GroundsRuntimeVersionUntested,
+	GroundsTurnRunning, GroundsRecordUnreadable, GroundsNativeUnreachable,
 }
 
 // Valid reports whether c is a known code.

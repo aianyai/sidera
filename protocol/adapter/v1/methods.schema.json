@@ -319,7 +319,7 @@
             "frontends": false,
             "first_turn_ended": false,
             "grounds": {
-              "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"] } }
+              "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable"] } }
             }
           },
           "required": ["grounds"]
@@ -469,7 +469,7 @@
         {
           "properties": {
             "verdict": { "const": "indeterminate" }, "turn": false,
-            "grounds": { "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"] } } }
+            "grounds": { "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable"] } } }
           }
         }
       ]

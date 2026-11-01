@@ -81,7 +81,7 @@ func (g Grounds) Validate() error {
 }
 
 // indeterminateCodes are the grounds of a verdict that cannot be decided yet.
-var indeterminateCodes = []GroundsCode{GroundsTurnRunning, GroundsRecordUnreadable, GroundsNativeUnreachable, GroundsRuntimeVersionUntested}
+var indeterminateCodes = []GroundsCode{GroundsTurnRunning, GroundsRecordUnreadable, GroundsNativeUnreachable}
 
 // SessionCreateResult is the adapter's answer to session.create.
 //

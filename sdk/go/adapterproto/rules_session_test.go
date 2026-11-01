@@ -81,7 +81,6 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"grounds required", func(r *adapterproto.SessionCreateResult) { r.Grounds = nil }, "grounds", false},
 			{"grounds turn_running", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "turn_running" }, "", false},
 			{"grounds native_unreachable", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "native_unreachable" }, "", false},
-			{"grounds runtime_version_untested", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "runtime_version_untested" }, "", false},
 			{"grounds of a found attempt", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "attempt_in_record" }, "grounds.code", false},
 			{"grounds of an absent attempt", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "never_dispatched" }, "grounds.code", false},
 			{"grounds code unknown", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "who_knows" }, "grounds.code", false},
@@ -273,7 +272,6 @@ func TestReconcileRules(t *testing.T) {
 		}, []row[adapterproto.ReconcileResult]{
 			{"record unreadable", func(r *adapterproto.ReconcileResult) { r.Grounds.Code = "record_unreadable" }, "", false},
 			{"native unreachable", func(r *adapterproto.ReconcileResult) { r.Grounds.Code = "native_unreachable" }, "", false},
-			{"runtime version untested", func(r *adapterproto.ReconcileResult) { r.Grounds.Code = "runtime_version_untested" }, "", false},
 			{"turn forbidden", func(r *adapterproto.ReconcileResult) { r.Turn = &adapterproto.TurnReport{Ref: "t", State: "running"} }, "turn", false},
 			{"grounds of a found attempt", func(r *adapterproto.ReconcileResult) { r.Grounds.Code = "attempt_in_record" }, "grounds.code", false},
 			{"grounds of an absent attempt", func(r *adapterproto.ReconcileResult) { r.Grounds.Code = "never_dispatched" }, "grounds.code", false},

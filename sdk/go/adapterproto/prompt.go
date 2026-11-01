@@ -152,8 +152,8 @@ func (t TurnReport) Validate() error {
 //   - Found goes with GroundsAttemptInRecord and carries Turn.
 //   - ProvablyAbsent goes with GroundsRecordCompleteWithoutAttempt or
 //     GroundsNeverDispatched.
-//   - Indeterminate goes with GroundsTurnRunning, GroundsRecordUnreadable,
-//     GroundsNativeUnreachable or GroundsRuntimeVersionUntested.
+//   - Indeterminate goes with GroundsTurnRunning, GroundsRecordUnreadable or
+//     GroundsNativeUnreachable.
 type ReconcileResult struct {
 	Verdict ReconcileVerdict `json:"verdict"`
 	Turn    *TurnReport      `json:"turn,omitempty"`

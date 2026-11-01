@@ -140,7 +140,7 @@
     "TurnState": { "type": "string", "enum": ["running", "completed", "interrupted", "failed"] },
     "GroundsCode": {
       "type": "string",
-      "enum": ["attempt_in_record", "record_complete_without_attempt", "never_dispatched", "turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"]
+      "enum": ["attempt_in_record", "record_complete_without_attempt", "never_dispatched", "turn_running", "record_unreadable", "native_unreachable"]
     },
     "AckVerdict": { "type": "string", "enum": ["allowed", "refused"] },
     "AckReason": { "type": "string", "enum": ["seen_in_full", "replaced", "truncated", "content_mismatch", "unknown_lease"] },

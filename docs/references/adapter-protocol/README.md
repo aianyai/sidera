@@ -567,8 +567,8 @@ runtime. The `grounds.code` belongs to the verdict: `found` goes with
 `attempt_in_record` and carries the turn; `provably_absent` with
 `record_complete_without_attempt` (the writer has stopped and the whole record was
 scanned) or `never_dispatched` (the checkpoint shows the runtime was never
-called); `indeterminate` with `turn_running`, `record_unreadable`,
-`native_unreachable` or `runtime_version_untested`.
+called); `indeterminate` with `turn_running`, `record_unreadable` or
+`native_unreachable`.
 
 **Turns.** Each turn has exactly one `turn.started` and one `turn.ended`,
 correlated by `turn`. Turns the runtime starts itself (an automatic continuation,
@@ -1141,10 +1141,10 @@ The manifest lists no tested versions of the native runtime, and the daemon neit
 judges nor blocks a version: the runtimes upgrade several times a day, so a list
 could not stay true and an alert about a version outside it would be noise. The
 name and version that `adapter.probe` reported are shown as reported. An adapter
-whose reading of a runtime's record depends on the version decides that itself,
-and answers `prompt.reconcile` with `indeterminate` and `runtime_version_untested`
-where the version leaves absence unproven; a wrong reconciliation can only end as
-"cannot tell".
+whose reading of a runtime's record may not hold in a newer version verifies the
+form of the record itself and answers `prompt.reconcile` with `indeterminate` and
+`record_unreadable` when it is not the form it reads, never with absence; a wrong
+reconciliation can only end as "cannot tell".
 
 ### Why
 
