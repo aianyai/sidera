@@ -3,6 +3,7 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -41,7 +42,13 @@ func TestWritePackage(t *testing.T) {
 	if data, err := os.ReadFile(file); err != nil || string(data) != "binary" {
 		t.Fatalf("binary %q, %v", data, err)
 	}
-	if info, err := os.Stat(file); err != nil || info.Mode().Perm()&0o100 == 0 {
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows has no Unix executable permission bit; the Windows package test
+	// checks the executable extension on both the manifest and the copied file.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("the binary is not executable: %v, %v", info, err)
 	}
 
