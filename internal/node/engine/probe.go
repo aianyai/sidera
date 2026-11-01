@@ -19,15 +19,16 @@ type ProbeState uint8
 
 // The states of a probe. The zero value is not a state.
 const (
-	// ProbePending: the adapter has not reported, or a token the node issued has
-	// not been presented yet and has not expired.
+	// ProbePending: the adapter has not reported, a token the node issued has not
+	// been presented yet and has not expired, or the adapter reported every tool
+	// probe as not_run, so that nothing has been shown yet.
 	ProbePending ProbeState = iota + 1
-	// ProbePassed: the adapter reported that each tool probe ran, and the node saw
-	// each token presented. An adapter with no tool probe to run passes with its
-	// report.
+	// ProbePassed: the adapter reported that each tool probe that applied ran, the
+	// node saw each of their tokens presented, and at least one did. An adapter with
+	// no tool probe to run passes with its report.
 	ProbePassed
-	// ProbeFailed: the adapter reported a tool probe that did not run, or a token
-	// expired before it was presented.
+	// ProbeFailed: the adapter reported a tool probe as failed or left one out, or a
+	// token expired before it was presented.
 	ProbeFailed
 )
 
@@ -72,10 +73,19 @@ type toolProbe struct {
 	frontend adapterproto.Frontend
 }
 
-// probeView says how far the probe has come at now. A token that was not
-// presented is pending until it expires and failed after; an adapter that reported
-// a tool probe as anything but ran, or did not report one the node issued a token
-// for, has failed it.
+// probeView says how far the probe has come at now. Each tool probe the node
+// issued a token for counts by what the adapter reported of it:
+//
+//   - ran is evidence once the node has seen its token presented; until then it is
+//     pending, and after the token expired unpresented it is a failure;
+//   - failed, and no report at all, are failures;
+//   - not_run says the probe did not apply (a preset the adapter cannot use, a front
+//     end it has no probe for), so it is neither evidence nor a failure.
+//
+// The probe has failed when any tool probe failed, is pending while one is
+// pending, and has passed when at least one tool probe was shown to run. An adapter
+// that reported only not_run has shown nothing yet and stays pending; one the node
+// issued no token for passes with its report.
 func (st *adapterState) probeView(now time.Time) ProbeView {
 	v := ProbeView{State: ProbePending, At: st.probedAt}
 	for _, t := range st.tokens {
@@ -86,25 +96,32 @@ func (st *adapterState) probeView(now time.Time) ProbeView {
 	if !st.probed {
 		return v
 	}
-	ran := map[toolProbe]bool{}
+	outcome := map[toolProbe]adapterproto.ProbeOutcome{}
 	for _, tp := range st.probe.ToolProbes {
-		ran[toolProbe{tp.Preset, tp.Frontend}] = tp.Outcome == adapterproto.ProbeRan
+		outcome[toolProbe{tp.Preset, tp.Frontend}] = tp.Outcome
 	}
-	failed, pending := false, false
+	failed, pending, shown := false, false, false
 	for _, t := range st.tokens {
-		switch {
-		case !ran[toolProbe{t.preset, t.frontend}]:
-			failed = true
-		case !t.used && now.Before(t.expires):
-			pending = true
-		case !t.used:
+		switch outcome[toolProbe{t.preset, t.frontend}] {
+		case adapterproto.ProbeNotRun:
+		case adapterproto.ProbeRan:
+			switch {
+			case t.used:
+				shown = true
+			case now.Before(t.expires):
+				pending = true
+			default:
+				failed = true
+			}
+		default: // failed, or not reported
 			failed = true
 		}
 	}
 	switch {
 	case failed:
 		v.State = ProbeFailed
-	case !pending:
+	case pending:
+	case shown || len(st.tokens) == 0:
 		v.State = ProbePassed
 	}
 	return v

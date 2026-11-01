@@ -855,6 +855,15 @@ into the node's declaration only once the instance is enabled and its first
 probe has passed, and is not withdrawn when it later becomes unusable, so the
 declaration does not flap.
 
+A tool probe in `adapter.probe` reports `ran`, `failed` or `not_run`. `not_run`
+means the probe did not apply: the preset is not one the adapter can use (it has no
+section for it, or it is not usable), or the front end has no probe. It is neither
+evidence nor a failure, and the daemon judges the probe of the instance from the
+others: it has passed when at least one tool probe ran and its token was seen, has
+failed when any tool probe failed, and stays pending while every one was `not_run`.
+A probe that applied and could not be run (the `sidera` program is missing, the
+runtime's server cannot be reached) is `failed`, never `not_run`.
+
 | Kind | Read by | Created by |
 | ---- | ------- | ---------- |
 | `runtime` | nobody; it takes no ordinary messages | the daemon, one per adapter that declares a runtime |

@@ -128,7 +128,8 @@ read from the manifest built into the executable.
   directory present, record directory name within bounds) and the tool probes: for the command-line
   front end `sidera probe` is run, for MCP `sidera mcp` is started and sent `initialize` and its
   own probe on connection is waited for, each with the probe token in `SIDERA_PROBE_TOKEN` and no
-  model turn; both are reported as `unsandboxed`. It then sends the availability snapshot:
+  model turn; both are reported as `unsandboxed`, `failed` when `sidera` is not found, and
+  `not_run` for a preset that is not configured or a front end that has no probe. It then sends the availability snapshot:
   `dependency_missing` for a program that is not found, `runtime_auth` when not logged in.
 
 ### Configuration

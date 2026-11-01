@@ -134,7 +134,8 @@ func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath str
 	case adapterproto.FrontendCLI:
 		out.Method = adapterproto.ProbeSandboxed
 		if c == nil {
-			out.Outcome, out.Detail, out.Method = adapterproto.ProbeNotRun, "the App Server cannot be reached", ""
+			// The probe applies and cannot be run: that is a failure, not not_run.
+			out.Outcome, out.Detail, out.Method = adapterproto.ProbeFailed, "the App Server cannot be reached", ""
 			return out
 		}
 		r, err := c.CommandExec(ctx, appserver.CommandExecParams{

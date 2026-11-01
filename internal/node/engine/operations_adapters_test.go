@@ -1383,6 +1383,71 @@ func TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe(t *testing.T) {
 	}
 }
 
+// A tool probe reported as not_run did not apply, so it is neither a failure nor
+// evidence: the probe passes on what did run, and an adapter that ran nothing is
+// pending, not failed.
+func TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence(t *testing.T) {
+	ran, notRun, failed := adapterproto.ProbeRan, adapterproto.ProbeNotRun, adapterproto.ProbeFailed
+	for _, tc := range []struct {
+		name      string
+		outcomes  [2]adapterproto.ProbeOutcome
+		presented []int
+		want      engine.ProbeState
+	}{
+		{"every tool probe not run", [2]adapterproto.ProbeOutcome{notRun, notRun}, nil, engine.ProbePending},
+		{"one ran and was seen, the other not run", [2]adapterproto.ProbeOutcome{ran, notRun}, []int{0}, engine.ProbePassed},
+		{"one ran and was not seen yet, the other not run", [2]adapterproto.ProbeOutcome{ran, notRun}, nil, engine.ProbePending},
+		{"one failed, the other not run", [2]adapterproto.ProbeOutcome{failed, notRun}, nil, engine.ProbeFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			r := newRig(t, 10, withAdapters(newHostDouble()), withPackage("/src/relay", relayPackage(t, "1.0.0")))
+			e := r.start()
+			if _, err := e.Execute(ctx, installCommand(60, "install", "/src/relay")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.Execute(ctx, enableCommand(61, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+				t.Fatal(err)
+			}
+			adm, info := relayAdmission(t)
+			if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.AdapterStarted(ctx, "relay", adapterproto.StartResult{}); err != nil {
+				t.Fatal(err)
+			}
+			reqs, err := e.ProbeTokens(ctx, "relay")
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := probeRan(reqs)
+			for i, outcome := range tc.outcomes {
+				res.ToolProbes[i].Outcome = outcome
+				if outcome == notRun {
+					res.ToolProbes[i].Method = ""
+				}
+			}
+			if err := e.AdapterProbed(ctx, "relay", res); err != nil {
+				t.Fatal(err)
+			}
+			for _, i := range tc.presented {
+				if _, err := e.PresentProbeToken(ctx, reqs[i].Token, reqs[i].Frontend); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err := e.AdapterList(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, in := range list.Instances {
+				if in.Name == "relay" && in.Probe.State != tc.want {
+					t.Errorf("probe state %v, want %v", in.Probe.State, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Crash points
 

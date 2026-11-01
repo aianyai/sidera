@@ -125,7 +125,8 @@ func (a *App) probeTool(ctx context.Context, req adapterproto.ToolProbeRequest, 
 		out.Detail = fmt.Sprintf("preset %q is not configured", req.Preset)
 		return out
 	case sidera == "":
-		out.Detail = "sidera was not found"
+		// The probe applies and cannot be run: that is a failure, not not_run.
+		out.Outcome, out.Detail = adapterproto.ProbeFailed, "sidera was not found"
 		return out
 	}
 	env := map[string]string{"SIDERA_PROBE_TOKEN": string(req.Token)}

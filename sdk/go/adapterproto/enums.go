@@ -71,8 +71,13 @@ func (s DependencyState) Valid() bool { return slices.Contains(dependencyStates,
 type ProbeOutcome string
 
 const (
-	ProbeRan    ProbeOutcome = "ran"
+	// ProbeRan: the probe ran; the daemon still waits to see its token.
+	ProbeRan ProbeOutcome = "ran"
+	// ProbeNotRun: the probe did not apply, so it says nothing either way: the
+	// preset is not one the adapter can use, or the front end has no probe. A probe
+	// that applied and could not be run is ProbeFailed.
 	ProbeNotRun ProbeOutcome = "not_run"
+	// ProbeFailed: the probe applied and did not succeed, or could not be run.
 	ProbeFailed ProbeOutcome = "failed"
 )
 

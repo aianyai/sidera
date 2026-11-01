@@ -372,10 +372,13 @@ one and the lookup of a session endpoint by `ByToken`, ask it first: Go's base64
 skips a newline and takes spare bits in the last character, so a decoder of their own
 would take a text that is not the token for it.
 The probe of an enabled instance is `pending` until the adapter has reported and every
-token issued for the round is presented or expired, `passed` when the adapter reported
-every tool probe as ran and every token was presented (an adapter with nothing to probe
-passes with its report), and `failed` when a tool probe did not run or a token expired
-unpresented. A runtime endpoint becomes part of what the node declares the first time
+token issued for the round is presented or expired, `passed` when every tool probe that
+applied was reported as ran and its token was presented, and at least one did (an adapter
+with nothing to probe passes with its report), and `failed` when a tool probe failed or
+was left out of the report, or a token expired unpresented. A tool probe reported as
+`not_run` did not apply to its preset (the adapter has nothing configured for it): it
+counts for nothing either way, so an adapter whose every tool probe was `not_run`, as
+with the `default` preset that names no section for it, stays `pending`. A runtime endpoint becomes part of what the node declares the first time
 its probe passes, and is not withdrawn when the adapter later becomes unusable, so that
 the declaration does not flap; disabling the instance ends it. `AdapterList` reads the
 installed adapters, the instances and the probe of each enabled one at one command.
@@ -1871,7 +1874,7 @@ reproducible).
 | Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |
 | Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
 | A change of the presets restarts the runtime instances that run, and the new `adapter.start` carries the presets | `operations_presets.go` (`presetsChanged`) | `TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun` |
-| The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe` |
+| The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe`, `TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
