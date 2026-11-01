@@ -26,6 +26,31 @@ func mustValid(t *testing.T, m adapterproto.Message) {
 	}
 }
 
+// A first turn that started but cannot be identified runs with the prompt, so the
+// request is an error and not a failure; asked again, the attempt finds the
+// process by the uuid on its command line and starts no second one.
+func TestCreateWithAStartedProcessThatCannotBeIdentifiedIsRetriedWithoutASecondStart(t *testing.T) {
+	w := newWorld(t)
+	w.onLaunch = claudeWrites(5 * time.Millisecond)
+	w.unidentified = true
+	app, _ := newApp(t, w)
+
+	res, err := app.CreateSession(ctxT(t), createParams(attempt1, prompt1))
+	if err == nil || res.Outcome == adapterproto.CreateFailed {
+		t.Fatalf("result %+v, err %v: want an error and no failure", res, err)
+	}
+	w.mu.Lock()
+	w.unidentified = false
+	w.mu.Unlock()
+	res, err = app.CreateSession(ctxT(t), createParams(attempt1, prompt1))
+	if err != nil || res.Outcome != adapterproto.CreateCreated {
+		t.Fatalf("retry: %+v %v", res, err)
+	}
+	if w.launchCount() != 1 {
+		t.Fatalf("%d processes started, want the one of the first request", w.launchCount())
+	}
+}
+
 func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	w := newWorld(t)
 	w.onLaunch = claudeWrites(5 * time.Millisecond)

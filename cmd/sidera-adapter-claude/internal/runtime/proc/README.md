@@ -9,7 +9,7 @@ so it does I/O; read [../../../README.md](../../../README.md).
 | Name | Does |
 | ---- | ---- |
 | `Table` (`NewTable`) | `Lookup(pid)` and `Snapshot()` of the caller's user's processes with their argument vectors. |
-| `Launcher` (`NewLauncher(table)`) | Starts a process in a session of its own, reading its input from a file and writing its output to files. |
+| `Launcher` (`NewLauncher(table)`) | Starts a process in a session of its own, reading its input from a file and writing its output to files. An error that wraps `ErrStartedUnidentified` means the process started and its identity could not be read; any other error means nothing started. |
 | `Signaller` (`NewSignaller`) | `Interrupt(pid)`: SIGINT. |
 | `Info.StartKey()` | The start as the protocol's opaque start key, `<sec>.<usec>`. |
 
@@ -21,5 +21,7 @@ so it does I/O; read [../../../README.md](../../../README.md).
 - A process started by the launcher leads a process group of its own, has no
   controlling terminal and outlives the adapter. Its input is a regular file, so
   reaching the end of it closes the input and no pipe ties it to the adapter.
+- A start whose process runs but cannot be identified is told from a start that failed: the
+  caller must not treat the first as "nothing happened".
 - Only macOS is implemented (`kern.proc` and `kern.procargs2`). On every other
   platform each call fails with `ErrUnsupported`, naming the operation.

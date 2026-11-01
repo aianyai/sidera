@@ -176,7 +176,9 @@ checkpoint holds no token, because `tool_access` is sent with every request that
 The loop takes one snapshot of the process table, then reads the session file, then asks `Decide`
 and does what it says, storing the new state before the next round and waiting 200 ms when it says
 wait. A turn process is started with `--session-id` for a session that has no file and `--resume`
-otherwise. When the first prompt is in the record the adapter stores `ready`, then the session's
+otherwise. A start that cannot be made is answered `failed` (`native_unavailable`) without ending
+the attempt; a process that was started but cannot be identified ends the request as an error, and
+the repeated request finds the process by the uuid on its command line. When the first prompt is in the record the adapter stores `ready`, then the session's
 checkpoint with the first turn, then reports the first turn, and only then answers `created` with
 the session uuid as the native reference, the turn process's identity and the front ends. If the
 first turn's process is already gone (the daemon restarted while it was creating and asks again),
@@ -194,7 +196,9 @@ and two such processes are `control_unknown`; a process that was started and nev
 recorded and followed. Otherwise the adapter stores the attempt's dispatch checkpoint, starts the
 process with `--resume`, stores the session's checkpoint with the new turn and answers `accepted`;
 `prompt.persisted` and `turn.started` follow when the prompt reaches the record. A process that
-cannot be started is `refused` as `native_unavailable`. If the dispatch checkpoint cannot be stored
+cannot be started is `refused` as `native_unavailable`; a process that was started but whose
+identity cannot be read is an error, because it runs with the prompt and nothing can be said
+to have failed or been refused. If the dispatch checkpoint cannot be stored
 the request fails with an error and the daemon reconciles: a checkpoint that was never stored is how
 a reconciliation proves that nothing was started.
 
@@ -468,6 +472,12 @@ at another path.
   daemon accepts the checkpoint of a session that is still being created and the notifications of
   an endpoint it does not yet know as open; a crash after the first `turn.started` then leaves a
   state to pick the turn up from instead of a turn nobody follows.
+- **A started process is never reported as a failed start.** The launcher says which of the two
+  happened (`ErrStartedUnidentified` for a process that runs but whose identity could not be read,
+  any other error for nothing started), and the handlers map it where they decide the outcome. A
+  refusal or a failure promises that nothing ran; for a process that runs with the prompt that
+  would send the daemon to deliver it again beside the first. An error leaves the daemon to
+  reconcile, which finds the prompt in the record.
 - **A process that was never recorded is followed, not refused.** When a prompt finds a process of the
   session that the checkpoint does not know (the adapter died between starting it and recording it),
   refusing as busy without following it would leave the daemon waiting for a `turn.ended` that

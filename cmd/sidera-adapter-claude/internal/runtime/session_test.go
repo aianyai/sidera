@@ -116,6 +116,31 @@ func TestRunningTurnIsCheckpointedOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
+// A process that started but whose identity cannot be read runs with the prompt:
+// the outcome is unknown, so it is an error for the daemon to reconcile and not a
+// refusal that says nothing happened.
+func TestDeliverOfAStartedProcessThatCannotBeIdentifiedIsAnError(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	openSession(t, w, app)
+	w.mu.Lock()
+	w.unidentified = true
+	w.mu.Unlock()
+
+	res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"})
+	if err == nil || res != (adapterproto.PromptDeliverResult{}) {
+		t.Fatalf("result %+v, err %v: want an error and no answer", res, err)
+	}
+	if w.aliveCount() != 1 {
+		t.Fatalf("%d processes run, want the one that was started", w.aliveCount())
+	}
+	// The process is the session's writer; a prompt now is busy, not a second start.
+	again, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: prompt2, Text: "x"})
+	if err != nil || again.Reason != adapterproto.RefusalBusy || w.launchCount() != 2 {
+		t.Fatalf("again: %+v %v, %d launches", again, err, w.launchCount())
+	}
+}
+
 func TestDeliverRefusals(t *testing.T) {
 	w := newWorld(t)
 	app, _ := newApp(t, w)

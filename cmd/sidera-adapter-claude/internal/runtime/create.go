@@ -242,7 +242,8 @@ func failedFor(reason create.Reason) adapterproto.SessionCreateResult {
 
 // startFirstTurn starts the turn process of the attempt. A launch that cannot be
 // made started nothing, so it is answered as a failure without ending the
-// attempt: a repeated request tries again.
+// attempt: a repeated request tries again. A process that started but cannot be
+// identified is an error, never a failure.
 func (a *App) startFirstTurn(at *attempt, p adapterproto.SessionCreateParams, resume bool) (proc.Started, *adapterproto.SessionCreateResult, error) {
 	preset, err := a.loadPreset(at.cp.Preset)
 	if err != nil {
@@ -254,6 +255,11 @@ func (a *App) startFirstTurn(at *attempt, p adapterproto.SessionCreateParams, re
 	})
 	var missing errDependencyMissing
 	switch {
+	case errors.Is(err, proc.ErrStartedUnidentified):
+		// The process runs with the first prompt, so the attempt is neither failed
+		// nor reported: it ends as an error, and the repeated request finds the
+		// process by the uuid on its command line.
+		return proc.Started{}, nil, fmt.Errorf("the first turn was started and cannot be identified: %w", err)
 	case errors.As(err, &missing):
 		res := failed(adapterproto.CreateFailDependencyMissing, err.Error())
 		return proc.Started{}, &res, nil

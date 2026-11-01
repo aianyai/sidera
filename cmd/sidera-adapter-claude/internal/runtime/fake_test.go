@@ -44,6 +44,9 @@ type world struct {
 
 	// onLaunch runs after a process was started, with the world unlocked.
 	onLaunch func(w *world, p *fakeProc, l proc.Launch)
+	// unidentified makes Start report a process it did start as one whose
+	// identity cannot be read.
+	unidentified bool
 	// afterOpen runs after a file was opened and its content taken, with the
 	// world unlocked: what happens in the world just after a read.
 	afterOpen func(w *world, path string)
@@ -102,9 +105,13 @@ func (w *world) Start(l proc.Launch) (proc.Started, error) {
 	w.launches = append(w.launches, l)
 	hook := w.onLaunch
 	info := w.info(p)
+	unidentified := w.unidentified
 	w.mu.Unlock()
 	if hook != nil {
 		go hook(w, p, l)
+	}
+	if unidentified {
+		return proc.Started{}, fmt.Errorf("%w: process %d", proc.ErrStartedUnidentified, p.pid)
 	}
 	return proc.Started{Info: info, PGID: p.pid, Done: make(chan error)}, nil
 }

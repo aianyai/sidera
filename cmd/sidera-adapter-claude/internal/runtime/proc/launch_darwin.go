@@ -50,7 +50,7 @@ func (l osLauncher) Start(spec Launch) (Started, error) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	if lookupErr != nil {
-		return Started{}, fmt.Errorf("proc: the process %d started but its identity cannot be read: %w", cmd.Process.Pid, lookupErr)
+		return Started{}, fmt.Errorf("%w: process %d: %w", ErrStartedUnidentified, cmd.Process.Pid, lookupErr)
 	}
 	started.Info, started.Done = info, done
 	return started, nil

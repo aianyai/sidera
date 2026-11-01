@@ -7,6 +7,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/reconcile"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/record"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -117,6 +118,12 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 		preset: resolvedPreset{Preset: preset, Cwd: s.cwd, RecordDir: s.recordDir}, session: s.id, resume: true,
 		attempt: string(p.Attempt), text: p.Text, toolEnv: s.toolEnv,
 	})
+	if errors.Is(err, proc.ErrStartedUnidentified) {
+		// The process runs with the prompt, so the outcome is unknown and not a
+		// refusal; the daemon reconciles, and the next look at the session finds
+		// the process by its command line.
+		return adapterproto.PromptDeliverResult{}, fmt.Errorf("a turn process was started and cannot be identified: %w", err)
+	}
 	if err != nil {
 		a.log.Warn("a turn process could not be started", "endpoint", s.endpoint, "error", err)
 		return refused(adapterproto.RefusalNativeUnavailable)

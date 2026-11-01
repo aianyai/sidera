@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,5 +88,32 @@ func TestLauncherFailsForAMissingExecutable(t *testing.T) {
 		Stdin: in, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err")})
 	if err == nil {
 		t.Fatal("want an error")
+	}
+}
+
+// failingTable cannot read the identity of what the launcher started.
+type failingTable struct{ Table }
+
+func (failingTable) Lookup(int) (Info, error) { return Info{}, errors.New("no such table") }
+
+// A process that started but whose identity cannot be read is not a failed
+// start: the error says it started, so the caller does not take it for nothing.
+func TestLauncherReportsAStartedProcessItCannotIdentify(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in")
+	if err := os.WriteFile(in, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started, err := NewLauncher(failingTable{NewTable()}).Start(Launch{
+		Argv: []string{"/usr/bin/true"}, Dir: dir,
+		Stdin: in, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err"),
+	})
+	if !errors.Is(err, ErrStartedUnidentified) || started.PID != 0 {
+		t.Fatalf("Start = %+v, %v: want ErrStartedUnidentified", started, err)
+	}
+	// Every other failure started nothing.
+	_, err = NewLauncher(NewTable()).Start(Launch{Argv: []string{"/usr/bin/true"}, Stdin: filepath.Join(dir, "missing")})
+	if err == nil || errors.Is(err, ErrStartedUnidentified) {
+		t.Fatalf("a launch that cannot be made: %v", err)
 	}
 }

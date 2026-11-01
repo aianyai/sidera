@@ -10,6 +10,12 @@ import (
 // wrongly would end in a second writer on a session.
 var ErrUnsupported = errors.New("proc: not supported on this platform")
 
+// ErrStartedUnidentified is wrapped by the error of a Start whose process did
+// start but whose identity could not be read. Such a start is not a failure: the
+// process runs, so what the caller does about it must not assume that nothing
+// happened.
+var ErrStartedUnidentified = errors.New("proc: the process started but its identity cannot be read")
+
 // Info is what the process table says about one process.
 type Info struct {
 	PID int
@@ -90,7 +96,8 @@ type Launcher interface {
 	// Start starts the process in a session of its own, with no controlling
 	// terminal, so that a signal to the adapter or its terminal does not reach
 	// it and it outlives the adapter. The identity it returns is read from the
-	// process table right away.
+	// process table right away. Any other error means no process was started;
+	// an error that wraps ErrStartedUnidentified means one was.
 	Start(Launch) (Started, error)
 }
 
