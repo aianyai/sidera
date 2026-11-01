@@ -138,9 +138,9 @@ start the work from a terminal on any of the machines and read the answers there
   not support yet by writing an adapter, in any language. A new adapter can be
   added while Sidera keeps running.
 - **Messages you can count on.** A message is kept until it is delivered or
-  its deadline passes. A message sent twice by mistake arrives once, and when
-  an agent may already have seen a message, it is told so. If a message cannot
-  be delivered, the sender is told; no news means it arrived.
+  its deadline passes. A message the sender sends again with the same `--key`
+  arrives once, and when an agent may already have seen a message, it is told so.
+  If a message cannot be delivered, the sender is told; no news means it arrived.
 - **You decide who is in.** A network belongs to one person or one
   organization. Machines join only by confirming each other, and you can remove a
   machine from your trust at any time. What an agent may do is decided by the
