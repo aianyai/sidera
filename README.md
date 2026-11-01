@@ -4,7 +4,10 @@
 
 [![CI](https://github.com/aianyai/sidera/actions/workflows/ci.yml/badge.svg)](https://github.com/aianyai/sidera/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Status](https://img.shields.io/badge/status-pre--release-orange.svg)
+
+> **Let your agent do it:** give it [`docs/agent-guide.md`](docs/agent-guide.md).
+> It installs Sidera on its machine, pairs it with another and learns to work with
+> the agents there.
 
 *Sidera* is Latin for the stars, and for the constellations they form (the
 plural of *sidus*). Each of your agents is a star on its own machine; Sidera
@@ -16,72 +19,120 @@ You build on a Mac and test on Windows and Linux, with an agent on each
 machine: Claude Code here, Codex there. They cannot reach each other, and once
 you step away from the keyboard you cannot reach them either. Sidera connects
 them. Install it on each machine, let the machines trust each other once, and
-every agent can message every other agent, whether the machines share a desk,
-an office network or nothing but the internet. Chat apps join the same
-network, so you can talk to your agents from wherever you already chat. There
-is no central server and no account to sign up for.
+every agent can message every other agent, whether the machines share a desk or
+an office network. There is no central server and no account to sign up for.
+Reaching machines across the internet and talking to your agents from a chat
+app are planned.
 
-> [!NOTE]
-> **Pre-release.** This README describes Sidera as it is designed. So far the
-> repository contains the single-node daemon, its local interfaces and the
-> command-line tools for initialization, local management and Agent messaging,
-> with in-process recovery checks, binary crash walks, and filesystem and
-> transaction benchmarks.
->
-> The [testkit reference](docs/references/testkit/README.md) describes the
-> acceptance checks; the [storage reference](docs/references/storage/README.md)
-> explains the benchmark measurements.
->
-> Build the command with `go build ./cmd/sidera`; the available commands are
-> described in the [command-line reference](docs/references/command-line/README.md).
+## Status
+
+Sidera 0.8.0 is the first public release.
+
+**Works today**
+
+- Direct connection between nodes on a local network, over TCP and QUIC.
+- Pairing: two nodes trust each other after both owners confirm.
+- Claude Code on macOS.
+- Codex on macOS, Linux and Windows.
+- Creating a session on another machine and exchanging messages with it.
+- The console bridge: the owner starts sessions and reads replies from a terminal.
+- Dynamic adapter install, replace, configuration and removal, while Sidera runs.
+
+**Planned**
+
+- NAT traversal and relays, to connect across the internet and behind routers.
+- Inherited trust: trust that reaches one step further.
+- People and remote management of nodes from other devices.
+- Chat adapters, so you can talk to your agents from a chat app.
+- Installing the daemon as a background service that starts at boot.
+- Claude Code on Linux and Windows.
+- Messages to several recipients.
+
+## Quick start
+
+Two machines on one network, Sidera [installed](docs/guide/install.md) on both
+(`A` and `B`), and Codex or Claude Code signed in on each. Placeholders in angle
+brackets come from the other machine. The full walkthrough, with the preset files
+and the reasons, is [Getting started](docs/guide/getting-started.md).
+
+```sh
+# On both machines
+sidera init                                    # prints the node id
+tmux new-session -d -s sidera 'sidera daemon'  # keep the daemon running
+sidera adapter install <release>/adapters/console && sidera adapter enable console
+sidera adapter install <release>/adapters/codex && sidera adapter enable codex
+sidera preset add dev --file dev.json          # a preset: see the guide
+sidera network show                            # first line: the contact line
+
+# On A, with B's contact line (node id, then addresses); on B the same for A
+sidera network address set <node-id-b> <addresses-of-b>
+sidera trust expect <node-id-b>                # and on B: sidera trust expect <node-id-a>
+sidera trust request <node-id-b> --wait 60s    # on A, once both expect
+
+# On A: the first message across machines, then its reply
+sidera-adapter-console new <runtime-address-on-b> --preset dev --body 'Say hello from B.'
+sidera-adapter-console recv --wait 30
+```
+
+The preset decides what the agent may do. The guide starts with a restricted one
+and explains the risk of a full-access preset.
+
+## Guides
+
+- [User guide](docs/guide/README.md): [install](docs/guide/install.md),
+  [getting started](docs/guide/getting-started.md),
+  [working with agents](docs/guide/agents.md) and
+  [operations](docs/guide/operations.md).
+- [Agent guide](docs/agent-guide.md): a procedure an AI agent follows to deploy
+  Sidera, pair it and work through it.
+- [Engineering references](docs/references/README.md): how each part is built.
 
 ## How it works
 
 ```mermaid
 flowchart TB
-  chat["Your chat app"]
+  chat["Chat app (planned)"]
   subgraph net["Your machines, connected by Sidera"]
     direction LR
-    mac["Mac<br/>Claude Code"] <--> win["Windows PC<br/>Codex"] <--> lin["Linux box<br/>another agent"]
+    mac["Mac<br/>Claude Code"] <--> win["Windows PC<br/>Codex"] <--> lin["Linux box<br/>Codex"]
     mac <--> lin
   end
-  apps["Web, desktop or mobile app"]
+  apps["Web, desktop or mobile app (planned)"]
   chat -. "chat adapter" .- net
   net -. "manage through any machine" .- apps
 ```
 
 For example: Claude Code on the Mac asks Codex on the Windows PC to run the
-test suite there, the agent on the Linux box reports how its build went, and
-you follow the whole exchange from your phone's chat app.
+test suite there, and the agent on the Linux box reports how its build went. You
+start the work from a terminal on any of the machines and read the answers there.
 
 - **Sidera on every machine, nothing in the middle.** Each machine runs the
-  same `sidera` program. Machines connect to each other directly, even behind
-  home or office routers; when they cannot, another of your machines passes
-  the messages along.
-- **Trust once.** Two machines join by confirming each other once, comparing a
-  short code on both sides. Trust reaches one step further: if A trusts B and
-  B trusts C, A and C can talk, unless either of them turns that off.
-- **Agents and people plug in.** Each kind of agent has an adapter, a small
-  companion program that hands messages to the agent's real session and lets
-  the agent send its own. A chat adapter does the same for you in a chat app.
-- **Manage from any device.** Manage your machines from the command line or
-  from web, desktop and mobile apps. Each can manage every machine you are
-  allowed to manage, through whichever of your machines it can reach.
+  same `sidera` program. Machines connect to each other directly. Reaching
+  machines behind routers, with another of your machines passing messages along,
+  is planned.
+- **Trust once.** Two machines join by confirming each other once: each owner
+  names the other node, and the pairing completes. Trust is between the two
+  nodes; trust that reaches one step further is planned.
+- **Agents plug in.** Each kind of agent has an adapter, a small companion program
+  that hands messages to the agent's real session and lets the agent send its own.
+  A chat adapter would do the same for you in a chat app; that is planned.
+- **A console for you.** The console bridge is an adapter too: from a terminal you
+  start a session on any trusted machine and read what comes back.
 
 ## Why Sidera
 
 - **Decentralized.** No central server, no account, no one else's service in
   the middle. Every machine has the final say over itself.
-- **Made for your own machines, on every platform.** Mac, Windows and Linux,
-  on one desk, one office network or across the internet. Useful whenever what
-  you build has to be tested and run on all three.
+- **Made for your own machines, on every platform.** Mac, Windows and Linux on
+  one desk or one office network. Useful whenever what you build has to be tested
+  and run on all three.
 - **Any agent, as it already is.** Adapters for Claude Code and Codex come
   with Sidera, and other agents join the same way. Sessions keep their own
   login, project instructions, skills and settings, and their credentials
   never leave the machine.
-- **People are on the network too.** Chat apps plug in like agents do, so a
-  message from you and a message from an agent travel the same way, under the
-  same rules.
+- **People are on the network too.** The owner's console plugs in like an agent
+  does, so a message from you and a message from an agent travel the same way,
+  under the same rules. Chat apps would join the same way.
 - **Open to your own adapters.** Connect an agent or a chat app Sidera does
   not support yet by writing an adapter, in any language. A new adapter can be
   added while Sidera keeps running.
@@ -90,9 +141,9 @@ you follow the whole exchange from your phone's chat app.
   an agent may already have seen a message, it is told so. If a message cannot
   be delivered, the sender is told; no news means it arrived.
 - **You decide who is in.** A network belongs to one person or one
-  organization. Machines join only by confirming each other, removing a
-  machine also cuts the trust that went through it, and each machine keeps
-  its own list of the people who may manage it.
+  organization. Machines join only by confirming each other, and you can remove a
+  machine from your trust at any time. What an agent may do is decided by the
+  preset you give it.
 - **Agents keep working if Sidera stops.** Restarting Sidera, or Sidera
   crashing, does not interrupt an agent in the middle of a task.
 
@@ -112,27 +163,31 @@ to, what to say and how to react. It is not:
 - an orchestrator or task framework: it does not assign tasks, retry them or
   wait for replies;
 - a team directory: it does not track who works on what;
-- a group chat: a message can go to several recipients, but there are no
-  groups;
+- a group chat: a message goes to one recipient and there are no groups;
 - a shared service for strangers: a network is one owner's machines, not a
   marketplace of other people's agents;
 - an implementation of an agent interoperability protocol such as A2A.
 
 ## Repository layout
 
+- `cmd/`: the programs.
+  - [`sidera`](cmd/sidera/README.md): the node program, the daemon and every command.
+  - [`sidera-adapter-claude`](cmd/sidera-adapter-claude/README.md): the Claude Code adapter.
+  - [`sidera-adapter-codex`](cmd/sidera-adapter-codex/README.md): the Codex adapter.
+  - [`sidera-adapter-console`](cmd/sidera-adapter-console/README.md): the console
+    bridge, the owner's endpoint and client.
+  - `sidera-fake-adapter` and `sidera-fake-runtime`: stand-ins used by tests.
 - `internal/`: the foundation packages, see its [README](internal/README.md).
 - `protocol/`: the language-neutral definition of the adapter protocol and the
   tests that hold the Go types to it, see its [README](protocol/README.md).
 - `sdk/go/`: the Go module adapters and Sidera share, see its
   [README](sdk/go/README.md).
-- `cmd/`: the [node command line](cmd/sidera/README.md), fake adapter and runtime
-  test programs, the Claude Code adapter's
-  [session-creation logic](cmd/sidera-adapter-claude/README.md) and the
-  [console bridge adapter](cmd/sidera-adapter-console/README.md).
-- `.github/workflows/`: continuous integration, see
-  [the ci reference](docs/references/ci/README.md).
+- `docs/guide/` and `docs/agent-guide.md`: the user guide and the guide for AI
+  agents, see the [guide index](docs/guide/README.md).
 - `docs/references/`: engineering references by topic, see its
   [README](docs/references/README.md).
+- `.github/workflows/`: continuous integration, see
+  [the ci reference](docs/references/ci/README.md).
 
 ## License
 
