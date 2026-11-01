@@ -3,6 +3,8 @@
 What the repository checks on every change, on which platform, what is left
 out for now and why, and how to run the same checks on a development machine.
 The workflow is [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml).
+Releases are built by a second workflow, [`release.yml`](../../../.github/workflows/release.yml);
+see "Release" below.
 
 ## What
 
@@ -145,6 +147,45 @@ none starts with the prefix.
 The `-v` of the `crashwalk` step puts the time of every rerun and of the whole
 walk into the log of each shard. Those numbers, not the estimates the shard
 counts were first set from, are what the counts and limits are adjusted by.
+
+### Release
+
+A release is made by pushing a tag `v<version>` (`v0.8.0`); nothing else starts
+it. The version is the tag without the `v`, and `CHANGELOG.md` must have a section
+for it, `## [0.8.0] - <date>`, because that section is the text of the release.
+
+To cut a release:
+
+1. Move what the release holds from `## [Unreleased]` into a new `## [<version>]`
+   section of `CHANGELOG.md`, with the date, and commit it on `main`.
+2. Check the archives on a development machine (`scripts/release.sh`, below) and
+   that CI is green on that commit.
+3. `git tag -a v<version> -m "Sidera <version>"` on that commit and
+   `git push origin v<version>`.
+
+`release.yml` checks out the tag, installs Go as `ci.yml` does, takes the release
+notes from the changelog (a tag without a section fails here, before anything is
+built), runs `scripts/release.sh`, and creates the GitHub Release with
+`gh release create`, using the job's `GITHUB_TOKEN`. A version with a pre-release
+part (`0.9.0-rc.1`) is marked as a pre-release. It does not run the tests: they ran
+on `main`.
+
+`scripts/release.sh <version> <outdir>` builds, with `CGO_ENABLED=0` and the
+version stamped into every program (see
+[`internal/release`](../../../internal/release/README.md)), for darwin/arm64,
+darwin/amd64, linux/amd64, linux/arm64 and windows/amd64: `sidera`,
+`sidera-adapter-codex` and `sidera-adapter-console`, and `sidera-adapter-claude` on
+darwin only, since its manifest lists darwin only. Each adapter's `package`
+subcommand then writes its package, which is where a package gets the release
+version in its manifest. `<outdir>` ends up with exactly:
+
+| File | Holds |
+| ---- | ----- |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: the programs (`.exe` on Windows), `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`), `LICENSE` and `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md` |
+| `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
+
+The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
+does not report the version it was given.
 
 ### Not run yet
 
@@ -296,6 +337,23 @@ included. Nothing modifies it. The list is written before the first tag, from
   `cancel-in-progress: true`, which pull requests need, and with
   `cancel-in-progress` given as an expression the documentation leaves the
   combination undefined.
+- **A script, not a release tool**: the build is a static cross-compile and each
+  adapter's own `package` subcommand, which a short script says plainly, runs
+  the same on a development machine as on the runner, and adds no tool to learn;
+  the workflow is only the runner, the tag and the token. A tool such as GoReleaser
+  would bring a configuration language for what these steps already express.
+- **The package commands run on the builder**: a cross-compiled adapter cannot
+  run there, so the script builds one native copy of each adapter, with the same
+  version, to run `package` with, and gives it the cross-compiled binary to copy.
+- **The commit is stated, not found**: Go records the revision of the checkout in
+  the binary, but for a build in a linked git worktree it records the main
+  checkout's, so `scripts/release.sh` passes `git rev-parse HEAD` to the linker. A
+  release built on the runner has the same commit either way.
+- **The release job's token**: `contents: read` for the workflow and
+  `contents: write` for the one job that creates the release; the checkout does not
+  persist the token and only the last step receives it. Its outputs are written
+  under `$RUNNER_TEMP`, since a file in the checkout would make the build report
+  an uncommitted change.
 - **Go version**: `actions/setup-go` reads it from the `toolchain` line of the
   root `go.mod` (setup-go prefers it over the `go` line), so CI installs the same
   patch release a local build uses; with only a `go 1.26.0` line it would install
@@ -369,6 +427,9 @@ and its hosted timings must be verified separately; focused tests do not establi
 ## Where
 
 - Workflow: `.github/workflows/ci.yml`.
+- Release: `.github/workflows/release.yml`, `scripts/release.sh`,
+  `scripts/release-notes.sh` (prints the changelog section of a version) and
+  `CHANGELOG.md`.
 - Line endings: `.gitattributes`.
 
 ## Run the same checks locally
@@ -401,11 +462,19 @@ SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=1/3 go test -count=1 -v -timeout 40
 
 (cd sdk/go && GOWORK=off go build ./... && GOWORK=off go test ./... && GOWORK=off go mod tidy -diff)
 
+# the release archives: five platforms into an empty directory, then the changelog section
+scripts/release.sh 0.8.0 "$(mktemp -d)"
+scripts/release-notes.sh 0.8.0
+
 for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
   CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go build ./... ./sdk/go/... || echo "build failed: $p"
 done
 ```
 
-The workflow file is checked with `actionlint .github/workflows/ci.yml`.
+The workflow files are checked with `actionlint .github/workflows/*.yml`, and the
+scripts with `shellcheck scripts/*.sh`. `scripts/release.sh` needs `go`, `git`,
+`tar`, `zip` and `sha256sum` (or `shasum`); the archives are written to the directory
+given, which must be empty, and the build reports "modified" after the commit when
+the working tree has uncommitted changes.
 
 `gofmt -l .` lists the files that need formatting; `gofmt -w` fixes them.
