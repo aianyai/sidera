@@ -1,5 +1,6 @@
-// Package semver parses and orders Semantic Versioning 2.0.0 versions, which
-// the adapter manifest uses for the adapter version.
+// Package semver parses Semantic Versioning 2.0.0 versions, which the adapter
+// manifest uses for the adapter version. Nothing orders them: the daemon never
+// compares versions of an adapter, it only installs the one it is given.
 //
 // Each of major, minor and patch has at most nine digits so that comparison
 // never overflows; versions beyond that are not real releases and are refused.
@@ -55,67 +56,4 @@ func atoi(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
-}
-
-// Compare returns -1, 0 or +1 as a has lower, equal or higher precedence than b.
-func Compare(a, b Version) int {
-	for _, d := range [3][2]int{{a.Major, b.Major}, {a.Minor, b.Minor}, {a.Patch, b.Patch}} {
-		if d[0] != d[1] {
-			if d[0] < d[1] {
-				return -1
-			}
-			return 1
-		}
-	}
-	switch {
-	case len(a.Pre) == 0 && len(b.Pre) == 0:
-		return 0
-	case len(a.Pre) == 0:
-		return 1
-	case len(b.Pre) == 0:
-		return -1
-	}
-	for i := 0; i < len(a.Pre) && i < len(b.Pre); i++ {
-		if c := comparePre(a.Pre[i], b.Pre[i]); c != 0 {
-			return c
-		}
-	}
-	switch {
-	case len(a.Pre) < len(b.Pre):
-		return -1
-	case len(a.Pre) > len(b.Pre):
-		return 1
-	}
-	return 0
-}
-
-func numeric(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return s != ""
-}
-
-// comparePre orders two pre-release identifiers: numeric ones numerically (as
-// digit strings, which never overflow), numeric below alphanumeric, the rest
-// in ASCII order.
-func comparePre(a, b string) int {
-	an, bn := numeric(a), numeric(b)
-	switch {
-	case an && bn:
-		if len(a) != len(b) {
-			if len(a) < len(b) {
-				return -1
-			}
-			return 1
-		}
-		return strings.Compare(a, b)
-	case an:
-		return -1
-	case bn:
-		return 1
-	}
-	return strings.Compare(a, b)
 }

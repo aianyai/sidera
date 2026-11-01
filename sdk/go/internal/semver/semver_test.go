@@ -30,46 +30,6 @@ func TestParse(t *testing.T) {
 	}
 }
 
-// TestCompare uses the precedence examples of the Semantic Versioning 2.0.0
-// specification, item 11, written out in increasing order.
-func TestCompare(t *testing.T) {
-	ordered := []string{
-		"1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0",
-		"2.0.0", "2.1.0", "2.1.1", "2.1.10", "10.0.0",
-	}
-	for i, a := range ordered {
-		for j, b := range ordered {
-			va, _ := semver.Parse(a)
-			vb, _ := semver.Parse(b)
-			want := 0
-			if i < j {
-				want = -1
-			} else if i > j {
-				want = 1
-			}
-			if got := semver.Compare(va, vb); got != want {
-				t.Errorf("Compare(%s, %s) = %d, want %d", a, b, got, want)
-			}
-		}
-	}
-}
-
-func TestCompareIgnoresBuildMetadata(t *testing.T) {
-	a, _ := semver.Parse("1.0.0+build.1")
-	b, _ := semver.Parse("1.0.0+build.2")
-	if semver.Compare(a, b) != 0 {
-		t.Fatal("build metadata changed precedence")
-	}
-}
-
-func TestCompareLongNumericIdentifiers(t *testing.T) {
-	a, _ := semver.Parse("1.0.0-99999999999999999999")
-	b, _ := semver.Parse("1.0.0-100000000000000000000")
-	if semver.Compare(a, b) != -1 {
-		t.Fatal("long numeric pre-release identifiers compared wrongly")
-	}
-}
-
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{"1.2.3", "1.0.0-rc.1+x", "", "01.0.0"} {
 		f.Add(s)
@@ -79,8 +39,9 @@ func FuzzParse(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if semver.Compare(v, v) != 0 {
-			t.Fatalf("%q is not equal to itself", s)
+		// A version that parses has the three numbers of its text.
+		if v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
+			t.Fatalf("%q parsed to %+v", s, v)
 		}
 	})
 }

@@ -489,6 +489,20 @@ have sent to a new version:
   predates it refuses a control reply that carries the reason, in JSON or a signed
   record, because the reason set stays closed.
 
+Three removals were made the same way, because nothing outside this repository reads
+what they took away:
+
+- the manifest member `tested`, the closed ranges of runtime versions an adapter was
+  tested against, with the alert the daemon raised for a version outside them. Runtimes
+  release several versions a day, so no list stays true. An older daemon that decodes
+  strictly refuses a manifest that still has the member;
+- the status condition `version_untested` (6), which showed that verdict. Its number
+  stays reserved, see the control signals below;
+- the grounds code `runtime_version_untested` of `prompt.reconcile`, which let an
+  adapter say it would not conclude absence on a version it had not tested. A value
+  that is no longer a known code is refused by validation like any other unknown one;
+  an adapter that reads a record whose form it does not know answers `record_unreadable`.
+
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
 for the manifest, a new `manifest_version`.
@@ -1159,10 +1173,15 @@ The manifest lists no tested versions of the native runtime, and the daemon neit
 judges nor blocks a version: the runtimes upgrade several times a day, so a list
 could not stay true and an alert about a version outside it would be noise. The
 name and version that `adapter.probe` reported are shown as reported. An adapter
-whose reading of a runtime's record may not hold in a newer version verifies the
-form of the record itself and answers `prompt.reconcile` with `indeterminate` and
-`record_unreadable` when it is not the form it reads, never with absence; a wrong
-reconciliation can only end as "cannot tell".
+whose reading of a runtime's record may not hold in a newer version verifies what it
+can of the form of the record and answers `prompt.reconcile` with `indeterminate` and
+`record_unreadable` when it is not the form it reads, never with absence. That guard is
+partial, and the protocol does not promise more: the Codex adapter checks the members
+of the items it recognizes (a page without its items, a `userMessage` item without its
+`clientId`), so a record that lost or renamed those members is caught, but one that
+renamed the item type itself would still read as holding no prompts, and a wrong
+`provably_absent` is then possible. The guard lowers the chance of a wrong absence; it
+does not remove it.
 
 ### Why
 
@@ -1204,7 +1223,7 @@ reconciliation can only end as "cannot tell".
 ### Where
 
 - `sdk/go/manifest/manifest.go`; tests `TestIdentityRules`, `TestEntryRules`,
-  `TestPlatformAndRequirementRules`, `TestTestedRangeRules`,
+  `TestPlatformAndRequirementRules`,
   `TestConfigFieldRules`, `TestBudgetRules`, `TestRecvWaitLimitRules`,
   `TestParseRecvWaitLimits`, `TestAckMarkerShape`, `TestParse`, `FuzzParse`;
   `protocol/conformance_test.go` `TestManifestRecvWaitLimitsMatchSchema`;
