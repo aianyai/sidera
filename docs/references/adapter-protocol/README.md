@@ -881,12 +881,19 @@ declaration does not flap.
 
 A tool probe in `adapter.probe` reports `ran`, `failed` or `not_run`. `not_run`
 means the probe did not apply: the preset is not one the adapter can use (it has no
-section for it, or it is not usable), or the front end has no probe. It is neither
-evidence nor a failure, and the daemon judges the probe of the instance from the
-others: it has passed when at least one tool probe ran and its token was seen, has
-failed when any tool probe failed, and stays pending while every one was `not_run`.
-A probe that applied and could not be run (the `sidera` program is missing, the
-runtime's server cannot be reached) is `failed`, never `not_run`.
+section for it), or the preset does not offer the front end (a session of it is never
+set up with that front end), or the front end has no probe. It is neither evidence
+nor a failure, and the daemon judges the probe of the instance from the others: it
+has passed when at least one tool probe ran and its token was seen, has failed when
+any tool probe failed, and stays pending while every one was `not_run`. The daemon
+asks for a probe of every front end of the runtime declaration for every preset, and
+cannot tell which front ends a preset offers: the adapter tells it by answering
+`not_run` for the ones it does not, and a probe of a front end that the preset offers
+and that is left out of the answer is a failure. An adapter that ran the probe of a
+front end its preset does not offer would fail an instance that works, because
+whatever stops that front end (a sandbox, say) stops the probe as well. A probe that
+applied and could not be run (the `sidera` program is missing, the runtime's server
+cannot be reached) is `failed`, never `not_run`.
 
 | Kind | Read by | Created by |
 | ---- | ------- | ---------- |

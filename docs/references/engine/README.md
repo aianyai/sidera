@@ -397,9 +397,14 @@ token issued for the round is presented or expired, `passed` when every tool pro
 applied was reported as ran and its token was presented, and at least one did (an adapter
 with nothing to probe passes with its report), and `failed` when a tool probe failed or
 was left out of the report, or a token expired unpresented. A tool probe reported as
-`not_run` did not apply to its preset (the adapter has nothing configured for it): it
-counts for nothing either way, so an adapter whose every tool probe was `not_run`, as
-with the `default` preset that names no section for it, stays `pending`. A runtime endpoint becomes part of what the node declares the first time
+`not_run` did not apply to its preset (the adapter has nothing configured for it, or the
+preset does not offer that front end): it counts for nothing either way, so an adapter
+whose every tool probe was `not_run`, as with the `default` preset that names no section
+for it, stays `pending`. The node issues a token for every front end of every preset and
+does not know which front ends a preset offers; the instance is judged against the ones
+the adapter reports on, so a preset that offers only the MCP front end passes with its MCP
+probe and a `not_run` for the command line, while a front end that the preset offers and
+the adapter left out of the report fails the instance. A runtime endpoint becomes part of what the node declares the first time
 its probe passes, and is not withdrawn when the adapter later becomes unusable, so that
 the declaration does not flap; disabling the instance ends it. `AdapterList` reads the
 installed adapters, the instances and the probe of each enabled one at one command.
@@ -1905,7 +1910,7 @@ reproducible).
 | A change of the presets restarts the runtime instances that run, and the new `adapter.start` carries the presets | `operations_presets.go` (`presetsChanged`), `operations_adapters.go` (`restartInstance`) | `TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun` |
 | Replacing the configuration of an instance restarts it when it is enabled, and only records it otherwise | `operations_adapters.go` (`ConfigureAdapterOp`) | `TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns` |
 | An instance is removed only once it is disabled and closed, and can be made again under its name | `operations_adapters.go` (`RemoveAdapterInstanceOp`, `openSessions`) | `TestAnInstanceIsRemovedOnlyOnceItIsDisabled`, `TestRemoveInstanceNeedsADisabledInstanceWithNoOpenSession` (`config`) |
-| The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe`, `TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence` |
+| The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe`, `TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence`, `TestTheProbeIsJudgedAgainstTheFrontEndsThePresetOffers` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |

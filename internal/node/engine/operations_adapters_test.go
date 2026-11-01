@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1617,6 +1618,85 @@ func TestAToolProbeThatWasNotRunIsNeitherAFailureNorEvidence(t *testing.T) {
 			}
 			for _, i := range tc.presented {
 				if _, err := e.PresentProbeToken(ctx, reqs[i].Token, reqs[i].Frontend); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err := e.AdapterList(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, in := range list.Instances {
+				if in.Name == "relay" && in.Probe.State != tc.want {
+					t.Errorf("probe state %v, want %v", in.Probe.State, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// The probe is judged against the front ends a preset offers, and the adapter says
+// which those are by what it reports: a front end the preset does not offer is
+// reported not_run and is not expected, one that is offered must be reported, and
+// reported ran to count; one that is left out of the report or reported failed
+// fails the instance.
+func TestTheProbeIsJudgedAgainstTheFrontEndsThePresetOffers(t *testing.T) {
+	ran, notRun, failed := adapterproto.ProbeRan, adapterproto.ProbeNotRun, adapterproto.ProbeFailed
+	mcp, cli := adapterproto.FrontendMCP, adapterproto.FrontendCLI
+	// reported maps a front end to its outcome; a front end that is absent is left
+	// out of the report.
+	for _, tc := range []struct {
+		name      string
+		reported  map[adapterproto.Frontend]adapterproto.ProbeOutcome
+		presented []adapterproto.Frontend
+		want      engine.ProbeState
+	}{
+		{"a preset that offers MCP only, with MCP passed", map[adapterproto.Frontend]adapterproto.ProbeOutcome{mcp: ran, cli: notRun}, []adapterproto.Frontend{mcp}, engine.ProbePassed},
+		{"a preset that offers both, with only MCP reported", map[adapterproto.Frontend]adapterproto.ProbeOutcome{mcp: ran}, []adapterproto.Frontend{mcp}, engine.ProbeFailed},
+		{"a preset that offers MCP, with MCP reported failed", map[adapterproto.Frontend]adapterproto.ProbeOutcome{mcp: failed, cli: notRun}, nil, engine.ProbeFailed},
+		{"a preset that offers both, with both passed", map[adapterproto.Frontend]adapterproto.ProbeOutcome{mcp: ran, cli: ran}, []adapterproto.Frontend{mcp, cli}, engine.ProbePassed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			r := newRig(t, 10, withAdapters(newHostDouble()), withPackage("/src/relay", relayPackage(t, "1.0.0")))
+			e := r.start()
+			if _, err := e.Execute(ctx, installCommand(60, "install", "/src/relay")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.Execute(ctx, enableCommand(61, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+				t.Fatal(err)
+			}
+			adm, info := relayAdmission(t)
+			if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.AdapterStarted(ctx, "relay", adapterproto.StartResult{}); err != nil {
+				t.Fatal(err)
+			}
+			reqs, err := e.ProbeTokens(ctx, "relay")
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := probeRan(reqs)
+			res.ToolProbes = res.ToolProbes[:0]
+			for _, q := range reqs {
+				outcome, there := tc.reported[q.Frontend]
+				if !there {
+					continue
+				}
+				tp := adapterproto.ToolProbeResult{Preset: q.Preset, Frontend: q.Frontend, Outcome: outcome}
+				if outcome != notRun {
+					tp.Method = adapterproto.ProbeUnsandboxed
+				}
+				res.ToolProbes = append(res.ToolProbes, tp)
+			}
+			if err := e.AdapterProbed(ctx, "relay", res); err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range reqs {
+				if !slices.Contains(tc.presented, q.Frontend) {
+					continue
+				}
+				if _, err := e.PresentProbeToken(ctx, q.Token, q.Frontend); err != nil {
 					t.Fatal(err)
 				}
 			}

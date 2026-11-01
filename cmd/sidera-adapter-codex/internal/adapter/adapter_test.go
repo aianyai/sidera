@@ -410,32 +410,41 @@ func TestCloseSession(t *testing.T) {
 	}
 }
 
-// A tool probe is not_run only for a preset that has no section for this adapter;
-// a section that cannot be used is a failure, so that a broken preset is never
-// taken for one that passed or one that does not apply.
-func TestToolProbeOutcomeByPreset(t *testing.T) {
+// A tool probe is not_run when the preset has no section for this adapter, and
+// when the preset does not offer the front end (a sandboxed preset offers the MCP
+// front end only: its sandbox would refuse the command-line probe, and the daemon
+// would take that for a failure of an instance that works). A section that cannot
+// be used is a failure, so that a broken preset is never taken for one that passed
+// or one that does not apply.
+func TestToolProbeOutcomeByPresetAndFrontEnd(t *testing.T) {
 	h := newHarnessWith(t, newFakeCodex(t), func(o *adapter.Options) {
 		o.MCPProbe = func(context.Context, string, []string) error { return nil }
 	})
 	h.startWith([]adapterproto.PresetConfig{
 		{Name: "good", Config: presetConfig(t, map[string]any{"cwd": h.dir})},
+		{Name: "open", Config: presetConfig(t, map[string]any{"cwd": h.dir, "sandbox": "danger-full-access"})},
 		{Name: "none", Config: adapterproto.ConfigValues{}},
 		{Name: "relative", Config: presetConfig(t, map[string]any{"cwd": "project", "sandbox": "nowhere"})},
 	})
+	mcp, cli := adapterproto.FrontendMCP, adapterproto.FrontendCLI
 	for _, tc := range []struct {
-		preset  string
-		outcome adapterproto.ProbeOutcome
-		detail  []string
+		preset   string
+		frontend adapterproto.Frontend
+		outcome  adapterproto.ProbeOutcome
+		detail   []string
 	}{
-		{"good", adapterproto.ProbeRan, nil},
-		{"none", adapterproto.ProbeNotRun, []string{"no section"}},
-		{"unknown", adapterproto.ProbeNotRun, []string{"no section"}},
-		{"relative", adapterproto.ProbeFailed, []string{"not usable", "cwd: the project directory must be an absolute path", "sandbox"}},
+		{"good", mcp, adapterproto.ProbeRan, nil},
+		{"good", cli, adapterproto.ProbeNotRun, []string{"does not offer"}},
+		{"open", mcp, adapterproto.ProbeRan, nil},
+		{"open", cli, adapterproto.ProbeRan, nil},
+		{"none", mcp, adapterproto.ProbeNotRun, []string{"no section"}},
+		{"unknown", mcp, adapterproto.ProbeNotRun, []string{"no section"}},
+		{"relative", mcp, adapterproto.ProbeFailed, []string{"not usable", "cwd: the project directory must be an absolute path", "sandbox"}},
 	} {
-		t.Run(tc.preset, func(t *testing.T) {
+		t.Run(tc.preset+"/"+string(tc.frontend), func(t *testing.T) {
 			var res adapterproto.ProbeResult
 			h.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{
-				{Preset: tc.preset, Frontend: adapterproto.FrontendMCP, Token: token, Env: map[string]string{}},
+				{Preset: tc.preset, Frontend: tc.frontend, Token: token, Env: map[string]string{}},
 			}}, &res)
 			if len(res.ToolProbes) != 1 || res.ToolProbes[0].Outcome != tc.outcome {
 				t.Fatalf("tool probes = %+v, want outcome %s", res.ToolProbes, tc.outcome)

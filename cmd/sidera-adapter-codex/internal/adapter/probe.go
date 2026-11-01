@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,11 +123,12 @@ func serverDependency(reachable bool, serverVer, installed string) adapterproto.
 	return d
 }
 
-// toolProbe runs one probe of a front end. The MCP front end is started by Codex
-// outside the sandbox, so its probe is the program run the same way. The command
-// line front end runs inside the preset's sandbox, so its probe goes through the
-// server under that sandbox, which says truthfully whether the preset lets a
-// command reach the daemon; it costs no model turn.
+// toolProbe runs one probe of a front end the preset offers; a front end it does not
+// offer is not_run. The MCP front end is started by Codex outside the sandbox, so
+// its probe is the program run the same way. The command line front end runs inside
+// the preset's sandbox, so its probe goes through the server under that sandbox,
+// which says truthfully whether the preset lets a command reach the daemon; it
+// costs no model turn.
 func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath, codexProblem string, req adapterproto.ToolProbeRequest) adapterproto.ToolProbeResult {
 	out := adapterproto.ToolProbeResult{Preset: req.Preset, Frontend: req.Frontend}
 	entry, known := a.presetEntryOf(req.Preset)
@@ -134,6 +136,13 @@ func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath, co
 	case !known || !entry.configured:
 		// Nothing was configured for this adapter: the probe does not apply.
 		out.Outcome, out.Detail = adapterproto.ProbeNotRun, "the preset has no section for this adapter"
+		return out
+	case !slices.Contains(entry.preset.Frontends(), req.Frontend):
+		// A session of the preset is never set up with this front end (a sandboxed
+		// preset offers the MCP front end only), so there is nothing to probe: the
+		// sandbox would refuse the command, truthfully, and the daemon would take
+		// that for a failure of an instance that works.
+		out.Outcome, out.Detail = adapterproto.ProbeNotRun, "the preset does not offer this front end"
 		return out
 	case len(entry.problems) > 0:
 		// The probe applies and cannot be run: that is a failure, not not_run.

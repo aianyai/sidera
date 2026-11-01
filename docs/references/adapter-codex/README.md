@@ -199,7 +199,10 @@ turn: `ran` with method `sandboxed`, or `failed` with the exit code and the firs
 of its standard error, and `failed` when the server cannot be reached. A preset that has no
 `codex` section (the `default` preset is one; it reaches the adapter as no values at all) gives
 `not_run`: the probe did not apply, and the daemon counts it for neither the pass nor the
-failure. When `codex` is not found or `codex --version` does not run, every tool probe of a
+failure. So does a front end the preset does not offer (the command line of a preset whose
+sandbox is not `danger-full-access`): the sandbox would refuse the command, and the daemon
+would take that for a failure of an instance whose sessions work.
+When `codex` is not found or `codex --version` does not run, every tool probe of a
 usable preset is `failed` with that as the detail, and the `codex` dependency is `missing`: the daemon
 judges the probe by its tool probes alone, and a server left running by an earlier start answers
 whether or not the program is there, so a probe that passed would say the runtime works while no

@@ -207,6 +207,11 @@ func (f *fakeCodex) install() {
 		}
 		return answer, nil
 	})
+	// A command run outside any thread, as the probe of the command-line front end
+	// runs one: it succeeds.
+	f.srv.Handle("command/exec", func(json.RawMessage) (any, *appserver.RPCError) {
+		return map[string]any{"exitCode": 0, "stdout": "", "stderr": ""}, nil
+	})
 	for _, m := range []string{"thread/archive", "thread/unsubscribe"} {
 		f.srv.Handle(m, func(raw json.RawMessage) (any, *appserver.RPCError) {
 			p := decode[struct{ ThreadID string }](raw)

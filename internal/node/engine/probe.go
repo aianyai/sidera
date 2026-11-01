@@ -80,7 +80,12 @@ type toolProbe struct {
 //     pending, and after the token expired unpresented it is a failure;
 //   - failed, and no report at all, are failures;
 //   - not_run says the probe did not apply (a preset the adapter cannot use, a front
-//     end it has no probe for), so it is neither evidence nor a failure.
+//     end the preset does not offer, a front end it has no probe for), so it is
+//     neither evidence nor a failure.
+//
+// The node issues a token for every front end of every preset and does not know
+// which ones a preset offers: the adapter says so by reporting the others not_run,
+// and one that is offered and left out of the report is a failure.
 //
 // The probe has failed when any tool probe failed, is pending while one is
 // pending, and has passed when at least one tool probe was shown to run. An adapter
