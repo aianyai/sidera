@@ -3,7 +3,6 @@ package adapter
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -16,7 +15,7 @@ func (a *App) conditionsLocked() []adapterproto.Availability {
 	if len(a.missing) > 0 {
 		conds = append(conds, adapterproto.Availability{
 			Condition: adapterproto.ConditionDependencyMissing,
-			Detail:    "not found: " + strings.Join(a.missing, ", "),
+			Detail:    cut(a.missing.String(), adapterproto.MaxDetailLen),
 		})
 	}
 	if a.liveClientLocked() == nil {

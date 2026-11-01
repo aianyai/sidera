@@ -175,7 +175,11 @@ turn: `ran` with method `sandboxed`, or `failed` with the exit code and the firs
 of its standard error, and `failed` when the server cannot be reached. A preset that has no
 `codex` section (the `default` preset is one; it reaches the adapter as no values at all) gives
 `not_run`: the probe did not apply, and the daemon counts it for neither the pass nor the
-failure. A `codex` section that cannot be used (a relative `cwd`, developer instructions that
+failure. When `codex` is not found or `codex --version` does not run, every tool probe of a
+usable preset is `failed` with that as the detail, and the `codex` dependency is `missing`: the daemon
+judges the probe by its tool probes alone, and a server left running by an earlier start answers
+whether or not the program is there, so a probe that passed would say the runtime works while no
+session can be created. The program is looked up once, at `adapter.start`. A `codex` section that cannot be used (a relative `cwd`, developer instructions that
 are too long) gives `failed` with its problems as the detail: the probe applies and cannot be
 run, and reporting it as `not_run` would leave a broken preset looking like one that is not
 configured.
@@ -192,6 +196,9 @@ after a restart.
 Before a thread exists, the answer is `failed` with `preset_unknown`, `preset_invalid`,
 `dependency_missing` (`codex` or `sidera` not found), `native_unavailable` (the server
 cannot be reached) or `runtime_auth` (no account); certainly nothing was created. The
+detail names what failed and why (`codex was not found: …`, or the error of connecting to
+or starting the server), and the adapter logs it, because the daemon maps
+`dependency_missing` to `native_unavailable` and passes no detail on. The
 steps are:
 
 1. `thread/start` with the preset's `cwd`, `approvalPolicy`, `sandbox` and `model`,

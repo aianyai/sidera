@@ -3,6 +3,7 @@ package adapter_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -442,6 +443,55 @@ func TestToolProbeOutcomeByPreset(t *testing.T) {
 				if !strings.Contains(res.ToolProbes[0].Detail, want) {
 					t.Errorf("detail = %q, want it to contain %q", res.ToolProbes[0].Detail, want)
 				}
+			}
+		})
+	}
+}
+
+// A Codex program that is not found or does not run fails every tool probe and the
+// creation of a session, and says so. The daemon judges a probe by its tool probes
+// alone, and an App Server left running by an earlier start would otherwise let the
+// probe pass while no session could be created.
+func TestUnusableCodexFailsTheProbeAndCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*adapter.Options)
+		detail string
+	}{
+		{"not found", func(o *adapter.Options) {
+			o.LookPath = func(name string) (string, error) {
+				if name == "codex" {
+					return "", errors.New(`exec: "codex": executable file not found in $PATH`)
+				}
+				return "/bin/" + name, nil
+			}
+		}, `codex was not found: exec: "codex": executable file not found`},
+		{"does not run", func(o *adapter.Options) {
+			o.CodexVersion = func(context.Context, string) (string, error) { return "", errors.New("codex --version: exit status 1") }
+		}, "codex cannot be run: codex --version: exit status 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarnessWith(t, newFakeCodex(t), func(o *adapter.Options) {
+				o.MCPProbe = func(context.Context, string, []string) error { return nil }
+				tc.mutate(o)
+			})
+			h.start()
+			var res adapterproto.ProbeResult
+			h.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{
+				{Preset: "dev", Frontend: adapterproto.FrontendMCP, Token: token, Env: map[string]string{}},
+			}}, &res)
+			if len(res.ToolProbes) != 1 || res.ToolProbes[0].Outcome != adapterproto.ProbeFailed || !strings.Contains(res.ToolProbes[0].Detail, tc.detail) {
+				t.Fatalf("tool probes = %+v, want failed with %q", res.ToolProbes, tc.detail)
+			}
+			if d := res.Dependencies[0]; d.Name != "codex" || d.State != adapterproto.DependencyMissing || !strings.Contains(d.Detail, tc.detail) {
+				t.Fatalf("codex dependency = %+v", d)
+			}
+			if tc.name != "not found" {
+				return
+			}
+			got := h.create(attempt1, sessionEP, "dev")
+			if got.Outcome != adapterproto.CreateFailed || got.Reason != adapterproto.CreateFailDependencyMissing || !strings.Contains(got.Detail, tc.detail) {
+				t.Fatalf("create = %+v, want dependency_missing naming codex", got)
 			}
 		})
 	}

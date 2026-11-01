@@ -197,14 +197,16 @@ func (a *App) precheck(ctx context.Context, rec *createAttempt) (adapterproto.Se
 		return adapterproto.SessionCreateResult{}, false
 	}
 	a.mu.Lock()
-	missing := append([]string(nil), a.missing...)
+	missing := append(missingPrograms(nil), a.missing...)
 	a.mu.Unlock()
 	if len(missing) > 0 {
-		return failed(adapterproto.CreateFailDependencyMissing, "not found: "+joinNames(missing)), true
+		a.log.Warn("cannot create a session", "reason", missing.String())
+		return failed(adapterproto.CreateFailDependencyMissing, cut(missing.String(), adapterproto.MaxDetailLen)), true
 	}
 	if _, err := a.ensureClient(ctx); err != nil {
+		a.log.Warn("cannot create a session: the App Server cannot be reached", "error", err)
 		a.startReconnect()
-		return failed(adapterproto.CreateFailNativeUnavailable, "the App Server cannot be reached"), true
+		return failed(adapterproto.CreateFailNativeUnavailable, "the App Server cannot be reached: "+shorten(err.Error())), true
 	}
 	a.mu.Lock()
 	signedIn := a.signedIn
@@ -213,17 +215,6 @@ func (a *App) precheck(ctx context.Context, rec *createAttempt) (adapterproto.Se
 		return failed(adapterproto.CreateFailRuntimeAuth, "Codex has no signed-in account"), true
 	}
 	return adapterproto.SessionCreateResult{}, false
-}
-
-func joinNames(names []string) string {
-	out := ""
-	for i, n := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += n
-	}
-	return out
 }
 
 // startThread starts the thread and registers it as the session, so that its

@@ -12,6 +12,7 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,7 +111,7 @@ type App struct {
 	instance    codexcfg.Instance
 	codexPath   string
 	sideraPath  string
-	missing     []string // programs that could not be found, for the availability
+	missing     missingPrograms // programs that could not be found, for the availability
 	codexVer    string
 	srv         ServerManager
 	presets     map[string]presetEntry
@@ -125,6 +126,31 @@ type App struct {
 	lastAvail   string
 	availSince  int64
 	shutdownNow bool
+}
+
+// missingProgram is a program the adapter needs and could not find, with the
+// lookup's own words.
+type missingProgram struct{ name, why string }
+
+type missingPrograms []missingProgram
+
+// find returns why the named program was not found.
+func (m missingPrograms) find(name string) (why string, ok bool) {
+	for _, p := range m {
+		if p.name == name {
+			return p.why, true
+		}
+	}
+	return "", false
+}
+
+// String says what was not found and why, for a detail or a log line.
+func (m missingPrograms) String() string {
+	parts := make([]string, len(m))
+	for i, p := range m {
+		parts[i] = p.name + " was not found: " + p.why
+	}
+	return strings.Join(parts, "; ")
 }
 
 type presetEntry struct {

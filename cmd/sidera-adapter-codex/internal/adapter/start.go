@@ -21,15 +21,15 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		return adapterproto.StartResult{}, peer.NewError(peer.CodeInvalidParams, err.Error())
 	}
 
-	var missing []string
+	var missing missingPrograms
 	codexPath, codexErr := a.opts.LookPath(inst.CodexProgram)
 	if codexErr != nil {
-		missing = append(missing, "codex")
+		missing = append(missing, missingProgram{"codex", codexErr.Error()})
 		codexPath = inst.CodexProgram
 	}
 	sideraPath, err := a.opts.LookPath(inst.SideraProgram)
 	if err != nil {
-		missing = append(missing, "sidera")
+		missing = append(missing, missingProgram{"sidera", err.Error()})
 		sideraPath = inst.SideraProgram
 	} else if abs, err := filepath.Abs(sideraPath); err == nil {
 		// The thread's MCP server is started by Codex from its own working
@@ -43,6 +43,10 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		} else {
 			version = v
 		}
+	}
+
+	if len(missing) > 0 {
+		a.log.Warn("a program the adapter needs was not found", "missing", missing.String())
 	}
 
 	presets := make(map[string]presetEntry, len(p.Presets))

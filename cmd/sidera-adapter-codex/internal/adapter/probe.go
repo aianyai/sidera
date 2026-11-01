@@ -25,7 +25,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	a.mu.Lock()
 	started := a.started
 	codexPath, sideraPath, version := a.codexPath, a.sideraPath, a.codexVer
-	missing := append([]string(nil), a.missing...)
+	missing := append(missingPrograms(nil), a.missing...)
 	serverVer := a.serverVer
 	a.mu.Unlock()
 	if !started {
@@ -36,8 +36,17 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		Auth: adapterproto.AuthUnknown, Dependencies: []adapterproto.Dependency{},
 		Presets: []adapterproto.PresetStatus{}, ToolProbes: []adapterproto.ToolProbeResult{},
 	}
-	if version == "" {
-		if v, err := a.opts.CodexVersion(ctx, codexPath); err == nil {
+	// codexProblem says why Codex cannot be used, or is empty. The daemon judges a
+	// probe by its tool probes alone, so a program that is not there or does not
+	// run must fail them: a server left running by an earlier start would answer
+	// otherwise, and the probe would pass while no session can be created.
+	codexProblem := ""
+	if why, gone := missing.find("codex"); gone {
+		codexProblem = "codex was not found: " + why
+	} else if version == "" {
+		if v, err := a.opts.CodexVersion(ctx, codexPath); err != nil {
+			codexProblem = "codex cannot be run: " + shorten(err.Error())
+		} else {
 			version = v
 			a.mu.Lock()
 			a.codexVer = v
@@ -63,7 +72,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	}
 
 	res.Dependencies = append(res.Dependencies,
-		programDependency("codex", missing, version),
+		codexDependency(codexProblem, version),
 		programDependency("sidera", missing, ""),
 		serverDependency(c != nil, serverVer, version),
 	)
@@ -81,18 +90,23 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	a.mu.Unlock()
 
 	for _, req := range p.ToolProbes {
-		res.ToolProbes = append(res.ToolProbes, a.toolProbe(ctx, c, sideraPath, req))
+		res.ToolProbes = append(res.ToolProbes, a.toolProbe(ctx, c, sideraPath, codexProblem, req))
 	}
 	return res, nil
 }
 
-func programDependency(name string, missing []string, version string) adapterproto.Dependency {
-	for _, m := range missing {
-		if m == name {
-			return adapterproto.Dependency{Name: name, State: adapterproto.DependencyMissing, Detail: "not found"}
-		}
+func programDependency(name string, missing missingPrograms, version string) adapterproto.Dependency {
+	if why, gone := missing.find(name); gone {
+		return adapterproto.Dependency{Name: name, State: adapterproto.DependencyMissing, Detail: cut("not found: "+why, adapterproto.MaxDetailLen)}
 	}
 	return adapterproto.Dependency{Name: name, State: adapterproto.DependencyOK, Detail: version}
+}
+
+func codexDependency(problem, version string) adapterproto.Dependency {
+	if problem != "" {
+		return adapterproto.Dependency{Name: "codex", State: adapterproto.DependencyMissing, Detail: cut(problem, adapterproto.MaxDetailLen)}
+	}
+	return adapterproto.Dependency{Name: "codex", State: adapterproto.DependencyOK, Detail: version}
 }
 
 func serverDependency(reachable bool, serverVer, installed string) adapterproto.Dependency {
@@ -113,7 +127,7 @@ func serverDependency(reachable bool, serverVer, installed string) adapterproto.
 // line front end runs inside the preset's sandbox, so its probe goes through the
 // server under that sandbox, which says truthfully whether the preset lets a
 // command reach the daemon; it costs no model turn.
-func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath string, req adapterproto.ToolProbeRequest) adapterproto.ToolProbeResult {
+func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath, codexProblem string, req adapterproto.ToolProbeRequest) adapterproto.ToolProbeResult {
 	out := adapterproto.ToolProbeResult{Preset: req.Preset, Frontend: req.Frontend}
 	entry, known := a.presetEntryOf(req.Preset)
 	switch {
@@ -124,6 +138,9 @@ func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath str
 	case len(entry.problems) > 0:
 		// The probe applies and cannot be run: that is a failure, not not_run.
 		out.Outcome, out.Detail = adapterproto.ProbeFailed, cut("the preset is not usable: "+strings.Join(entry.problems, "; "), adapterproto.MaxDetailLen)
+		return out
+	case codexProblem != "":
+		out.Outcome, out.Detail = adapterproto.ProbeFailed, cut(codexProblem, adapterproto.MaxDetailLen)
 		return out
 	}
 	preset := entry.preset
