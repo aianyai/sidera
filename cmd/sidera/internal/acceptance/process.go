@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -16,16 +17,17 @@ import (
 // process owns exactly one Wait, installed as soon as Start succeeds. Output
 // goes to files: a surviving runtime cannot keep an output-copy pipe open.
 type process struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-	err  error // published by closing done
+	native *os.Process
+	cmd    *exec.Cmd
+	done   chan struct{}
+	err    error // published by closing done
 }
 
 func startProcess(cmd *exec.Cmd) (*process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	p := &process{cmd: cmd, done: make(chan struct{})}
+	p := &process{native: cmd.Process, cmd: cmd, done: make(chan struct{})}
 	go func() { p.err = cmd.Wait(); close(p.done) }()
 	return p, nil
 }
@@ -40,13 +42,49 @@ func (p *process) wait(ctx context.Context) error {
 }
 
 func (p *process) killAndWait() (bool, error) {
-	err := p.cmd.Process.Kill()
+	if p.exited() {
+		return false, nil
+	}
+	err := p.native.Kill()
 	killed := err == nil
 	if errors.Is(err, os.ErrProcessDone) {
 		err = nil
 	}
 	<-p.done
 	return killed, err
+}
+
+// processSpec deliberately supports only direct executables with file output.
+// The caller supplies the complete environment; nil does not mean inheritance.
+type processSpec struct {
+	exe            string
+	args, env      []string
+	dir            string
+	stdout, stderr *os.File
+}
+
+func (s processSpec) validate() error {
+	if !filepath.IsAbs(s.exe) || !filepath.IsAbs(s.dir) {
+		return fmt.Errorf("acceptance: executable and working directory must be absolute")
+	}
+	if s.stdout == nil || s.stderr == nil {
+		return fmt.Errorf("acceptance: process output requires files")
+	}
+	for _, file := range []*os.File{s.stdout, s.stderr} {
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("acceptance: process output requires regular files")
+		}
+	}
+	for _, value := range append(append([]string{s.exe, s.dir}, s.args...), s.env...) {
+		if strings.ContainsRune(value, 0) {
+			return fmt.Errorf("acceptance: process input contains NUL")
+		}
+	}
+	return nil
 }
 
 func (p *process) exited() bool {
