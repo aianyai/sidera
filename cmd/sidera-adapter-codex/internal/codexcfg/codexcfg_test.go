@@ -19,24 +19,25 @@ func values(kv map[string]any) adapterproto.ConfigValues {
 }
 
 func TestParsePreset(t *testing.T) {
+	cwd := t.TempDir()
 	for _, tc := range []struct {
 		name     string
 		in       map[string]any
 		want     Preset
 		problems string // a substring of the joined problems; empty means none
 	}{
-		{"defaults", map[string]any{"cwd": "/work"},
-			Preset{Name: "p", CWD: "/work", Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny"}, ""},
-		{"everything", map[string]any{"cwd": "/work", "sandbox": "read-only", "approval_policy": "on-request", "approvals": "approve", "model": "gpt-6.1-sol", "effort": "low"},
-			Preset{Name: "p", CWD: "/work", Sandbox: "read-only", ApprovalPolicy: "on-request", Approvals: "approve", Model: "gpt-6.1-sol", Effort: "low"}, ""},
-		{"instructions", map[string]any{"cwd": "/work", "developer_instructions": "Answer in French."},
-			Preset{Name: "p", CWD: "/work", Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny", DeveloperInstructions: "Answer in French."}, ""},
-		{"instructions too long", map[string]any{"cwd": "/w", "developer_instructions": strings.Repeat("x", MaxDeveloperInstructions+1)}, Preset{}, "developer_instructions"},
+		{"defaults", map[string]any{"cwd": cwd},
+			Preset{Name: "p", CWD: cwd, Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny"}, ""},
+		{"everything", map[string]any{"cwd": cwd, "sandbox": "read-only", "approval_policy": "on-request", "approvals": "approve", "model": "gpt-6.1-sol", "effort": "low"},
+			Preset{Name: "p", CWD: cwd, Sandbox: "read-only", ApprovalPolicy: "on-request", Approvals: "approve", Model: "gpt-6.1-sol", Effort: "low"}, ""},
+		{"instructions", map[string]any{"cwd": cwd, "developer_instructions": "Answer in French."},
+			Preset{Name: "p", CWD: cwd, Sandbox: "workspace-write", ApprovalPolicy: "never", Approvals: "deny", DeveloperInstructions: "Answer in French."}, ""},
+		{"instructions too long", map[string]any{"cwd": cwd, "developer_instructions": strings.Repeat("x", MaxDeveloperInstructions+1)}, Preset{}, "developer_instructions"},
 		{"no cwd", map[string]any{}, Preset{}, "a project directory is required"},
 		{"relative cwd", map[string]any{"cwd": "work"}, Preset{}, "absolute path"},
-		{"bad sandbox", map[string]any{"cwd": "/w", "sandbox": "open"}, Preset{}, "sandbox"},
-		{"bad policy", map[string]any{"cwd": "/w", "approval_policy": "always"}, Preset{}, "approval_policy"},
-		{"bad effort", map[string]any{"cwd": "/w", "effort": "max"}, Preset{}, "effort"},
+		{"bad sandbox", map[string]any{"cwd": cwd, "sandbox": "open"}, Preset{}, "sandbox"},
+		{"bad policy", map[string]any{"cwd": cwd, "approval_policy": "always"}, Preset{}, "approval_policy"},
+		{"bad effort", map[string]any{"cwd": cwd, "effort": "max"}, Preset{}, "effort"},
 		{"not a string", map[string]any{"cwd": 3}, Preset{}, "a string is expected"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,7 +135,7 @@ func TestPresetFieldsDeclareDeveloperInstructions(t *testing.T) {
 // A string that is not UTF-8 is refused as it is, before decoding would turn its
 // bad bytes into U+FFFD and change what the owner wrote.
 func TestParsePresetRefusesInstructionsThatAreNotUTF8(t *testing.T) {
-	v := values(map[string]any{"cwd": "/w"})
+	v := values(map[string]any{"cwd": t.TempDir()})
 	v[KeyDeveloperInstructions] = json.RawMessage("\"bad \xff\"")
 	_, problems := ParsePreset("p", v)
 	if !strings.Contains(strings.Join(problems, "; "), "UTF-8") {
