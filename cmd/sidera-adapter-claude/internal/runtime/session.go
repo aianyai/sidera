@@ -34,6 +34,10 @@ type session struct {
 	mu sync.Mutex
 	// turn is the last turn, nil before the first.
 	turn *turn.State
+	// stored is the turn as the last successful checkpoint holds it, nil while
+	// none was stored from this process; a look that leaves the turn as stored
+	// writes nothing.
+	stored *turn.State
 	// idx reads the session file for idxAttempt's prompt.
 	idx        *record.Index
 	idxAttempt string
@@ -174,9 +178,30 @@ func adoptUnknown(p turn.Process) *turn.State { return &turn.State{Process: p} }
 
 // persistSession stores the session's checkpoint. The caller holds s.mu.
 func (a *App) persistSession(ctx context.Context, s *session) error {
-	return a.putCheckpoint(ctx, adapterproto.ScopeSession, string(s.endpoint), sessionCheckpoint{
+	err := a.putCheckpoint(ctx, adapterproto.ScopeSession, string(s.endpoint), sessionCheckpoint{
 		V: checkpointVersion, Session: s.id, Cwd: s.cwd, RecordDir: s.recordDir, Turn: s.turn,
 	})
+	if err != nil {
+		return err
+	}
+	s.stored = nil
+	if s.turn != nil {
+		stored := *s.turn
+		s.stored = &stored
+	}
+	return nil
+}
+
+// turnStored reports whether the last successful checkpoint holds the session's
+// turn as it is now. The caller holds s.mu.
+func (s *session) turnStored() bool {
+	switch {
+	case s.turn == nil:
+		return s.stored == nil
+	case s.stored == nil:
+		return false
+	}
+	return *s.turn == *s.stored
 }
 
 // scan reads the session file from the index's offset to its end. A file that
@@ -263,8 +288,13 @@ func (a *App) tick(ctx context.Context, s *session) (settled bool) {
 	next, events := t.Step(obs)
 	a.emit(ctx, s, next, events)
 	s.turn = &next
-	if err := a.persistSession(ctx, s); err != nil {
-		a.log.Warn("the checkpoint of a session was not stored", "endpoint", s.endpoint, "error", err)
+	// Every durable write is a transaction with the daemon, and a turn is looked
+	// at every poll: only a change is stored, and a store that failed is tried
+	// again at the next look because the turn then still differs from the stored one.
+	if !s.turnStored() {
+		if err := a.persistSession(ctx, s); err != nil {
+			a.log.Warn("the checkpoint of a session was not stored", "endpoint", s.endpoint, "error", err)
+		}
 	}
 	return next.Done()
 }

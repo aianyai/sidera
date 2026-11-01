@@ -82,6 +82,39 @@ func TestDeliverAPromptToAnIdleSession(t *testing.T) {
 	}
 }
 
+// A running turn is looked at every poll; its checkpoint is stored when the
+// turn changes and not at every look.
+func TestRunningTurnIsCheckpointedOnlyWhenItChanges(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	session := openSession(t, w, app)
+	sessionPuts := func() int {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		return strings.Count(strings.Join(w.puts, "|"), "session/session-1")
+	}
+
+	if res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}); err != nil || res.Stage != adapterproto.PromptAccepted {
+		t.Fatalf("deliver: %+v %v", res, err)
+	}
+	w.appendRecord(filepath.Join(recordDir, session+".jsonl"), userLine(session, attempt2))
+	w.waitEvents("started "+prompt1, "ended "+prompt1+" completed", "persisted "+attempt2, "started "+attempt2)
+	// Let the monitor store the start, then let many polls pass over an unchanged turn.
+	time.Sleep(20 * time.Millisecond)
+	before := sessionPuts()
+	time.Sleep(100 * time.Millisecond)
+	if after := sessionPuts(); after != before {
+		t.Fatalf("an unchanged turn was stored %d more times", after-before)
+	}
+
+	w.exit(w.lastProc(), resultOK)
+	w.waitEvents("started "+prompt1, "ended "+prompt1+" completed", "persisted "+attempt2, "started "+attempt2, "ended "+attempt2+" completed")
+	time.Sleep(20 * time.Millisecond)
+	if sessionPuts() <= before {
+		t.Fatal("the end of the turn was not stored")
+	}
+}
+
 func TestDeliverRefusals(t *testing.T) {
 	w := newWorld(t)
 	app, _ := newApp(t, w)

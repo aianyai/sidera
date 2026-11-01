@@ -24,6 +24,8 @@ for the rules and their reasons.
   lost is sent again from the stored state, never skipped.
 - A session's turn is followed by one monitor goroutine under the session's lock, which also
   orders the notifications; every handler that changes the turn holds the same lock.
+- A session's checkpoint is stored when its turn changes, not at every poll; each store is a
+  durable transaction with the daemon.
 - Nothing the adapter logs or stores holds a token or a prompt's text (a digest is stored).
 - The turn files (`turns/<session>/<attempt>.{in,out,err}.jsonl`) are private to the user.
 

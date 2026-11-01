@@ -306,6 +306,9 @@ session again), all of them belong to the one turn and the last one decides how 
   process with no result at all.
 - The process is looked at before the record is read, so that a process seen as gone has
   written everything it will.
+- The session's checkpoint is stored when the turn's state changes, not at every look: a turn is
+  looked at every poll for as long as it runs, and each store is a durable transaction with the
+  daemon. A store that failed is tried again at the next look.
 - After a restart the adapter picks the turn up from its checkpoint: a turn begun and not
   ended whose process is gone is ended, a start that was lost may be sent again, and a
   process that still runs is watched. The daemon tolerates a repeated start or end.
