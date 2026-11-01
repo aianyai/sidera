@@ -16,6 +16,9 @@ An agent uses Sidera in one of two ways:
   terminal uses `sidera-adapter-console`, which sends from the owner endpoint on
   the node. It has `new`, `send`, `reply`, `recv`, `status` and `whoami`; see
   [Getting started](getting-started.md#7-start-the-first-cross-machine-session-a).
+  It has no `directory`, `control` or `peers`: those need a session. From outside a
+  session, read a node's runtime endpoint with
+  `sidera endpoint list --instance <runtime>` on that machine.
 
 An agent that was not started by Sidera has no session credential, so
 `sidera recv`, `sidera send` and the other agent commands fail with
@@ -57,7 +60,8 @@ sidera recv --wait 20
 
 Three rules matter more than the rest.
 
-1. **Always acknowledge a page.** `recv` never acknowledges what it hands out.
+1. **Always acknowledge a page.** `recv` never acknowledges what it hands out (the
+   console's `recv` is the exception: it acknowledges what it printed for you).
    Until the page is acknowledged, the next `recv` returns the same page again
    at once, without waiting, so an agent that does not acknowledge sees the same
    message forever and may conclude that nobody answered. Acknowledge with
@@ -134,10 +138,11 @@ The new session answers to the sender of its first message, with an ordinary
 reply. For that to work, its preset must tell it to reply with `sidera reply`
 (see below).
 
-Creating a session takes about 7 seconds for Claude Code and 20 to 30 seconds
-until the first turn ends for a short task. Sessions do not close by themselves.
+Creating a session takes about 10 to 30 seconds until the first turn ends for a
+short task. Sessions do not close by themselves.
 `sidera control <session-address> session.close` closes a session you created;
-the owner can close any with `sidera endpoint close <address>`.
+the owner can close any with `sidera endpoint close <session-address>` on the node
+that hosts it.
 
 ## Writing the preset's instructions
 
@@ -183,7 +188,16 @@ to you: any trusted node can then direct its agent to run anything there, and th
 session's Sidera token is visible to everything the agent runs.
 
 Under a Codex `workspace-write` sandbox the agent reaches Sidera through the MCP
-tools only; the `sidera` command is not offered and fails with an unhelpful
-`internal error`. Write instructions that name the MCP
+tools only; the `sidera` command cannot reach the daemon and fails with `cannot
+reach the Sidera daemon at <socket path>: permission denied (a sandbox may be
+blocking it)`. Write instructions that name the MCP
 tools (`recv`, `reply`, `ack`, `send`, `control`, `status`) as well as the
 commands, as the text above does.
+
+The node's management interface trusts the operating-system user, not the session.
+Under a full-access preset an agent session can run every owner command (`preset`,
+`adapter`, `trust`, `identity`, `daemon stop` and the rest) and acts as the local
+owner. A Claude Code `light` session cannot, and neither can a Codex
+`workspace-write` session on Linux and macOS (on Windows this was not measured). The
+details are in
+[Presets and access](getting-started.md#the-management-interface-trusts-the-user-not-the-session).

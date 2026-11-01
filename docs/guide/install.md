@@ -46,7 +46,7 @@ An archive holds:
 The adapter programs for Codex and Claude Code are inside their packages; you
 install a package with `sidera adapter install <directory>/adapters/<name>` and do
 not copy those programs yourself. On Windows the programs end in `.exe`. The
-release notes are in `CHANGELOG.md`.
+release notes are on the release page, not in the archive.
 
 ### Verify the download
 
@@ -83,15 +83,25 @@ found by name.
 macOS and Linux:
 
 ```sh
-mkdir -p ~/.local/bin
-tar -xzf sidera_0.8.0_<os>_<arch>.tar.gz
-cp sidera sidera-adapter-console ~/.local/bin/
+mkdir -p ~/.local/bin ~/sidera-release
+tar -xzf sidera_0.8.0_<os>_<arch>.tar.gz -C ~/sidera-release
+cp ~/sidera-release/sidera ~/sidera-release/sidera-adapter-console ~/.local/bin/
 ```
 
-Make sure `~/.local/bin` is on your `PATH` (add
-`export PATH="$HOME/.local/bin:$PATH"` to your shell profile if it is not).
-Keep the extracted `adapters/` directory: you install the adapter packages from it in
-[Getting started](getting-started.md#4-install-and-enable-adapters-both).
+Make sure `~/.local/bin` is on the `PATH` of your login shell: add
+`export PATH="$HOME/.local/bin:$PATH"` to the file that shell reads (`~/.zprofile`
+for zsh, `~/.bash_profile` or `~/.profile` for bash) if it is not there. Then check
+it in a fresh login shell:
+
+```sh
+"$SHELL" -l -c 'command -v sidera'
+```
+
+It must print the path of the binary you just installed (`~/.local/bin/sidera`
+expanded), not another one and not nothing.
+
+Keep the extracted `~/sidera-release/adapters/` directory: you install the adapter
+packages from it in [Getting started](getting-started.md#4-install-and-enable-adapters-both).
 
 If macOS refuses to run a program that a browser downloaded, remove its
 quarantine mark:
@@ -110,7 +120,10 @@ Copy-Item $env:USERPROFILE\sidera-release\*.exe $env:USERPROFILE\sidera\bin\
 [Environment]::SetEnvironmentVariable('Path', "$([Environment]::GetEnvironmentVariable('Path','User'));$env:USERPROFILE\sidera\bin", 'User')
 ```
 
-If the archive extracts into a subdirectory, adjust the `Copy-Item` path.
+This changes the user `PATH` for good. In a new terminal, check that
+`(Get-Command sidera).Source` prints `sidera.exe` under `%USERPROFILE%\sidera\bin`.
+The adapter packages are then in `$env:USERPROFILE\sidera-release\adapters\`. If the
+archive extracts into a subdirectory, adjust the `Copy-Item` path.
 
 ### Check the installation
 
@@ -168,34 +181,46 @@ sidera daemon
 `sidera daemon stop`. The node's own log is
 in `~/.sidera/logs/`. Sidera does not start itself at boot and does not install a
 background service yet; the options below keep it running after you close the
-terminal.
+terminal. Stopping the daemon leaves the Codex App Server that the Codex adapter
+keeps running; see [Stop the daemon](operations.md#stop-the-daemon-and-the-codex-app-server).
 
-Start the daemon from a stable directory such as your home directory, never from
-one that may be deleted later, such as a git worktree. The daemon and its adapters
-run in that directory; if it disappears, Claude Code sessions fail with
-`native_unavailable` and the adapter log says "The current directory no longer
-exists".
+Start the daemon from your home directory, not from a directory that you may delete
+later, such as a git worktree.
 
 The daemon must be started with an environment in which `sidera` and the agent
 you want to drive (`claude` or `codex`) are on the `PATH`. Start it from a login
 shell, or set the `PATH` yourself.
+
+Every `sidera` and `sidera-adapter-console` command, and the daemon, uses the data
+directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera`. A second node
+on the same machine needs its own data directory and its own port
+(`SIDERA_HOME=<directory> sidera init --port <n>`), and every command for it needs
+the same `SIDERA_HOME`.
 
 ### macOS and Linux: a terminal multiplexer
 
 `tmux` keeps the daemon alive when you log out or the SSH connection drops.
 
 ```sh
-tmux new-session -d -s sidera -c "$HOME" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
+tmux new-session -d -s sidera -c "$HOME" -e PATH="$PATH" 'sidera daemon >> ~/sidera-daemon.log 2>&1'
 tmux ls                  # the session `sidera` is listed
 sidera daemon stop       # stops the daemon; the tmux session ends with it
 ```
 
-If your shell sets an alias for `tmux`, run `/usr/bin/env tmux` instead. When you
-start it over SSH, use a login shell so that the `PATH` is complete:
-`tmux new-session -d -s sidera -c "$HOME" "zsh -lic 'exec sidera daemon >> ~/sidera-daemon.log 2>&1'"`
-(use `bash -lic` if bash is your shell).
+A tmux session starts with the environment of the tmux server, not of the shell you
+type in, and the server may be much older than your shell. `-e PATH="$PATH"` hands
+the session your shell's `PATH` (tmux 3.2 or newer). Run the command in a shell
+where `command -v sidera` and the agent (`command -v claude codex`) print a path.
+When the node uses a data directory other than `~/.sidera`, add
+`-e SIDERA_HOME=<directory>` as well.
 
-`screen` or `cd ~ && nohup sidera daemon &` work the same way.
+Check with `tmux ls` right away and again after a few seconds. If the session
+`sidera` is gone, the daemon exited: run `sidera daemon` once in the foreground, in
+the same shell, to see the error.
+
+If your shell sets an alias for `tmux`, run `/usr/bin/env tmux` instead.
+`screen` or `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &` work the same
+way.
 
 ### Windows: a detached start that survives logout
 
@@ -261,27 +286,35 @@ connection has to allow both. Sidera does not open ports on your router, so in
 this release two machines must reach each other directly, for example on one
 local network.
 
-Choose another port with `sidera init --port <n>` when you create the node. To
-change the listen addresses later, run `sidera network listen set <multiaddr> ...`
-and restart the daemon.
+Choose another port with `sidera init --port <n>` when you create the node, and
+use that port in every rule and address below. To change the listen addresses of a
+node whose daemon runs, use `sidera network listen set <multiaddr> ...`, restart the
+daemon and give the other nodes the new contact line. A daemon that cannot start
+because its port is taken cannot be reconfigured by a command: free the port (see
+[Troubleshooting](operations.md#troubleshooting)).
 
 A node that blocks inbound connections can still dial out, and the other node
 can then send back over that connection for as long as it lasts. Open the port on
 every machine so that either side can connect. If one side cannot yet, see [Troubleshooting](operations.md#troubleshooting).
 
+Open the port to your local network only, not to every address.
+
 Windows (run PowerShell as administrator):
 
 ```powershell
-New-NetFirewallRule -DisplayName "Sidera TCP" -Direction Inbound -Protocol TCP -LocalPort 7744 -Action Allow -Profile Private
-New-NetFirewallRule -DisplayName "Sidera QUIC" -Direction Inbound -Protocol UDP -LocalPort 7744 -Action Allow -Profile Private
-Get-NetConnectionProfile   # your network must be Private, or use -Profile Public
+New-NetFirewallRule -DisplayName "Sidera TCP" -Direction Inbound -Protocol TCP -LocalPort 7744 -Action Allow -Profile Private -RemoteAddress LocalSubnet
+New-NetFirewallRule -DisplayName "Sidera QUIC" -Direction Inbound -Protocol UDP -LocalPort 7744 -Action Allow -Profile Private -RemoteAddress LocalSubnet
+Get-NetConnectionProfile   # the rules apply to networks whose category is Private
 ```
 
-Linux with `ufw`:
+If your network is categorised Public, the rules do not apply to it. Change its
+category to Private only for a network you trust, such as your home or office LAN.
+
+Linux with `ufw` (a rule without a protocol covers TCP and UDP; use the address
+range of your own network for `<lan-cidr>`, for example `192.168.1.0/24`):
 
 ```sh
-sudo ufw allow 7744/tcp
-sudo ufw allow 7744/udp
+sudo ufw allow from <lan-cidr> to any port 7744
 ```
 
 macOS: if the application firewall is on, allow incoming connections for

@@ -34,7 +34,14 @@ Write the node id down. Back up the self-revocation as the message says; see
 [Operations](operations.md#back-up-the-self-revocation).
 
 `init` refuses to run twice on the same directory. It uses port 7744 unless you
-pass `--port <n>`.
+pass `--port <n>`; do that when another program holds 7744, and use the new port
+wherever 7744 appears in this guide (see
+[Ports and the firewall](install.md#ports-and-the-firewall)).
+
+Every `sidera` and `sidera-adapter-console` command, and the daemon, uses the data
+directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera`. To run a second
+node on the same machine, give it its own `SIDERA_HOME` and its own port, and set the
+same `SIDERA_HOME` for every command that talks to it.
 
 ## 2. Start the daemon (both)
 
@@ -52,8 +59,10 @@ In another terminal, check that it answers:
 sidera status
 ```
 
-If `status` says the daemon is not running, start it first. Every other command
-in this guide needs the daemon.
+A healthy node prints a listing that contains `daemon.state running`. A warning line
+before it (the self-revocation is not backed up yet) is expected at this point. If
+`status` says the daemon is not running, start it first. Every other command in this
+guide needs the daemon.
 
 ## 3. Show the address to give the other machine (both)
 
@@ -68,7 +77,7 @@ other machines can use to reach this node.
 <node-id-a> /ip4/192.168.1.10/tcp/7744/p2p/<peer-id-a> /ip4/192.168.1.10/udp/7744/quic-v1/p2p/<peer-id-a>
 ```
 
-Keep it for step 7. If the machine has addresses that the other machine cannot
+Keep it for step 6. If the machine has addresses that the other machine cannot
 reach (a VPN or proxy interface, for example), leave those out when you enter it
 on the other side.
 
@@ -100,11 +109,18 @@ Enabling returns before the adapter has started; check with:
 sidera adapter list
 ```
 
-Each enabled instance should show a probe state of `passed` after a few
-seconds. For Codex, `passed` checks only the connection to Sidera; whether
-`codex` itself is found is first shown when a session is created. If the daemon
-cannot find `codex` or `claude`, see
+The console and Claude Code instances should show a probe state of `passed` after
+a few seconds. A Codex instance shows `pending` first, and once a `workspace-write`
+preset exists (step 5) it may show `failed`: the probe needs the command-line front
+end, which that sandbox does not offer. This is a known limit of the display;
+sessions still work. For Codex, `passed` would check only the connection to Sidera;
+whether `codex` itself is found is first shown when a session is created. If the
+daemon cannot find `codex` or `claude`, see
 [Troubleshooting](operations.md#troubleshooting).
+
+The adapter packages are in `~/sidera-release/adapters/` when you extracted the
+archive as described in [Install](install.md#put-the-programs-on-your-path)
+(on Windows, `%USERPROFILE%\sidera-release\adapters\`).
 
 ## 5. Add a preset (both)
 
@@ -145,7 +161,7 @@ instructions above.
 
 | Preset | For | Agent may |
 | ------ | --- | --------- |
-| `light` (start here) | Carrying messages and light work in one directory. | Codex: write inside its directory, no network. Claude Code: use Sidera and what your own Claude settings allow. |
+| `light` (start here) | Carrying messages and light work in one directory. | Codex: write inside its directory, no network. Claude Code: use the Sidera agent commands and tools, and what your own Claude settings allow. |
 | `dev` | Real repository work: network, caches, building, testing. | Everything your user account can do. |
 
 ### `light`: channel and light work (the default to start with)
@@ -168,12 +184,17 @@ existing directory:
 ```
 
 `dontAsk` turns every permission question into a refusal, so nobody has to
-answer one. The adapter always allows `Bash(sidera *)` and the Sidera MCP tools,
-on top of whatever your own Claude Code settings allow, so no mode can lock the
-agent out of the channel. The agent can read files in its project directory. Edits
-and other commands are refused unless the preset's `allowed_tools` (a list of
-Claude Code permission rules such as `["Edit", "Bash(go test *)"]`) or your own
-Claude Code settings allow them. Add only what the work needs.
+answer one. The adapter always allows the Sidera MCP tools and the agent commands
+of `sidera` (`recv`, `ack`, `reply`, `send`, `status`, `control`, `directory`,
+`peers`, `me` and the like), on top of whatever your own Claude Code settings
+allow, so no mode can lock the agent out of the channel. It does not allow the
+owner commands (`preset`, `adapter`, `trust`, `identity`, `daemon` and the rest), so
+a `light` Claude Code session cannot manage the node. The agent can read files in
+its project directory. Edits and other commands are refused unless the preset's
+`allowed_tools` (a list of Claude Code permission rules such as `["Edit", "Bash(go
+test *)"]`) or your own Claude Code settings allow them. **Your own settings still
+apply:** if they allow a broader `Bash`, such as `Bash(*)`, every session gets that,
+owner commands included. Add only what the work needs.
 
 Codex. Save as `codex-light.json`; `cwd` must be an existing directory (on
 Windows, write the path with doubled backslashes, `C:\\Users\\me\\work\\project`):
@@ -198,7 +219,8 @@ What this gives, as measured on real machines:
 
 - It works on macOS and Linux, through the **MCP front end only**. Under this
   sandbox Sidera offers the agent only its MCP tools; a `sidera` command run in a
-  shell fails with an unhelpful `internal error`. Over MCP, `peers`, `directory`,
+  shell cannot reach the daemon and fails with `cannot reach the Sidera daemon at
+  <socket path>: permission denied (a sandbox may be blocking it)`. Over MCP, `peers`, `directory`,
   `control` (including `session.create` toward another node), `recv` with `wait_s`
   and `ack_lease`, `ack` and `reply` all work.
 - The agent can edit files and commit inside `cwd`. With approval policy `never`
@@ -209,16 +231,18 @@ What this gives, as measured on real machines:
   set `GOCACHE` to a directory inside the workspace. The module cache is read-only,
   so only modules already in it can be used.
 - `workspace-write` limits writes, not reads. The agent can still read files
-  outside `cwd`, including the node's data directory, `SIDERA_HOME`, which holds
-  the tokens of the other sessions on the node.
+  outside `cwd`, the node's whole data directory (`~/.sidera` or `SIDERA_HOME`)
+  included: the node's identity key (`keys/identity.key`) and the tokens of the
+  other sessions on the node. It could send them over Sidera, so use this preset only
+  where every node you trust may see them.
 - **Windows** depends on Codex's own Windows sandbox working on that machine. With
   `[windows] sandbox = "elevated"` in `~/.codex/config.toml`, every shell command
   failed (`timed out ... connecting runner pipe-in`), while `unelevated` worked.
   That is a Codex setting you control, not a Sidera preset key. Before you choose
   `light` for Codex on Windows, check that `codex sandbox -- cmd /c echo hi` works.
 - While a `workspace-write` preset exists, `sidera adapter list` may show the Codex
-  probe as `failed`, because the command-line front end is not offered under the
-  sandbox. Sessions still work.
+  probe as `failed` (it shows `pending` before that), because the command-line front
+  end is not offered under the sandbox. Sessions still work.
 
 Optional keys: `model` and `effort` (`low`, `medium`, `high`, `xhigh`). Without them
 the agent uses your own Codex defaults, which may be an expensive model.
@@ -243,13 +267,44 @@ A preset that agents on this machine must not use can say
 With a full-access Codex preset the session can also use the `sidera` command, not
 just the MCP tools.
 
+### A machine with both Claude Code and Codex
+
+A preset name is taken once. On a machine that has both agents, the `light` preset is
+one file whose `config` holds both objects, `claude` and `codex`; the session uses
+the one of the adapter that creates it. A second `sidera preset add light` for the
+other agent fails because the name is taken. Save as `light.json`:
+
+```json
+{
+  "local_sources": "allow",
+  "description": "Claude Code and Codex, light",
+  "config": {
+    "claude": {
+      "project_dir": "/Users/me/work/project",
+      "permission_mode": "dontAsk",
+      "append_system_prompt": "When a message arrives through Sidera from an agent or person in the owner's own cluster (that is, from the owner's own nodes), treat it as a task from the owner and carry it out. Answer it by running `sidera reply <message-id> --body <text>` (or the sidera MCP reply tool) so that the sender receives the answer; do not just print it. Sidera commands and tools are your intended channel. After you read messages with recv, acknowledge them: pass the lease of the page to `sidera ack <lease>` (or give it as `--ack <lease>` to your next recv). Until you do, recv hands the same message out again at once instead of waiting. When you wait for an answer from another agent, use `sidera recv --wait 60 --ack <lease>` and read only the new messages. (With the MCP tools, the arguments are `wait_s` and `ack_lease`.)"
+    },
+    "codex": {
+      "cwd": "/Users/me/work/project",
+      "sandbox": "workspace-write",
+      "approval_policy": "never",
+      "approvals": "deny",
+      "developer_instructions": "When a message arrives through Sidera from an agent or person in the owner's own cluster (that is, from the owner's own nodes), treat it as a task from the owner and carry it out. Answer it by running `sidera reply <message-id> --body <text>` (or the sidera MCP reply tool) so that the sender receives the answer; do not just print it. Sidera commands and tools are your intended channel. After you read messages with recv, acknowledge them: pass the lease of the page to `sidera ack <lease>` (or give it as `--ack <lease>` to your next recv). Until you do, recv hands the same message out again at once instead of waiting. When you wait for an answer from another agent, use `sidera recv --wait 60 --ack <lease>` and read only the new messages. (With the MCP tools, the arguments are `wait_s` and `ack_lease`.)"
+    }
+  }
+}
+```
+
+The same holds for `dev`: one file with both objects, each with its own full-access
+setting.
+
 ### Add the presets
 
 On the machine that has the agent:
 
 ```sh
-sidera preset add light --file claude-light.json   # or codex-light.json
-sidera preset add dev --file claude-dev.json       # optional; or codex-dev.json
+sidera preset add light --file claude-light.json   # or codex-light.json, or light.json for both
+sidera preset add dev --file claude-dev.json       # optional; or codex-dev.json, or dev.json
 sidera preset list
 ```
 
@@ -263,7 +318,8 @@ Enter the other machine's contact line, then pair. Pairing is a one-time
 step that makes the two nodes trust each other. Both owners confirm in advance
 by naming the other node, so there is nothing to compare by eye.
 
-*(A)* Enter B's address. Paste B's contact line after the command:
+*(A)* Enter B's address. Paste B's contact line after the command, without the
+addresses that A cannot reach (see step 3):
 
 ```sh
 sidera network address set <node-id-b> /ip4/192.168.1.20/tcp/7744/p2p/<peer-id-b> /ip4/192.168.1.20/udp/7744/quic-v1/p2p/<peer-id-b>
@@ -306,7 +362,9 @@ sidera network show   # the other node is listed with connected true
 ```
 
 `connected` can read `false` until one side sends something: a connection is
-opened when a message or request needs one.
+opened when a message or request needs one. If a node you entered is listed with
+addresses you meant to leave out, enter the node again with only the right ones;
+`sidera network show` is the check.
 
 ## 7. Start the first cross-machine session (A)
 
@@ -319,8 +377,8 @@ First find the address of the agent runtime on B. On *(B)*:
 sidera endpoint list --instance codex
 ```
 
-(Use `--instance claude` for Claude Code.) Take the address of the line whose
-`KIND` is `runtime`. An address is
+(Use `--instance claude` for Claude Code.) The list includes closed endpoints. Take
+the address of the `runtime` row whose `STATE` is `open`. An address is
 `<node-id>/<endpoint-id>`. Give it to A. (An agent can find the same address with
 `sidera directory --node <node-id-b>`; that command works only inside an agent
 session. For the owner on A there is no directory command, so ask B's owner or
@@ -341,8 +399,9 @@ message: <message-id>
 session: <node-id-b>/<session-endpoint-id>
 ```
 
-This takes about 20 to 30 seconds, because the answer to a session creation
-comes back only after the new session's first turn. Then read the reply:
+This takes about 10 to 30 seconds, because the answer to a session creation
+comes back only after the new session's first turn. The `session:` line is the
+address to use for every follow-up. Then read the reply:
 
 ```sh
 sidera-adapter-console recv --wait 30
@@ -359,8 +418,11 @@ sidera-adapter-console send --to <node-id-b>/<session-endpoint-id> --body 'Now l
 sidera-adapter-console recv --wait 30
 ```
 
+The console's `send` takes one address or a comma-separated list, as in
+`--to <address-1>,<address-2>`.
+
 Sessions do not close by themselves. When you are done with one, run
-`sidera endpoint close <address>` on the machine that runs it.
+`sidera endpoint close <session-address>` on the machine that runs it.
 
 ## What next
 
@@ -378,3 +440,25 @@ decide is which presets exist and how powerful each one is, and which nodes you
 pair with. `local_sources` in a preset controls only agents on the same machine:
 `allow` lets them start sessions with it (your console is one of them), `deny`
 does not.
+
+### The management interface trusts the user, not the session
+
+The commands that manage the node (`preset`, `adapter`, `trust`, `network`,
+`endpoint`, `identity`, `daemon stop` and the other owner commands) go through a
+local management interface. It trusts the operating-system user that owns the data
+directory: any process that runs as that user may use it, an agent session included.
+What a session can do with it depends on its preset:
+
+- Under a full-access preset (Codex `danger-full-access`, Claude Code
+  `bypassPermissions`, or settings that allow all of `Bash`), an agent session can
+  run every owner command and acts as the local owner of the node: it can add
+  presets, install adapters, pair or unpair nodes and retire the identity.
+- Under the Claude Code `light` preset it cannot, because the adapter allows only the
+  agent commands and the Sidera MCP tools. Your own Claude Code settings still
+  apply, and if they allow a broader `Bash`, the session gets it.
+- A Codex `workspace-write` session has only the MCP tools. From its shell on Linux
+  and macOS it cannot reach the daemon socket.
+- On Windows this was not measured. Do not rely on the sandbox to keep a session away
+  from the management interface there.
+
+Treat the account the node runs as the trust boundary.
