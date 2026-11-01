@@ -232,9 +232,16 @@ func (f *Fixture) exitResult(g *generation) error {
 }
 
 func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
+	phase := "inputs"
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("acceptance: generation %d start phase %s: %w", spec.Number, phase, err)
+		}
+	}()
 	if err := f.writeInputs(); err != nil {
 		return err
 	}
+	phase = "launch"
 	g, err := f.begin(spec, "daemon")
 	if err != nil {
 		return err
@@ -245,6 +252,7 @@ func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
 			err = f.startFailure(ctx, g, err)
 		}
 	}()
+	phase = "readiness"
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -277,18 +285,23 @@ func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
 		case <-tick.C:
 		}
 	}
+	phase = "table"
 	if err = f.checkTable(ctx); err != nil {
 		return err
 	}
+	phase = "bootstrap"
 	if err = f.bootstrap(ctx); err != nil {
 		return err
 	}
+	phase = "probes"
 	if err = f.waitProbes(ctx); err != nil {
 		return err
 	}
+	phase = "quiesce"
 	if err = f.Quiesce(ctx); err != nil {
 		return err
 	}
+	phase = "runtime addresses"
 	return f.bindRuntimeAddresses(ctx)
 }
 
@@ -297,7 +310,7 @@ func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
 func (f *Fixture) startFailure(ctx context.Context, g *generation, cause error) error {
 	if ctx.Err() != nil {
 		g.cancelled = true
-		return errors.Join(ctx.Err(), f.kill(g))
+		return errors.Join(cause, ctx.Err(), f.kill(g))
 	}
 	if g.p.exited() {
 		return f.exitResult(g)
@@ -306,7 +319,7 @@ func (f *Fixture) startFailure(ctx context.Context, g *generation, cause error) 
 	if err == nil && g.spec.Target != "" && trace.Crash == g.spec.Target {
 		if err := g.p.wait(ctx); ctx.Err() != nil {
 			g.cancelled = true
-			return errors.Join(err, f.kill(g))
+			return errors.Join(cause, ctx.Err(), err, f.kill(g))
 		}
 		return f.exitResult(g)
 	}

@@ -51,6 +51,14 @@ use the actual fake-runtime program. The tagged daemon consumes and clears its
 crash controls before launching adapters, so descendant CLI processes do not
 inherit the daemon generation's target or record file.
 
+`Start` failures identify the generation and the active phase: input preparation,
+launch, public readiness, table checking, bootstrap, probes, quiet or runtime
+address binding. Deadline cleanup preserves the original failure together with
+the context and kill errors, including while waiting for a recorded crash target
+to exit. Cancellation still kills and waits for that daemon before returning;
+it cannot count as a reached crash target. These diagnostics do not extend the
+caller's budget or make a pending probe successful.
+
 `Manage`, `Adapter` and `Runtime` expose the existing external clients. The
 `Adapter` acquisition captures the current daemon generation. Its connection
 wait and synchronization end on caller cancellation or that process's completed

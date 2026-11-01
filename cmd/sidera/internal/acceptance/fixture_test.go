@@ -39,6 +39,28 @@ func fixture(t *testing.T) (*Fixture, context.Context) {
 	return f, ctx
 }
 
+func TestStartFailurePreservesCauseAfterDeadline(t *testing.T) {
+	f, ctx := fixture(t)
+	if err := f.prepare(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g, err := f.begin(GenerationSpec{Number: 1}, "daemon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.current = g
+	expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	cause := errors.New("probe readiness detail")
+	err = f.startFailure(expired, g, cause)
+	if !errors.Is(err, cause) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("start failure lost cause or deadline: %v", err)
+	}
+	if !g.cancelled || !g.p.exited() {
+		t.Fatalf("deadline cleanup: cancelled=%v, waited=%v", g.cancelled, g.p.exited())
+	}
+}
+
 func TestRealBinaryAdapterAcquisitionEndsWithGeneration(t *testing.T) {
 	for _, alreadyExited := range []bool{true, false} {
 		name := "during-wait"

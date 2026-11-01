@@ -168,6 +168,16 @@ Tagged daemons clear their process crash controls before launching adapters,
 so fake native runtimes and their CLI descendants cannot inherit a daemon target.
 The fixture's README describes the runtime creation-step limitation.
 
+Foreground `Start` errors name their generation and active startup phase. When
+the caller's context expires, cleanup retains the original readiness or
+management failure in the error chain alongside the context and kill errors,
+also when a recorded crash marker requires waiting for actual exit. The fixture
+still kills and waits for the cancelled daemon, marks it cancelled and refuses
+to count that termination as a reached target. Startup deadlines and probe
+requirements are unchanged. The no-token runtime probe regression checks the
+bootstrap phase, deadline identity and completed daemon exit; a direct
+`startFailure` regression deterministically checks retention of a distinct cause.
+
 Acquiring an adapter Controller captures the current daemon generation and bounds
 both connection waiting and synchronization by the caller context and that
 process's completed exit. This prevents an interrupted recipe step from waiting

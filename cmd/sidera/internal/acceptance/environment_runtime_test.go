@@ -113,6 +113,12 @@ func TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe(t *testing.T)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("successful command without presentation must remain pending: %v", err)
 	}
+	if !strings.Contains(err.Error(), "generation 1 start phase bootstrap") {
+		t.Fatalf("start failure lost generation or phase: %v", err)
+	}
+	if !f.current.p.exited() {
+		t.Fatal("start deadline returned before daemon Wait")
+	}
 	// The static input persists commands only, never the opaque request Env.
 	for _, in := range f.inputs {
 		raw, err := json.Marshal(in.process)
