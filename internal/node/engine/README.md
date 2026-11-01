@@ -223,13 +223,20 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **The runtime endpoint of an instance is made by its admission, once.** An
   adapter that declared a runtime gets one runtime endpoint, whose id is minted the
   first time and kept in `config/` for ever, in the same transaction
-  (`runtime-admit`) as the record. An open endpoint is not written again; a closed
+  (`runtime-admit`) as the record. An open endpoint is not written again, unless its
+  directory name is not the one its instance gives it (below); a closed
   one is opened again with a new token, which is a new place in the cap; both count
   against `publication.MaxEndpointsPerNode` like a direct endpoint, and a refusal
   leaves the instance not admitted. Its token is never shown to anyone: a runtime
   endpoint is no caller. A closed runtime endpoint whose queued records are still
   being closed is not opened again: the admission fails, the host ends the
   connection and starts the instance again after its backoff.
+- **A runtime endpoint is named after its instance and adapter.** The directory
+  shows `instance (adapter)`, or the one word when both are the same, as the
+  endpoint's display name, set by the admission so that no owner has to name it
+  and an agent can tell a Claude runtime from a Codex one on a node that has
+  both. An open endpoint made before the name existed, or whose name differs, is
+  renamed by the admission with an endpoint update, not a new `runtime-admit`.
 - **What `adapter.start` carries is built from the engine's view and the
   configuration, and is valid.** The node, the runtime endpoint (only for a runtime),
   the instance's configuration values, the presets (only for a runtime) each with

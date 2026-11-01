@@ -93,7 +93,10 @@ whether a send would succeed.
 
 **Directory.** `limit` is 1 through 256, default 100. Entries contain `address`,
 `kind`, `display_name`, `description` and `accepts` (action names such as
-`message.send` and `session.create`). Only visible open endpoints appear, in
+`message.send` and `session.create`). A runtime endpoint's `display_name` is its
+instance and adapter, `work (codex)`, or the one word when they are the same, so an
+agent can tell the runtimes of a node apart; a direct endpoint's is what its adapter
+registered. Only visible open endpoints appear, in
 endpoint ID order. Creating, closed and system endpoints do not appear. An open
 endpoint whose adapter has not been admitted still appears; only signals known
 for its kind are advertised, and interrupt requires a confirming admission.

@@ -255,6 +255,9 @@ func TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId(t *t
 		if string(rec.Declaration) != `{}` {
 			t.Errorf("declaration %q, want the encoded empty declaration {}", rec.Declaration)
 		}
+		if rec.DisplayName != "chat" {
+			t.Errorf("display name %q, want the instance, which is also the adapter's id", rec.DisplayName)
+		}
 		if kept := r.cfg.EndpointIDs("chat").Runtime; kept != id {
 			t.Errorf("id kept in config/ is %s, want %s", kept, id)
 		}
@@ -295,6 +298,43 @@ func TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId(t *t
 		}
 		if got := r.runtimeRecords()[0].Token; !bytes.Equal(got, token) {
 			t.Error("the token of an open runtime endpoint changed")
+		}
+	})
+
+	t.Run("the directory name says the instance and the adapter it runs", func(t *testing.T) {
+		r := newRig(t, 10)
+		r.enableInstance("agent", "")
+		e := r.start()
+		if err := admitOn(ctx, e, "agent", rt); err != nil {
+			t.Fatal(err)
+		}
+		for _, rec := range r.runtimeRecords() {
+			if rec.Instance == "agent" && rec.DisplayName != "agent (chat)" {
+				t.Errorf("display name %q, want %q", rec.DisplayName, "agent (chat)")
+			}
+		}
+	})
+
+	t.Run("an open endpoint made without a name is named, without being admitted again", func(t *testing.T) {
+		r := newRig(t, 10)
+		e := r.start()
+		if err := admitOn(ctx, e, "chat", rt); err != nil {
+			t.Fatal(err)
+		}
+		unnamed := r.runtimeRecords()[0]
+		unnamed.DisplayName = ""
+		r.restart()
+		r.seedRecord(unnamed)
+		e = r.start()
+		if err := admitOn(ctx, e, "chat", rt); err != nil {
+			t.Fatal(err)
+		}
+		rec := r.runtimeRecords()[0]
+		if rec.DisplayName != "chat" || rec.Status != store.EndpointOpen || !bytes.Equal(rec.Token, unnamed.Token) {
+			t.Errorf("record %+v: want the same open endpoint and token, named chat", rec)
+		}
+		if n := r.commits("runtime-admit"); n > 0 {
+			t.Errorf("%d commits of runtime-admit after the restart, want none", n)
 		}
 	})
 

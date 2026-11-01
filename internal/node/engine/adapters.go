@@ -205,6 +205,11 @@ func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterprot
 // made, and one that was closed (the instance was disabled and is enabled again)
 // is opened again with a new token. Both take a place in the cap of the node. A
 // runtime endpoint is no caller: its token is never shown to anyone.
+//
+// The endpoint is named in the directory after its instance and adapter
+// (runtimeDisplayName), so that an agent can tell the runtimes of a node apart
+// without the owner naming them. An open endpoint whose name differs, as one made
+// before the name existed does, is renamed.
 func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 	ch, err := e.d.Config.RuntimeID(instance, e.randomReader())
 	var ce *config.ChangeError
@@ -214,11 +219,20 @@ func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 	case err != nil:
 		return ident.EndpointID{}, err
 	}
+	name := runtimeDisplayName(instance, e.d.Config.Instances().Items[instance].Adapter)
 	st := e.view.endpoints[ch.ID]
 	switch {
 	case st != nil && st.rec.Kind != adapterreg.KindRuntime:
 		return ident.EndpointID{}, errors.New("engine: the stable id of a runtime endpoint is the id of another kind of endpoint")
 	case st != nil && st.rec.Status != store.EndpointClosed:
+		if st.rec.DisplayName != name {
+			rec := st.rec
+			rec.DisplayName = name
+			if err := e.d.Store.EndpointUpdate(rec); err != nil {
+				return ident.EndpointID{}, err
+			}
+			e.putEndpoint(rec, st.decl)
+		}
 		return ch.ID, nil
 	case st != nil && e.view.Draining(ch.ID):
 		// Records queued for the endpoint while it was closed would land on the
@@ -232,7 +246,7 @@ func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 	if err != nil {
 		return ident.EndpointID{}, err
 	}
-	rec := store.EndpointRecord{ID: ch.ID, Kind: adapterreg.KindRuntime, Instance: instance, Status: store.EndpointOpen, Token: token}
+	rec := store.EndpointRecord{ID: ch.ID, Kind: adapterreg.KindRuntime, Instance: instance, DisplayName: name, Status: store.EndpointOpen, Token: token}
 	if rec.Declaration, err = encodeDeclaration(authz.Declaration{}); err != nil {
 		return ident.EndpointID{}, err
 	}
@@ -241,6 +255,18 @@ func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 	}
 	e.putEndpoint(rec, authz.Declaration{})
 	return ch.ID, nil
+}
+
+// runtimeDisplayName is the name the directory shows for the runtime endpoint of
+// an instance: the instance, and the adapter it runs when that is not the same
+// word, since the adapter is what tells a Claude runtime from a Codex one. The
+// owner names the instance and the adapter's id is fixed, so the name needs no
+// setting.
+func runtimeDisplayName(instance, adapter string) string {
+	if instance == adapter {
+		return instance
+	}
+	return instance + " (" + adapter + ")"
 }
 
 // startParams is what adapter.start carries, built from the configuration and the

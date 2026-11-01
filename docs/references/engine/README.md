@@ -399,7 +399,12 @@ tells what `adapter.probe` found (`AdapterProbed`), then the notifications
 The admission of an adapter that declared a runtime makes its runtime endpoint
 exist, in the transaction `runtime-admit`: the id in `config/endpoint-ids/`, minted
 once and kept for ever, then the record in `state/endpoints/`. An open record is
-not written again; a closed one is opened again with a new token. Either way a new
+not written again, except to rename it (below); a closed one is opened again with
+a new token. The record's display name is the instance, followed by the adapter in
+parentheses when the adapter's id is another word (`work (codex)`), so that the
+directory tells a node's runtimes apart without the owner naming them; an open
+record with another name, as one made before the name existed, is updated in place
+(`endpoint-update`) when its instance is admitted. Either way a new
 or reopened endpoint takes a place in the cap of the node, exactly as a direct
 endpoint does, and an admission refused for the cap (`endpoint_limit`, node) leaves
 the instance not admitted. The token of a runtime endpoint is minted because the
@@ -1815,7 +1820,7 @@ reproducible).
 | The 257th endpoint is refused | `endpoints.go` (`registerDirect`) | `TestEndpointBeyondNodeCapRefused`, `TestTheNodeCapCountsOtherKindsOfEndpointOnTheRegistrationPath`, `TestInstanceLimitRefusesBeforeTheNodeCap` |
 | Same key, same endpoint; a new token on reopening | `endpoints.go`, `tokens.go` | `TestSameKeyGivesTheSameEndpointAcrossARestart`, `TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken` |
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
-| The runtime endpoint is made once, its id is kept, a closed one is reopened with a new token | `adapters.go` (`admitRuntime`), `transactions.go` | `TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId` |
+| The runtime endpoint is made once, its id is kept, a closed one is reopened with a new token, and its directory name is the instance and adapter | `adapters.go` (`admitRuntime`, `runtimeDisplayName`), `transactions.go` | `TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId` |
 | The runtime endpoint counts against the node's cap; a refused admission leaves the instance not admitted | `adapters.go` (`admitRuntime`) | `TestRuntimeEndpointCountsAgainstTheNodeCap` |
 | The admission crashes anywhere | `transactions.go` | `TestRuntimeAdmitRecoversFromACrashAtEveryPoint` |
 | What `adapter.start` carries | `adapters.go` (`startParams`) | `TestAdmissionReturnsWhatAdapterStartCarries` |
