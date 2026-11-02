@@ -58,7 +58,9 @@ jobs:
           fi
 
   # The same three checks on every platform a node runs on. The race detector
-  # needs cgo and a C compiler; all three hosted images ship one.
+  # needs cgo and a C compiler, which the Linux, macOS and Windows x64 hosted
+  # images ship, and Go does not support it on windows/arm64, so that runner
+  # (windows-11-arm) takes the plain steps only.
   #
   # go test stops a package after 10 minutes unless told otherwise; the explicit
   # limit leaves the job's own timeout room for setup and a readable failure.
@@ -71,7 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-11-arm]
     defaults:
       run:
         shell: bash
@@ -90,6 +92,7 @@ jobs:
       - name: go test
         run: go test -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
       - name: go test -race
+        if: matrix.os != 'windows-11-arm'
         run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
       # go test prints t.Log output and skip reasons only with -v or on failure.
       # The platform tests of these two packages log what they measure on the
@@ -117,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-11-arm]
     defaults:
       run:
         shell: bash
@@ -136,6 +139,7 @@ jobs:
       - name: go test with tags
         run: go test -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
       - name: go test -race with tags
+        if: matrix.os != 'windows-11-arm'
         run: go test -race -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
 
   # The tests that drive built binaries, one job per platform. Their files carry
@@ -160,7 +164,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest, windows-11-arm]
     defaults:
       run:
         shell: bash

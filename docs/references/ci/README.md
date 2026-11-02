@@ -23,9 +23,9 @@ test, the crash walks of `internal/node/store` included.
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
-| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
-| `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
-| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
+| `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...` (not on Windows arm64, where Go has no race detector), then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
+| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` (the `-race` one not on Windows arm64) |
+| `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64 |
@@ -37,22 +37,24 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | Job | Instances | `timeout-minutes` | `go test -timeout` |
 | --- | --------- | ----------------- | ------------------ |
 | `format` | 1 | 10 | none |
-| `test` | 3 | 40 | 30m per test step; benchmarks 10m, 10m, 30m |
-| `test-tags` | 3 | 40 | 30m per step |
-| `acceptance` | 3 | 30 | 25m |
+| `test` | 4 | 40 | 30m per test step; benchmarks 10m, 10m, 30m |
+| `test-tags` | 4 | 40 | 30m per step |
+| `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
 | `sdk-standalone` | 1 | 15 | go default |
 | `cross-compile` | 6 | 15 | none |
 | `release-dry-run` | 1 | 20 | none |
 
-A push to `main` or a pull request starts 18 jobs, three of them on macOS; a
-manual dispatch adds the nine `crashwalk` jobs, 27 in all, five of them on macOS.
+A push to `main` or a pull request starts 21 jobs, three of them on macOS; a
+manual dispatch adds the nine `crashwalk` jobs, 30 in all, five of them on macOS.
 GitHub limits how many jobs of a plan run at once, macOS jobs more tightly than
 the others, so some of them may wait for a runner.
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
-six platforms are the ones Sidera ships binaries for.
+six platforms are the ones Sidera ships binaries for. The Windows arm64 jobs
+run on the `windows-11-arm` hosted runner, which is native arm64; the Go race
+detector does not support windows/arm64, so they run the plain steps only.
 
 ### Build tags
 
@@ -254,7 +256,7 @@ to the workflow.
 - **`CGO_ENABLED=0` in `cross-compile`**: released binaries are static, so a
   dependency that needs cgo must fail here and not at release time. The `test`
   job's `-race` is the one place cgo is on: the race detector needs it and a C
-  compiler, which all three hosted runner images carry.
+  compiler, which the Linux, macOS and Windows x64 hosted runner images carry.
 - **The crash walks take what the reliability floor needs**: the walks of
   `internal/node/store` and `internal/node/engine` replay every crash point of
   every transaction, and each scenario is single-threaded on an in-memory file
@@ -472,6 +474,10 @@ that the five macOS jobs of a run start together; that a dispatch
 that leaves `inputs.crashwalk` out takes `full`. The foreground-process acceptance
 package exists and its focused tests run locally. A complete binary catalog walk
 and its hosted timings must be verified separately; focused tests do not establish the full-walk budget.
+
+The Windows arm64 jobs (`test`, `test-tags` and `acceptance` on `windows-11-arm`) have
+not run yet either: the packages build and vet for windows/arm64 on a development
+machine, and nothing has run the tests on that platform until CI does.
 
 ## Where
 
