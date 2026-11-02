@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"reflect"
 	"slices"
 	"sort"
 	"sync"
@@ -671,9 +672,10 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 			continue
 		}
 		// A report the delivery ignores can still teach the record when the message
-		// arrived, from which the reply window is counted, so every applied report
-		// is written.
-		if effect == envelope.ReportApplied {
+		// arrived, from which the reply window is counted, so an applied report is
+		// written when it changed the delivery or the arrival. The same report again
+		// (a pull whose target has nothing new) changes neither and writes nothing.
+		if effect == envelope.ReportApplied && trackedChanged(c.o.Outbound, next, sr.Report().Recipient) {
 			c.take(next, sr.Report().Recipient, outcomes)
 		}
 	}
@@ -699,6 +701,17 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 		}
 	}
 	return c.commit()
+}
+
+// trackedChanged says whether applying a report changed what the record tracks for
+// the recipient: its delivery or the arrival of the message. The comparison may err
+// only toward writing: a difference that is not a change costs a write that did
+// nothing, while a change it took for none would be lost, so it must not be loosened
+// (a field left out of the comparison, a tolerance) to save writes.
+func trackedChanged(before, after envelope.Outbound, recipient ident.EndpointID) bool {
+	b, _ := before.Find(recipient)
+	a, _ := after.Find(recipient)
+	return !reflect.DeepEqual(b, a)
 }
 
 // noteContactFailing tells the deliveries of a record on a node that contact with

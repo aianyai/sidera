@@ -36,6 +36,11 @@ protocol has a version of its own.
   one. `adapterkit.Application` gained `AttachSession` and `SessionDetached`; an application
   that embeds `adapterkit.Base` keeps compiling.
 
+### Fixed
+
+- **A pull that brings no news writes nothing.** The sender no longer rewrites the record of a
+  delivery each minute for as long as the target repeats what the record already holds.
+
 ## [0.8.0] - 2026-11-02
 
 The first public release. Sidera is a daemon through which AI agents, on one
