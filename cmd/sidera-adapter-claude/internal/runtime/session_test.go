@@ -43,12 +43,12 @@ func TestDeliverAPromptToAnIdleSession(t *testing.T) {
 	if w.launchCount() != 2 {
 		t.Fatalf("%d processes started", w.launchCount())
 	}
-	l := w.launches[1]
-	if !slices.Contains(l.Argv, "--resume") || sessionOf(l) != session || !strings.Contains(string(w.files[l.Stdin]), "more") {
+	l := w.launched()[1]
+	if !slices.Contains(l.Argv, "--resume") || sessionOf(l) != session || !strings.Contains(string(w.file(l.Stdin)), "more") {
 		t.Fatalf("a prompt resumes the session: %q", l.Argv)
 	}
 	// The dispatch is on record before the process: "no checkpoint" proves nothing was started.
-	order := strings.Join(w.order, "|")
+	order := strings.Join(w.orderList(), "|")
 	if i := strings.Index(order, "put attempt/"+attempt2); i < 0 || i > strings.LastIndex(order, "put session/session-1") {
 		t.Fatalf("the attempt's checkpoint comes first: %s", order)
 	}
@@ -90,9 +90,7 @@ func TestRunningTurnIsCheckpointedOnlyWhenItChanges(t *testing.T) {
 	app, _ := newApp(t, w)
 	session := openSession(t, w, app)
 	sessionPuts := func() int {
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		return strings.Count(strings.Join(w.puts, "|"), "session/session-1")
+		return strings.Count(strings.Join(w.putKeys(), "|"), "session/session-1")
 	}
 
 	if res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}); err != nil || res.Stage != adapterproto.PromptAccepted {
@@ -123,9 +121,7 @@ func TestDeliverOfAStartedProcessThatCannotBeIdentifiedIsAnError(t *testing.T) {
 	w := newWorld(t)
 	app, _ := newApp(t, w)
 	openSession(t, w, app)
-	w.mu.Lock()
-	w.unidentified = true
-	w.mu.Unlock()
+	w.setUnidentified(true)
 
 	res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"})
 	if err == nil || res != (adapterproto.PromptDeliverResult{}) {
@@ -158,9 +154,7 @@ func TestDeliverRefusals(t *testing.T) {
 		t.Fatalf("two writers: %+v %v", res, err)
 	}
 	// The record is gone.
-	w.mu.Lock()
-	delete(w.files, filepath.Join(recordDir, session+".jsonl"))
-	w.mu.Unlock()
+	w.removeFile(filepath.Join(recordDir, session+".jsonl"))
 	res, err = app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "x"})
 	if err != nil || res.Reason != adapterproto.RefusalSessionLost {
 		t.Fatalf("lost: %+v %v", res, err)
@@ -181,8 +175,8 @@ func TestCloseInterruptsARunningTurnAndForgetsTheSession(t *testing.T) {
 	if err != nil || res.Outcome != adapterproto.CloseClosed {
 		t.Fatalf("close: %+v %v", res, err)
 	}
-	if len(w.signals) != 1 {
-		t.Fatalf("signals %v", w.signals)
+	if signals := w.signalled(); len(signals) != 1 {
+		t.Fatalf("signals %v", signals)
 	}
 	w.waitEvents("started "+prompt1, "ended "+prompt1+" interrupted")
 	if _, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "x"}); err == nil {
@@ -207,8 +201,8 @@ func TestCloseDoesNotKillATurnThatDoesNotEnd(t *testing.T) {
 	if err != nil || res.Outcome != adapterproto.CloseUnconfirmed || res.Reason != adapterproto.CloseTurnStillRunning {
 		t.Fatalf("close: %+v %v", res, err)
 	}
-	if len(w.signals) != 1 || w.aliveCount() != 1 {
-		t.Fatalf("signals %v, alive %d: the adapter interrupts and never kills", w.signals, w.aliveCount())
+	if signals := w.signalled(); len(signals) != 1 || w.aliveCount() != 1 {
+		t.Fatalf("signals %v, alive %d: the adapter interrupts and never kills", signals, w.aliveCount())
 	}
 	if app.session("session-1") == nil {
 		t.Fatal("a session that was not closed is still held")
@@ -222,8 +216,8 @@ func TestCloseAfterARestartFindsTheProcessByTheNativeReference(t *testing.T) {
 	const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
 	w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: "x"})
 	res, err := app.CloseSession(ctxT(t), adapterproto.CloseParams{Endpoint: "gone", NativeRef: session})
-	if err != nil || res.Outcome != adapterproto.CloseClosed || len(w.signals) != 1 {
-		t.Fatalf("close: %+v %v, signals %v", res, err, w.signals)
+	if signals := w.signalled(); err != nil || res.Outcome != adapterproto.CloseClosed || len(signals) != 1 {
+		t.Fatalf("close: %+v %v, signals %v", res, err, signals)
 	}
 	if _, err := app.CloseSession(ctxT(t), adapterproto.CloseParams{Endpoint: "gone"}); err == nil {
 		t.Fatal("an endpoint the adapter does not hold, with no reference, is unknown")
@@ -357,13 +351,9 @@ func TestReconcileDoesNotConcludeAbsenceFromARecordFormItDoesNotRead(t *testing.
 	want(reconcile(), adapterproto.VerdictProvablyAbsent, adapterproto.GroundsRecordCompleteWithoutAttempt)
 
 	// The attempt's process finished a turn, yet its uuid is nowhere in the record.
-	w.mu.Lock()
-	w.files[outFile(session, prompt2)] = []byte(resultOK)
-	w.mu.Unlock()
+	w.setFile(outFile(session, prompt2), []byte(resultOK))
 	want(reconcile(), adapterproto.VerdictIndeterminate, adapterproto.GroundsRecordUnreadable)
-	w.mu.Lock()
-	delete(w.files, outFile(session, prompt2))
-	w.mu.Unlock()
+	w.removeFile(outFile(session, prompt2))
 
 	// A user line without the uuid the lookup reads.
 	w.appendRecord(file, `{"type":"user","sessionId":"`+session+`"}`)
@@ -404,7 +394,7 @@ func TestStartTakesSessionsBack(t *testing.T) {
 		w := newWorld(t)
 		w.appendRecord(file, userLine(session, prompt1))
 		started, _ := w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: outFile(session, prompt1)})
-		w.exit(w.procs[started.PID], resultOK)
+		w.exit(w.procByPID(started.PID), resultOK)
 		cp := checkpoint(turn.State{Attempt: prompt1, StartedReported: true, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey()}})
 		_, res := newApp(t, w, attach("session-1", cp))
 		if got := res.Sessions[0]; got.State != adapterproto.AttachAttached || got.TurnActive || got.Process != nil {
@@ -476,7 +466,7 @@ func TestProbe(t *testing.T) {
 		t.Fatalf("a probe for an unknown preset %+v", res.ToolProbes[1])
 	}
 
-	w.loggedIn = false
+	w.setLoggedIn(false)
 	res, err = app.Probe(ctxT(t), adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{}})
 	if err != nil || res.Auth != adapterproto.AuthInvalid || res.Presets[0].Usable {
 		t.Fatalf("logged out: %+v %v", res, err)

@@ -53,11 +53,7 @@ func (w *world) claudeProc(pid int) {
 	w.procs[pid] = &fakeProc{pid: pid, startUnix: claudeStart, alive: true}
 }
 
-func (w *world) killClaude(pid int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.procs[pid].alive = false
-}
+func (w *world) killClaude(pid int) { w.setAlive(pid, false) }
 
 // registryDoc is a registry file in the form the runtime writes it.
 func registryDoc(pid int, session, status string, statusAt int64, extra map[string]any) []byte {
@@ -86,16 +82,15 @@ func (w *world) setRegistry(session, status string, statusAt int64, extra ...map
 			doc[k] = v
 		}
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.files[attached.RegistryFile(claudeHome, claudePID)] = registryDoc(claudePID, session, status, statusAt, doc)
+	// The document is built with the world locked: a look that reads the registry
+	// waits for the write, and TestAStatusReadBeforeTheTranscriptOpensNoTurn fails
+	// when the document is built before the lock is taken.
+	w.locked(func() {
+		w.files[attached.RegistryFile(claudeHome, claudePID)] = registryDoc(claudePID, session, status, statusAt, doc)
+	})
 }
 
-func (w *world) removeRegistry() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	delete(w.files, attached.RegistryFile(claudeHome, claudePID))
-}
+func (w *world) removeRegistry() { w.removeFile(attached.RegistryFile(claudeHome, claudePID)) }
 
 func transcript(session string) string { return filepath.Join(recordDir, session+".jsonl") }
 
@@ -188,7 +183,7 @@ func TestAttachOutcomes(t *testing.T) {
 		{"a registry entry in a form that is not read", func(w *world) {
 			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"status": nil})
 		}, fullWake(), failed, adapterproto.AttachFailNativeError, "form"},
-		{"the process table cannot be read", func(w *world) { w.lookupErr = errors.New("sysctl failed") }, fullWake(), failed, adapterproto.AttachFailNativeUnreachable, "sysctl"},
+		{"the process table cannot be read", func(w *world) { w.setLookupErr(errors.New("sysctl failed")) }, fullWake(), failed, adapterproto.AttachFailNativeUnreachable, "sysctl"},
 		{"a wake without a socket", func(w *world) {}, wakeOf("", inboxToken, claudePID), failed, adapterproto.AttachFailWakeUnavailable, "carries no inbox socket"},
 		{"a wake without a socket for a runtime that lists no messaging", func(w *world) {
 			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"peerProtocol": nil, "messagingSocketPath": nil})
@@ -254,9 +249,7 @@ func TestADeliveredPromptIsWrittenAndFollowedToTheEndOfItsTurn(t *testing.T) {
 	if got := w.inboxWrites(); len(got) != 1 || got[0].socket != inboxSock || got[0].data != want {
 		t.Fatalf("written %+v\nwant   %q", got, want)
 	}
-	w.mu.Lock()
-	_, dispatched := w.checkpts["attempt/"+attempt1]
-	w.mu.Unlock()
+	_, dispatched := w.checkpoint("attempt/" + attempt1)
 	if !dispatched {
 		t.Fatal("the attempt's checkpoint must be stored before the message is written")
 	}
@@ -361,10 +354,10 @@ func TestTheEndOfATurnWrittenJustBeforeAClearIsNotLost(t *testing.T) {
 		}
 		// A look has just read the old file. The turn ends and the session is cleared
 		// after that, before the next look.
-		w.mu.Lock()
-		w.files[path] = append(w.files[path], turnEndRecord(claudeSess)+"\n"...)
-		w.files[attached.RegistryFile(claudeHome, claudePID)] = registryDoc(claudePID, clearedSes, "idle", 3000, nil)
-		w.mu.Unlock()
+		w.locked(func() {
+			w.files[path] = append(w.files[path], turnEndRecord(claudeSess)+"\n"...)
+			w.files[attached.RegistryFile(claudeHome, claudePID)] = registryDoc(claudePID, clearedSes, "idle", 3000, nil)
+		})
 	}
 	w.mu.Unlock()
 	w.waitNotes("started person-2000 attempt=", "ended person-2000 completed")
@@ -394,9 +387,7 @@ func TestAStatusReadBeforeTheTranscriptOpensNoTurn(t *testing.T) {
 	var fired atomic.Bool
 	w.mu.Lock()
 	w.afterOpen = func(w *world, path string) {
-		w.mu.Lock()
-		busy := bytes.Contains(w.files[attached.RegistryFile(claudeHome, claudePID)], []byte(`"busy"`))
-		w.mu.Unlock()
+		busy := bytes.Contains(w.file(attached.RegistryFile(claudeHome, claudePID)), []byte(`"busy"`))
 		if path != transcript(claudeSess) || !busy || !fired.CompareAndSwap(false, true) {
 			return
 		}
@@ -456,9 +447,7 @@ func TestAGoneSessionRefusesPromptsAndIsReportedUnavailable(t *testing.T) {
 		t.Fatal("nothing is written to a session that is gone")
 	}
 	// The endpoint stays open: the session coming back is followed again.
-	w.mu.Lock()
-	w.procs[claudePID].alive = true
-	w.mu.Unlock()
+	w.setAlive(claudePID, true)
 	w.setRegistry(claudeSess, "idle", 5000)
 	for deadline := time.Now().Add(5 * time.Second); len(w.lastAvailability()) != 0 && time.Now().Before(deadline); {
 		time.Sleep(2 * time.Millisecond)
@@ -493,9 +482,7 @@ func TestAReachableSessionIsNotReportedUnavailableAnyLonger(t *testing.T) {
 			if len(w.lastAvailability()) != 1 {
 				t.Fatal("not reported unavailable")
 			}
-			w.mu.Lock()
-			w.procs[claudePID].alive = true
-			w.mu.Unlock()
+			w.setAlive(claudePID, true)
 			act(t, w, app)
 			if got := w.lastAvailability(); len(got) != 0 {
 				t.Fatalf("availability after the session was reached: %+v", got)
@@ -506,7 +493,7 @@ func TestAReachableSessionIsNotReportedUnavailableAnyLonger(t *testing.T) {
 
 func TestAnInboxThatCannotBeConnectedRefusesThePrompt(t *testing.T) {
 	w, app := attachedWorld(t)
-	w.inboxErr = fmt.Errorf("%w: connection refused", ErrInboxUnreachable)
+	w.setInboxErr(fmt.Errorf("%w: connection refused", ErrInboxUnreachable))
 	r, err := deliver(app, attempt1, "x")
 	if err != nil || r.Stage != adapterproto.PromptRefused || r.Reason != adapterproto.RefusalNativeUnavailable {
 		t.Fatalf("%+v, %v", r, err)
@@ -515,7 +502,7 @@ func TestAnInboxThatCannotBeConnectedRefusesThePrompt(t *testing.T) {
 		t.Fatalf("availability %+v", got)
 	}
 	// The refused attempt left nothing expected: the same attempt may be tried again.
-	w.inboxErr = nil
+	w.setInboxErr(nil)
 	if r, err := deliver(app, attempt1, "x"); err != nil || r.Stage != adapterproto.PromptAccepted {
 		t.Fatalf("retry: %+v, %v", r, err)
 	}
@@ -526,12 +513,12 @@ func TestAnInboxThatCannotBeConnectedRefusesThePrompt(t *testing.T) {
 
 func TestAWriteThatFailedAfterTheConnectionIsAnUnknownOutcome(t *testing.T) {
 	w, app := attachedWorld(t)
-	w.inboxErr = errors.New("broken pipe")
+	w.setInboxErr(errors.New("broken pipe"))
 	if r, err := deliver(app, attempt1, "x"); err == nil {
 		t.Fatalf("the outcome of a write that may have arrived is not a refusal: %+v", r)
 	}
 	// If it arrived, the record settles the attempt all the same.
-	w.inboxErr = nil
+	w.setInboxErr(nil)
 	w.appendRecord(transcript(claudeSess), peerRecord(claudeSess, attempt1))
 	w.waitNotes("persisted "+attempt1, "started "+attempt1+" attempt="+attempt1)
 }
@@ -548,10 +535,7 @@ func TestAnAttachedEndpointIsNotClosedOrInterrupted(t *testing.T) {
 	if !isCode(err, adapterproto.CodeWrongEndpointKind) {
 		t.Fatalf("interrupt: %v", err)
 	}
-	w.mu.Lock()
-	signals := len(w.signals)
-	w.mu.Unlock()
-	if signals != 0 || !w.procs[claudePID].alive || len(w.inboxWrites()) != 0 {
+	if signals := len(w.signalled()); signals != 0 || !w.isAlive(claudePID) || len(w.inboxWrites()) != 0 {
 		t.Fatal("the person's session was touched")
 	}
 	// An endpoint nobody holds is still unknown to interrupt.
@@ -590,7 +574,7 @@ func TestADroppedEndpointGetsNoConditionBack(t *testing.T) {
 			w, app := attachedWorld(t)
 			s := app.attachedSession(ep) // what a delivery that began before the drop holds
 			drop(app)
-			w.inboxErr = fmt.Errorf("%w: refused", ErrInboxUnreachable)
+			w.setInboxErr(fmt.Errorf("%w: refused", ErrInboxUnreachable))
 			if r, err := app.deliverAttached(context.Background(), s, adapterproto.PromptDeliverParams{Endpoint: ep, Attempt: attempt1, Text: "x"}); err != nil || r.Stage != adapterproto.PromptRefused {
 				t.Fatalf("%+v, %v", r, err)
 			}
@@ -630,7 +614,7 @@ func TestPromptsNeverSeenAreForgottenWithTheMemoryOfThem(t *testing.T) {
 
 func TestDetachingClearsTheUnavailability(t *testing.T) {
 	w, app := attachedWorld(t)
-	w.inboxErr = fmt.Errorf("%w: refused", ErrInboxUnreachable)
+	w.setInboxErr(fmt.Errorf("%w: refused", ErrInboxUnreachable))
 	_, _ = deliver(app, attempt1, "x")
 	if len(w.lastAvailability()) != 1 {
 		t.Fatal("not reported")
@@ -665,7 +649,7 @@ func TestAnAttachedSessionIsTakenBackAtStart(t *testing.T) {
 		{"the session has ended", func(w *world) { w.killClaude(claudePID) }, attachedEntry(nil, cp), adapterproto.AttachLost, false, false},
 		{"its registry entry is gone", func(w *world) { w.removeRegistry() }, attachedEntry(fullWake(), nil), adapterproto.AttachLost, false, false},
 		{"nothing names its process", func(w *world) {}, attachedEntry(nil, nil), adapterproto.AttachUnreachable, false, false},
-		{"the process table cannot be read", func(w *world) { w.lookupErr = errors.New("sysctl failed") }, attachedEntry(fullWake(), nil), adapterproto.AttachUnreachable, false, false},
+		{"the process table cannot be read", func(w *world) { w.setLookupErr(errors.New("sysctl failed")) }, attachedEntry(fullWake(), nil), adapterproto.AttachUnreachable, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -772,11 +756,11 @@ func TestTheWakeNeverReachesTheLog(t *testing.T) {
 	ctx := context.Background()
 	_, _ = app.AttachSession(ctx, adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: fullWake()})
 	_, _ = deliver(app, attempt1, "a prompt text that is not logged either")
-	w.inboxErr = fmt.Errorf("%w: connection refused", ErrInboxUnreachable)
+	w.setInboxErr(fmt.Errorf("%w: connection refused", ErrInboxUnreachable))
 	_, _ = deliver(app, attempt2, "x")
-	w.inboxErr = errors.New("broken pipe")
+	w.setInboxErr(errors.New("broken pipe"))
 	_, _ = deliver(app, "55555555-5555-4555-8555-555555555555", "x")
-	w.inboxErr = nil
+	w.setInboxErr(nil)
 	w.setRegistry(claudeSess, "idle", 1000, map[string]any{"procStart": "Mon Nov  2 01:00:00 2026"}) // a pid reuse is logged
 	_, _ = deliver(app, "66666666-6666-4666-8666-666666666666", "x")
 	w.setRegistry(claudeSess, "idle", 1000, map[string]any{"status": nil})
@@ -793,9 +777,7 @@ func TestTheWakeNeverReachesTheLog(t *testing.T) {
 		}
 	}
 	// Neither the token nor the socket is written to the daemon as a checkpoint.
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for key, cp := range w.checkpts {
+	for key, cp := range w.checkpoints() {
 		if strings.Contains(string(cp), inboxToken) || strings.Contains(string(cp), inboxSock) {
 			t.Fatalf("checkpoint %s holds the wake: %s", key, cp)
 		}
@@ -810,7 +792,7 @@ func TestAvailabilityKeepsTheConditionsOfTheProbe(t *testing.T) {
 	app.sidera = ""
 	app.mu.Unlock()
 	app.setProbe(context.Background(), []adapterproto.Availability{{Condition: adapterproto.ConditionDependencyMissing, Detail: "sidera was not found"}})
-	w.inboxErr = fmt.Errorf("%w: refused", ErrInboxUnreachable)
+	w.setInboxErr(fmt.Errorf("%w: refused", ErrInboxUnreachable))
 	_, _ = deliver(app, attempt1, "x")
 	got := w.lastAvailability()
 	if len(got) != 2 || got[0].Condition != adapterproto.ConditionDependencyMissing || got[1].Condition != adapterproto.ConditionNativeUnavailable {
@@ -825,7 +807,7 @@ func TestAvailabilityKeepsTheConditionsOfTheProbe(t *testing.T) {
 // A session the daemon no longer lists has been closed, and its notice may have been missed.
 func TestStartDropsAttachedSessionsItNoLongerLists(t *testing.T) {
 	w, app := attachedWorld(t)
-	w.inboxErr = fmt.Errorf("%w: refused", ErrInboxUnreachable)
+	w.setInboxErr(fmt.Errorf("%w: refused", ErrInboxUnreachable))
 	_, _ = deliver(app, attempt1, "x")
 	startApp(t, app)
 	if app.attachedSession(ep) != nil {

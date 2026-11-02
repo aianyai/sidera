@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -82,6 +83,132 @@ func (w *world) inboxWrites() []inboxWrite {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return slices.Clone(w.inbox)
+}
+
+// The accessors below are the only way a test reads or changes what the world
+// holds while the adapter's goroutines run: every field behind w.mu is touched
+// under it, so a monitor that writes a checkpoint never races a test that reads it.
+
+// locked runs f with the world locked, for a change of several fields that a
+// reader must see together or not at all.
+func (w *world) locked(f func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	f()
+}
+
+// setInboxErr sets the error the next writes to an inbox socket return.
+func (w *world) setInboxErr(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.inboxErr = err
+}
+
+// setLookupErr sets the error a process lookup returns.
+func (w *world) setLookupErr(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lookupErr = err
+}
+
+// setUnidentified sets whether Start reports the process it started as one whose
+// identity cannot be read.
+func (w *world) setUnidentified(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.unidentified = v
+}
+
+// setLoggedIn sets whether the Claude program reports a logged-in account.
+func (w *world) setLoggedIn(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.loggedIn = v
+}
+
+// file is a copy of the content of a file, nil when there is none.
+func (w *world) file(path string) []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.files[path])
+}
+
+// setFile replaces the content of a file.
+func (w *world) setFile(path string, data []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.files[path] = slices.Clone(data)
+}
+
+// removeFile deletes a file.
+func (w *world) removeFile(path string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.files, path)
+}
+
+// checkpoint is the state stored for "scope/id", and whether any was.
+func (w *world) checkpoint(key string) (json.RawMessage, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	state, ok := w.checkpts[key]
+	return slices.Clone(state), ok
+}
+
+// checkpoints is a copy of every state stored, by "scope/id".
+func (w *world) checkpoints() map[string]json.RawMessage {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return maps.Clone(w.checkpts)
+}
+
+// putKeys lists the checkpoint puts, as "scope/id", in order.
+func (w *world) putKeys() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.puts)
+}
+
+// orderList lists the checkpoint puts and the events in the order they happened.
+func (w *world) orderList() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.order)
+}
+
+// launched lists the launches, in order.
+func (w *world) launched() []proc.Launch {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.launches)
+}
+
+// signalled lists the processes that were interrupted, in order.
+func (w *world) signalled() []int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.signals)
+}
+
+// procByPID is the process with the pid, nil when there is none.
+func (w *world) procByPID(pid int) *fakeProc {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.procs[pid]
+}
+
+// isAlive reports whether the process with the pid runs.
+func (w *world) isAlive(pid int) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.procs[pid].alive
+}
+
+// setAlive sets whether the process with the pid runs.
+func (w *world) setAlive(pid int, alive bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.procs[pid].alive = alive
 }
 
 type fakeProc struct {

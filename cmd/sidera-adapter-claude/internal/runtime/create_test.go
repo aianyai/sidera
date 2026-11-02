@@ -32,16 +32,14 @@ func mustValid(t *testing.T, m adapterproto.Message) {
 func TestCreateWithAStartedProcessThatCannotBeIdentifiedIsRetriedWithoutASecondStart(t *testing.T) {
 	w := newWorld(t)
 	w.onLaunch = claudeWrites(5 * time.Millisecond)
-	w.unidentified = true
+	w.setUnidentified(true)
 	app, _ := newApp(t, w)
 
 	res, err := app.CreateSession(ctxT(t), createParams(attempt1, prompt1))
 	if err == nil || res.Outcome == adapterproto.CreateFailed {
 		t.Fatalf("result %+v, err %v: want an error and no failure", res, err)
 	}
-	w.mu.Lock()
-	w.unidentified = false
-	w.mu.Unlock()
+	w.setUnidentified(false)
 	res, err = app.CreateSession(ctxT(t), createParams(attempt1, prompt1))
 	if err != nil || res.Outcome != adapterproto.CreateCreated {
 		t.Fatalf("retry: %+v %v", res, err)
@@ -69,7 +67,7 @@ func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	if w.launchCount() != 1 {
 		t.Fatalf("%d processes started", w.launchCount())
 	}
-	l := w.launches[0]
+	l := w.launched()[0]
 	session := string(res.NativeRef)
 	if sessionOf(l) != session || !slices.Contains(l.Argv, "--session-id") || slices.Contains(l.Argv, "--resume") {
 		t.Fatalf("a new session is started with --session-id: %q", l.Argv)
@@ -81,7 +79,7 @@ func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	if !slices.Contains(l.Argv, "Read(/"+toolHome+"/**)") || !slices.Contains(l.Argv, "Edit(/"+toolHome+"/**)") {
 		t.Fatalf("the data directory is not denied: %q", l.Argv)
 	}
-	if in := string(w.files[l.Stdin]); !strings.Contains(in, `"uuid":"`+prompt1+`"`) || !strings.Contains(in, "hello") {
+	if in := string(w.file(l.Stdin)); !strings.Contains(in, `"uuid":"`+prompt1+`"`) || !strings.Contains(in, "hello") {
 		t.Fatalf("the prompt on standard input: %s", in)
 	}
 	if filepath.Dir(l.Stdin) != filepath.Join(stateDir, "turns", session) {
@@ -100,7 +98,7 @@ func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	// The turn starts when the prompt is in the record, after the session's own
 	// checkpoint was stored; the process ending ends the turn.
 	w.waitEvents("started " + prompt1)
-	order := strings.Join(w.order, "|")
+	order := strings.Join(w.orderList(), "|")
 	if strings.Index(order, "put session/session-1") > strings.Index(order, "started "+prompt1) || !strings.Contains(order, "put session/session-1") {
 		t.Fatalf("the session checkpoint comes before the first turn.started: %s", order)
 	}
@@ -108,7 +106,7 @@ func TestCreateAStartedSessionAndReportItsTurn(t *testing.T) {
 	w.waitEvents("started "+prompt1, "ended "+prompt1+" completed")
 
 	// The attempt's checkpoint says ready and holds no token.
-	raw := w.checkpts["attempt/"+attempt1]
+	raw, _ := w.checkpoint("attempt/" + attempt1)
 	var cp attemptCheckpoint
 	if err := json.Unmarshal(raw, &cp); err != nil {
 		t.Fatal(err)
@@ -147,12 +145,12 @@ func TestCreateAfterACrashBetweenStartingAndRecording(t *testing.T) {
 			if _, err := app1.CreateSession(ctxT(t), createParams(attempt1, prompt1)); err == nil {
 				t.Fatal("the creation should have failed with the put")
 			}
-			intent := w.checkpts["attempt/"+attempt1]
+			intent, _ := w.checkpoint("attempt/" + attempt1)
 			if intent == nil || w.launchCount() != 1 || w.aliveCount() != 1 {
 				t.Fatalf("intent %s, %d launches, %d alive", intent, w.launchCount(), w.aliveCount())
 			}
 			w.failPutIf = nil
-			session := sessionOf(w.launches[0])
+			session := sessionOf(w.launched()[0])
 			if processEnded {
 				w.waitRecord(session, prompt1)
 				w.exit(w.lastProc(), resultOK)
@@ -198,7 +196,7 @@ func TestCreateFailsBeforeAnythingIsStarted(t *testing.T) {
 		{"an unknown preset", func(_ *world, p *adapterproto.SessionCreateParams) { p.Preset = "nope" }, adapterproto.CreateFailPresetUnknown},
 		{"a working directory that does not exist", func(_ *world, p *adapterproto.SessionCreateParams) { p.Preset = "gone" }, adapterproto.CreateFailPresetInvalid},
 		{"a permission mode the runtime does not know", func(_ *world, p *adapterproto.SessionCreateParams) { p.Preset = "bad" }, adapterproto.CreateFailPresetInvalid},
-		{"not logged in", func(w *world, _ *adapterproto.SessionCreateParams) { w.loggedIn = false }, adapterproto.CreateFailRuntimeAuth},
+		{"not logged in", func(w *world, _ *adapterproto.SessionCreateParams) { w.setLoggedIn(false) }, adapterproto.CreateFailRuntimeAuth},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -211,8 +209,8 @@ func TestCreateFailsBeforeAnythingIsStarted(t *testing.T) {
 				t.Fatal(err)
 			}
 			mustValid(t, res)
-			if res.Outcome != adapterproto.CreateFailed || res.Reason != tc.want || w.launchCount() != 0 || len(w.puts) != 0 {
-				t.Fatalf("result %+v, %d launches, puts %v", res, w.launchCount(), w.puts)
+			if res.Outcome != adapterproto.CreateFailed || res.Reason != tc.want || w.launchCount() != 0 || len(w.putKeys()) != 0 {
+				t.Fatalf("result %+v, %d launches, puts %v", res, w.launchCount(), w.putKeys())
 			}
 		})
 	}
