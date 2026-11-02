@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.attach",
+  "note": "a reason only with a failure",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "attached",
+      "reason": "native_error"
+    }
+  }
+}

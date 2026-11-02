@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 93,
+  "result": {
+    "outcome": "not_found",
+    "detail": "no session with this identifier in the runtime's record"
+  }
+}

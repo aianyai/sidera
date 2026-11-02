@@ -1,0 +1,26 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.start",
+  "note": "a wake is never an empty object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.start",
+    "params": {
+      "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "config": {},
+      "presets": [],
+      "sessions": [
+        {
+          "endpoint": "22222222222222222222222222222222",
+          "native_ref": "sess_1",
+          "turn_active": false,
+          "attached": true,
+          "wake": {}
+        }
+      ],
+      "direct_endpoints": []
+    }
+  }
+}

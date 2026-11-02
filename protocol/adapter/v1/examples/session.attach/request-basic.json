@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 90,
+  "method": "session.attach",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "native_ref": "sess_01HZZ1"
+  }
+}

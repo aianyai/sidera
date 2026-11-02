@@ -16,6 +16,7 @@
         { "x-direction": "daemon_to_adapter", "x-result": "adapter.start.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.start" }, "params": { "$ref": "#/$defs/adapter.start.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "adapter.probe.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.probe" }, "params": { "$ref": "#/$defs/adapter.probe.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "session.create.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.create" }, "params": { "$ref": "#/$defs/session.create.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.attach.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.attach" }, "params": { "$ref": "#/$defs/session.attach.params" } } },
         { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "checkpoint.put" }, "params": { "$ref": "#/$defs/checkpoint.put.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "prompt.deliver.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "prompt.deliver" }, "params": { "$ref": "#/$defs/prompt.deliver.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "session.interrupt.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.interrupt" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
@@ -38,7 +39,8 @@
         { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "turn.started" }, "params": { "$ref": "#/$defs/turn.started.params" } } },
         { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "turn.ended" }, "params": { "$ref": "#/$defs/turn.ended.params" } } },
         { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "native_request.handled" }, "params": { "$ref": "#/$defs/native_request.handled.params" } } },
-        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "endpoint.pending" }, "params": { "$ref": "#/$defs/endpoint.pending.params" } } }
+        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "endpoint.pending" }, "params": { "$ref": "#/$defs/endpoint.pending.params" } } },
+        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "session.detached" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } }
       ]
     },
 
@@ -114,17 +116,23 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["endpoint", "preset", "native_ref", "turn_active", "tool_access"],
+            "description": "A session the adapter created has a preset and tool access. An attached session, one a person opened and asked to be attached, is marked attached and has neither; it may carry the wake the daemon knows.",
+            "required": ["endpoint", "native_ref", "turn_active"],
             "additionalProperties": false,
             "properties": {
               "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+              "attached": { "const": true, "description": "Sent as true or left out." },
               "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
               "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" },
               "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" },
               "turn_active": { "type": "boolean" },
               "tool_access": { "$ref": "types.schema.json#/$defs/ToolAccess" },
+              "wake": { "$ref": "types.schema.json#/$defs/WakeInfo" },
               "checkpoint": { "$ref": "types.schema.json#/$defs/State" }
-            }
+            },
+            "if": { "required": ["attached"] },
+            "then": { "properties": { "preset": false, "tool_access": false } },
+            "else": { "required": ["preset", "tool_access"], "properties": { "wake": false } }
           }
         },
         "direct_endpoints": {
@@ -324,6 +332,32 @@
           },
           "required": ["grounds"]
         }
+      ]
+    },
+
+    "session.attach.params": {
+      "type": "object",
+      "required": ["endpoint", "native_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" },
+        "wake": { "$ref": "types.schema.json#/$defs/WakeInfo" }
+      }
+    },
+    "session.attach.result": {
+      "description": "attached: the adapter holds the session and can deliver prompts; not_found: the runtime has no such session; failed: the reason says why.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "$ref": "types.schema.json#/$defs/SessionAttachOutcome" },
+        "reason": { "$ref": "types.schema.json#/$defs/SessionAttachFailure" },
+        "detail": { "$ref": "types.schema.json#/$defs/Detail" }
+      },
+      "oneOf": [
+        { "properties": { "outcome": { "const": "failed" } }, "required": ["reason"] },
+        { "properties": { "outcome": { "enum": ["attached", "not_found"] }, "reason": false } }
       ]
     },
 

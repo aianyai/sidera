@@ -381,7 +381,7 @@ func TestStartTakesSessionsBack(t *testing.T) {
 	attach := func(endpoint string, cp json.RawMessage) adapterproto.SessionAttach {
 		return adapterproto.SessionAttach{
 			Endpoint: adapterproto.EndpointRef(endpoint), Preset: "dev", NativeRef: session, Checkpoint: cp,
-			ToolAccess: adapterproto.ToolAccess{Env: map[string]string{}},
+			ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}},
 		}
 	}
 

@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "method": "session.detached",
+  "params": {
+    "endpoint": "22222222222222222222222222222222"
+  }
+}

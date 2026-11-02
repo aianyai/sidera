@@ -126,6 +126,8 @@
     "ProbeMethod": { "type": "string", "enum": ["sandboxed", "unsandboxed", "native_turn"] },
     "AvailabilityCondition": { "type": "string", "enum": ["runtime_auth", "native_unavailable", "dependency_missing"] },
     "AttachState": { "type": "string", "enum": ["attached", "unreachable", "lost"] },
+    "SessionAttachOutcome": { "type": "string", "enum": ["attached", "not_found", "failed"] },
+    "SessionAttachFailure": { "type": "string", "enum": ["wake_unavailable", "native_unreachable", "native_error"] },
     "CreateOutcome": { "type": "string", "enum": ["created", "failed", "indeterminate"] },
     "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error", "control_unknown"] },
     "CheckpointScope": { "type": "string", "enum": ["attempt", "session"] },
@@ -195,6 +197,14 @@
       "additionalProperties": false,
       "properties": { "env": { "$ref": "#/$defs/Env" } }
     },
+    "WakeInfo": {
+      "description": "What an adapter needs to deliver a prompt to a session a person runs. The names and values are the adapter's own; the daemon passes them through unchanged and keeps them in memory only. Never an empty object: leave the member out instead.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": { "$ref": "#/$defs/EnvName" },
+      "additionalProperties": { "type": "string", "maxLength": 4096 }
+    },
     "Capabilities": {
       "description": "What an adapter declares it supports. An absent runtime or direct part means the adapter provides no such endpoints. This object, runtime and direct are open: a member this version of the protocol does not define is ignored by the reader, so a newer adapter can declare a new capability to an older daemon, which then does not use it. Nothing else in the protocol is open. Members that are defined are checked as usual.",
       "type": "object",
@@ -206,7 +216,8 @@
             "interrupt": { "type": "boolean" },
             "ack_on_behalf": { "type": "boolean" },
             "server_requests": { "type": "boolean" },
-            "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/Frontend" } }
+            "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/Frontend" } },
+            "attach": { "type": "boolean", "description": "The adapter implements attached sessions: session.attach, the attached entries of adapter.start, session.detached, and their prompt and turn semantics. Optional; absent means false." }
           }
         },
         "direct": {

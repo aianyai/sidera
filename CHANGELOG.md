@@ -8,6 +8,20 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **Adapter protocol: attached sessions.** An adapter can declare the runtime capability
+  `attach` and take hold of a session a person opened: the new request `session.attach`, the
+  notification `session.detached` and the `attached` and `wake` members of an `adapter.start`
+  session entry. The daemon sends none of them to an adapter that did not declare it.
+
+### Changed
+
+- **Go SDK: attached sessions change three shapes.** `adapterproto.SessionAttach.ToolAccess`
+  is now a `*ToolAccess` and is absent for an attached entry, and `Preset` may be empty for
+  one. `adapterkit.Application` gained `AttachSession` and `SessionDetached`; an application
+  that embeds `adapterkit.Base` keeps compiling.
+
 ## [0.8.0] - 2026-11-02
 
 The first public release. Sidera is a daemon through which AI agents, on one

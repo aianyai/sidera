@@ -162,8 +162,12 @@ func TestConfigValuesRules(t *testing.T) {
 
 func TestStartParamsRules(t *testing.T) {
 	session := func() adapterproto.SessionAttach {
-		return adapterproto.SessionAttach{Endpoint: ep1, Preset: "default", NativeRef: "sess_1", Process: proc(), TurnActive: true, ToolAccess: toolAccess(),
+		return adapterproto.SessionAttach{Endpoint: ep1, Preset: "default", NativeRef: "sess_1", Process: proc(), TurnActive: true, ToolAccess: ptr(toolAccess()),
 			Checkpoint: raw(`{"phase":"ready"}`)}
+	}
+	attached := func(p *adapterproto.StartParams) {
+		s := &p.Sessions[0]
+		s.Attached, s.Preset, s.ToolAccess = true, "", nil
 	}
 	method(t, func() adapterproto.StartParams {
 		return adapterproto.StartParams{Node: "node-a", RuntimeEndpoint: epRT, Config: adapterproto.ConfigValues{},
@@ -193,6 +197,22 @@ func TestStartParamsRules(t *testing.T) {
 		{"session process optional", func(p *adapterproto.StartParams) { p.Sessions[0].Process = nil }, "", false},
 		{"session process validated", func(p *adapterproto.StartParams) { p.Sessions[0].Process.PID = 0 }, "sessions[0].process.pid", false},
 		{"session tool access validated", func(p *adapterproto.StartParams) { p.Sessions[0].ToolAccess.Env = nil }, "sessions[0].tool_access", false},
+		{"session tool access required", func(p *adapterproto.StartParams) { p.Sessions[0].ToolAccess = nil }, "sessions[0].tool_access", false},
+		{"session preset required", func(p *adapterproto.StartParams) { p.Sessions[0].Preset = "" }, "sessions[0].preset", false},
+		{"session wake only for an attached session", func(p *adapterproto.StartParams) { p.Sessions[0].Wake = adapterproto.WakeInfo{"K": "v"} }, "sessions[0].wake", false},
+		{"session with an empty wake, which is not sent", func(p *adapterproto.StartParams) { p.Sessions[0].Wake = adapterproto.WakeInfo{} }, "", false},
+		{"attached session", attached, "", false},
+		{"attached session with a wake", func(p *adapterproto.StartParams) {
+			attached(p)
+			p.Sessions[0].Wake = adapterproto.WakeInfo{"CLAUDE_PID": "4821"}
+		}, "", false},
+		{"attached session with a preset", func(p *adapterproto.StartParams) { attached(p); p.Sessions[0].Preset = "default" }, "sessions[0].preset", false},
+		{"attached session with tool access", func(p *adapterproto.StartParams) { attached(p); p.Sessions[0].ToolAccess = ptr(toolAccess()) }, "sessions[0].tool_access", false},
+		{"attached session wake validated", func(p *adapterproto.StartParams) {
+			attached(p)
+			p.Sessions[0].Wake = adapterproto.WakeInfo{"bad-name": "v"}
+		}, "sessions[0].wake", false},
+		{"attached session native ref required", func(p *adapterproto.StartParams) { attached(p); p.Sessions[0].NativeRef = "" }, "sessions[0].native_ref", false},
 		{"session checkpoint optional", func(p *adapterproto.StartParams) { p.Sessions[0].Checkpoint = nil }, "", false},
 		{"session checkpoint is an object", func(p *adapterproto.StartParams) { p.Sessions[0].Checkpoint = raw(`[]`) }, "sessions[0].checkpoint", false},
 		{"session checkpoint null", func(p *adapterproto.StartParams) { p.Sessions[0].Checkpoint = raw(`null`) }, "sessions[0].checkpoint", false},

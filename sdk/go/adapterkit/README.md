@@ -16,8 +16,8 @@ file opened without sharing on Windows, through `syscall`.
 | ---- | ------- |
 | `Serve(ctx, r, w, Config)`, `ServeStdio(ctx, Config)` | Serve the protocol over a pair of streams, or over the standard input and output, until the daemon closes the stream (`nil`), `ctx` ends (its error) or the connection fails. The instance lock is released when it returns. |
 | `Config` | The identity and capabilities answered in `initialize`, the `Application`, and the limits and logger of the peer. They are checked before anything is served: an identity or a set of capabilities that would make `initialize` answer something invalid is refused. |
-| `Application` | What the adapter implements: `Initialize`, `Shutdown`, `Start`, `Probe`, the five runtime methods and `EndpointPending`. |
-| `Base` | Embed it to implement only the methods the adapter has: an empty start and probe, and `capability_not_declared` for the runtime methods. |
+| `Application` | What the adapter implements: `Initialize`, `Shutdown`, `Start`, `Probe`, the five runtime methods, `AttachSession`, `SessionDetached` and `EndpointPending`. |
+| `Base` | Embed it to implement only the methods the adapter has: an empty start and probe, and `capability_not_declared` for the runtime methods and `session.attach`, with `session.detached` ignored. |
 | `Conn` | What the adapter sends: `Call` and `Notify` for any method it may send, and typed helpers for each (`CheckpointPut`, `Register`, `Recv`, `Ack`, `Send`, `MessageStatus`, `RecvObserved`, `Availability`, `PromptPersisted`, `TurnStarted`, `TurnEnded`, `NativeRequestHandled`). |
 
 ## Rules
@@ -42,6 +42,11 @@ file opened without sharing on Windows, through `syscall`.
   `prompt.deliver`, `prompt.reconcile`, `session.interrupt` and `session.close` are
   answered `1003` without calling the application when `Config.Capabilities` has no
   runtime.
+- **The methods of attached sessions need `attach` declared.** `session.attach` is
+  answered `1003` without calling the application, `session.detached` is dropped, and
+  an `adapter.start` that lists an attached session is answered `1003`, unless the
+  runtime in `Config.Capabilities` declares `attach`. Nothing of attached sessions
+  reaches an application that did not declare it.
 - **Errors are the application's to choose.** A `*peer.Error` is answered as it is;
   any other error is `-32603` with a fixed message, as the peer does for every
   handler.

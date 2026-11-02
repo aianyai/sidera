@@ -142,6 +142,11 @@ type RuntimeCapabilities struct {
 	ServerRequests bool `json:"server_requests"`
 	// Frontends are the agent tool front ends a session can be set up with.
 	Frontends []Frontend `json:"frontends"`
+	// Attach: the adapter implements attached sessions: session.attach, the
+	// attached entries of adapter.start, session.detached, and their prompt and
+	// turn semantics. It is optional: an adapter that does not implement them
+	// leaves it out, and an explicit false is accepted.
+	Attach bool `json:"attach,omitempty"`
 }
 
 // UnmarshalJSON decodes the declaration strictly, except that members it has no
@@ -301,6 +306,12 @@ func validateEnv(env map[string]string) error {
 	if len(env) > maxEnvEntries {
 		return bad("%d entries, at most %d", len(env), maxEnvEntries)
 	}
+	return validateEnvEntries(env)
+}
+
+// validateEnvEntries checks the names and values of a map of environment
+// variables, the shape the tool access and the wake share.
+func validateEnvEntries(env map[string]string) error {
 	for k, v := range env {
 		if err := strLen(k, 1, 128); err != nil {
 			return at(k, err)
@@ -426,29 +437,52 @@ func (p PresetConfig) Validate() error {
 }
 
 // SessionAttach is a session the daemon asks the adapter to take back control of.
+//
+// A session the adapter created has a Preset and a ToolAccess. An attached
+// session, one a person opened and asked to be attached, is marked Attached and
+// has neither: the person's own tools got their token elsewhere. Wake is what
+// the daemon last learned for delivering prompts to an attached session, and is
+// absent when it knows none.
 type SessionAttach struct {
-	Endpoint  EndpointRef `json:"endpoint"`
-	Preset    string      `json:"preset"`
-	NativeRef NativeRef   `json:"native_ref"`
+	Endpoint EndpointRef `json:"endpoint"`
+	// Attached is only ever sent as true.
+	Attached  TrueOnly  `json:"attached,omitempty"`
+	Preset    string    `json:"preset,omitempty"`
+	NativeRef NativeRef `json:"native_ref"`
 	// Process is the native process as last reported.
 	Process *ProcessIdentity `json:"process,omitempty"`
 	// TurnActive is whether the daemon last heard that a turn was running.
-	TurnActive bool       `json:"turn_active"`
-	ToolAccess ToolAccess `json:"tool_access"`
+	TurnActive bool        `json:"turn_active"`
+	ToolAccess *ToolAccess `json:"tool_access,omitempty"`
+	Wake       WakeInfo    `json:"wake,omitempty"`
 	// Checkpoint is the session's stored state.
 	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
 }
 
-// Validate checks the entry.
+// Validate checks the entry: an attached session has no preset and no tool
+// access, any other has both and no wake.
 func (s SessionAttach) Validate() error {
 	var c checker
 	c.field("endpoint", s.Endpoint.Validate())
-	c.field("preset", ValidatePresetName(s.Preset))
 	c.field("native_ref", s.NativeRef.Validate())
+	if s.Attached {
+		c.ok(s.Preset == "", "preset: an attached session has none")
+		c.ok(s.ToolAccess == nil, "tool_access: an attached session has none")
+		if s.Wake != nil {
+			c.field("wake", s.Wake.Validate())
+		}
+	} else {
+		c.field("preset", ValidatePresetName(s.Preset))
+		if s.ToolAccess == nil {
+			c.ok(false, "tool_access: required for a session that is not attached")
+		} else {
+			c.field("tool_access", s.ToolAccess.Validate())
+		}
+		c.ok(len(s.Wake) == 0, "wake: only an attached session has one")
+	}
 	if s.Process != nil {
 		c.field("process", s.Process.Validate())
 	}
-	c.field("tool_access", s.ToolAccess.Validate())
 	if s.Checkpoint != nil {
 		c.field("checkpoint", validCheckpoint(s.Checkpoint))
 	}

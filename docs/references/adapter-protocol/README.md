@@ -356,10 +356,12 @@ only says the request was not understood or not allowed.
 | `ping` | both | request | none | none |
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | none | none |
-| `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions`, `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
+| `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions` (an entry of an attached session has `attached`, `wake?` and no `preset` or `tool_access`), `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
 | `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets`, `tool_probes` |
 | `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
 | `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created (with `first_turn_ended?`), failed or indeterminate, with the fields each needs |
+| `session.attach` | D to A | request | `endpoint`, `native_ref`, `wake?` | `outcome` attached, not_found or failed, `reason` with a failure, `detail?` |
+| `session.detached` | D to A | notification | `endpoint` | |
 | `checkpoint.put` | A to D | request | `scope` (attempt or session), `id`, `state` (object, at most 16 KiB compact) | none; answered once the state is durable |
 | `prompt.deliver` | D to A | request | `endpoint`, `attempt`, `text` | `stage` accepted, persisted or refused, `reason` with a refusal |
 | `prompt.persisted` | A to D | notification | `endpoint`, `attempt` | |
@@ -472,7 +474,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Four
+reader of an earlier shape is deployed that the change could break. Five
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -487,7 +489,14 @@ have sent to a new version:
   table (`ErrorObject.Validate`) refuses it;
 - the control creation failure reason `node_endpoint_limit` (10). A reader that
   predates it refuses a control reply that carries the reason, in JSON or a signed
-  record, because the reason set stays closed.
+  record, because the reason set stays closed;
+- attached sessions, behind the runtime capability `attach`: the request `session.attach`, the
+  notification `session.detached`, and the members `attached` and `wake` of an `adapter.start`
+  session entry, which make `preset` and `tool_access` absent for such an entry. The capability
+  alone would need no new version, but the new members of the session entry and the new
+  methods would. The daemon sends none of them to an adapter that did not declare `attach`, and
+  an older daemon never sees a declaration it would act on, so no deployed reader meets them; the
+  record is kept because rule 3 would otherwise have sent them to a new version.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -531,10 +540,13 @@ parameters are read.
 
 **The adapter kit.** `sdk/go/adapterkit` serves these rules for an adapter written in Go:
 version negotiation, the lock before the answer (`1011` when it is held), the two gates
-above, strict decoding of every request, validation of every result before it is sent,
-and typed calls and notifications to the daemon. The adapter implements the methods that
-remain as an `adapterkit.Application`. An adapter in another language implements the same
-rules from this reference.
+above, the capability gate of the methods that need one (a runtime, and `attach` for
+`session.attach`, `session.detached` and an `adapter.start` that lists an attached session;
+a request without it is answered `1003`, a notification is dropped), strict decoding of
+every request, validation of every result before it is sent, and typed calls and
+notifications to the daemon. The adapter implements the methods that remain as an
+`adapterkit.Application`. An adapter in another language implements the same rules from
+this reference.
 
 **Prompt delivery.** The daemon records the attempt as dispatching before it
 sends `prompt.deliver`. The adapter delivers `text` unchanged (it may append one
@@ -638,19 +650,66 @@ adapter stops, nor when the owner removes the instance from the configuration, b
 process the adapter started (a detached server, a turn) may outlive the adapter and still use it. It is a path the adapter is given, not a place it chooses, because the layout of
 the data directory is the daemon's.
 
+**Attached sessions.** A session endpoint comes from one of two origins: it is created by
+`session.create`, or it is attached, at the request of a session that a person opened and
+that asked to be attached, through the local owner's management interface. The runtime
+declaration says whether the adapter implements them: `attach`. For an attached session the
+daemon sends `session.attach` with the endpoint, the native session and, when it has one, a
+`wake`, and lists the session in every later `adapter.start` with `attached` and, when known,
+`wake`. A `wake` is what the adapter needs to deliver a prompt to a session someone else runs: a
+map of at most 16 names (environment-variable names) to values of at most 4096 characters, and
+never an empty object. Its names and values are the adapter's own and are defined in the
+adapter's reference; the daemon passes them through unchanged, holds them in memory only, and
+never writes them down or logs them, and an adapter must not log the values either. After a
+restart of the daemon an entry may therefore come without a `wake`; the owner side supplies it
+again by repeating the attachment, which the daemon forwards as another `session.attach`. A
+repeated `session.attach` for the endpoint replaces the wake the adapter holds, and none sent
+means none held.
+
+`session.attach` answers `attached` (the adapter holds the session and can deliver prompts to
+it), `not_found` (the runtime has no such session) or `failed` with a reason:
+`wake_unavailable` (the session exists but prompts cannot be delivered to it: the runtime is
+too old, or the wake is missing or refused), `native_unreachable` (the adapter cannot tell now)
+or `native_error`. A `detail` may come with any outcome. The kit answers `1003` to a call
+without `attach` declared, and the daemon never makes one.
+
+An attached session differs from a created one in what the daemon asks of the adapter:
+
+- `prompt.deliver` and `prompt.reconcile` have the same parameters and results. The adapter
+  delivers through the runtime's own entry for a session someone else runs. While the native
+  session is not there it refuses with `native_unavailable` and reports that availability
+  condition for the endpoint, so the rules for a blocked delivery apply; the endpoint stays
+  open.
+- A turn the person starts is reported with `turn.started` and `turn.ended` without an
+  `attempt`; a turn a prompt started names the attempt.
+- `session.close` and `session.interrupt` are never sent: the session is the person's, and the
+  daemon refuses those control signals itself. An adapter that receives either for an attached
+  endpoint answers `1002`.
+- Closing the endpoint owes no release of a native session. The daemon sends the notification
+  `session.detached` instead: the adapter stops watching the session and drops the wake, and the
+  person's session goes on. It is best effort like `endpoint.pending`, not recorded and not
+  repeated; an adapter that misses it stops at the next `adapter.start`, which no longer lists
+  the endpoint.
+- No tool access is sent: the session's own tools got their token over the owner's management
+  connection.
+- `recv.observed` for an attached session is refused with `1002`.
+
+The daemon sends `session.attach`, `session.detached` and the attached entries of `adapter.start`
+only to an adapter that declared `attach`.
+
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
-`adapter.start`, holds what the session's tools need to reach the daemon: the token of
-the session endpoint in `SIDERA_TOKEN` and the data directory in `SIDERA_HOME`. The adapter
-puts both into the environment of the agent. The token stays opaque: the adapter never
-parses it or acts on its content. The data directory is a path the adapter may use to keep
-the agent's runtime away from it, as the Claude and Codex adapters do (they deny it to the
-runtime's file tools and sandbox).
+`adapter.start` for sessions the adapter created, holds what the session's tools need to
+reach the daemon: the token of the session endpoint in `SIDERA_TOKEN` and the data
+directory in `SIDERA_HOME`. The adapter puts both into the environment of the agent. The
+token stays opaque: the adapter never parses it or acts on its content. The data directory
+is a path the adapter may use to keep the agent's runtime away from it, as the Claude and
+Codex adapters do (they deny it to the runtime's file tools and sandbox).
 
 **Acknowledging on the agent's behalf.** `recv.observed` carries the text of a
 `recv` tool result as the model received it, read from the runtime's durable
 record, with the lease the result names. The daemon decides whether that proves
 the model saw the page and, if so, settles every part of it; the adapter may only
-do this for session endpoints it owns. A refusal (`replaced`, `truncated`,
+do this for session endpoints it created. A refusal (`replaced`, `truncated`,
 `content_mismatch`, `unknown_lease`) leaves the page for an explicit
 acknowledgement.
 
@@ -830,7 +889,7 @@ is authoritative.
   `TestInitializeWithoutACommonVersionIsRefusedAndTakesNoLock`,
   `TestInitializeAnswersInstanceLockedWhileAnotherAdapterHoldsTheLock`,
   `TestAfterShutdownOnlyPingIsServed`, `TestRequestsAndAnswersAreHeldToTheProtocol`,
-  `TestAServedAdapterAnswersAndSends`.
+  `TestAttachMethodsNeedTheAttachCapability`, `TestAServedAdapterAnswersAndSends`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy. Nearly every
   input error names the path of the offending value, a wrong JSON type included, so a
@@ -856,7 +915,7 @@ is authoritative.
 An adapter declares what it supports in the result of `initialize`:
 
 ```json
-{"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"]},
+{"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"], "attach": true},
  "direct": {"max_endpoints": 50}}
 ```
 
@@ -868,9 +927,12 @@ empty; an adapter uses a daemon-side addition only when it finds it there.
 
 `runtime` and `direct` are each absent when the adapter provides no such
 endpoints. `frontends` lists the agent tool front ends a session can be set up
-with (at least one); `max_endpoints` is 1 to 1000. The three flags say that the
+with (at least one); `max_endpoints` is 1 to 1000. The first three flags say that the
 adapter implements `session.interrupt`, calls `recv.observed`, and receives
-requests from its native runtime that it must answer and report.
+requests from its native runtime that it must answer and report. The fourth, `attach`, is
+optional (absent means false, so an adapter that predates it still completes the handshake)
+and says that the adapter implements attached sessions: `session.attach`, the attached entries
+of `adapter.start`, `session.detached`, and their prompt and turn semantics.
 
 What an adapter declares is kept apart from what is currently usable. The
 declaration comes from `initialize` and the manifest and is recorded per
@@ -901,15 +963,15 @@ cannot be reached) is `failed`, never `not_run`.
 | Kind | Read by | Created by |
 | ---- | ------- | ---------- |
 | `runtime` | nobody; it takes no ordinary messages | the daemon, one per adapter that declares a runtime |
-| `session` | the native agent itself, with `recv`; the adapter only wakes it and may acknowledge for it | `session.create` only |
+| `session` | the native agent itself, with `recv`; the adapter only wakes it and may acknowledge for it (not for an attached session) | `session.create`, or attached at the session's own request (`session.attach`) |
 | `direct` | the adapter itself, as a chat bridge reads for a person | `endpoint.register`, up to `max_endpoints` |
 
 A session endpoint cannot exist without a runtime. "Direct" describes only who
 reads the messages: the channel does not distinguish a person from an agent on
 the other side.
 
-Control signals an endpoint accepts, which are written into the node's
-declaration of the endpoint: runtime: `session.create`, `endpoint.status`;
+Control signals an endpoint accepts, which the node's directory publishes for the
+endpoint (`accepts`) and by which the daemon answers a signal as unsupported: runtime: `session.create`, `endpoint.status`;
 session: `message.send` (delivered as a prompt), `session.close`,
 `endpoint.status`, and `session.interrupt` when the adapter declared interrupt;
 direct: `message.send`, `endpoint.status`. A signal that authorization allows but
@@ -925,10 +987,11 @@ capabilities: `session.interrupt` appears only after admission confirms it.
 Which methods apply to which kind (forbidden is refused with `1002`; a method
 that needs a capability the adapter did not declare is refused with `1003`). The
 table judges calls the adapter makes: a method only the daemon may call
-(`initialize`, `session.create`, `prompt.deliver`, `session.interrupt`, ...) is
+(`initialize`, `session.create`, `prompt.deliver`, `session.interrupt`, `session.attach`, ...) is
 `-32601` when the adapter calls it, as an unknown method is, before the kind or a
 capability is looked at. `session.interrupt` needs `interrupt` for the daemon to
-send it, which the signals an endpoint accepts (above) already state:
+send it, which the signals an endpoint accepts (above) already state, and
+`session.attach` and `session.detached` need `attach`, which `Admission.Attaches` states:
 
 | Method | runtime and session endpoints | direct endpoints |
 | ------ | ----------------------------- | ---------------- |
@@ -936,7 +999,8 @@ send it, which the signals an endpoint accepts (above) already state:
 | `session.create`, `prompt.deliver`, `prompt.reconcile`, `turn.started`, `turn.ended`, `session.close`, `prompt.persisted` | required | forbidden |
 | `checkpoint.put` | optional | optional |
 | `session.interrupt` | optional (`interrupt`) | forbidden |
-| `recv.observed` | optional (`ack_on_behalf`), session endpoints only | forbidden |
+| `session.attach`, `session.detached` | optional (`attach`) | forbidden |
+| `recv.observed` | optional (`ack_on_behalf`), session endpoints only; the daemon refuses it with `1002` for an attached session, judging per endpoint | forbidden |
 | `native_request.handled` | required when `server_requests` is declared | forbidden |
 | `endpoint.register`, `endpoint.recv`, `endpoint.ack`, `endpoint.send`, `endpoint.pending` | forbidden | required |
 | `endpoint.unregister`, `endpoint.message_status` | forbidden | optional |

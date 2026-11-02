@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 94,
+  "result": {
+    "outcome": "failed",
+    "reason": "wake_unavailable",
+    "detail": "the runtime is too old to take messages from outside"
+  }
+}

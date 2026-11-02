@@ -65,6 +65,11 @@ var requirements = map[string]rule{
 	adapterproto.MethodTurnStarted:     {Required, Required, Forbidden, gateNone},
 	adapterproto.MethodTurnEnded:       {Required, Required, Forbidden, gateNone},
 	adapterproto.MethodSessionClose:    {Required, Required, Forbidden, gateNone},
+	// The two methods of attached sessions are the daemon's calls, sent only to an
+	// adapter that declared attach (Attaches); an adapter's call of either is
+	// refused before any gate is read.
+	adapterproto.MethodSessionAttach:   {Optional, Optional, Forbidden, gateNone},
+	adapterproto.MethodSessionDetached: {Optional, Optional, Forbidden, gateNone},
 	// An adapter that ever answers prompt.deliver with accepted must send
 	// prompt.persisted afterwards (or leave it to reconciliation).
 	adapterproto.MethodPromptPersisted: {Required, Required, Forbidden, gateNone},
@@ -127,8 +132,9 @@ func MethodAllowed(k EndpointKind, method string) bool {
 //     or the capability the method needs (ack on behalf, server requests).
 //
 // Whether the daemon may send an adapter a method that needs a capability (an
-// interrupt) is not judged here, since the daemon is the caller then: it is
-// Signals and AcceptsSignal.
+// interrupt, an attach) is not judged here, since the daemon is the caller then:
+// for a control signal it is Signals and AcceptsSignal, for session.attach and
+// session.detached it is Attaches.
 func (a Admission) Check(k EndpointKind, method string) int {
 	r, ok := requirements[method]
 	if !ok {

@@ -1,0 +1,71 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "adapter.start",
+  "params": {
+    "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "runtime_endpoint": "11111111111111111111111111111111",
+    "config": {
+      "home": "/home/dev/.example",
+      "verbose": true,
+      "retries": 3,
+      "extra_args": [
+        "--quiet",
+        "--no-color"
+      ]
+    },
+    "presets": [
+      {
+        "name": "default",
+        "config": {
+          "project_dir": "/home/dev/projects/api",
+          "model": "standard"
+        }
+      },
+      {
+        "name": "review.readonly",
+        "config": {
+          "project_dir": "/home/dev/projects/api",
+          "model": "standard",
+          "read_only": true
+        }
+      }
+    ],
+    "sessions": [
+      {
+        "endpoint": "33333333333333333333333333333333",
+        "preset": "review.readonly",
+        "native_ref": "sess_01HZX9",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 51002,
+          "start_key": "darwin:1792713000.482113:boot-5",
+          "container": {
+            "kind": "launchd_job",
+            "name": "dev.sidera.session.33"
+          }
+        }
+      },
+      {
+        "endpoint": "55555555555555555555555555555555",
+        "attached": true,
+        "native_ref": "sess_01HZZ1",
+        "turn_active": false,
+        "wake": {
+          "EXAMPLE_SOCKET": "/run/user/1000/example/4821.sock",
+          "EXAMPLE_TOKEN": "w4k3-t0k3n-3x4mpl3",
+          "EXAMPLE_PID": "4821"
+        },
+        "checkpoint": {
+          "phase": "watching"
+        }
+      }
+    ],
+    "direct_endpoints": []
+  }
+}

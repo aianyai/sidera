@@ -207,6 +207,11 @@ func (a Admission) DeclaredKinds() []EndpointKind {
 	return out
 }
 
+// Attaches reports whether the adapter declared attached sessions: only then does
+// the daemon send it session.attach and session.detached, or list an attached
+// session in adapter.start.
+func (a Admission) Attaches() bool { return a.caps.Runtime != nil && a.caps.Runtime.Attach }
+
 // MaxDirectEndpoints is the most direct endpoints the adapter may register; zero
 // when it declared none.
 func (a Admission) MaxDirectEndpoints() int {
@@ -217,9 +222,10 @@ func (a Admission) MaxDirectEndpoints() int {
 }
 
 // Signals lists the control signals an endpoint of the kind accepts, in the
-// order of authz.Actions. The list is written into the node's declaration of the
-// endpoint. A signal that authorization allows but the endpoint does not accept
-// is answered by the daemon as unsupported, without calling the adapter.
+// order of authz.Actions. The node's directory publishes the list for the
+// endpoint (accepts), and the daemon answers by it: a signal that authorization
+// allows but the endpoint does not accept is answered as unsupported, without
+// calling the adapter.
 //
 //   - runtime: session.create and endpoint.status;
 //   - session: message.send (delivered as a prompt), session.close and

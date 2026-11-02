@@ -32,6 +32,8 @@ type stub struct {
 	initErr   error
 	shutdowns int
 	created   []adapterproto.SessionCreateParams
+	attached  []adapterproto.SessionAttachParams
+	started   []adapterproto.StartParams
 	badResult bool
 }
 
@@ -59,6 +61,20 @@ func (s *stub) CreateSession(_ context.Context, p adapterproto.SessionCreatePara
 	return adapterproto.SessionCreateResult{
 		Outcome: adapterproto.CreateCreated, NativeRef: "native-1", Frontends: []adapterproto.Frontend{adapterproto.FrontendCLI},
 	}, nil
+}
+
+func (s *stub) Start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
+	s.mu.Lock()
+	s.started = append(s.started, p)
+	s.mu.Unlock()
+	return s.Base.Start(ctx, p)
+}
+
+func (s *stub) AttachSession(_ context.Context, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attached = append(s.attached, p)
+	return adapterproto.SessionAttachResult{Outcome: adapterproto.SessionAttachAttached}, nil
 }
 
 func runtimeCaps() adapterproto.Capabilities {
@@ -303,6 +319,99 @@ func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
 	}
 	if got := codeOf(t, direct.call(adapterproto.MethodSessionCreate, createParams(), &raw)); got != adapterproto.CodeCapabilityNotDeclared {
 		t.Errorf("session.create without a runtime: code %d, want %d", got, adapterproto.CodeCapabilityNotDeclared)
+	}
+}
+
+// The methods of attached sessions are answered only for an adapter that declared
+// attach, even when it declared a runtime.
+func TestAttachMethodsNeedTheAttachCapability(t *testing.T) {
+	dir := t.TempDir()
+	params := adapterproto.SessionAttachParams{Endpoint: endpoint, NativeRef: "native-1"}
+	for _, tc := range []struct {
+		name     string
+		attach   bool
+		wantCode int
+	}{
+		{"declared", true, 0},
+		{"runtime without attach", false, adapterproto.CodeCapabilityNotDeclared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := runtimeCaps()
+			caps.Runtime.Attach = tc.attach
+			app := &stub{}
+			s := serveOn(t, config(app, caps))
+			if err := s.initialize(filepath.Join(dir, tc.name+".lock")); err != nil {
+				t.Fatal(err)
+			}
+			var res adapterproto.SessionAttachResult
+			err := s.call(adapterproto.MethodSessionAttach, params, &res)
+			if tc.wantCode == 0 {
+				if err != nil || res.Outcome != adapterproto.SessionAttachAttached || len(app.attached) != 1 {
+					t.Fatalf("session.attach = %+v, %v; the application saw %d calls", res, err, len(app.attached))
+				}
+				return
+			}
+			if got := codeOf(t, err); got != tc.wantCode {
+				t.Errorf("session.attach: code %d, want %d", got, tc.wantCode)
+			}
+			if len(app.attached) != 0 {
+				t.Error("an undeclared session.attach reached the application")
+			}
+		})
+	}
+}
+
+// An adapter.start that lists an attached session is refused for an adapter that
+// did not declare attach, before the application sees it; one without an attached
+// entry is served as before.
+func TestStartWithAnAttachedSessionNeedsTheAttachCapability(t *testing.T) {
+	dir := t.TempDir()
+	start := func(attached bool) adapterproto.StartParams {
+		entry := adapterproto.SessionAttach{Endpoint: endpoint, NativeRef: "native-1"}
+		if attached {
+			entry.Attached = true
+		} else {
+			entry.Preset = "default"
+			entry.ToolAccess = &adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token}}
+		}
+		return adapterproto.StartParams{
+			Node: "node", Config: adapterproto.ConfigValues{}, Presets: []adapterproto.PresetConfig{},
+			Sessions: []adapterproto.SessionAttach{entry}, DirectEndpoints: []adapterproto.DirectAttach{},
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		attach   bool
+		attached bool
+		wantCode int
+	}{
+		{"attached entry, declared", true, true, 0},
+		{"attached entry, runtime without attach", false, true, adapterproto.CodeCapabilityNotDeclared},
+		{"created entry, runtime without attach", false, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := runtimeCaps()
+			caps.Runtime.Attach = tc.attach
+			app := &stub{}
+			s := serveOn(t, config(app, caps))
+			if err := s.initialize(filepath.Join(dir, tc.name+".lock")); err != nil {
+				t.Fatal(err)
+			}
+			var res adapterproto.StartResult
+			err := s.call(adapterproto.MethodAdapterStart, start(tc.attached), &res)
+			if tc.wantCode == 0 {
+				if err != nil || len(app.started) != 1 {
+					t.Fatalf("adapter.start = %+v, %v; the application saw %d calls", res, err, len(app.started))
+				}
+				return
+			}
+			if got := codeOf(t, err); got != tc.wantCode {
+				t.Errorf("adapter.start: code %d, want %d", got, tc.wantCode)
+			}
+			if len(app.started) != 0 {
+				t.Error("an attached entry reached an application that did not declare attach")
+			}
+		})
 	}
 }
 

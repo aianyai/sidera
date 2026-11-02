@@ -79,6 +79,9 @@ func Serve(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) error
 // adapter could not take back.
 type nativeSession struct {
 	sess fakeruntime.Session // nil when lost
+	// attached is true for a session a person opened and the daemon asked the
+	// adapter to attach, which the adapter never created or closes.
+	attached bool
 }
 
 type promptRecord struct {
@@ -221,7 +224,9 @@ func (a *adapter) register() {
 	a.handle(adapterproto.MethodPromptReconcile, a.promptReconcile)
 	a.handle(adapterproto.MethodSessionInterrupt, a.sessionInterrupt)
 	a.handle(adapterproto.MethodSessionClose, a.sessionClose)
+	a.handle(adapterproto.MethodSessionAttach, a.sessionAttach)
 	a.p.HandleNotification(adapterproto.MethodEndpointPending, a.endpointPending)
+	a.p.HandleNotification(adapterproto.MethodSessionDetached, a.sessionDetached)
 }
 
 // handle registers a request handler behind the checks every method has: a hung
@@ -359,6 +364,44 @@ func (a *adapter) endpointPending(_ context.Context, raw json.RawMessage) {
 	_ = a.log(ledger.KindEndpointPendingReceived, ledger.Attrs{Endpoint: string(p.Endpoint), Count: p.Count})
 }
 
+// sessionAttach takes hold of a native session that is running in the runtime: it
+// answers attached for one that is alive and not_found for any other. The wake is
+// not needed by a runtime that is in the same process, and, like a token, it is
+// never written to the ledger or the log.
+func (a *adapter) sessionAttach(_ context.Context, raw json.RawMessage) (any, error) {
+	if err := a.attachMethod(); err != nil {
+		return nil, err
+	}
+	var p adapterproto.SessionAttachParams
+	if err := decodeParams(raw, &p); err != nil {
+		return nil, err
+	}
+	sess, found := a.cfg.Runtime.Find(string(p.NativeRef))
+	if !found || !sess.Alive() {
+		return answer(adapterproto.SessionAttachResult{Outcome: adapterproto.SessionAttachNotFound})
+	}
+	a.adopt(p.Endpoint, sess, true)
+	return answer(adapterproto.SessionAttachResult{Outcome: adapterproto.SessionAttachAttached})
+}
+
+// sessionDetached stops watching an attached session and forgets its endpoint. The
+// native session goes on: the person's session is never ended.
+func (a *adapter) sessionDetached(_ context.Context, raw json.RawMessage) {
+	var p adapterproto.SessionDetachedParams
+	if adapterproto.Decode(raw, &p) != nil || a.attachMethod() != nil {
+		return
+	}
+	a.mu.Lock()
+	ns, ok := a.sessions[p.Endpoint]
+	if ok && ns.attached {
+		delete(a.sessions, p.Endpoint)
+	}
+	a.mu.Unlock()
+	if ok && ns.attached && ns.sess != nil {
+		ns.sess.Watch(nil)
+	}
+}
+
 // outcome returns the knob outcome for the next request of a kind, if any, after
 // writing its hit. A held request waits here and then goes its normal way; an
 // error that has no effect is returned for the handler to answer with.
@@ -419,6 +462,21 @@ func (a *adapter) runtimeMethod() error {
 	return nil
 }
 
+// errAttachedSession is the answer to a close or an interrupt for an endpoint
+// held as an attached session, which the adapter does not control.
+var errAttachedSession = peer.NewError(adapterproto.CodeWrongEndpointKind, "an attached session is not closed or interrupted by the node")
+
+// attachMethod refuses a method of attached sessions the adapter did not declare.
+func (a *adapter) attachMethod() error {
+	if err := a.runtimeMethod(); err != nil {
+		return err
+	}
+	if !a.opts.Attach {
+		return peer.NewError(adapterproto.CodeCapabilityNotDeclared, "this adapter does not take attached sessions")
+	}
+	return nil
+}
+
 func (a *adapter) identity(s fakeruntime.Session) *adapterproto.ProcessIdentity {
 	return &adapterproto.ProcessIdentity{PID: s.PID(), StartKey: s.StartKey()}
 }
@@ -433,9 +491,11 @@ func (a *adapter) session(ep adapterproto.EndpointRef) (*nativeSession, error) {
 	return s, nil
 }
 
-func (a *adapter) adopt(ep adapterproto.EndpointRef, s fakeruntime.Session) {
+// adopt holds the native session s (nil when it is lost) as the session of the
+// endpoint, attached when a person opened it.
+func (a *adapter) adopt(ep adapterproto.EndpointRef, s fakeruntime.Session, attached bool) {
 	a.mu.Lock()
-	a.sessions[ep] = &nativeSession{sess: s}
+	a.sessions[ep] = &nativeSession{sess: s, attached: attached}
 	a.mu.Unlock()
 	if s != nil {
 		s.Watch(&sessionWatcher{a: a, endpoint: ep, sess: s})
@@ -462,15 +522,15 @@ func (a *adapter) start(ctx context.Context, raw json.RawMessage) (any, error) {
 		case has && o.Kind == OutcomeUnreachable:
 			st.State = adapterproto.AttachUnreachable
 			if found {
-				a.adopt(at.Endpoint, sess)
+				a.adopt(at.Endpoint, sess, bool(at.Attached))
 			}
 		case found && sess.Alive():
 			st.State = adapterproto.AttachAttached
 			_, st.TurnActive = sess.TurnActive()
 			st.Process = a.identity(sess)
-			a.adopt(at.Endpoint, sess)
+			a.adopt(at.Endpoint, sess, bool(at.Attached))
 		default:
-			a.adopt(at.Endpoint, nil)
+			a.adopt(at.Endpoint, nil, bool(at.Attached))
 		}
 		states = append(states, st)
 	}
@@ -592,7 +652,7 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 		}
 		return answer(adapterproto.SessionCreateResult{Outcome: adapterproto.CreateFailed, Reason: refused.Reason})
 	}
-	a.adopt(p.SessionEndpoint, sess)
+	a.adopt(p.SessionEndpoint, sess, false)
 	outcome := adapterproto.CreateCreated
 	switch {
 	case has && o.Kind == OutcomeFail:
@@ -771,6 +831,9 @@ func (a *adapter) sessionInterrupt(ctx context.Context, raw json.RawMessage) (an
 	if err != nil {
 		return nil, err
 	}
+	if ns.attached {
+		return nil, errAttachedSession
+	}
 	if err := a.log(ledger.KindInterruptReceived, ledger.Attrs{Endpoint: string(p.Endpoint)}); err != nil {
 		return nil, err
 	}
@@ -816,10 +879,13 @@ func (a *adapter) sessionInterrupt(ctx context.Context, raw json.RawMessage) (an
 // exists, or is held under another endpoint, which a close answers as closed. An
 // endpoint the adapter holds takes precedence. An endpoint it does not hold is
 // found by the native reference the daemon sent, as an adapter that restarted
-// must; without a reference it is unknown.
+// must; without a reference it is unknown. An endpoint held as an attached
+// session is never closed: the session is the person's.
 func (a *adapter) closeTarget(p adapterproto.CloseParams) (fakeruntime.Session, error) {
 	ns, err := a.session(p.Endpoint)
 	switch {
+	case err == nil && ns.attached:
+		return nil, errAttachedSession
 	case err == nil:
 		return ns.sess, nil
 	case p.NativeRef == "":

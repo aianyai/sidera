@@ -310,7 +310,7 @@ func TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart(t *testi
 		Node: "node-1", RuntimeEndpoint: "rt-1", Config: adapterproto.ConfigValues{}, Presets: []adapterproto.PresetConfig{},
 		Sessions: []adapterproto.SessionAttach{{
 			Endpoint: "sess-1", Preset: "default", NativeRef: created.NativeRef, Process: created.Process,
-			ToolAccess: adapterproto.ToolAccess{Env: map[string]string{}},
+			ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}},
 		}},
 		DirectEndpoints: []adapterproto.DirectAttach{},
 	}, &started); err != nil {
@@ -631,7 +631,7 @@ func TestGoldenProcessConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"instance_id":"fake","manifest":{"id":"fake","version":"0.1.0","runtime":true,"direct":true,"frontends":["cli","mcp"],"interrupt":true,"ack_on_behalf":true,"max_direct_endpoints":10,"recv_wait_s":{"cli":20,"mcp":45},"budgets":[{"frontend":"cli","unit":"chars","limit":27000},{"frontend":"mcp","unit":"tokens","limit":22500},{"frontend":"direct","unit":"chars","limit":9000}],"runtime_name":"fake-runtime","runtime_version":"1.0.0","ack_markers":{"replaced":[{"literal":"[result saved to file]"}],"truncated":[{"regexp":"\\.\\.\\. \\d+ more lines"}]},"program":"bin/sidera-fake-adapter"},"ledger_dir":"/tmp/l","runtime_dir":"/tmp/r","runtime_binary":"/tmp/sidera-fake-runtime","runtime_seed":9,"runtime_test_seed":"base","runtime_first_turn":{"manual_start":true},"clock_start_ms":1792832400000,"control":"127.0.0.1:5555"}`
+	const want = `{"instance_id":"fake","manifest":{"id":"fake","version":"0.1.0","runtime":true,"direct":true,"frontends":["cli","mcp"],"interrupt":true,"ack_on_behalf":true,"attach":true,"max_direct_endpoints":10,"recv_wait_s":{"cli":20,"mcp":45},"budgets":[{"frontend":"cli","unit":"chars","limit":27000},{"frontend":"mcp","unit":"tokens","limit":22500},{"frontend":"direct","unit":"chars","limit":9000}],"runtime_name":"fake-runtime","runtime_version":"1.0.0","ack_markers":{"replaced":[{"literal":"[result saved to file]"}],"truncated":[{"regexp":"\\.\\.\\. \\d+ more lines"}]},"program":"bin/sidera-fake-adapter"},"ledger_dir":"/tmp/l","runtime_dir":"/tmp/r","runtime_binary":"/tmp/sidera-fake-runtime","runtime_seed":9,"runtime_test_seed":"base","runtime_first_turn":{"manual_start":true},"clock_start_ms":1792832400000,"control":"127.0.0.1:5555"}`
 	if string(raw) != want {
 		t.Fatalf("encoded\n %s\nwant\n %s", raw, want)
 	}

@@ -48,6 +48,16 @@ type Application interface {
 	Interrupt(ctx context.Context, p adapterproto.InterruptParams) (adapterproto.InterruptResult, error)
 	CloseSession(ctx context.Context, p adapterproto.CloseParams) (adapterproto.CloseResult, error)
 
+	// AttachSession and SessionDetached are the two methods of attached sessions.
+	// The kit answers session.attach with capability_not_declared, without calling
+	// AttachSession, and drops session.detached, unless the runtime declared attach.
+	// AttachSession is idempotent: a repeat replaces the wake the adapter holds.
+	// SessionDetached is the daemon's best-effort notice that the endpoint of an
+	// attached session is closed: the adapter stops watching the session and drops
+	// its wake, and must not depend on receiving it.
+	AttachSession(ctx context.Context, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error)
+	SessionDetached(ctx context.Context, p adapterproto.SessionDetachedParams)
+
 	// EndpointPending is the daemon's best-effort notice that messages wait for a
 	// direct endpoint; the adapter must not depend on receiving it.
 	EndpointPending(ctx context.Context, p adapterproto.PendingParams)
@@ -110,6 +120,14 @@ func (Base) Interrupt(context.Context, adapterproto.InterruptParams) (adapterpro
 func (Base) CloseSession(context.Context, adapterproto.CloseParams) (adapterproto.CloseResult, error) {
 	return adapterproto.CloseResult{}, notDeclared("session.close")
 }
+
+// AttachSession is not declared.
+func (Base) AttachSession(context.Context, adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	return adapterproto.SessionAttachResult{}, notDeclared("session.attach")
+}
+
+// SessionDetached ignores the notice.
+func (Base) SessionDetached(context.Context, adapterproto.SessionDetachedParams) {}
 
 // EndpointPending ignores the notice.
 func (Base) EndpointPending(context.Context, adapterproto.PendingParams) {}

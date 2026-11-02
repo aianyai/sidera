@@ -183,7 +183,7 @@ func TestCreateRefusals(t *testing.T) {
 		h := newHarness(t, codex)
 		h.mgr.err = context.DeadlineExceeded
 		res := h.start(adapterproto.SessionAttach{
-			Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1", ToolAccess: adapterproto.ToolAccess{Env: map[string]string{}},
+			Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1", ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}},
 		})
 		if len(res.Sessions) != 1 || res.Sessions[0].State != adapterproto.AttachUnreachable {
 			t.Fatalf("start = %+v", res)
@@ -206,8 +206,8 @@ func TestStartAttachesSessions(t *testing.T) {
 	h := newHarness(t, codex)
 	access := adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}}
 	res := h.start(
-		adapterproto.SessionAttach{Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1", ToolAccess: access},
-		adapterproto.SessionAttach{Endpoint: otherEP, Preset: "dev", NativeRef: "th-gone", ToolAccess: access},
+		adapterproto.SessionAttach{Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1", ToolAccess: &access},
+		adapterproto.SessionAttach{Endpoint: otherEP, Preset: "dev", NativeRef: "th-gone", ToolAccess: &access},
 	)
 	if len(res.Sessions) != 2 ||
 		res.Sessions[0].State != adapterproto.AttachAttached || !res.Sessions[0].TurnActive ||
@@ -807,7 +807,7 @@ func TestThreadWithoutTheProfileIsNotUsed(t *testing.T) {
 		h := newHarness(t, codex)
 		res := h.start(adapterproto.SessionAttach{
 			Endpoint: sessionEP, Preset: "dev", NativeRef: "th-1",
-			ToolAccess: adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}},
+			ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token, "SIDERA_HOME": dataDir}},
 		})
 		if len(res.Sessions) != 1 || res.Sessions[0].State != adapterproto.AttachUnreachable {
 			t.Fatalf("start = %+v", res)

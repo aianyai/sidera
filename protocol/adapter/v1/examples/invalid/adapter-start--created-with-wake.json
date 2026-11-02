@@ -1,0 +1,31 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.start",
+  "note": "only an attached session has a wake",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.start",
+    "params": {
+      "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "config": {},
+      "presets": [],
+      "sessions": [
+        {
+          "endpoint": "22222222222222222222222222222222",
+          "native_ref": "sess_1",
+          "turn_active": false,
+          "preset": "default",
+          "tool_access": {
+            "env": {}
+          },
+          "wake": {
+            "K": "v"
+          }
+        }
+      ],
+      "direct_endpoints": []
+    }
+  }
+}

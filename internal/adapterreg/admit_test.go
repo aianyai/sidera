@@ -193,6 +193,34 @@ func TestDeclaredKindsAndSignals(t *testing.T) {
 	}
 }
 
+// An adapter takes attached sessions only when its runtime declared attach; a
+// direct-only adapter and the zero admission never do.
+func TestAttaches(t *testing.T) {
+	withAttach := runtimeCaps(false, false, false, "cli")
+	withAttach.Runtime.Attach = true
+	directOnly := adapterproto.Capabilities{Direct: directCaps(1)}
+	for _, tc := range []struct {
+		name string
+		caps adapterproto.Capabilities
+		want bool
+	}{
+		{"runtime with attach", withAttach, true},
+		{"runtime without attach", runtimeCaps(true, true, true, "cli"), false},
+		{"direct only", directOnly, false},
+	} {
+		a, err := adapterreg.Admit(tc.caps, man())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.Attaches() != tc.want {
+			t.Errorf("%s: Attaches = %v", tc.name, a.Attaches())
+		}
+	}
+	if (adapterreg.Admission{}).Attaches() {
+		t.Error("the zero admission takes attached sessions")
+	}
+}
+
 func equalActions(a, b []authz.Action) bool {
 	if len(a) != len(b) {
 		return false

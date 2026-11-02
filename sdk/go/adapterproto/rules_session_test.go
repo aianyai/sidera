@@ -1,6 +1,7 @@
 package adapterproto_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -297,4 +298,59 @@ func TestNativeRequestHandledRules(t *testing.T) {
 		{"disposition required", func(p *adapterproto.NativeRequestHandledParams) { p.Disposition = "" }, "disposition", false},
 		{"time required", func(p *adapterproto.NativeRequestHandledParams) { p.AtMS = 0 }, "at_ms", false},
 	})
+}
+
+func TestSessionAttachParamsRules(t *testing.T) {
+	method(t, func() adapterproto.SessionAttachParams {
+		return adapterproto.SessionAttachParams{Endpoint: ep1, NativeRef: "sess_1", Wake: adapterproto.WakeInfo{"CLAUDE_PID": "4821", "_socket": repeat("s", 4096)}}
+	}, []row[adapterproto.SessionAttachParams]{
+		{"endpoint required", func(p *adapterproto.SessionAttachParams) { p.Endpoint = "" }, "endpoint", false},
+		{"native ref required", func(p *adapterproto.SessionAttachParams) { p.NativeRef = "" }, "native_ref", false},
+		{"native ref of 256", func(p *adapterproto.SessionAttachParams) { p.NativeRef = adapterproto.NativeRef(repeat("r", 256)) }, "", false},
+		{"native ref of 257", func(p *adapterproto.SessionAttachParams) { p.NativeRef = adapterproto.NativeRef(repeat("r", 257)) }, "native_ref", false},
+		{"wake optional", func(p *adapterproto.SessionAttachParams) { p.Wake = nil }, "", false},
+		{"wake of 16 entries", func(p *adapterproto.SessionAttachParams) { p.Wake = wakeOf(16) }, "", false},
+		{"wake of 17 entries", func(p *adapterproto.SessionAttachParams) { p.Wake = wakeOf(17) }, "wake", false},
+		{"wake name with a dash", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{"a-b": "v"} }, "wake", false},
+		{"wake name starting with a digit", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{"1a": "v"} }, "wake", false},
+		{"wake name of 128", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{repeat("n", 128): "v"} }, "", false},
+		{"wake name of 129", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{repeat("n", 129): "v"} }, "wake", false},
+		{"wake value empty", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{"K": ""} }, "", false},
+		{"wake value over the limit", func(p *adapterproto.SessionAttachParams) { p.Wake = adapterproto.WakeInfo{"K": repeat("v", 4097)} }, "wake", false},
+	})
+}
+
+func wakeOf(n int) adapterproto.WakeInfo {
+	w := adapterproto.WakeInfo{}
+	for i := range n {
+		w["K"+strconv.Itoa(i)] = "v"
+	}
+	return w
+}
+
+func TestSessionAttachResultRules(t *testing.T) {
+	method(t, func() adapterproto.SessionAttachResult {
+		return adapterproto.SessionAttachResult{Outcome: "attached"}
+	}, []row[adapterproto.SessionAttachResult]{
+		{"attached", nil, "", false},
+		{"not found", func(r *adapterproto.SessionAttachResult) { r.Outcome = "not_found" }, "", false},
+		{"failed needs a reason", func(r *adapterproto.SessionAttachResult) { r.Outcome = "failed" }, "reason", false},
+		{"failed with each reason", func(r *adapterproto.SessionAttachResult) { r.Outcome, r.Reason = "failed", "wake_unavailable" }, "", false},
+		{"failed with an unknown reason", func(r *adapterproto.SessionAttachResult) { r.Outcome, r.Reason = "failed", "gone" }, "reason", false},
+		{"attached with a reason", func(r *adapterproto.SessionAttachResult) { r.Reason = "native_error" }, "reason", false},
+		{"not found with a reason", func(r *adapterproto.SessionAttachResult) { r.Outcome, r.Reason = "not_found", "native_error" }, "reason", false},
+		{"outcome unknown", func(r *adapterproto.SessionAttachResult) { r.Outcome = "wait" }, "outcome", false},
+		{"outcome missing", func(r *adapterproto.SessionAttachResult) { r.Outcome = "" }, "outcome", false},
+		{"detail with any outcome", func(r *adapterproto.SessionAttachResult) { r.Detail = "ok" }, "", false},
+		{"detail at the limit", func(r *adapterproto.SessionAttachResult) { r.Detail = repeat("d", 1024) }, "", false},
+		{"detail over the limit", func(r *adapterproto.SessionAttachResult) { r.Detail = repeat("d", 1025) }, "detail", false},
+	})
+}
+
+func TestSessionDetachedParamsRules(t *testing.T) {
+	method(t, func() adapterproto.SessionDetachedParams { return adapterproto.SessionDetachedParams{Endpoint: ep1} },
+		[]row[adapterproto.SessionDetachedParams]{
+			{"endpoint required", func(p *adapterproto.SessionDetachedParams) { p.Endpoint = "" }, "endpoint", false},
+			{"endpoint over the limit", func(p *adapterproto.SessionDetachedParams) { p.Endpoint = adapterproto.EndpointRef(repeat("e", 129)) }, "endpoint", false},
+		})
 }

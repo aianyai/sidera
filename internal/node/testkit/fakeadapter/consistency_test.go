@@ -134,6 +134,33 @@ func runFullScenario(t *testing.T, serverRequests bool) *rig {
 	var closed adapterproto.CloseResult
 	r.mustCall(adapterproto.MethodSessionClose, adapterproto.CloseParams{Endpoint: "sess-1"}, &closed)
 
+	// An attached session: a native session a person opened, which the runtime has
+	// and the daemon asks the adapter to attach and later to let go; and one the
+	// runtime does not have.
+	person, err := r.runtime.Create(ctx, fakeruntime.CreateRequest{
+		Attempt: string(attemptID(50)), Endpoint: "person", Preset: "default", FirstAttempt: string(attemptID(51)), FirstPrompt: "opened by a person",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.runtime.SetPlan(person.Ref(), fakeruntime.TurnPlan{ManualStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	var attached adapterproto.SessionAttachResult
+	r.mustCall(adapterproto.MethodSessionAttach, adapterproto.SessionAttachParams{
+		Endpoint: "att-1", NativeRef: adapterproto.NativeRef(person.Ref()), Wake: adapterproto.WakeInfo{"EXAMPLE_PID": "4821"},
+	}, &attached)
+	if attached.Outcome != adapterproto.SessionAttachAttached {
+		t.Fatalf("attach outcome %q, want attached", attached.Outcome)
+	}
+	r.mustCall(adapterproto.MethodSessionAttach, adapterproto.SessionAttachParams{Endpoint: "att-2", NativeRef: "n-ffffffff"}, &attached)
+	if attached.Outcome != adapterproto.SessionAttachNotFound {
+		t.Fatalf("attach outcome %q, want not_found", attached.Outcome)
+	}
+	if err := r.daemon.Notify(ctx, adapterproto.MethodSessionDetached, adapterproto.SessionDetachedParams{Endpoint: "att-1"}); err != nil {
+		t.Fatal(err)
+	}
+
 	// Direct endpoints: everything the chat bridge does.
 	reg, err := r.knobs.Register(ctx, adapterproto.RegisterParams{Key: "chat:alice", DisplayName: "Alice"})
 	if err != nil {
@@ -231,6 +258,8 @@ func expectedExchange(serverRequests bool) (toAdapter, fromAdapter map[string]in
 		adapterproto.MethodPromptReconcile:  2, // an attempt in the record and one that never was
 		adapterproto.MethodSessionInterrupt: 2, // a running turn, then none
 		adapterproto.MethodSessionClose:     1,
+		adapterproto.MethodSessionAttach:    2, // one the runtime has and one it does not
+		adapterproto.MethodSessionDetached:  1,
 		adapterproto.MethodEndpointPending:  1,
 		adapterproto.MethodShutdown:         1,
 	}

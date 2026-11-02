@@ -666,6 +666,44 @@ func TestCloseByNativeReferenceAfterARestart(t *testing.T) {
 	}
 }
 
+// An attached entry of adapter.start is a session a person opened: the adapter
+// refuses to close or interrupt it, the native session goes on, and
+// session.detached makes the adapter forget the endpoint.
+func TestAttachedEntryOfStartIsNeverControlled(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.initialize()
+	person, err := r.runtime.Create(r.ctx, fakeruntime.CreateRequest{
+		Attempt: string(attemptID(50)), Endpoint: "person", Preset: "default", FirstAttempt: string(attemptID(51)), FirstPrompt: "opened by a person",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.start([]adapterproto.SessionAttach{{Endpoint: "att-1", Attached: true, NativeRef: adapterproto.NativeRef(person.Ref())}}, nil)
+
+	if _, err := r.closeSession("att-1"); codeOf(err) != adapterproto.CodeWrongEndpointKind {
+		t.Fatalf("close of an attached session: %v", err)
+	}
+	if _, err := r.closeNative("att-1", person.Ref()); codeOf(err) != adapterproto.CodeWrongEndpointKind {
+		t.Fatalf("close of an attached session by reference: %v", err)
+	}
+	if _, err := r.interrupt("att-1"); codeOf(err) != adapterproto.CodeWrongEndpointKind {
+		t.Fatalf("interrupt of an attached session: %v", err)
+	}
+	if !person.Alive() {
+		t.Fatal("the person's session was ended")
+	}
+	if err := r.daemon.Notify(r.ctx, adapterproto.MethodSessionDetached, adapterproto.SessionDetachedParams{Endpoint: "att-1"}); err != nil {
+		t.Fatal(err)
+	}
+	r.waitFor("the endpoint to be forgotten", func() bool {
+		_, err := r.interrupt("att-1")
+		return codeOf(err) == adapterproto.CodeUnknownEndpoint
+	})
+	if !person.Alive() {
+		t.Fatal("the person's session was ended by session.detached")
+	}
+}
+
 // An endpoint the adapter holds takes precedence over the native reference, and a
 // reference that names a native session held under another endpoint is left alone:
 // the close is answered closed, because nothing is left to release for the endpoint
@@ -719,7 +757,7 @@ func TestStartReattachesWhatItCan(t *testing.T) {
 	r.connect()
 	r.initialize()
 	attach := func(ep, native string) adapterproto.SessionAttach {
-		return adapterproto.SessionAttach{Endpoint: adapterproto.EndpointRef(ep), Preset: "default", NativeRef: adapterproto.NativeRef(native), ToolAccess: adapterproto.ToolAccess{Env: map[string]string{}}}
+		return adapterproto.SessionAttach{Endpoint: adapterproto.EndpointRef(ep), Preset: "default", NativeRef: adapterproto.NativeRef(native), ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}}}
 	}
 	res := r.start([]adapterproto.SessionAttach{attach("sess-1", ref), attach("sess-dead", string(dead.NativeRef)), attach("sess-ghost", "n-ffffffff")}, nil)
 	want := map[string]adapterproto.AttachState{"sess-1": adapterproto.AttachAttached, "sess-dead": adapterproto.AttachLost, "sess-ghost": adapterproto.AttachLost}
@@ -748,7 +786,7 @@ func TestStartCanReportEverySessionUnreachable(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	ref := r.ready()
 	_ = r.knobs.QueueStart(fakeadapter.Outcome{Kind: fakeadapter.OutcomeUnreachable})
-	res := r.start([]adapterproto.SessionAttach{{Endpoint: "sess-1", Preset: "default", NativeRef: adapterproto.NativeRef(ref), ToolAccess: adapterproto.ToolAccess{Env: map[string]string{}}}}, nil)
+	res := r.start([]adapterproto.SessionAttach{{Endpoint: "sess-1", Preset: "default", NativeRef: adapterproto.NativeRef(ref), ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}}}}, nil)
 	if len(res.Sessions) != 1 || res.Sessions[0].State != adapterproto.AttachUnreachable {
 		t.Fatalf("%+v", res)
 	}
@@ -962,6 +1000,14 @@ func TestCapabilitiesThatWereNotDeclaredAreRefused(t *testing.T) {
 		r := newRig(t, rigOptions{manifest: func(o *fakeadapter.ManifestOptions) { o.Interrupt = false }})
 		r.ready()
 		if _, err := r.interrupt("sess-1"); codeOf(err) != adapterproto.CodeCapabilityNotDeclared {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("attach", func(t *testing.T) {
+		r := newRig(t, rigOptions{manifest: func(o *fakeadapter.ManifestOptions) { o.Attach = false }})
+		r.ready()
+		params := adapterproto.SessionAttachParams{Endpoint: "att-1", NativeRef: "n-00000000"}
+		if _, err := r.call(adapterproto.MethodSessionAttach, params); codeOf(err) != adapterproto.CodeCapabilityNotDeclared {
 			t.Fatalf("got %v", err)
 		}
 	})

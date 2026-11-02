@@ -32,8 +32,13 @@ before it answers), `ping`, `shutdown`, `adapter.start`, `adapter.probe`,
 `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.interrupt`,
 `session.close` (which closes the session of an endpoint it holds, finds a session it no
 longer holds by the native reference the request carries, answers `closed` for one that is
-gone and leaves alone one that it holds under another endpoint), and `endpoint.pending`,
-which it writes to the ledger with its count. It calls `checkpoint.put` while it creates a
+gone and leaves alone one that it holds under another endpoint; it answers `1002` for an
+endpoint it holds as an attached session), `session.attach` (`attached` for a native
+session the runtime has alive, `not_found` for any other; it never looks at the wake),
+`session.detached` (it stops watching an attached session and leaves the native session
+alone), and `endpoint.pending`, which it writes to the ledger with its count. An attached
+entry of `adapter.start` is held as an attached session too: `session.close` and
+`session.interrupt` for it are `1002`. It calls `checkpoint.put` while it creates a
 session, sends `turn.started`, `turn.ended` and `adapter.availability`, and, from its
 knobs, `prompt.persisted`, `native_request.handled` and the `endpoint.*` methods of a
 chat bridge. It reports a recv result with `recv.observed` when it declared that it

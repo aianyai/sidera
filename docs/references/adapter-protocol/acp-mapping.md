@@ -40,7 +40,7 @@ bridge.
 
 ## Sidera to ACP
 
-All 25 methods and notifications of the committed method table, in table order.
+All 27 methods and notifications of the committed method table, in table order.
 
 | Sidera method | Direction, kind | ACP counterpart | Status | Transformation, or why none |
 | ------------- | --------------- | --------------- | ------ | --------------------------- |
@@ -52,6 +52,8 @@ All 25 methods and notifications of the committed method table, in table order.
 | `adapter.probe` | D to A, request | `initialize` response (`agentInfo`, `authMethods`), `authenticate` | mappable | `runtime` (`name`, `version`) is `agentInfo` (optional in ACP); `auth` is derived from `authMethods` and from a `-32000` ("authentication required") error on a request. `dependencies`, `presets` and `tool_probes` have no ACP counterpart. |
 | `adapter.availability` | A to D, notification | none | none | ACP has no health or availability notification. A bridge derives `runtime_auth` from `-32000` and `native_unavailable` from the exit of the agent process. |
 | `session.create` | D to A, request | `session/new`, then `session/prompt` for `first_prompt` | mappable | `session/new` takes `cwd`, `mcpServers` and optional `additionalDirectories`; it takes no first prompt and no preset. The bridge supplies `cwd` and the `mcpServers` entries from the preset and `tool_access`, takes `native_ref` from the returned `sessionId`, and sends the first prompt as an ordinary `session/prompt`. `outcome: indeterminate` is the bridge's judgement after a timeout or an error whose effect is unknown. |
+| `session.attach` | D to A, request | none | none | An attached session is one a person runs in the runtime's own interface and asked to be attached. ACP has an agent run by the client that started it and offers no way to deliver a prompt to a session another client runs, so a bridge declares no `attach`. |
+| `session.detached` | D to A, notification | none | none | As `session.attach`. |
 | `checkpoint.put` | A to D, request | none | none | Durable adapter state kept by the daemon for crash recovery; ACP has no such concept. |
 | `prompt.deliver` | D to A, request | `session/prompt` | mappable | `text` becomes one text content block. The response of `session/prompt` arrives only when the turn stops (stable v1), so it cannot serve as the `stage` answer; see section 5. `attempt` has no field in `session/prompt`. Refusal reasons (`busy`, `runtime_auth`, `native_unavailable`, `session_lost`, `control_unknown`) are the bridge's own. |
 | `prompt.persisted` | A to D, notification | none in stable v1 | none | v1 has no signal that a prompt was taken into the conversation before the turn ends. v2 draft: the successful response of `session/prompt` means the user message was inserted and carries its `messageId`. |
@@ -70,7 +72,7 @@ All 25 methods and notifications of the committed method table, in table order.
 | `endpoint.send` | A to D, request | none | none | As `endpoint.register`. ACP has no messaging between agents or nodes. |
 | `endpoint.message_status` | A to D, request | none | none | As `endpoint.register`. |
 
-Counts: 1 same, 9 mappable, 15 none (25 in all).
+Counts: 1 same, 9 mappable, 17 none (27 in all).
 
 ## ACP to Sidera
 

@@ -1,0 +1,34 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "session.attach",
+  "note": "wake of 17 entries",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.attach",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "native_ref": "sess_1",
+      "wake": {
+        "K0": "v",
+        "K1": "v",
+        "K2": "v",
+        "K3": "v",
+        "K4": "v",
+        "K5": "v",
+        "K6": "v",
+        "K7": "v",
+        "K8": "v",
+        "K9": "v",
+        "K10": "v",
+        "K11": "v",
+        "K12": "v",
+        "K13": "v",
+        "K14": "v",
+        "K15": "v",
+        "K16": "v"
+      }
+    }
+  }
+}

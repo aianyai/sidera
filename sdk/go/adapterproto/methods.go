@@ -17,6 +17,8 @@ const (
 	MethodAdapterProbe          = "adapter.probe"
 	MethodAdapterAvailability   = "adapter.availability"
 	MethodSessionCreate         = "session.create"
+	MethodSessionAttach         = "session.attach"
+	MethodSessionDetached       = "session.detached"
 	MethodCheckpointPut         = "checkpoint.put"
 	MethodPromptDeliver         = "prompt.deliver"
 	MethodPromptPersisted       = "prompt.persisted"
@@ -139,6 +141,8 @@ func Methods() []MethodInfo {
 		request[ProbeParams, ProbeResult](MethodAdapterProbe, DaemonToAdapter),
 		notification[AvailabilityParams](MethodAdapterAvailability, AdapterToDaemon),
 		request[SessionCreateParams, SessionCreateResult](MethodSessionCreate, DaemonToAdapter),
+		request[SessionAttachParams, SessionAttachResult](MethodSessionAttach, DaemonToAdapter),
+		notification[SessionDetachedParams](MethodSessionDetached, DaemonToAdapter),
 		request[CheckpointPutParams, Empty](MethodCheckpointPut, AdapterToDaemon),
 		request[PromptDeliverParams, PromptDeliverResult](MethodPromptDeliver, DaemonToAdapter),
 		notification[PromptPersistedParams](MethodPromptPersisted, AdapterToDaemon),

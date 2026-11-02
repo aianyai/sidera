@@ -64,6 +64,87 @@ func (p SessionCreateParams) Validate() error {
 	return c.err
 }
 
+// MaxWakeEntries bounds the entries of a WakeInfo.
+const MaxWakeEntries = 16
+
+// WakeInfo is what an adapter needs to deliver a prompt to a session that a
+// person runs, such as the address of the runtime's messaging socket and the
+// token for it. The names and values are the adapter's own and opaque to the
+// daemon, which passes them through unchanged, keeps them in memory only and
+// never writes them down or logs them; an adapter must not log the values
+// either. The names follow the rule of an environment variable name, and the
+// bounds of a value are those of one.
+type WakeInfo map[string]string
+
+// Validate checks the number of entries and the names and values. An absent
+// wake is a nil WakeInfo; callers validate a wake only when there is one.
+func (w WakeInfo) Validate() error {
+	if len(w) > MaxWakeEntries {
+		return bad("%d entries, at most %d", len(w), MaxWakeEntries)
+	}
+	return validateEnvEntries(w)
+}
+
+// SessionAttachParams asks the adapter to take hold of a session that a person
+// opened, so that prompts can be delivered to it. The same request may be sent
+// again for the same endpoint: the adapter then replaces the wake it holds with
+// the new one, and none sent means none held.
+type SessionAttachParams struct {
+	Endpoint  EndpointRef `json:"endpoint"`
+	NativeRef NativeRef   `json:"native_ref"`
+	Wake      WakeInfo    `json:"wake,omitempty"`
+}
+
+// Validate checks the endpoint, the native session and the wake.
+func (p SessionAttachParams) Validate() error {
+	var c checker
+	c.field("endpoint", p.Endpoint.Validate())
+	c.field("native_ref", p.NativeRef.Validate())
+	if p.Wake != nil {
+		c.field("wake", p.Wake.Validate())
+	}
+	return c.err
+}
+
+// SessionAttachResult is the adapter's answer to session.attach.
+//
+//   - Attached: the adapter holds the session and can deliver prompts to it.
+//   - NotFound: the runtime has no such session.
+//   - Failed: the adapter could not take the session; Reason says why.
+type SessionAttachResult struct {
+	Outcome SessionAttachOutcome `json:"outcome"`
+	Reason  SessionAttachFailure `json:"reason,omitempty"`
+	Detail  string               `json:"detail,omitempty"`
+}
+
+// Validate checks that a reason appears exactly with a failure.
+func (r SessionAttachResult) Validate() error {
+	var c checker
+	c.field("outcome", enumOK(r.Outcome, sessionAttachOutcomes))
+	if c.err != nil {
+		return c.err
+	}
+	if r.Detail != "" {
+		c.field("detail", strLen(r.Detail, 1, MaxDetailLen))
+	}
+	if r.Outcome == SessionAttachFailed {
+		c.field("reason", enumOK(r.Reason, sessionAttachFailures))
+	} else {
+		c.ok(r.Reason == "", "reason: only a failure has one")
+	}
+	return c.err
+}
+
+// SessionDetachedParams tells the adapter that the endpoint of an attached
+// session is closed: it stops watching the session and drops the wake. The
+// person's session is not ended.
+type SessionDetachedParams struct {
+	Endpoint EndpointRef `json:"endpoint"`
+}
+
+// Validate checks the endpoint.
+func (p SessionDetachedParams) Validate() error { return at("endpoint", p.Endpoint.Validate()) }
+
 // Grounds is the evidence behind a verdict that is not a plain yes.
 type Grounds struct {
 	Code   GroundsCode `json:"code"`

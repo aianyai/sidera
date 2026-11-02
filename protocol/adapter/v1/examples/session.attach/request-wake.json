@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 91,
+  "method": "session.attach",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "native_ref": "sess_01HZZ1",
+    "wake": {
+      "EXAMPLE_SOCKET": "/run/user/1000/example/4821.sock",
+      "EXAMPLE_TOKEN": "w4k3-t0k3n-3x4mpl3",
+      "EXAMPLE_PID": "4821"
+    }
+  }
+}

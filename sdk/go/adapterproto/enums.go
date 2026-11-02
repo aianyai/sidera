@@ -180,6 +180,43 @@ var createFailures = []CreateFailure{CreateFailPresetUnknown, CreateFailPresetIn
 // Valid reports whether f is a known failure.
 func (f CreateFailure) Valid() bool { return slices.Contains(createFailures, f) }
 
+// SessionAttachOutcome is the adapter's answer to session.attach.
+type SessionAttachOutcome string
+
+const (
+	// SessionAttachAttached: the adapter holds the session and can deliver prompts.
+	SessionAttachAttached SessionAttachOutcome = "attached"
+	// SessionAttachNotFound: the native runtime has no such session.
+	SessionAttachNotFound SessionAttachOutcome = "not_found"
+	// SessionAttachFailed: the adapter could not take the session; the failure says why.
+	SessionAttachFailed SessionAttachOutcome = "failed"
+)
+
+var sessionAttachOutcomes = []SessionAttachOutcome{SessionAttachAttached, SessionAttachNotFound, SessionAttachFailed}
+
+// Valid reports whether o is a known outcome.
+func (o SessionAttachOutcome) Valid() bool { return slices.Contains(sessionAttachOutcomes, o) }
+
+// SessionAttachFailure says why the adapter could not take an attached session.
+type SessionAttachFailure string
+
+const (
+	// AttachFailWakeUnavailable: the session exists but prompts cannot be
+	// delivered to it: the runtime is too old, or the wake information is missing
+	// or refused.
+	AttachFailWakeUnavailable SessionAttachFailure = "wake_unavailable"
+	// AttachFailNativeUnreachable: the adapter cannot tell now whether the
+	// session exists.
+	AttachFailNativeUnreachable SessionAttachFailure = "native_unreachable"
+	// AttachFailNativeError: the runtime failed in a way no other reason names.
+	AttachFailNativeError SessionAttachFailure = "native_error"
+)
+
+var sessionAttachFailures = []SessionAttachFailure{AttachFailWakeUnavailable, AttachFailNativeUnreachable, AttachFailNativeError}
+
+// Valid reports whether f is a known failure.
+func (f SessionAttachFailure) Valid() bool { return slices.Contains(sessionAttachFailures, f) }
+
 // CheckpointScope says what a checkpoint belongs to.
 type CheckpointScope string
 
@@ -504,6 +541,8 @@ func EnumTables() map[string][]string {
 		"AttachState":           strs(attachStates),
 		"CreateOutcome":         strs(createOutcomes),
 		"CreateFailure":         strs(createFailures),
+		"SessionAttachOutcome":  strs(sessionAttachOutcomes),
+		"SessionAttachFailure":  strs(sessionAttachFailures),
 		"CheckpointScope":       strs(checkpointScopes),
 		"PromptStage":           strs(promptStages),
 		"PromptRefusal":         strs(promptRefusals),

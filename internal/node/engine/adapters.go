@@ -332,7 +332,7 @@ func (e *Engine) sessionAttaches(instance string) ([]adapterproto.SessionAttach,
 		}
 		a := adapterproto.SessionAttach{
 			Endpoint: adapterproto.EndpointRef(id.String()), Preset: rec.Session.Preset, NativeRef: adapterproto.NativeRef(rec.Session.NativeRef),
-			Process: rec.Session.Process, ToolAccess: access,
+			Process: rec.Session.Process, ToolAccess: &access,
 		}
 		if cp, ok := e.view.checkpoints[store.CheckpointKey{Scope: string(adapterproto.ScopeSession), ID: id.String()}]; ok {
 			a.Checkpoint = append([]byte(nil), cp...)

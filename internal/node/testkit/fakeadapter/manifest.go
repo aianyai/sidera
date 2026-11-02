@@ -25,12 +25,13 @@ type ManifestOptions struct {
 	Runtime bool `json:"runtime,omitempty"`
 	Direct  bool `json:"direct,omitempty"`
 
-	// Frontends, Interrupt, AckOnBehalf and ServerRequests are the runtime
+	// Frontends, Interrupt, AckOnBehalf, ServerRequests and Attach are the runtime
 	// capabilities.
 	Frontends      []adapterproto.Frontend `json:"frontends,omitempty"`
 	Interrupt      bool                    `json:"interrupt,omitempty"`
 	AckOnBehalf    bool                    `json:"ack_on_behalf,omitempty"`
 	ServerRequests bool                    `json:"server_requests,omitempty"`
+	Attach         bool                    `json:"attach,omitempty"`
 
 	// MaxDirectEndpoints is the direct endpoint limit.
 	MaxDirectEndpoints int `json:"max_direct_endpoints,omitempty"`
@@ -64,12 +65,12 @@ const (
 )
 
 // DefaultManifestOptions returns the declaration of the fake adapter: a runtime
-// with command-line and MCP front ends that can interrupt and acknowledge on
-// behalf, direct endpoints, and receive wait limits of 20 seconds for the command
-// line and 45 for MCP, so that a test can tell them from both the daemon's default
-// and the protocol's cap. The program has the extension of an executable of the
-// platform: a path that names a program is used as it is, and Windows starts only
-// a file that has one.
+// with command-line and MCP front ends that can interrupt, acknowledge on
+// behalf and take attached sessions, direct endpoints, and receive wait limits of
+// 20 seconds for the command line and 45 for MCP, so that a test can tell them
+// from both the daemon's default and the protocol's cap. The program has the
+// extension of an executable of the platform: a path that names a program is used
+// as it is, and Windows starts only a file that has one.
 func DefaultManifestOptions() ManifestOptions {
 	lit := replacedMarker
 	re := truncatedMarkerRE
@@ -79,6 +80,7 @@ func DefaultManifestOptions() ManifestOptions {
 		Frontends:   []adapterproto.Frontend{adapterproto.FrontendCLI, adapterproto.FrontendMCP},
 		Interrupt:   true,
 		AckOnBehalf: true,
+		Attach:      true,
 
 		MaxDirectEndpoints: 10,
 		RecvWaitS:          map[adapterproto.Frontend]int{adapterproto.FrontendCLI: 20, adapterproto.FrontendMCP: 45},
@@ -117,7 +119,7 @@ func (o ManifestOptions) Capabilities() adapterproto.Capabilities {
 	var c adapterproto.Capabilities
 	if o.Runtime {
 		c.Runtime = &adapterproto.RuntimeCapabilities{
-			Interrupt: o.Interrupt, AckOnBehalf: o.AckOnBehalf, ServerRequests: o.ServerRequests,
+			Interrupt: o.Interrupt, AckOnBehalf: o.AckOnBehalf, ServerRequests: o.ServerRequests, Attach: o.Attach,
 			Frontends: append([]adapterproto.Frontend(nil), o.Frontends...),
 		}
 	}

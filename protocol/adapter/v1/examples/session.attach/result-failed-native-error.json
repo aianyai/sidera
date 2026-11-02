@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 96,
+  "result": {
+    "outcome": "failed",
+    "reason": "native_error"
+  }
+}

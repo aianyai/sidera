@@ -208,7 +208,7 @@ func TestSchemaMethodsMatchGo(t *testing.T) {
 	consts := []string{
 		adapterproto.MethodInitialize, adapterproto.MethodPing, adapterproto.MethodCancelRequest, adapterproto.MethodShutdown,
 		adapterproto.MethodAdapterStart, adapterproto.MethodAdapterProbe, adapterproto.MethodAdapterAvailability,
-		adapterproto.MethodSessionCreate, adapterproto.MethodCheckpointPut, adapterproto.MethodPromptDeliver,
+		adapterproto.MethodSessionCreate, adapterproto.MethodSessionAttach, adapterproto.MethodSessionDetached, adapterproto.MethodCheckpointPut, adapterproto.MethodPromptDeliver,
 		adapterproto.MethodPromptPersisted, adapterproto.MethodTurnStarted, adapterproto.MethodTurnEnded,
 		adapterproto.MethodSessionInterrupt, adapterproto.MethodSessionClose, adapterproto.MethodPromptReconcile,
 		adapterproto.MethodRecvObserved, adapterproto.MethodNativeRequestHandled, adapterproto.MethodEndpointRegister,

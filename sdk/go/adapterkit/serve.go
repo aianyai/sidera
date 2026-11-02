@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -116,25 +117,57 @@ func (s *server) register() {
 	})
 
 	app := s.cfg.App
-	serve(s, adapterproto.MethodAdapterStart, false, app.Start)
-	serve(s, adapterproto.MethodAdapterProbe, false, app.Probe)
-	serve(s, adapterproto.MethodSessionCreate, true, app.CreateSession)
-	serve(s, adapterproto.MethodPromptDeliver, true, app.DeliverPrompt)
-	serve(s, adapterproto.MethodPromptReconcile, true, app.Reconcile)
-	serve(s, adapterproto.MethodSessionInterrupt, true, app.Interrupt)
-	serve(s, adapterproto.MethodSessionClose, true, app.CloseSession)
-	s.p.HandleNotification(adapterproto.MethodEndpointPending, func(ctx context.Context, raw json.RawMessage) {
-		var p adapterproto.PendingParams
-		// A notification has no answer to carry a refusal: one that is not admitted or
-		// not valid is dropped.
-		if s.admit() != nil || adapterproto.Decode(raw, &p) != nil {
+	serve(s, adapterproto.MethodAdapterStart, nil, s.start)
+	serve(s, adapterproto.MethodAdapterProbe, nil, app.Probe)
+	serve(s, adapterproto.MethodSessionCreate, declaresRuntime, app.CreateSession)
+	serve(s, adapterproto.MethodPromptDeliver, declaresRuntime, app.DeliverPrompt)
+	serve(s, adapterproto.MethodPromptReconcile, declaresRuntime, app.Reconcile)
+	serve(s, adapterproto.MethodSessionInterrupt, declaresRuntime, app.Interrupt)
+	serve(s, adapterproto.MethodSessionClose, declaresRuntime, app.CloseSession)
+	serve(s, adapterproto.MethodSessionAttach, declaresAttach, app.AttachSession)
+	// A notification has no answer to carry a refusal: one that is not admitted or
+	// not valid is dropped.
+	notify(s, adapterproto.MethodEndpointPending, nil, app.EndpointPending)
+	notify(s, adapterproto.MethodSessionDetached, declaresAttach, app.SessionDetached)
+}
+
+// capabilityGate says whether the capabilities an adapter declared include the
+// one a method needs.
+type capabilityGate func(adapterproto.Capabilities) bool
+
+// declaresRuntime is the gate of the methods of a runtime adapter.
+func declaresRuntime(c adapterproto.Capabilities) bool { return c.Runtime != nil }
+
+// declaresAttach is the gate of the methods of attached sessions.
+func declaresAttach(c adapterproto.Capabilities) bool { return c.Runtime != nil && c.Runtime.Attach }
+
+// start passes adapter.start to the application. Nothing of attached sessions
+// reaches an application that did not declare attach, so an entry of an attached
+// session is refused here as session.attach is, before the application sees it.
+func (s *server) start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
+	attached := func(e adapterproto.SessionAttach) bool { return bool(e.Attached) }
+	if !declaresAttach(s.cfg.Capabilities) && slices.ContainsFunc(p.Sessions, attached) {
+		return adapterproto.StartResult{}, notDeclared(adapterproto.MethodAdapterStart + " with an attached session")
+	}
+	return s.cfg.App.Start(ctx, p)
+}
+
+// notify registers the handler of a notification of the daemon, behind the same
+// checks as a request.
+func notify[P any, PP interface {
+	*P
+	adapterproto.Message
+}](s *server, method string, gate capabilityGate, f func(context.Context, P)) {
+	s.p.HandleNotification(method, func(ctx context.Context, raw json.RawMessage) {
+		var params P
+		if s.admit() != nil || (gate != nil && !gate(s.cfg.Capabilities)) || adapterproto.Decode(raw, PP(&params)) != nil {
 			return
 		}
-		app.EndpointPending(ctx, p)
+		f(ctx, params)
 	})
 }
 
-// admit is the gate every method but initialize and ping passes: before
+// admit is the admission check every method but initialize and ping passes: before
 // initialize it is not_initialized (-32003), after shutdown began it is
 // shutting_down (-32002).
 func (s *server) admit() error {
@@ -149,18 +182,18 @@ func (s *server) admit() error {
 	return nil
 }
 
-// serve registers the handler of a request of the daemon: the gate, the capability
-// the method needs, strict decoding of the parameters, the application, and
-// validation of the result before it is sent.
+// serve registers the handler of a request of the daemon: the admission check, the
+// capability the method needs if any, strict decoding of the parameters, the
+// application, and validation of the result before it is sent.
 func serve[P any, PP interface {
 	*P
 	adapterproto.Message
-}, R adapterproto.Message](s *server, method string, needsRuntime bool, f func(context.Context, P) (R, error)) {
+}, R adapterproto.Message](s *server, method string, needs capabilityGate, f func(context.Context, P) (R, error)) {
 	s.p.Handle(method, func(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err := s.admit(); err != nil {
 			return nil, err
 		}
-		if needsRuntime && s.cfg.Capabilities.Runtime == nil {
+		if needs != nil && !needs(s.cfg.Capabilities) {
 			return nil, notDeclared(method)
 		}
 		var params P
