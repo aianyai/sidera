@@ -21,7 +21,8 @@ An agent uses Sidera in one of two ways:
   `sidera endpoint list --instance <runtime>` on that machine.
   In a script, `sidera endpoint list --json` prints
   `{"result":{"endpoints":[...]}}`, and the console's `recv --wait` accepts at most
-  30 seconds.
+  30 seconds. A session you started by hand and use to direct others is a
+  controller; see [The controller](#the-controller-a-session-you-started-yourself).
 
 An agent that was not started by Sidera has no session credential, so
 `sidera recv`, `sidera send` and the other agent commands fail with
@@ -146,6 +147,51 @@ short task. Sessions do not close by themselves.
 `sidera control <session-address> session.close` closes a session you created;
 the owner can close any with `sidera endpoint close <session-address>` on the node
 that hosts it.
+
+## The controller: a session you started yourself
+
+Usually you open Claude Code or Codex in a terminal yourself, and that session
+directs the others. It is the **controller**. Sidera did not create it, so in
+0.8.0 it has no endpoint of its own and nothing wakes it when a message arrives.
+
+What a controller has to do today:
+
+- **Direct through the owner's console.** It starts and instructs sessions with
+  `sidera-adapter-console new|send`, as in the sections above.
+- **Read the replies itself.** A reply comes back to the console's owner
+  endpoint, not to the controller, and does not wake it. The controller has to
+  read it, typically by running `sidera-adapter-console recv --wait 30` in a loop
+  in the background, or as a background task if its runtime has one. The console's
+  `recv` acknowledges what it printed, so the loop only has to keep running and
+  its output has to be read.
+
+  macOS and Linux:
+
+  ```sh
+  while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>/dev/null || sleep 5; done &
+  ```
+
+  PowerShell:
+
+  ```powershell
+  Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>$null | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
+  ```
+
+  Then read the file, for example `tail ~/sidera-inbox.txt`, whenever you expect
+  an answer. `--wait` is at most 30 seconds.
+- **Read promptly.** A message nobody reads within the endpoint's queue time (30
+  minutes by default; see
+  [deadlines](../references/delivery/README.md#deadlines-and-retention)) is
+  rejected back to its sender as `backlog_expired`. The work was done and the
+  report is lost.
+- **Share the inbox with care.** The console inbox belongs to everything on that
+  node that uses the console. Run one reader at a time, or let each reader handle
+  only the messages whose `from` is a session it created itself.
+
+A session that Sidera itself created on the controller's request has its own
+endpoint and is woken when a message arrives, so work between such sessions needs
+no polling. Giving a session you started yourself its own endpoint and wake-up is
+planned.
 
 ## Writing the preset's instructions
 

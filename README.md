@@ -74,6 +74,13 @@ sidera-adapter-console new <runtime-address-on-b> --preset light --body 'Say hel
 sidera-adapter-console recv --wait 30
 ```
 
+When you direct agents from a Claude Code or Codex session you started yourself, that
+session is the controller. Sidera did not create it, so nothing wakes it when a reply
+arrives: it has to keep reading the console, for example with
+`sidera-adapter-console recv --wait 30` in a background loop, or a reply that waits
+longer than the queue time (30 minutes by default) is rejected. See
+[The controller](docs/guide/agents.md#the-controller-a-session-you-started-yourself).
+
 The preset decides what the agent may do. The guide starts with a `light` preset for
 channel and light work, and explains the full-access `dev` preset for real
 repository work and its risk.

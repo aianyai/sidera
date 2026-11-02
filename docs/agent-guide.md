@@ -741,6 +741,31 @@ them there without your owner's yes (see "Ask your owner before").
     the data directory) in a message. Under a full-access preset you can read them, and
     under a Claude Code `light` preset a `Bash` file command that your owner's settings
     allow may; that is not permission to send them.
+15. **If you are the controller and use the console, keep reading.** A session your
+    owner started by hand has no endpoint of its own, so nothing wakes it: the
+    replies to the sessions you start land in the console's owner endpoint and wait
+    there. Keep a background `recv` loop running until every task you started has
+    replied, and read what it collects promptly. A message nobody reads within the
+    endpoint's queue time (30 minutes by default) is rejected back to its sender as
+    `backlog_expired`: the work is done and the report is lost. macOS and Linux:
+
+    ```sh
+    while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>/dev/null || sleep 5; done &
+    ```
+
+    PowerShell:
+
+    ```powershell
+    Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>$null | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
+    ```
+
+    If your runtime has background tasks, run the loop as one. Read the file with
+    `tail ~/sidera-inbox.txt` (`Get-Content $HOME\sidera-inbox.txt -Tail 40`). The
+    console inbox is shared by everything on the node that uses the console: run one
+    reader at a time, or handle only the messages whose `from` is a session you
+    created. Sessions that Sidera created on your request have their own endpoint
+    and are woken by a message, so between them no loop is needed. Giving a session
+    started by hand its own endpoint and wake-up is planned.
 
 ## An example, step by step
 
