@@ -126,7 +126,8 @@ type engineDouble struct {
 	// registerGate, when set, holds RegisterDirect until it is closed.
 	registerGate chan struct{}
 
-	// onEvent is called with the kind of every call, as it is made.
+	// onEvent is called with the kind of every call, as it is made and before
+	// the call is recorded.
 	onEvent func(kind string)
 
 	onRegister   func(adapterproto.RegisterParams) (adapterproto.RegisterResult, error)
@@ -139,13 +140,17 @@ func newEngine() *engineDouble {
 }
 
 func (d *engineDouble) record(e event) {
+	// The hook runs before the event is recorded, so a test that waits for the
+	// event also sees what the hook did.
 	d.mu.Lock()
-	d.events = append(d.events, e)
 	hook := d.onEvent
 	d.mu.Unlock()
 	if hook != nil {
 		hook(e.Kind)
 	}
+	d.mu.Lock()
+	d.events = append(d.events, e)
+	d.mu.Unlock()
 	select {
 	case d.changed <- struct{}{}:
 	default:
