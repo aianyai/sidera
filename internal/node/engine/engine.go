@@ -78,8 +78,9 @@ type Engine struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	workers  atomic.Int32
-	// adapterCalls is how many of the workers are inside a call to an adapter, which
-	// Quiesce does not count as work while the adapter holds the request on purpose.
+	// adapterCalls is how many of the workers are inside a call to an adapter that
+	// the engine has not cancelled (see adapterCall), which Quiesce does not count as
+	// work while the adapter holds the request on purpose.
 	adapterCalls atomic.Int32
 	waiting      atomic.Int32 // adapter requests waiting for the running phase
 	activity     chan struct{}
@@ -508,6 +509,44 @@ func (e *Engine) spawn(fn func(ctx context.Context)) bool {
 		fn(e.ctx)
 	}()
 	return true
+}
+
+// adapterCall is one worker's call to an adapter, counted in Engine.adapterCalls
+// from enter until end. A call that the engine cancels is ended by the cancel, before
+// the context is cancelled: the adapter may go on holding its request and the host go
+// on counting it until the worker wakes and sends the cancel, and a worker in that
+// window is not waiting for something the caller of Quiesce put there on purpose, so it
+// stays work until it has returned and its result has been taken.
+type adapterCall struct {
+	e      *Engine
+	mu     sync.Mutex
+	inside bool // enter counted the call and end has not yet taken it back
+	over   bool // end ran: a late enter counts nothing
+}
+
+func (e *Engine) newAdapterCall() *adapterCall { return &adapterCall{e: e} }
+
+// enter counts the call, unless it has already ended. It is called by the worker
+// that makes the call.
+func (c *adapterCall) enter() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.over {
+		c.inside = true
+		c.e.adapterCalls.Add(1)
+	}
+}
+
+// end stops counting the call. It is idempotent: the worker ends the call when it
+// returns, and the engine ends it when it cancels it.
+func (c *adapterCall) end() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.inside {
+		c.inside = false
+		c.e.adapterCalls.Add(-1)
+	}
+	c.over = true
 }
 
 // goroutineID is the id of the calling goroutine, read from the first line of its

@@ -503,6 +503,10 @@ have no answer are exactly the ones the caller says the adapter holds on purpose
 inside a call to an adapter is work until the adapter answers, except for the calls the
 caller says the adapter holds on purpose: those are the requests the host's own check
 has just matched with the held list, so the workers that wait for them are not counted.
+A call the engine itself cancels (the deadline of a call about a prompt) stops being one of
+those at the cancel, before its context ends: the host keeps counting it and the adapter
+keeps holding it until the worker wakes and sends the cancel, and that worker is work until
+it has returned and its result has been taken, whatever the list says.
 
 **Pulling.** `Recv` and `Ack` are commands of the loop; the caller is an open
 session endpoint by its token or an open direct endpoint by its adapter. One recv, in
@@ -2009,7 +2013,7 @@ reproducible).
 | Availability becomes handoff's signals; online and offline | `adapters.go` (`notified`, `gone`, `AdapterSignals`) | `TestAvailabilitySnapshotsBecomeHandoffSignals`, `TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission`, `TestAnInstanceTheConfigurationDoesNotEnableIsUnknownToReadsAndToGone` |
 | Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest`, `TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore` |
 | A checkpoint is on disk before it is answered; a session's is taken while the session is being created | `adapters.go` (`checkpointPut`), `view.go` (`resolveSessionBeingMade`, `resolveAttemptBeingMade`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
-| `Quiesce` judges the host's counts | `recovery.go` | `TestQuiesceJudgesTheAdapterHostsCounts` |
+| `Quiesce` judges the host's counts, and does not take a call the engine cancelled for one the adapter holds | `recovery.go`, `engine.go` (`adapterCall`), `prompts.go` (`spawnPromptCall`) | `TestQuiesceJudgesTheAdapterHostsCounts`, `TestQuiesceDoesNotTakeACallTheEngineCancelledForOneTheAdapterHolds` |
 | `Quiesce` sees the outbound worker begin to wait out a delay after it looked at the worker running | `recovery.go` | `TestQuiesceSeesTheWorkerBeginToWaitOutADelayAfterItLookedAtTheWorkerRunning` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
 | One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |

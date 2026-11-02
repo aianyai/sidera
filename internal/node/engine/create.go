@@ -187,9 +187,10 @@ func (e *Engine) startCreate(now time.Time, key store.TargetKey) {
 	cr.inflight = true
 	attempt := c.Intent.Attempt
 	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
+		ac := e.newAdapterCall()
+		ac.enter()
 		res, err := e.d.Adapters.CreateSession(ctx, instance, params)
-		e.adapterCalls.Add(-1)
+		ac.end()
 		r := &cmdCreateResult{call: newCall[struct{}](), key: key, attempt: attempt, res: res, err: err}
 		_, _ = roundTrip(ctx, e, submitInternal, r, r.call)
 	}) {

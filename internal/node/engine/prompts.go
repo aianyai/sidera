@@ -453,9 +453,9 @@ func (e *Engine) dispatchPrompt(now time.Time, id ident.EndpointID, d handoff.Pr
 
 // callDeliver sends the prompt to the adapter from a worker.
 func (e *Engine) callDeliver(now time.Time, instance string, id ident.EndpointID, params adapterproto.PromptDeliverParams) {
-	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context) {
+	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context, ac *adapterCall) {
 		res, err := e.d.Adapters.DeliverPrompt(callCtx, instance, params)
-		e.adapterCalls.Add(-1)
+		ac.end()
 		c := &cmdPromptResult{call: newCall[struct{}](), endpoint: id, attempt: params.Attempt, res: res, err: err}
 		_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
 	})
@@ -465,15 +465,21 @@ func (e *Engine) callDeliver(now time.Time, instance string, id ident.EndpointID
 // The call is bound by PromptCallDeadline on the injected clock: when it ends the
 // call's context is cancelled, the worker's call returns with an error that leaves the
 // outcome unknown, and the result is taken in like any other. The worker gets the
-// context of the call and, to answer the loop, the one of the engine.
-func (e *Engine) spawnPromptCall(now time.Time, id ident.EndpointID, call func(callCtx, ctx context.Context)) {
+// context of the call and, to answer the loop, the one of the engine. The call stops
+// counting as one the adapter holds on purpose when it is cancelled (see adapterCall),
+// and the worker ends it itself when the adapter has answered.
+func (e *Engine) spawnPromptCall(now time.Time, id ident.EndpointID, call func(callCtx, ctx context.Context, ac *adapterCall)) {
 	f := e.promptOf(id).flight
 	callCtx, cancel := context.WithCancel(e.ctx)
-	f.calling, f.cancelCall = true, cancel
+	ac := e.newAdapterCall()
+	f.calling, f.cancelCall = true, func() {
+		ac.end()
+		cancel()
+	}
 	e.sched.set(promptKey(schedPromptCallDeadline, id), now.Add(e.p.PromptCallDeadline))
 	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
-		call(callCtx, ctx)
+		ac.enter()
+		call(callCtx, ctx, ac)
 	}) {
 		e.endPromptCall(f, id)
 	}
@@ -588,9 +594,9 @@ func (e *Engine) startReconcile(now time.Time, id ident.EndpointID) {
 		params.Checkpoint = json.RawMessage(slices.Clone(cp))
 	}
 	instance, attempt := st.rec.Instance, p.flight.attempt
-	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context) {
+	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context, ac *adapterCall) {
 		res, err := e.d.Adapters.Reconcile(callCtx, instance, params)
-		e.adapterCalls.Add(-1)
+		ac.end()
 		c := &cmdReconcileResult{call: newCall[struct{}](), endpoint: id, attempt: attempt, res: res, err: err}
 		_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
 	})

@@ -93,10 +93,11 @@ func (e *Engine) startRelease(now time.Time, id ident.EndpointID) {
 	params := adapterproto.CloseParams{Endpoint: adapterproto.EndpointRef(id.String()), NativeRef: adapterproto.NativeRef(rec.Session.NativeRef)}
 	r.inflight = true
 	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
+		ac := e.newAdapterCall()
+		ac.enter()
 		c := &cmdReleaseResult{call: newCall[struct{}](), endpoint: id}
 		c.closed, c.err = e.d.Adapters.Close(ctx, instance, params)
-		e.adapterCalls.Add(-1)
+		ac.end()
 		_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
 	}) {
 		r.inflight = false

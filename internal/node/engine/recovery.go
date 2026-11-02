@@ -515,7 +515,8 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 	// what the loop was doing and what the host counts are of one moment. A worker
 	// that waits for a request the adapter holds on purpose is not at work: the
 	// host's own check below makes sure that the requests it has in flight are
-	// exactly those the caller expects held.
+	// exactly those the caller expects held. A call the engine has cancelled is no
+	// longer counted in adapterCalls (see adapterCall), whatever the host still says.
 	var pending []string
 	held := 0
 	for _, inst := range sortedKeys(c.expect.Adapters) {

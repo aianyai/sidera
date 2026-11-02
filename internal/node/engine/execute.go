@@ -162,14 +162,15 @@ func (e *Engine) startExecute(now time.Time, key store.TargetKey) {
 	}
 	x.inflight, x.offline = true, false
 	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
+		ac := e.newAdapterCall()
+		ac.enter()
 		r := &cmdExecuteResult{call: newCall[struct{}](), key: key}
 		if c.Kind == envelope.KindSessionClose {
 			r.closed, r.err = e.d.Adapters.Close(ctx, instance, adapterproto.CloseParams{Endpoint: ref, NativeRef: native})
 		} else {
 			r.interrupted, r.err = e.d.Adapters.Interrupt(ctx, instance, adapterproto.InterruptParams{Endpoint: ref})
 		}
-		e.adapterCalls.Add(-1)
+		ac.end()
 		_, _ = roundTrip(ctx, e, submitInternal, r, r.call)
 	}) {
 		x.inflight = false

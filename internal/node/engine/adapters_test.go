@@ -1873,3 +1873,66 @@ func TestQuiesceJudgesTheAdapterHostsCounts(t *testing.T) {
 		}
 	})
 }
+
+// holdingHost is an adapter host whose prompt call goes on after its context is
+// cancelled, as a real call does until its worker wakes and sends the cancel: the
+// host keeps counting the call, and the adapter keeps holding it, until the test lets
+// it go.
+type holdingHost struct {
+	*hostDouble
+	entered   chan struct{} // closed when a prompt call is out
+	cancelled chan struct{} // closed when the context of that call ended
+	release   chan struct{}
+}
+
+func (h *holdingHost) DeliverPrompt(ctx context.Context, _ string, _ adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	h.set("chat", adapterhost.ConnCounts{Connected: true, Calls: []string{adapterproto.MethodPromptDeliver}})
+	close(h.entered)
+	<-ctx.Done()
+	close(h.cancelled)
+	<-h.release
+	h.set("chat", adapterhost.ConnCounts{Connected: true})
+	return adapterproto.PromptDeliverResult{}, ctx.Err()
+}
+
+// A call that the engine cancelled at its deadline is no longer one the adapter holds
+// on purpose: until its worker has returned and the result is taken, the host still
+// counts the call and the caller's expectation still lists it, and a Quiesce that
+// subtracted the worker would report quiet with the attempt in flight.
+func TestQuiesceDoesNotTakeACallTheEngineCancelledForOneTheAdapterHolds(t *testing.T) {
+	noLeaks(t)
+	host := &holdingHost{hostDouble: newHostDouble(), entered: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
+	var letGo sync.Once
+	release := func() { letGo.Do(func() { close(host.release) }) }
+	defer release() // a failed check must not leave the worker blocked
+	r, _, _ := waitingSession(t, host)
+	e := r.start()
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(engine.DefaultParams().RetryBackoff)
+	<-host.entered
+	held := engine.Expect{Adapters: map[string]engine.AdapterExpect{"chat": {Held: []string{adapterproto.MethodPromptDeliver}}}}
+	quietBy := func(d time.Duration) error {
+		qctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		_, err := e.Quiesce(qctx, held)
+		return err
+	}
+	if err := quietBy(5 * time.Second); err != nil {
+		t.Fatalf("a call the adapter holds is not quiet before its deadline: %v", err)
+	}
+	r.clk.Advance(engine.DefaultParams().PromptCallDeadline)
+	<-host.cancelled
+	if err := quietBy(300 * time.Millisecond); err == nil {
+		t.Fatal("quiet was reported while the call the engine cancelled was still with the adapter")
+	}
+	release()
+	// The call has returned: what is left is the engine's own work, and the host
+	// holds nothing.
+	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := e.Quiesce(qctx, engine.Expect{Adapters: map[string]engine.AdapterExpect{"chat": {}}}); err != nil {
+		t.Fatalf("not quiet after the call returned: %v", err)
+	}
+}
