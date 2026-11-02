@@ -10,7 +10,7 @@ own version (v1) and does not follow this one.
 | ---- | -------------- |
 | `Version()` | The version of the running program: the release version, or `DevVersion` |
 | `Read()` | `Info`: the version, the abbreviated commit and whether the checkout was modified (from the module's build information), and the Go version |
-| `Info.Describe(program)` | The one line `version` prints, `sidera 0.8.0 (commit 369c94e9f1a2, go1.26.10)` |
+| `Info.Describe(program)` | The one line `version` prints, `sidera 0.9.0 (commit 369c94e9f1a2, go1.26.10)` |
 | `DevVersion` | `0.0.0-dev`, what a build without the release version reports |
 
 ## Rules

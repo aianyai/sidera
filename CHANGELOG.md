@@ -8,34 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-02
+
+A Claude Code or Codex session you opened yourself can now take part as a controller:
+it has an endpoint of its own on the node and is woken when a reply arrives. The release
+also ships a Windows arm64 package. State written by 0.8.0 needs no migration. The adapter
+protocol stays at version 1, and the daemon sends nothing new to an adapter that does not
+declare the new capability `attach`; the Go SDK has source-incompatible changes, listed
+under Changed.
+
 ### Added
 
-- **A Windows arm64 package.** A release carries `sidera_<version>_windows_arm64.zip` beside
-  the five archives it had, with the Codex and console adapter packages for windows/arm64.
-- **Adapter protocol: attached sessions.** An adapter can declare the runtime capability
-  `attach` and take hold of a session a person opened: the new request `session.attach`, the
-  notification `session.detached` and the `attached` and `wake` members of an `adapter.start`
-  session entry. The daemon sends none of them to an adapter that did not declare it.
-- **Management: `sessions.attach`.** The owner can attach a session a person opened to an
-  adapter that declared `attach`: the answer is the endpoint, its token and whether the adapter
-  can deliver prompts to the session. The request is safe to repeat, carries no operation
-  identifier and stores no result. Because the answer holds a token, a sandbox has to deny the
-  management socket to an agent. `endpoints.list` shows the `origin` of a session endpoint.
-- **Management: `sessions.attach` can only find.** With the new parameter `create` set to false
-  the method answers like any attachment when the session already has an open endpoint, and
-  with `not_found/session_not_attached` when it has none, without making one.
-- **Endpoint record: the origin of a session.** A session endpoint record can say that the
-  session was attached rather than created (`origin`). Records without it read as created, so
-  existing state needs no migration.
-- **Attached sessions: absence of the controller.** Every `sessions.attach` counts as the
-  heartbeat of the session's controller. An attached endpoint whose controller has not attached
-  for the endpoint's queue time (30 minutes by default, and never less than three minutes),
-  counted in the time the node was awake, is closed once nothing is queued or leased on it.
-- **Attached sessions: a session that attaches again is prompted at once.** An attachment
-  judges the endpoint for a prompt at once, without the minute that follows a failed prompt, so
-  that a session the person resumed is prompted for what waited while it was away.
-- **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
-  counts the turns of attached sessions, and a full node no longer holds back their prompts.
 - **Controller sessions.** A Claude Code or Codex session you opened becomes a controller
   when it has the `sidera` MCP server (or runs `sidera` agent commands) and no `SIDERA_TOKEN`:
   it attaches itself through `sessions.attach` on first use, keeps the token in memory only
@@ -43,7 +26,8 @@ protocol has a version of its own.
   runs, only finding the endpoint and never making one, and tells the model, in a second text item
   of the first result, whether the session can be woken. When the endpoint is closed the next
   tool call attaches the session as a new endpoint and its result names the new address and says
-  the old one is closed. `sidera setup controller` prints the commands that add the MCP server to Claude
+  the old one is closed.
+- **`sidera setup controller`.** It prints the commands that add the MCP server to Claude
   Code and Codex, naming the program by its absolute path (a client starts it without a shell and may
   not find the bare name on its `PATH`: Codex on Windows does not) and the data directory with `--home`
   when it is not the default, and the permission each client needs so that a woken controller does not
@@ -54,15 +38,25 @@ protocol has a version of its own.
   keeps its token and starts the heartbeat, so that what waited for the session while it was
   away reaches it without a first tool call. A session with no endpoint is left alone until its
   first tool call.
-- **Agent client: a token supplied later.** `agentapi.Client.SetToken` replaces the endpoint
-  credential for the calls that follow, so a caller that obtains its token after the client
-  exists keeps it in memory only.
-- **Claude adapter: attached sessions.** The adapter declares `attach`. A Claude Code session a
-  person opened and that attached itself is woken through the session's inbox socket and followed
-  through its registry entry and its session record: the turns the person starts are reported
-  without an attempt (also when a busy session goes from one turn straight to the next), `/clear` is
-  followed, and a session that is gone refuses prompts as
-  `native_unavailable`. Closing or interrupting such an endpoint is a wrong endpoint kind.
+- **A session that attaches again is prompted at once.** An attachment judges the endpoint for
+  a prompt without the minute that follows a failed prompt, so that a session the person resumed
+  is prompted for what waited while it was away.
+- **An attached endpoint is closed when its controller is gone.** Every attachment counts as the
+  heartbeat of the session's controller. An attached endpoint whose controller has not attached
+  for the endpoint's queue time (30 minutes by default, and never less than three minutes),
+  counted in the time the node was awake, is closed once nothing is queued or leased on it.
+- **Attached sessions are outside the node's turn cap.** The setting `node_prompt_turns` no
+  longer counts the turns of attached sessions, and a full node no longer holds back their
+  prompts.
+- **A Windows arm64 package.** A release carries `sidera_<version>_windows_arm64.zip` beside
+  the five archives it had, with the Codex and console adapter packages for windows/arm64. The
+  Claude Code adapter stays macOS only.
+- **Claude Code adapter: attached sessions.** The adapter declares `attach`. A Claude Code
+  session a person opened and that attached itself is woken through the session's inbox socket
+  and followed through its registry entry and its session record: the turns the person starts are
+  reported without an attempt (also when a busy session goes from one turn straight to the next),
+  `/clear` is followed, and a session that is gone refuses prompts as `native_unavailable`.
+  Closing or interrupting such an endpoint is a wrong endpoint kind.
 - **Codex adapter: attached sessions.** The adapter declares `attach` and takes hold of a Codex
   thread a person opened: it reads the thread's turns (once a second while it waits for a
   prompt it queued or a turn is open, every ten seconds otherwise), reports the turns the person
@@ -70,25 +64,47 @@ protocol has a version of its own.
   Codex (delivered within about ten seconds when the session is idle, after the current turn
   when it is busy, and held while no Codex process has the thread loaded). At most one wake-up
   of its own waits in the person's queue: an older one nobody took is withdrawn when a newer
-  one is queued and when the endpoint detaches. The adapter's
-  connection now asks for Codex's experimental API, which the queue needs. A thread that takes
-  no prompt (archived, unknown) is reported as the availability condition `native_unavailable`
-  of that endpoint alone, until it takes one again or the endpoint detaches.
+  one is queued and when the endpoint detaches. The adapter's connection now asks for Codex's
+  experimental API, which the queue needs. A thread that takes no prompt (archived, unknown) is
+  reported as the availability condition `native_unavailable` of that endpoint alone, until it
+  takes one again or the endpoint detaches.
+- **Management: `sessions.attach`.** The owner can attach a session a person opened to an
+  adapter that declared `attach`: the answer is the endpoint, its token and whether the adapter
+  can deliver prompts to the session. The request is safe to repeat, carries no operation
+  identifier and stores no result. Because the answer holds a token, a sandbox has to deny the
+  management socket to an agent. With the parameter `create` set to false the method only finds:
+  it answers like any attachment when the session already has an open endpoint, and with
+  `not_found/session_not_attached` when it has none, without making one. `endpoints.list` shows
+  the `origin` of a session endpoint.
+- **Endpoint record: the origin of a session.** A session endpoint record can say that the
+  session was attached rather than created (`origin`). Records without it read as created, so
+  existing state needs no migration.
+- **Adapter protocol: attached sessions.** An adapter can declare the runtime capability
+  `attach` and take hold of a session a person opened: the new request `session.attach`, the
+  notification `session.detached` and the `attached` and `wake` members of an `adapter.start`
+  session entry. The daemon sends none of them to an adapter that did not declare it. The Go SDK
+  has the types (`adapterproto`, with `RuntimeCapabilities.Attach`) and serves them through
+  `adapterkit` only for an adapter that declared `attach`.
 
 ### Changed
 
+- **Go SDK, incompatible: attached sessions change three shapes.** An adapter written against
+  0.8.0 has to be rebuilt and may need edits:
+  - `adapterproto.SessionAttach.ToolAccess` is now a `*ToolAccess`, absent for an attached
+    entry, and `Preset` may be empty for one. Code that reads either of them from an
+    `adapter.start` entry has to dereference the pointer; an adapter that does not declare
+    `attach` never receives an attached entry, so the pointer is never nil for it.
+  - `adapterkit.Application` gained the methods `AttachSession` and `SessionDetached`. An
+    application that embeds `adapterkit.Base` keeps compiling and refuses `session.attach`; an
+    application that implements the interface by itself has to add both.
 - **The reply to a control signal reaches its sender sooner.** The sender's first pulls for the
   reply to a control signal (the address of a session just created, the answer to a close) come
   2, 5 and 10 seconds apart, then once a minute as for any delivery; before, the reply was seen
   a minute after the signal. Messages are pulled once a minute as before.
-- **Go SDK: attached sessions change three shapes.** `adapterproto.SessionAttach.ToolAccess`
-  is now a `*ToolAccess` and is absent for an attached entry, and `Preset` may be empty for
-  one. `adapterkit.Application` gained `AttachSession` and `SessionDetached`; an application
-  that embeds `adapterkit.Base` keeps compiling.
 - **Codex adapter: the thread's `sidera` MCP server states `enabled = true`.** A person who
   also has a `[mcp_servers.sidera]` table in their own `config.toml` has it merged key by key
   with the one the adapter gives a session; the adapter now states every key it depends on, so
-  a `enabled = false` in the person's table no longer switches the session's channel off. A
+  an `enabled = false` in the person's table no longer switches the session's channel off. A
   `url` key in that table still makes the thread fail to start and has to be removed.
 
 ### Fixed
@@ -213,5 +229,6 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/aianyai/sidera/releases/tag/v0.9.0
 [0.8.0]: https://github.com/aianyai/sidera/releases/tag/v0.8.0

@@ -31,7 +31,7 @@ and log in once as yourself:
 ## Install from a release archive
 
 Releases are at <https://github.com/aianyai/sidera/releases>. Each release has
-one archive per platform, named `sidera_0.8.0_<os>_<arch>.tar.gz`
+one archive per platform, named `sidera_0.9.0_<os>_<arch>.tar.gz`
 (`.zip` on Windows), where `<os>` is `darwin`, `linux` or `windows` and
 `<arch>` is `arm64` or `amd64`, and a `checksums.txt` for all of them.
 
@@ -71,7 +71,7 @@ Windows (PowerShell): print the digest and compare it by eye with the line in
 `checksums.txt`.
 
 ```powershell
-(Get-FileHash .\sidera_0.8.0_windows_amd64.zip -Algorithm SHA256).Hash
+(Get-FileHash .\sidera_0.9.0_windows_amd64.zip -Algorithm SHA256).Hash
 ```
 
 Each command must report `OK` or an equal digest. If it does not, delete the
@@ -87,7 +87,7 @@ macOS and Linux:
 
 ```sh
 mkdir -p ~/.local/bin ~/sidera-release
-tar -xzf sidera_0.8.0_<os>_<arch>.tar.gz -C ~/sidera-release
+tar -xzf sidera_0.9.0_<os>_<arch>.tar.gz -C ~/sidera-release
 cp ~/sidera-release/sidera ~/sidera-release/sidera-adapter-console ~/.local/bin/
 ```
 
@@ -116,7 +116,7 @@ xattr -d com.apple.quarantine ~/.local/bin/sidera ~/.local/bin/sidera-adapter-co
 Windows (PowerShell):
 
 ```powershell
-Expand-Archive .\sidera_0.8.0_windows_amd64.zip -DestinationPath $env:USERPROFILE\sidera-release
+Expand-Archive .\sidera_0.9.0_windows_amd64.zip -DestinationPath $env:USERPROFILE\sidera-release
 New-Item -ItemType Directory -Force $env:USERPROFILE\sidera\bin | Out-Null
 Copy-Item $env:USERPROFILE\sidera-release\*.exe $env:USERPROFILE\sidera\bin\
 # Add the directory to the user PATH (open a new terminal afterwards).
@@ -135,7 +135,7 @@ sidera version
 ```
 
 It prints one line with the version, the commit the program was built from and the
-Go version that built it, for example `sidera 0.8.0 (commit abc123456789, go1.26.10)`.
+Go version that built it, for example `sidera 0.9.0 (commit abc123456789, go1.26.10)`.
 `sidera version --json` prints the same as JSON. Every node in a cluster should
 run the same release. A program built from source without release settings reports
 `0.0.0-dev`.
