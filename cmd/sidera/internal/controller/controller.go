@@ -54,6 +54,9 @@ type Request struct {
 	NativeRef   string            `json:"native_ref"`
 	DisplayName string            `json:"display_name,omitempty"`
 	Wake        map[string]string `json:"wake,omitempty"`
+	// Create false only finds the endpoint the session has. Absent, the node makes
+	// one when there is none.
+	Create *bool `json:"create,omitempty"`
 }
 
 // RequestFromEnv builds the request of the session whose environment this is.
@@ -145,12 +148,16 @@ type Manager interface {
 	Call(ctx context.Context, method string, in manageapi.Request) (json.RawMessage, error)
 }
 
+// CodeSessionNotAttached is the code of the refusal that answers a request which only
+// finds an endpoint (Create false) when the session has none.
+const CodeSessionNotAttached = "session_not_attached"
+
 // Attach asks the node to attach the session, or to find the endpoint it already
 // has. It carries no operation identifier: the method is safe to repeat.
 func Attach(ctx context.Context, m Manager, req Request) (Attachment, error) {
 	raw, err := m.Call(ctx, "sessions.attach", manageapi.Request{Params: req})
 	if err != nil {
-		return Attachment{}, explain(err, req.Adapter)
+		return Attachment{}, explain(withoutWake(err, req.Wake), req.Adapter)
 	}
 	var out struct {
 		Result Attachment `json:"result"`
@@ -159,6 +166,35 @@ func Attach(ctx context.Context, m Manager, req Request) (Attachment, error) {
 		return Attachment{}, apiwire.OutcomeUnknown("")
 	}
 	return out.Result, nil
+}
+
+// withoutWake returns err with every wake value of the request taken out of its
+// words. The node's own errors name a wake key and never its value, and so does
+// every error this process makes; this is the one place that keeps a value out of what
+// a person, a model or a log is shown should an error on the way carry the request.
+func withoutWake(err error, wake map[string]string) error {
+	if len(wake) == 0 {
+		return err
+	}
+	clean := func(text string) string {
+		for _, value := range wake {
+			text = strings.ReplaceAll(text, value, "[wake value]")
+		}
+		return text
+	}
+	var wire *apiwire.Error
+	if errors.As(err, &wire) {
+		if message := clean(wire.Message); message != wire.Message {
+			out := *wire
+			out.Message, out.Details = message, nil
+			return &out
+		}
+		return err
+	}
+	if text := clean(err.Error()); text != err.Error() {
+		return errors.New(text)
+	}
+	return err
 }
 
 // explain words the refusals of an attachment for the person or model who must
@@ -186,12 +222,24 @@ func explain(err error, adapter string) error {
 	return &out
 }
 
-// Notice is the text a controller's model reads on its first use, saying whether
-// the node can wake the session when a reply arrives.
-func Notice(w Wake) string {
-	if w.State == "ready" {
-		return "Sidera: this session is attached as a controller. A reply to a message you send wakes this session by itself."
-	}
+// Arrival is what a model is told about an attachment its session made: where it is
+// attached, whether the node can wake it and, when it had an endpoint that was closed
+// before, which one.
+type Arrival struct {
+	// Endpoint is the address of the endpoint the session is attached as.
+	Endpoint string
+	// Replaced is the address of the endpoint the session held until it was closed;
+	// empty when it had none.
+	Replaced string
+	Wake     Wake
+}
+
+const (
+	wakesByItself  = "A reply to a message you send wakes this session by itself."
+	collectReplies = "Replies will not interrupt you: call recv with a wait (wait_s, or --wait on the command line) inside a turn, or run a background watcher, to collect them."
+)
+
+func (w Wake) cause() string {
 	why := w.Reason
 	if why == "" {
 		why = w.State
@@ -199,6 +247,29 @@ func Notice(w Wake) string {
 	if w.Detail != "" {
 		why += ": " + w.Detail
 	}
-	return "Sidera: this session is attached as a controller, but the node cannot wake it (" + why + "). " +
-		"Replies will not interrupt you: call recv with a wait (wait_s, or --wait on the command line) inside a turn, or run a background watcher, to collect them."
+	return why
+}
+
+// Notice is the text a controller's model reads on its first use, saying whether
+// the node can wake the session when a reply arrives.
+func Notice(w Wake) string {
+	if w.State == "ready" {
+		return "Sidera: this session is attached as a controller. " + wakesByItself
+	}
+	return "Sidera: this session is attached as a controller, but the node cannot wake it (" + w.cause() + "). " + collectReplies
+}
+
+// Notice is the text the model reads with the result of the call that made the
+// attachment. A session that lost its endpoint is told the old address is closed and
+// the new one is where its peers must write.
+func (a Arrival) Notice() string {
+	if a.Replaced == "" || a.Replaced == a.Endpoint {
+		return Notice(a.Wake)
+	}
+	text := "Sidera: the endpoint of this session, " + a.Replaced + ", was closed, so messages sent to that address are no longer delivered. " +
+		"This session is attached again as " + a.Endpoint + "; tell the peers that wrote to the old address to use the new one. "
+	if a.Wake.State == "ready" {
+		return text + wakesByItself
+	}
+	return text + "The node cannot wake it (" + a.Wake.cause() + "). " + collectReplies
 }

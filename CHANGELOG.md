@@ -38,9 +38,16 @@ protocol has a version of its own.
   when it has the `sidera` MCP server (or runs `sidera` agent commands) and no `SIDERA_TOKEN`:
   it attaches itself through `sessions.attach` on first use, keeps the token in memory only
   and uses the ordinary Agent tools. `sidera mcp` repeats the attachment every minute while it
-  runs and tells the model, in a second text item of the first result, whether the session can
-  be woken. `sidera setup controller` prints the commands that add the MCP server to Claude
-  Code and Codex.
+  runs, only finding the endpoint and never making one, and tells the model, in a second text item
+  of the first result, whether the session can be woken. When the endpoint is closed the next
+  tool call attaches the session as a new endpoint and its result names the new address and says
+  the old one is closed. `sidera setup controller` prints the commands that add the MCP server to Claude
+  Code and Codex, naming the data directory with `--home` when it is not the default.
+- **A resumed Claude Code session is woken at once.** When it starts, the `sidera` MCP server
+  of a Claude Code session looks for an endpoint the session already has and, if it finds one,
+  keeps its token and starts the heartbeat, so that what waited for the session while it was
+  away reaches it without a first tool call. A session with no endpoint is left alone until its
+  first tool call.
 - **Agent client: a token supplied later.** `agentapi.Client.SetToken` replaces the endpoint
   credential for the calls that follow, so a caller that obtains its token after the client
   exists keeps it in memory only.

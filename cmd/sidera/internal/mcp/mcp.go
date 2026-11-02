@@ -61,10 +61,25 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 	logger := slog.New(slog.NewTextHandler(cfg.Stderr, nil))
 	s := &server{cfg: cfg, ctx: ctx, log: logger}
+	var resumed chan struct{} // nil when the server looks nothing up at start
 	if cfg.Controller != nil {
 		c := *cfg.Controller
 		c.Agent, c.Log = cfg.Agent, logger
 		s.controller = controller.NewSession(ctx, c)
+		// Without an Agent client every tool call is answered daemon_not_running, and
+		// there is no client to give a token to.
+		if cfg.Agent != nil {
+			resumed = make(chan struct{})
+			go func() {
+				defer close(resumed)
+				// A session resumed after its controller was away has an endpoint already;
+				// taking it up now wakes the session for what waited without a first tool
+				// call. Failing is quiet: the first tool call attaches and reports.
+				if err := s.controller.Resume(ctx); err != nil {
+					logger.Debug("the controller endpoint could not be looked up", "error", err)
+				}
+			}()
+		}
 	}
 	p, err := peer.New(cfg.Stdin, cfg.Stdout, peer.Config{
 		Logger: logger,
@@ -88,6 +103,9 @@ func Run(ctx context.Context, cfg Config) error {
 		s.probeMu.Unlock()
 		cancel()
 		p.Close()
+		if resumed != nil {
+			<-resumed
+		}
 		s.probeWG.Wait()
 		if s.controller != nil {
 			s.controller.Wait()

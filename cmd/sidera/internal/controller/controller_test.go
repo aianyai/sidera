@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -93,24 +94,63 @@ func TestDisplayNameStaysWithinTheLimit(t *testing.T) {
 	}
 }
 
-// fakeManager answers sessions.attach and records what it was sent.
+// fakeManager is the node's side of sessions.attach for one session: a request that
+// creates makes an endpoint when none is open, and one that only finds (create false)
+// is refused when none is. Endpoint n has the address "n/e<n>" and the token endpointTokens[n-1].
 type fakeManager struct {
 	mu       sync.Mutex
 	requests []string
-	tokens   []string // answers in order; the last repeats
+	opened   int
+	open     bool
 	fail     error
+	// failWith, when set, makes the error of a failure out of the request it answers.
+	failWith func(body string) error
 }
+
+const tokenC = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAI"
+
+var endpointTokens = []string{tokenA, tokenB, tokenC}
 
 func (f *fakeManager) Call(_ context.Context, method string, in manageapi.Request) (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	body, _ := json.Marshal(in.Params)
 	f.requests = append(f.requests, method+" "+string(body))
+	if f.failWith != nil {
+		return nil, f.failWith(string(body))
+	}
 	if f.fail != nil {
 		return nil, f.fail
 	}
-	token := f.tokens[min(len(f.requests)-1, len(f.tokens)-1)]
-	return json.RawMessage(`{"result":{"endpoint":"n/e","instance":"claude","token":"` + token + `","wake":{"state":"ready"}}}`), nil
+	if !f.open {
+		if strings.Contains(string(body), `"create":false`) {
+			return nil, apiwire.New(apiwire.CategoryNotFound, "session_not_attached", "no open endpoint is attached to this session")
+		}
+		f.opened, f.open = f.opened+1, true
+	}
+	return json.RawMessage(fmt.Sprintf(`{"result":{"endpoint":"n/e%d","instance":"claude","token":"%s","wake":{"state":"ready"}}}`, f.opened, endpointTokens[f.opened-1])), nil
+}
+
+// setFail makes every request fail with err (none: they succeed again).
+func (f *fakeManager) setFail(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = err
+}
+
+// closeEndpoint is the owner closing the endpoint.
+func (f *fakeManager) closeEndpoint() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.open = false
+}
+
+// replaceEndpoint is another process of the session closing the endpoint and
+// attaching again.
+func (f *fakeManager) replaceEndpoint() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened++
 }
 
 func (f *fakeManager) count() int {
@@ -119,15 +159,22 @@ func (f *fakeManager) count() int {
 	return len(f.requests)
 }
 
+// sent is a copy of the requests so far.
+func (f *fakeManager) sent() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.requests...)
+}
+
 func TestAttachSendsTheRequestAndReturnsTheToken(t *testing.T) {
-	m := &fakeManager{tokens: []string{tokenA}}
+	m := &fakeManager{}
 	req := controller.Request{Adapter: "codex", NativeRef: "t", DisplayName: "Codex controller (p)"}
 	att, err := controller.Attach(context.Background(), m, req)
 	if err != nil || string(att.Token) != tokenA || att.Wake.State != "ready" {
 		t.Fatalf("%+v %v", att, err)
 	}
-	if want := `sessions.attach {"adapter":"codex","native_ref":"t","display_name":"Codex controller (p)"}`; m.requests[0] != want {
-		t.Fatalf("request %s; want %s", m.requests[0], want)
+	if want := `sessions.attach {"adapter":"codex","native_ref":"t","display_name":"Codex controller (p)"}`; m.sent()[0] != want {
+		t.Fatalf("request %s; want %s", m.sent()[0], want)
 	}
 }
 

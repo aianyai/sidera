@@ -87,15 +87,27 @@ A server started without `SIDERA_TOKEN` and `SIDERA_PROBE_TOKEN` is the `sidera`
 server a person added to their own Claude Code or Codex (`sidera setup controller` prints
 the commands). A server with either variable never enters this mode. The server attaches
 its session on the first `tools/call` that passes argument validation, not at start-up:
-a session that never uses Sidera opens no endpoint. A repeated tool call does not
+a session that never uses Sidera opens no endpoint. The one thing it does at start-up
+is to look for an endpoint the session already has (below). A repeated tool call does not
 attach again; a failed attachment is tried again by the next call, and a refusal is
 that call's tool error (the words are in [the command line](../command-line/README.md#controller-sessions)).
 
 - Claude Code: the session id is `CLAUDE_CODE_SESSION_ID` of the server's environment,
   and the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
   `CLAUDE_PID` are copied from it when present. After `/clear` the variable is stale;
-  the endpoint keeps the id it was attached with.
-- Codex: the server's environment has no `CODEX*` variable. The thread id is
+  the endpoint keeps the id it was attached with. At start-up, in the background and
+  without holding up the protocol, the server calls `sessions.attach` once with `create`
+  false and the same params: a session resumed after its controller was away has an open
+  endpoint (it stays open for the queue time after the last heartbeat), and the answer
+  makes the server keep its token and start the heartbeat at once, so that the node wakes
+  the resumed session for what waited without waiting for a first tool call. When the
+  session has no endpoint (`not_found/session_not_attached`), or the lookup fails (the
+  node is not running; only a debug line is logged), nothing is made and the first tool
+  call attaches as described. The first result after a lookup that found an endpoint
+  carries the wake notice, as one after an attachment does.
+- Codex: the server's environment has no `CODEX*` variable, so the server cannot look for an
+  endpoint at start-up: it learns the thread id only from the first tool call, and a
+  resumed Codex session is woken once that call has attached it. The thread id is
   `params._meta["x-codex-turn-metadata"].thread_id` of the tool call, read as an object or
   as the same object in a JSON string; no other member of the metadata is interpreted.
   Without it the tool call is a tool error `unauthenticated/token_missing` saying the
@@ -106,11 +118,25 @@ that call's tool error (the words are in [the command line](../command-line/READ
   answer goes to the Agent client in memory and replaces the credential for the calls
   that follow; it is in no environment, argv, log or file, and neither are the wake
   values.
-- While the server runs, a heartbeat repeats the same attachment every 60 seconds. It
-  stops with the server (end of input or shutdown), which joins it. A failed repetition
-  is logged on standard error (the error text carries no token or wake value) and tried
-  again at the next beat. An answer with another token means the endpoint was replaced
-  after the old one closed; the Agent client takes the new token.
+- While the server runs, a heartbeat repeats the attachment every 60 seconds with `create`
+  false: it proves to the node that the controller lives (an endpoint whose controller is
+  gone for the queue time is closed) and sends the wake information anew, and it never
+  makes an endpoint, so an endpoint the owner closed is not made again behind the owner's
+  back. It stops with the server (end of input or shutdown), which joins it. A failed
+  repetition is logged on standard error (the error text carries no token or wake value)
+  and tried again at the next beat; a refusal that holds until a person changes something
+  (no adapter instance, an adapter that does not take attached sessions) is logged once
+  for each code. An answer with another token means the endpoint was replaced by another
+  process of the session; the Agent client takes the new token.
+- When the node answers that the session has no endpoint (`not_found/session_not_attached`), or a
+  tool call is refused by the Agent interface for authentication (`unauthenticated`, the token
+  is not known any more), the endpoint was closed. The session is then not attached: the
+  heartbeat stops, and the next valid tool call attaches it again and gets a new endpoint with
+  a new address. That call's result carries a notice naming the new address and saying
+  the old one is closed, so the peers that wrote to it must use the new one. The call that was
+  refused is not repeated.
+- A tool call of a Codex session that names another thread id than the one attached is logged
+  once on standard error; the attachment stays as it was.
 - The result of the call that attached carries a second text item, after the tool's
   own, saying whether the node can wake the session (`ready`) or not (`unavailable` or
   `unknown`, with the reason and that `recv` with `wait_s` collects replies instead).

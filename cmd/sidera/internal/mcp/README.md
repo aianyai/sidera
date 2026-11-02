@@ -21,8 +21,10 @@ known arguments; projected JSON retains explicit member presence through
 64-bit integer lexemes before that call, including decimal and exponent inputs.
 The Agent interface owns semantic validation and the
 single-recipient limit. The server opens the management interface only in controller
-mode, through [`controller`](../controller/README.md), for `sessions.attach`: on the
-first valid tool call, then as a heartbeat that `Run` joins before it returns. The
+mode, through [`controller`](../controller/README.md), for `sessions.attach`: once at
+start-up in the background to find an endpoint the session already has (a server with no Agent client
+looks for none), on the first
+valid tool call otherwise, then as a heartbeat; `Run` joins both before it returns. The
 Codex thread id is read from the tool call's `_meta` here, the only place that sees it. Read
 [the reference](../../../../docs/references/mcp/README.md) for the wire contract.
 

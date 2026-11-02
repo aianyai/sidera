@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/peer"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
@@ -218,15 +217,18 @@ func (s *server) callTool(ctx context.Context, fields map[string]json.RawMessage
 	}
 	var notice string
 	if s.controller != nil {
-		wake, err := s.controller.Ensure(ctx, codexThread(fields))
+		arrival, err := s.controller.Ensure(ctx, codexThread(fields))
 		if err != nil {
 			return s.toolResult(nil, err, modern, "")
 		}
-		if wake != nil {
-			notice = controller.Notice(*wake)
+		if arrival != nil {
+			notice = arrival.Notice()
 		}
 	}
 	result, err := s.invoke(ctx, name, projected)
+	if s.controller != nil {
+		s.controller.Rejected(err)
+	}
 	return s.toolResult(result, err, modern, notice)
 }
 
