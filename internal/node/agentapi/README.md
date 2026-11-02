@@ -11,7 +11,7 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 | ---- | ------- |
 | `Listen`, `Listener` | Open an Agent address through `ipc`, under the node's instance lock. The underlying listener is private. |
 | `New`, `Config`, `Server.Serve`, `ServeHTTP`, `Shutdown`, `Close` | Serve the interface, initially accepting only probes. `Server.EnableMethods` opens the endpoint methods after recovery. |
-| `NewClient`, `ClientConfig`, `Client.Probe`, `Client.Close` | Present the separate probe credential through the shared checked transport and release idle connections. |
+| `NewClient`, `ClientConfig`, `Client.Probe`, `Client.SetToken`, `Client.Close` | Present the separate probe credential through the shared checked transport, take the endpoint credential later than the client (memory only, safe during calls), and release idle connections. |
 | `Client.Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control` | Call the endpoint methods; receive returns unchanged page bytes. |
 | `Client.Call(ctx, method, in)` | Send JSON with explicit member presence and receive the method's validated concrete result. |
 | Request and result types in `methods.go` | The snake-case Agent wire shapes; value vocabularies and validation stay with their existing owners. |

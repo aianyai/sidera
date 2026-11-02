@@ -3,6 +3,7 @@ package agentapi
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -14,7 +15,9 @@ import (
 )
 
 // ClientConfig names the node and the two distinct credentials an Agent tool may
-// hold. A probe uses ProbeToken; every other method uses Token.
+// hold. A probe uses ProbeToken; every other method uses Token. A caller that does
+// not hold the endpoint token yet leaves Token empty and supplies it later with
+// SetToken.
 type ClientConfig struct {
 	Home       string
 	Token      adapterproto.Token
@@ -26,6 +29,7 @@ type ClientConfig struct {
 type Client struct {
 	cfg       ClientConfig
 	transport *localhttp.Client
+	mu        sync.RWMutex // guards cfg.Token, which SetToken may replace during calls
 }
 
 // NewClient binds the two separate Agent credentials to one node. The server
@@ -36,6 +40,21 @@ func NewClient(c ClientConfig) (*Client, error) {
 		return nil, err
 	}
 	return &Client{cfg: c, transport: transport}, nil
+}
+
+// SetToken replaces the endpoint credential used by the calls that start after it.
+// A caller that obtains its token after the client exists, such as a session that
+// attaches itself, keeps the token in this memory only.
+func (c *Client) SetToken(token adapterproto.Token) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cfg.Token = token
+}
+
+func (c *Client) endpointToken() adapterproto.Token {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cfg.Token
 }
 
 // Close releases idle connections. In-flight calls belong to their contexts.
@@ -72,7 +91,7 @@ func (c *Client) Call(ctx context.Context, method string, in any) (any, error) {
 }
 
 func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
-	token := c.cfg.Token
+	token := c.endpointToken()
 	timeout := 60 * time.Second
 	var decode func([]byte) (any, error)
 	switch method {

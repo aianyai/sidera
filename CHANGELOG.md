@@ -29,6 +29,10 @@ protocol has a version of its own.
 - **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
   counts the turns of attached sessions, and a full node no longer holds back their prompts.
 
+- **Agent client: a token supplied later.** `agentapi.Client.SetToken` replaces the endpoint
+  credential for the calls that follow, so a caller that obtains its token after the client
+  exists keeps it in memory only.
+
 ### Changed
 
 - **The reply to a control signal reaches its sender sooner.** The sender's first pulls for the

@@ -160,3 +160,21 @@ func TestCallRejectsUnknownMethodsAndUnsafeDocumentsBeforeDialing(t *testing.T) 
 		}
 	}
 }
+
+func TestSetTokenReplacesTheEndpointCredentialForLaterCalls(t *testing.T) {
+	var seen []string
+	c := responseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		io.WriteString(w, `{"nodes":[]}`)
+	})
+	later := adapterproto.Token(strings.Repeat("C", 43))
+	for _, token := range []adapterproto.Token{"", later} {
+		c.SetToken(token)
+		if _, err := c.Peers(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := []string{"", "Bearer " + string(later)}; !reflect.DeepEqual(seen, want) {
+		t.Fatalf("credentials: %q; want %q", seen, want)
+	}
+}
