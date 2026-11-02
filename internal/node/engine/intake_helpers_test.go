@@ -190,10 +190,12 @@ func clientResults(t testing.TB, h *harness.H, from string) []ledger.Entry {
 }
 
 // resendBackoff and pullInterval are how long the sender waits before it sends
-// again after no answer and before it asks again for a report.
+// again after no answer and before it asks again for a report; controlReplyWait is
+// how long it waits before its first pull for the reply to a control signal.
 var (
-	resendBackoff = engine.DefaultParams().ResendBackoff
-	pullInterval  = engine.DefaultParams().PullInterval
+	resendBackoff    = engine.DefaultParams().ResendBackoff
+	pullInterval     = engine.DefaultParams().PullInterval
+	controlReplyWait = engine.DefaultParams().ControlPullRamp[0]
 )
 
 // forged is an envelope from a third party that names a message as the one it

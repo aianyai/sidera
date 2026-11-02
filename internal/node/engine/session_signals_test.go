@@ -42,7 +42,7 @@ func signal(t testing.TB, h *harness.H, from, to string, sig adapterproto.Contro
 func replyOf(t testing.TB, h *harness.H, from string, msg adapterproto.MessageID) *adapterproto.ControlReply {
 	t.Helper()
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	return controlReply(t, h, from, msg)
 }

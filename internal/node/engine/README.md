@@ -441,7 +441,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   digest, and so the request, is the same. A call that fails after `BeginShutdown` is
   dropped as a cancelled call is: the network closes before the worker stops, and
   its failures are not contact failing; the next start sends again. A delivery that is not settled is asked
-  about every `PullInterval` until its report deadline, which already holds the
+  about every `PullInterval` until its report deadline (the delivery of a control signal
+  itself first on the short waits of `Params.ControlPullRamp`, so that its reply is heard of
+  within seconds, `pullDelay`), which already holds the
   tolerance of the clock (a pull names each delivery of the record on that node that
   is not settled, and the target answers for those only; a derived delivery, which only a
   control signal's record has, is asked about like the others, since the worker carries a

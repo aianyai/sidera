@@ -93,7 +93,7 @@ func TestSessionCreateWithParamsBeyondPresetIsRefused(t *testing.T) {
 	}
 	msg := create(t, h, "a", "default")
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 
 	wantFailed(t, controlReply(t, h, "a", msg), adapterproto.CreateReasonPresetUnavailable)
@@ -134,7 +134,7 @@ func TestSessionCreateWithPresetClosedToLocalSourcesIsRefused(t *testing.T) {
 
 	open := create(t, h, "a", "open")
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	r := controlReply(t, h, "a", open)
 	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated {
@@ -337,7 +337,7 @@ func TestRepliesAndCreateRepliesPassRestrictedDeclaration(t *testing.T) {
 	// And so is the reply to a creation.
 	msg := create(t, h, "a", "default")
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	r := controlReply(t, h, "a", msg)
 	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated {
@@ -364,7 +364,7 @@ func TestSessionCreateIsRefusedWhileTheAdapterIsOffline(t *testing.T) {
 	adapterRestarted(t, h, 2)
 	again := create(t, h, "a", "default")
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	if r := controlReply(t, h, "a", again); r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated {
 		t.Errorf("the creation after the adapter returned: %+v, want created", r)
@@ -453,7 +453,7 @@ func TestSessionCreateFailedAsControlUnknownAlertsTheOwner(t *testing.T) {
 	}
 	msg := create(t, h, "a", "default")
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	wantFailed(t, controlReply(t, h, "a", msg), adapterproto.CreateReasonControlUnknown)
 	alerts, err := h.Engine().Alerts(context.Background())

@@ -271,7 +271,7 @@ func TestARefusedControlSignalRecoversFromACrashAtEveryPoint(t *testing.T) {
 		t.Fatalf("the signal is accepted by its sender's node: %v", err)
 	}
 	quiet(t, h)
-	h.Advance(pullInterval)
+	h.Advance(controlReplyWait)
 	quiet(t, h)
 	if len(taker.disks) == 0 {
 		t.Fatal("no step of the watched transactions was reached")

@@ -155,7 +155,7 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 			}
 			msg := res.MessageID
 			quiet(t, h)
-			h.Advance(pullInterval)
+			h.Advance(controlReplyWait)
 			quiet(t, h)
 			if len(taker.disks) == 0 {
 				t.Fatal("no step of the watched transactions was reached")
@@ -181,7 +181,7 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 		taker.h = h // only what the close writes is walked
 		msg := signal(t, h, "a", addressOf(id), adapterproto.SignalSessionClose, "")
 		quiet(t, h)
-		h.Advance(pullInterval)
+		h.Advance(controlReplyWait)
 		quiet(t, h)
 		if len(taker.disks) == 0 {
 			t.Fatal("no step of the watched transactions was reached")

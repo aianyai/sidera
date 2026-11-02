@@ -31,6 +31,10 @@ protocol has a version of its own.
 
 ### Changed
 
+- **The reply to a control signal reaches its sender sooner.** The sender's first pulls for the
+  reply to a control signal (the address of a session just created, the answer to a close) come
+  2, 5 and 10 seconds apart, then once a minute as for any delivery; before, the reply was seen
+  a minute after the signal. Messages are pulled once a minute as before.
 - **Go SDK: attached sessions change three shapes.** `adapterproto.SessionAttach.ToolAccess`
   is now a `*ToolAccess` and is absent for an attached entry, and `Preset` may be empty for
   one. `adapterkit.Application` gained `AttachSession` and `SessionDetached`; an application

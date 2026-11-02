@@ -82,7 +82,7 @@ func newSessionOn(t testing.TB, h *harness.H, instance, from string) (fakeagent.
 	t.Helper()
 	msg := createOn(t, h, instance, from, "default")
 	quiet(t, h)
-	h.Advance(pullInterval) // the reply reaches its sender by the sender's pull
+	h.Advance(controlReplyWait) // the reply reaches its sender by the sender's pull
 	quiet(t, h)
 	r := controlReply(t, h, from, msg)
 	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || r.Create.SessionEndpoint == "" {

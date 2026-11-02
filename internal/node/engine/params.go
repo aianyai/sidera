@@ -44,6 +44,15 @@ type Params struct {
 	// PullInterval is how long a sender waits between two pulls of the reports of
 	// a delivery that is not final, until its report deadline.
 	PullInterval time.Duration
+	// ControlPullRamp are the waits before the first pulls for the reply to a control
+	// signal, one for each pull, on the injected clock; after them, or from the first
+	// entry that is not positive on, the pulls are PullInterval apart as for any
+	// message. A control signal is something a sender waits on (a session created is
+	// the address its next message goes to), and the target answers it within
+	// seconds, so waiting a whole PullInterval to hear of it would be most of the
+	// time the whole exchange takes. A wait longer than PullInterval counts as
+	// PullInterval. An array, so that Params stays comparable.
+	ControlPullRamp [3]time.Duration
 	// CreateReplyDeadline is how long a session creation has, from the moment the
 	// node accepted the signal, to show the session ready: when it ends the sender
 	// is told that the creation is unconfirmed. Until then a call that failed or
@@ -95,6 +104,7 @@ func DefaultParams() Params {
 		RetryBackoff:     time.Minute,
 		ResendBackoff:    30 * time.Second,
 		PullInterval:     time.Minute,
+		ControlPullRamp:  [3]time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second},
 
 		CreateReplyDeadline: 3 * time.Minute,
 		CreateRetryBackoff:  30 * time.Second,
@@ -136,6 +146,9 @@ func (p Params) withDefaults() Params {
 	}
 	if p.PullInterval <= 0 {
 		p.PullInterval = d.PullInterval
+	}
+	if p.ControlPullRamp == ([3]time.Duration{}) {
+		p.ControlPullRamp = d.ControlPullRamp
 	}
 	if p.CreateReplyDeadline <= 0 {
 		p.CreateReplyDeadline = d.CreateReplyDeadline

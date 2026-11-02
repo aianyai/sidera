@@ -661,7 +661,10 @@ answer is made again every `ResendBackoff` (30 s) until the delivery deadline, t
 node that has not answered (the envelope is made anew, so a reply's evidence is signed
 anew, and the request digest is the same); a delivery that is not settled is asked about
 every `PullInterval` (1 min) until its report deadline, which already holds the clock
-tolerance, and once more after it (below); after the delivery deadline a node that never
+tolerance, and once more after it (below); the delivery of a control signal itself is asked
+about on the short waits of `Params.ControlPullRamp` first (2 s, 5 s, 10 s, one for each pull
+after the send was answered, each at most `PullInterval`), and then every `PullInterval` like
+the rest (see the reply of a creation below); after the delivery deadline a node that never
 answered is asked and not sent to. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
 verified with the target's certificate and applied to the source record by the envelope
 package's one rule; the record is written with the feedback the change calls for and with
@@ -1654,7 +1657,8 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
 - **Pulling at a fixed interval, not on a signal.** The sender asks again because a
   transport to another node has no way to tell it a state changed; the loopback is the
   same seam. At the scale of a node (a few thousand live messages) a pull a minute is a
-  cheap command that writes nothing when nothing changed.
+  cheap command that writes nothing when nothing changed. A control signal is the one
+  delivery a sender waits on, so its first pulls come sooner (above).
 
 - **One writer, not locks.** Every operation that changes state is serialised, so
   the crash points of each transaction can be enumerated and a run can be replayed.
@@ -1886,10 +1890,19 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   unconfirmed reply names an endpoint that cannot be used; the alert is what the owner has for
   the native session that may remain. The alternative, keeping the endpoint to be opened by a
   late result, would let the endpoint of a reply that said "not confirmed" start taking messages.
-- **The reply of a creation is not pushed to its source.** The source pulls until the reply
-  comes, so the sender sees it within `PullInterval`; a faster path (the target asking its own
-  source node to pull at once) would be a second way a reply reaches a source, and none is
-  needed by a sender that polls the status of its message.
+- **The reply of a control signal is not pushed to its source; the source pulls soon.** The
+  source pulls until the reply comes, and for the delivery of a control signal itself the first
+  pulls come on a short ramp (`Params.ControlPullRamp`: 2 s, 5 s, 10 s after the send was
+  answered), then every `PullInterval` like any delivery. Dispatching work is the commonest thing
+  a controller does, it needs the address of each new session before it can send to it, and the
+  target has the reply within seconds; with the pull a minute away every new session cost a
+  minute of waiting for nothing. The ramp is finite and stays within the deadlines of the signal
+  (a pull is asked for only while the delivery is not settled and `report_by` has not passed),
+  and it concerns the signal's own delivery only: a message, and the delivery a creation derives
+  from its initial message, are pulled every `PullInterval`. A push (the target asking its own
+  source node to pull at once) would be a second way a reply reaches a source and needs a
+  message between nodes that does not exist; the source's pull is the one way, only sooner. The
+  ramp is the loop's memory (`outState`), so a restart begins it again at the first wait.
 
 Prior art taken: the typed command with a capacity-one answer and a context that
 does not retract a handed command (etcd raft node), the heap with one timer re-armed
@@ -2070,6 +2083,7 @@ reproducible).
 | A session a person opened is attached by the owner's request: one open endpoint for an instance and a native session, found again and not duplicated by a repeat (with the wake information replaced), a new endpoint after a close, refused for an adapter that did not declare `attach`, a native session the node created, a missing or ambiguous instance and a full node; the adapter is asked with `session.attach` after the endpoint is written and its answer is the wake state; closing says `closed`, sends `session.detached` (also when the node restarted since the attachment) and never `session.close`; `adapter.start` lists it with its wake only to a declarer, an adapter that does not declare `attach` has its attached endpoints closed at admission, `recv.observed` for it is refused, and the directory and the answer to a close or an interrupt agree | `attach.go`, `adapters.go` (`sessionAttaches`, `admit`), `endpoints.go` (`putEndpoint`), `lease.go` (`observed`) | `TestAttachingTheSameSessionAgainIsTheSameEndpointUntilItIsClosed`, `TestAttachingASessionIsRefused`, `TestAnAttachedEndpointTakesAPlaceOfTheNodeCap`, `TestTheWakeStateIsWhatTheAdapterSaid`, `TestAdapterStartListsAnAttachedSessionOnlyToAnAdapterThatTakesIt`, `TestClosingAnAttachedSessionDetachesItAndNeverClosesTheSession`, `TestClosingAnAttachedSessionAfterARestartStillDetachesIt`, `TestRecvObservedIsRefusedForAnAttachedSession`, `TestTheDirectoryAndTheAnswerToASignalAgreeOnAnAttachedSession` |
 | An attached endpoint is closed when its controller has not attached for the endpoint's queue time (never less than three heartbeats) in awake time, and only when nothing is queued or leased on it: an attachment starts the window again, a jump of the clock (a sleep) counts for no more than the cap, which follows the periodic tasks, a restart gives a fresh window, a queued or leased message holds the endpoint open until it has expired | `attach.go` (`attachedAbsenceDue`, `attachedWindow`, `seedAttached`), `awake.go`, `engine.go` (`observe`) | `TestAnAttachedEndpointClosesWhenItsControllerHasBeenGoneForTheQueueTime`, `TestAQueueTimeShorterThanThreeHeartbeatsDoesNotCloseALiveController`, `TestAnAttachmentBeforeTheWindowEndsStartsItAgain`, `TestTheTimeTheNodeSleptIsNotAbsenceOfTheController`, `TestTheStepCapOfTheAwakeTimeFollowsThePeriodicTasks`, `TestARestartGivesTheControllerAFreshWindow`, `TestAMessageOnTheEndpointHoldsItOpenPastTheWindow` |
 | The turns of an attached session are not counted by the node's cap on prompt-started turns, and the session is prompted when the node is full | `prompts.go` (`countsAgainstNodeCap`, `promptRound`), `internal/handoff` (`WaitingPrompt.OutsideCap`) | `TestAnAttachedSessionIsOutsideTheNodePromptCap`, and the rows of `TestDecideNodePrompts` |
+| The reply to a control signal is pulled on the short ramp after the send, within seconds, and the pulls of an ordinary message, and of the delivery a creation derives, stay every `PullInterval`; the ramp is one wait for each pull, each at most the interval | `outbound.go` (`pullDelay`, `afterOutbound`), `params.go` | `TestAControlReplyIsPulledSoon`, `TestPullDelayRampsOnlyForTheDeliveryOfAControlSignal` |
 | A report that changes neither the delivery nor the arrival writes nothing: a pull whose target has nothing new is not a write of the sender's record | `outbound.go` (`trackedChanged`) | `TestAPullThatBringsNoNewsWritesNothing` |
 | A direct endpoint is told with `endpoint.pending` how many messages wait for it, once for each message made ready by a separate command, not for a message a waiting recv took, and a session endpoint is not told | `pending.go` (`notePending`, `servePending`) | `TestADirectEndpointIsToldOnceThatAMessageWaits`, `TestAMessageHandedToAWaitingRecvIsNotAnnounced`, `TestASessionEndpointIsNotToldWithEndpointPending` |
 | A notice whose body is damaged is told again from what it covered, and a crash anywhere in the settlement loses none of it and tells it only once | `feedback.go` (`reissueCovered`), `quarantine.go` (`quarantineOwner`) | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered`, `TestADamagedNoticeIsToldAgainOnceWhereverTheNodeDiesSettlingIt`, `TestADamagedNoticeWhoseItemsAreStillQueuedToBeClearedIsToldAgainOnce` |

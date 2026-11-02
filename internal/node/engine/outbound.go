@@ -99,6 +99,9 @@ type outState struct {
 	// failure of the run that is going on: it is forgotten when a call to the node
 	// gets an answer. It says for how long contact has been failing.
 	failingSince map[ident.NodeID]time.Time
+	// rampPulls is how many pulls for the reply to a control signal the record has
+	// had waits from Params.ControlPullRamp for.
+	rampPulls int
 }
 
 func newOutbox() *outbox {
@@ -473,8 +476,8 @@ func (e *Engine) finalPullMade(now time.Time, w outWork, st *outState) {
 }
 
 // afterOutbound schedules the next look at a record whose work is all back: a
-// send again after ResendBackoff while a node has not answered, else a pull one
-// interval from now while a delivery is not settled, nothing when none is. A
+// send again after ResendBackoff while a node has not answered, else a pull
+// (pullDelay) while a delivery is not settled, nothing when none is. A
 // delivery that is waiting for the pull before its close is looked at at once: that
 // pull is the last, and the close waits for it.
 func (e *Engine) afterOutbound(name string, now time.Time) {
@@ -499,7 +502,7 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 			next = e.p.ResendBackoff
 		case workPull:
 			if next == 0 {
-				next = e.p.PullInterval
+				next = e.pullDelay(o.Outbound, t, st)
 			}
 		}
 		if next == e.p.ResendBackoff {
@@ -511,6 +514,25 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 		return
 	}
 	e.sched.set(schedKey{schedOutbound, name}, now.Add(next))
+}
+
+// pullDelay is how long to wait before the next pull for the delivery t of the
+// record: PullInterval, except for the delivery of a control signal itself, whose
+// first pulls come on the short waits of Params.ControlPullRamp. A control signal
+// is what the sender waits on (dispatching work is the commonest thing a controller
+// does, and it needs the address of the session it made), and the target has its
+// reply within seconds. The pulls stay within the deadlines of the signal, which
+// outboundNeed holds to: a pull is only asked for while the delivery is not settled
+// and report_by has not passed. The derived delivery of a creation (its initial
+// message) and the messages are pulled every PullInterval.
+func (e *Engine) pullDelay(o envelope.Outbound, t envelope.Tracked, st *outState) time.Duration {
+	ramp := e.p.ControlPullRamp
+	if !o.Kind.IsControl() || t.Address != o.Recipients[0].Address || st.rampPulls >= len(ramp) || ramp[st.rampPulls] <= 0 {
+		return e.p.PullInterval
+	}
+	wait := min(ramp[st.rampPulls], e.p.PullInterval)
+	st.rampPulls++
+	return wait
 }
 
 // sourceChange is the change one answer from a node, or one failure to get an
