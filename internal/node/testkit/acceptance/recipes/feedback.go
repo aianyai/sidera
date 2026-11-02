@@ -17,6 +17,12 @@ type feedbackDrain struct {
 func (d *feedbackDrain) run(e scenario.Env, facts *DeliveryEvidence, sender string) error {
 	for d.completedSteps < 2 {
 		if !d.advanceIssued {
+			// The action that came before (a send, a receive) leaves the system
+			// reacting; the clock moves only once that has stopped, or the state the
+			// advance finds depends on how far each goroutine has got.
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
 			// Advancing selects the new logical time before its resulting writes
 			// can be cut, even if the call has not returned when the process dies.
 			d.advanceIssued = true

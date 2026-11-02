@@ -33,8 +33,11 @@ message, target and kind is a duplicate. Acknowledgements name only the parts ju
 returned by that receive, and their real outcomes must accept those parts.
 
 Each feedback phase owns a separate zero-value private `feedbackDrain`. It
-issues two one-minute advances, remembering issuance before calling `Advance`
-and counting a step only after `Quiesce` succeeds. A crash during an advance's
+issues two one-minute advances. Before each it waits for the system to settle
+(`Quiesce`), because the send or receive that came before leaves the system
+reacting and the state the advance finds would otherwise depend on how far each
+goroutine has got. It remembers issuance before calling `Advance` and counts a
+step only after `Quiesce` succeeds. A crash during an advance's
 response or its resulting writes therefore resumes quiescence at the selected
 time instead of advancing again. Repeating completed waits could otherwise pass
 a creation's reply deadline and create additional feedback during cleanup.
