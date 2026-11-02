@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -20,6 +21,7 @@ const legacyVersion = "2025-06-18"
 const modernVersion = "2026-07-28"
 const versionKey = "io.modelcontextprotocol/protocolVersion"
 const capabilitiesKey = "io.modelcontextprotocol/clientCapabilities"
+const codexTurnMetadataKey = "x-codex-turn-metadata"
 const instructions = "Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."
 
 // Config borrows Agent and Stderr. Run owns and closes Stdin and Stdout.
@@ -31,6 +33,10 @@ type Config struct {
 	Agent          *agentapi.Client
 	Version        string
 	ProbeOnConnect bool
+	// Controller is set when the server holds no token of its own and may attach
+	// the session it runs in as a controller. Run supplies its Agent client and
+	// logger; the caller supplies the management client and the environment.
+	Controller *controller.Config
 }
 
 type server struct {
@@ -42,6 +48,7 @@ type server struct {
 	probeWG      sync.WaitGroup
 	ctx          context.Context
 	log          *slog.Logger
+	controller   *controller.Session // nil unless the server may attach its session
 }
 
 // Run serves until stdin closes, the context ends or a transport fails.
@@ -54,6 +61,11 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 	logger := slog.New(slog.NewTextHandler(cfg.Stderr, nil))
 	s := &server{cfg: cfg, ctx: ctx, log: logger}
+	if cfg.Controller != nil {
+		c := *cfg.Controller
+		c.Agent, c.Log = cfg.Agent, logger
+		s.controller = controller.NewSession(ctx, c)
+	}
 	p, err := peer.New(cfg.Stdin, cfg.Stdout, peer.Config{
 		Logger: logger,
 		Dialect: peer.Dialect{
@@ -77,6 +89,9 @@ func Run(ctx context.Context, cfg Config) error {
 		cancel()
 		p.Close()
 		s.probeWG.Wait()
+		if s.controller != nil {
+			s.controller.Wait()
+		}
 	}()
 	p.HandleDefault(s.handle)
 	p.HandleNotification("notifications/initialized", func(context.Context, json.RawMessage) {})

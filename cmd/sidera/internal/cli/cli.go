@@ -14,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/cmd/sidera/internal/mcp"
 	"github.com/aianyai/sidera/internal/datahome"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -253,10 +255,19 @@ func (c *command) run(ctx context.Context, args []string) error {
 		if len(p) != 0 {
 			return usage("mcp takes no positional arguments")
 		}
-		return mcp.Run(ctx, mcp.Config{
+		cfg := mcp.Config{
 			Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr,
 			Agent: client, Version: c.Release.Version, ProbeOnConnect: probeToken != "",
-		})
+		}
+		if controller.Wanted(c.Getenv) {
+			manage, err := manageapi.NewClient(manageapi.ClientConfig{Home: home})
+			if err != nil {
+				return err
+			}
+			defer manage.Close()
+			cfg.Controller = &controller.Config{Manage: manage, Getenv: c.Getenv, Getwd: os.Getwd}
+		}
+		return mcp.Run(ctx, cfg)
 	case "status":
 		p, err := parse(c.arguments.flags, args[1:])
 		if err != nil {

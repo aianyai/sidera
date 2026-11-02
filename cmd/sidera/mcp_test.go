@@ -93,7 +93,7 @@ func TestMCPUnknownMethodsValidateEraThroughTheRealProgram(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	cmd := exec.CommandContext(ctx, program, "--home", home, "mcp")
-	cmd.Env = append(os.Environ(), "SIDERA_TOKEN=", "SIDERA_PROBE_TOKEN=")
+	cmd.Env = append(hostEnv(), "SIDERA_TOKEN=", "SIDERA_PROBE_TOKEN=")
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

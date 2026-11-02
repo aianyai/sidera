@@ -51,7 +51,8 @@ the one-recipient rule. A receive writes the client's page unchanged, adds no
 newline and does not acknowledge it. Errors use `apiwire` and its exit table;
 daemon failures retain `daemon.ExitCode`, including fatal storage code 74.
 The `mcp` command parses its empty local flag set, then calls `mcp.Run` directly
-with the existing client and build version. A non-empty probe credential enables
+with the existing client and build version, and with the management client and the
+environment when the process holds no token (controller mode). A non-empty probe credential enables
 the MCP package's automatic connection probe; ordinary credentials stay separate.
 
 Management commands parse their inputs once, read an omitted collection version

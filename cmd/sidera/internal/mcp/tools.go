@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/peer"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
@@ -210,15 +211,51 @@ func (s *server) callTool(ctx context.Context, fields map[string]json.RawMessage
 	}
 	projected, err := selected.InputSchema.project(args, "", name)
 	if err != nil {
-		return s.toolResult(nil, err, modern)
+		return s.toolResult(nil, err, modern, "")
 	}
 	if s.cfg.Agent == nil {
-		return s.toolResult(nil, apiwire.New(apiwire.CategoryUnavailable, "daemon_not_running", "the node is not running"), modern)
+		return s.toolResult(nil, apiwire.New(apiwire.CategoryUnavailable, "daemon_not_running", "the node is not running"), modern, "")
+	}
+	var notice string
+	if s.controller != nil {
+		wake, err := s.controller.Ensure(ctx, codexThread(fields))
+		if err != nil {
+			return s.toolResult(nil, err, modern, "")
+		}
+		if wake != nil {
+			notice = controller.Notice(*wake)
+		}
 	}
 	result, err := s.invoke(ctx, name, projected)
-	return s.toolResult(result, err, modern)
+	return s.toolResult(result, err, modern, notice)
 }
-func (s *server) toolResult(result any, err error, modern bool) (any, error) {
+
+// codexThread is the thread id Codex puts into the metadata of every tool call, or
+// empty when the call carries none. The key is Codex's own and not a protocol
+// field, so only this member is read and anything unexpected reads as absent. The
+// value is an object or, in some versions, the same object as a JSON string.
+func codexThread(fields map[string]json.RawMessage) string {
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(fields["_meta"], &meta) != nil {
+		return ""
+	}
+	raw := meta[codexTurnMetadataKey]
+	var encoded string
+	if json.Unmarshal(raw, &encoded) == nil {
+		raw = json.RawMessage(encoded)
+	}
+	var turn struct {
+		ThreadID string `json:"thread_id"`
+	}
+	if json.Unmarshal(raw, &turn) != nil {
+		return ""
+	}
+	return turn.ThreadID
+}
+
+// toolResult is the one text item of a call; a notice adds a second item, which
+// a controller's model reads on its first use.
+func (s *server) toolResult(result any, err error, modern bool, notice string) (any, error) {
 	var text []byte
 	isError := err != nil
 	if isError {
@@ -235,7 +272,11 @@ func (s *server) toolResult(result any, err error, modern bool) (any, error) {
 		}
 		text = out.Bytes()
 	}
-	return s.decorate(map[string]any{"content": []map[string]string{{"type": "text", "text": string(text)}}, "isError": isError}, modern, false), nil
+	content := []map[string]string{{"type": "text", "text": string(text)}}
+	if notice != "" {
+		content = append(content, map[string]string{"type": "text", "text": notice})
+	}
+	return s.decorate(map[string]any{"content": content, "isError": isError}, modern, false), nil
 }
 func (s *server) invoke(ctx context.Context, name string, args json.RawMessage) (any, error) {
 	var fields map[string]json.RawMessage

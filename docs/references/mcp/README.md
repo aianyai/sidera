@@ -4,7 +4,9 @@ Run `sidera mcp` to serve the Agent tools on stdin/stdout. Global `--home`
 selects the node as it does for other commands. `SIDERA_TOKEN` authenticates
 endpoint tools; `SIDERA_PROBE_TOKEN` is the independent one-use probe credential.
 `--json` does not change MCP framing or redirect process diagnostics to stdout.
-The command never starts a daemon or opens the management interface.
+The command never starts a daemon. It opens the management interface only in
+controller mode, for the one method `sessions.attach`, and never exposes a management
+tool.
 
 The stdio boundary supports precisely `2025-06-18` and `2026-07-28`. It reuses
 [the peer transport](../../../sdk/go/peer/README.md), including bounded queues
@@ -79,6 +81,41 @@ the automatic probe before returning, so its final diagnostic finishes while
 the borrowed diagnostic writer is still available. A synchronized stop marker
 prevents a late request handler from starting a probe after shutdown begins.
 
+## Controller mode
+
+A server started without `SIDERA_TOKEN` and `SIDERA_PROBE_TOKEN` is the `sidera` MCP
+server a person added to their own Claude Code or Codex (`sidera setup controller` prints
+the commands). A server with either variable never enters this mode. The server attaches
+its session on the first `tools/call` that passes argument validation, not at start-up:
+a session that never uses Sidera opens no endpoint. A repeated tool call does not
+attach again; a failed attachment is tried again by the next call, and a refusal is
+that call's tool error (the words are in [the command line](../command-line/README.md#controller-sessions)).
+
+- Claude Code: the session id is `CLAUDE_CODE_SESSION_ID` of the server's environment,
+  and the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
+  `CLAUDE_PID` are copied from it when present. After `/clear` the variable is stale;
+  the endpoint keeps the id it was attached with.
+- Codex: the server's environment has no `CODEX*` variable. The thread id is
+  `params._meta["x-codex-turn-metadata"].thread_id` of the tool call, read as an object or
+  as the same object in a JSON string; no other member of the metadata is interpreted.
+  Without it the tool call is a tool error `unauthenticated/token_missing` saying the
+  session id is unknown, and nothing is attached. A server run by hand in a plain
+  terminal answers its tool calls the same way, with the code a missing token has.
+- The attachment is sent by the management client with the display name
+  `<Claude|Codex> controller (<base name of the working directory>)`. The token in the
+  answer goes to the Agent client in memory and replaces the credential for the calls
+  that follow; it is in no environment, argv, log or file, and neither are the wake
+  values.
+- While the server runs, a heartbeat repeats the same attachment every 60 seconds. It
+  stops with the server (end of input or shutdown), which joins it. A failed repetition
+  is logged on standard error (the error text carries no token or wake value) and tried
+  again at the next beat. An answer with another token means the endpoint was replaced
+  after the old one closed; the Agent client takes the new token.
+- The result of the call that attached carries a second text item, after the tool's
+  own, saying whether the node can wake the session (`ready`) or not (`unavailable` or
+  `unknown`, with the reason and that `recv` with `wait_s` collects replies instead).
+  Later results have the one text item described below. The tool schemas do not change.
+
 ## Agent tools
 
 `tools/list` returns the fixed tools `me`, `declare`, `peers`, `directory`, `send`,
@@ -117,7 +154,8 @@ silently round a fractional or large value, and a separate decimal library adds
 scope without a capability needed here. Non-numbers and fractional values are
 rejected. The Agent interface alone enforces its single-recipient limit.
 
-`tools/call` returns one text item and explicit `isError`. It adds modern result
+`tools/call` returns one text item and explicit `isError` (a controller's first result adds the
+wake notice, see Controller mode). It adds modern result
 metadata only for a modern request. JSON text uses the same encoding as the Agent
 command output, including its final newline. A receive is the Agent page's exact
 bytes: there is no wrapper or re-encoding. No `outputSchema` or

@@ -20,7 +20,10 @@ known arguments; projected JSON retains explicit member presence through
 `agentapi.Client.Call`. Integral JSON numbers are projected exactly into signed
 64-bit integer lexemes before that call, including decimal and exponent inputs.
 The Agent interface owns semantic validation and the
-single-recipient limit. It never opens the management interface. Read
+single-recipient limit. The server opens the management interface only in controller
+mode, through [`controller`](../controller/README.md), for `sessions.attach`: on the
+first valid tool call, then as a heartbeat that `Run` joins before it returns. The
+Codex thread id is read from the tool call's `_meta` here, the only place that sees it. Read
 [the reference](../../../../docs/references/mcp/README.md) for the wire contract.
 
 The opt-in real-client check uses an explicit empty `message_id` to exercise
