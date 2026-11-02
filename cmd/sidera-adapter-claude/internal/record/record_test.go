@@ -3,6 +3,7 @@ package record
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -145,6 +146,65 @@ func TestIndexWatchesUUIDsAddedLater(t *testing.T) {
 	ix.Feed([]byte(`{"type":"user","uuid":"` + prompt + `","sessionId":"` + sess + `"}` + "\n"))
 	if !ix.UserSeen(prompt) {
 		t.Fatal("watched uuid not found")
+	}
+}
+
+// A follower of a session's turns gets, in the order of the file, the prompts it
+// watches and the ends of turns, and only from the moment it asked.
+func TestIndexMarkersFollowTheFile(t *testing.T) {
+	user := `{"type":"user","uuid":"` + prompt + `","origin":{"kind":"peer"},"sessionId":"` + sess + `"}`
+	toolResult := `{"type":"user","uuid":"` + other + `","sessionId":"` + sess + `"}`
+	end := `{"type":"system","subtype":"turn_duration","durationMs":1200,"sessionId":"` + sess + `"}`
+	otherSystem := `{"type":"system","subtype":"informational","content":"turn_duration","sessionId":"` + sess + `"}`
+	asUser := `{"type":"user","uuid":"` + other + `","message":{"content":"say turn_duration"},"sessionId":"` + sess + `"}`
+
+	ix := NewIndex(sess, prompt)
+	ix.Feed([]byte(end + "\n"))
+	ix.Track()
+	if m := ix.Markers(); len(m) != 0 {
+		t.Fatalf("history fed before Track left markers %v", m)
+	}
+	for _, line := range []string{toolResult, otherSystem, asUser, user, end, end} {
+		ix.Feed([]byte(line + "\n"))
+	}
+	want := []Marker{{Kind: MarkPrompt, UUID: prompt}, {Kind: MarkTurnEnd}, {Kind: MarkTurnEnd}}
+	got := ix.Markers()
+	if !slices.Equal(got, want) {
+		t.Fatalf("markers %v, want %v", got, want)
+	}
+	if again := ix.Markers(); len(again) != 0 {
+		t.Fatalf("markers handed out twice: %v", again)
+	}
+}
+
+// A user record that begins a turn without being a watched prompt is marked, by the
+// origin kind the runtime writes: the person's, another session's and a finished
+// task's; a tool's result carries none and is not.
+func TestIndexMarksTheUserRecordsThatBeginATurn(t *testing.T) {
+	line := func(uuid, origin string) string {
+		return `{"type":"user","uuid":"` + uuid + `",` + origin + `"sessionId":"` + sess + `"}` + "\n"
+	}
+	ix := NewIndex(sess, prompt)
+	ix.Track()
+	ix.Feed([]byte(line("h", `"origin":{"kind":"human"},`) + line("p", `"origin":{"kind":"peer"},`) + line("t", `"origin":{"kind":"task-notification"},`) +
+		line("x", `"origin":{"kind":"system"},`) + line("r", ``) + line(prompt, `"origin":{"kind":"peer"},`)))
+	want := []Marker{{Kind: MarkTurnStart, UUID: "h"}, {Kind: MarkTurnStart, UUID: "p"}, {Kind: MarkTurnStart, UUID: "t"}, {Kind: MarkPrompt, UUID: prompt}}
+	if got := ix.Markers(); !slices.Equal(got, want) {
+		t.Fatalf("markers %v, want %v", got, want)
+	}
+}
+
+func TestIndexForgetsAnUnwatchedUUID(t *testing.T) {
+	ix := NewIndex(sess, prompt)
+	ix.Feed([]byte(`{"type":"user","uuid":"` + prompt + `","sessionId":"` + sess + `"}` + "\n"))
+	ix.Unwatch(prompt)
+	if ix.UserSeen(prompt) {
+		t.Fatal("an unwatched uuid is still remembered")
+	}
+	ix.Track()
+	ix.Feed([]byte(`{"type":"user","uuid":"` + prompt + `","sessionId":"` + sess + `"}` + "\n"))
+	if ix.UserSeen(prompt) || len(ix.Markers()) != 0 {
+		t.Fatal("an unwatched uuid was found")
 	}
 }
 
