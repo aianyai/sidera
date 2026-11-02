@@ -164,7 +164,7 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 				return nil, rep, err
 			}
 			e.view.addConfigResults(d.Config.LastOperations())
-			e.seedAttached()
+			e.seedAttached(d.Clock.Now())
 			e.trust = e.buildTrust(sc)
 			if err := e.openPairing(sc); err != nil {
 				return nil, rep, err

@@ -562,6 +562,13 @@ delivery to a session: when it is judged and how the verdict is recorded.
   `attach` has the instance's attached endpoints closed at admission. A close sends
   `session.detached` (`putEndpoint`), never `session.close`, and owes no release. `observed` refuses
   an attached endpoint, and `acceptedSignals` lists neither close nor interrupt for it.
+  Each `AttachSession` is the controller's heartbeat: an endpoint whose controller has not attached
+  for its queue time (never less than `attachedMinWindow`, three heartbeats), counted in awake time
+  (`awake.go`: the steps between readings of the wall clock, each capped at a little over the period of
+  the clock state's task, derived from the periodic tasks, so a sleep counts for no more than the cap),
+  is closed the way the owner's close does it, but only with nothing queued or leased on it and only in
+  the running phase (`attachedAbsenceDue`, the `schedAttachedAbsence` entry). The start counts as the last
+  attachment of an endpoint that was open before it.
 - **A close or an interrupt is carried out when it is accepted, not queued.** A signal the
   endpoint does not take (`Engine.acceptedSignals`, which the directory publishes too) is
   answered as unsupported at once; one it takes is accepted and the adapter is called by a

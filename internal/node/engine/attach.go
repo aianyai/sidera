@@ -36,12 +36,45 @@ import (
 // endpoints, and is passed to the adapter at every adapter.start and every attach; it
 // is never written to the disk or to a log, and no error names a value of it. After a
 // restart of the node an entry holds none, until the owner repeats the attachment.
+//
+// Each attachment is also the heartbeat of the session's controller: a controller
+// repeats it while it runs. An endpoint whose controller has not attached for the
+// endpoint's queue time (never less than attachedMinWindow), counted in the time the
+// node was awake (awake.go), and that has nothing queued or leased, is closed the way
+// the owner's close does it. An open
+// session that is idle for days keeps attaching and is never closed by this.
 
 // attachedSession is what the loop remembers of an open attached endpoint besides its
 // record. It is memory only.
 type attachedSession struct {
 	// wake is the wake information the last attachment carried; nil for none.
 	wake adapterproto.WakeInfo
+	// lastAttach is the awake time (Engine.awake) of the last attachment; for an
+	// endpoint seeded at the start, the start.
+	lastAttach time.Duration
+}
+
+// attachedHeldRecheck is how long a controller that has been gone for the queue time
+// but whose endpoint still holds queued or leased messages waits before the endpoint is
+// looked at again: the messages expire under the delivery rules, and the endpoint is
+// closed once none is left.
+const attachedHeldRecheck = time.Minute
+
+// attachedMinWindow is the least time an attached endpoint's controller may be gone
+// before the endpoint is closed, whatever its queue time: three beats of the
+// controller's heartbeat, which repeats the attachment every minute. A live controller
+// whose beat is a little late (a busy machine, a stalled call) must never lose its
+// endpoint, which a queue time set shorter than that would otherwise do.
+const attachedMinWindow = 3 * time.Minute
+
+// attachedWindow is how long the controller of the endpoint may be gone before the
+// endpoint is closed: its queue time, and never less than attachedMinWindow.
+func (e *Engine) attachedWindow(rec store.EndpointRecord) time.Duration {
+	return max(e.d.Config.EndpointSettings(rec.Instance, rec.ID).MaxQueue, attachedMinWindow)
+}
+
+func attachedAbsenceKey(id ident.EndpointID) schedKey {
+	return schedKey{schedAttachedAbsence, id.String()}
 }
 
 // AttachRequest is the owner's request to attach a session a person opened.
@@ -117,8 +150,8 @@ type cmdAttach struct {
 }
 
 func (c *cmdAttach) gate() gate { return gateWrite }
-func (c *cmdAttach) run(e *Engine, _ time.Time) {
-	step, err := e.attach(c.req)
+func (c *cmdAttach) run(e *Engine, now time.Time) {
+	step, err := e.attach(now, c.req)
 	c.done(step, e.classify(err))
 }
 
@@ -143,7 +176,7 @@ func (e *Engine) AttachSession(ctx context.Context, r AttachRequest) (AttachResu
 	}, nil
 }
 
-func (e *Engine) attach(r AttachRequest) (attachStep, error) {
+func (e *Engine) attach(now time.Time, r AttachRequest) (attachStep, error) {
 	var none attachStep
 	if err := validateAttachRequest(r); err != nil {
 		return none, err
@@ -188,7 +221,8 @@ func (e *Engine) attach(r AttachRequest) (attachStep, error) {
 	if len(r.Wake) > 0 {
 		wake = maps.Clone(r.Wake)
 	}
-	e.attached[rec.ID] = attachedSession{wake: wake}
+	e.attached[rec.ID] = attachedSession{wake: wake, lastAttach: e.awake.total}
+	e.armAttachedAbsence(now, rec)
 
 	a := e.adapters[inst]
 	return attachStep{
@@ -323,13 +357,64 @@ func (e *Engine) askToAttach(ctx context.Context, s attachStep) WakeReport {
 // seedAttached gives every open attached endpoint of the view its entry in attached,
 // without wake information, when the engine starts: the wake information is memory
 // only and is lost with the process, but the endpoint is still attached, and its
-// close must still tell the adapter.
-func (e *Engine) seedAttached() {
+// close must still tell the adapter. The start counts as the last attachment, so a
+// controller that kept running through the restart has a whole window to attach again.
+func (e *Engine) seedAttached(now time.Time) {
+	var open []ident.EndpointID
 	for id, st := range e.view.endpoints {
 		if st.rec.Kind == adapterreg.KindSession && st.rec.Status == store.EndpointOpen && st.rec.Origin() == adapterreg.OriginAttached {
-			e.attached[id] = attachedSession{}
+			open = append(open, id)
 		}
 	}
+	// Endpoints with the same window are due together: the order they are armed in is
+	// the order the schedule breaks the tie in, and it is kept fixed.
+	sort.Slice(open, func(i, j int) bool { return open[i].String() < open[j].String() })
+	for _, id := range open {
+		e.attached[id] = attachedSession{lastAttach: e.awake.total}
+		e.armAttachedAbsence(now, e.view.endpoints[id].rec)
+	}
+}
+
+// armAttachedAbsence schedules the first look at whether the controller of the
+// endpoint is gone: a window from now. Awake time is a lower bound of the wall time,
+// unless the wall clock was set back, so the controller cannot have been gone for the
+// window sooner than this.
+func (e *Engine) armAttachedAbsence(now time.Time, rec store.EndpointRecord) {
+	e.sched.set(attachedAbsenceKey(rec.ID), now.Add(e.attachedWindow(rec)))
+}
+
+// attachedAbsenceDue judges an endpoint whose look came due. A controller gone for
+// less than the window in awake time (the node slept, or the setting changed) is
+// looked for again when the rest of it could have passed. Once it has been gone for
+// the window the endpoint is closed as the owner's close does, but only when nothing
+// is queued or leased on it: those messages get their say first, and the endpoint is
+// looked at again while they are there. Outside the running phase nothing is closed
+// (a command that closes is refused there); the look is repeated.
+func (e *Engine) attachedAbsenceDue(now time.Time, id ident.EndpointID) {
+	att, ok := e.attached[id]
+	if !ok {
+		return
+	}
+	key := attachedAbsenceKey(id)
+	rec := e.view.endpoints[id].rec
+	window := e.attachedWindow(rec)
+	if gone := e.awake.total - att.lastAttach; gone < window {
+		e.sched.set(key, now.Add(window-gone))
+		return
+	}
+	if e.Phase() != PhaseRunning || len(e.view.queued[id]) > 0 {
+		e.sched.set(key, now.Add(attachedHeldRecheck))
+		return
+	}
+	if _, _, err := e.closeEndpoint(now, id, nil); err != nil {
+		e.classify(err)
+		if e.fatal == nil {
+			e.log.Warn("an attached session whose controller is gone could not be closed; it is tried again", "endpoint", id.String(), "error", err.Error())
+			e.sched.set(key, now.Add(e.p.RetryBackoff))
+		}
+		return
+	}
+	e.log.Info("an attached session was closed: its controller has been gone for the whole window", "endpoint", id.String(), "window", window.String())
 }
 
 // notifyDetached tells the adapter that the attached endpoint is closed and forgets
@@ -346,6 +431,7 @@ func (e *Engine) notifyDetached(rec store.EndpointRecord) {
 		return
 	}
 	delete(e.attached, rec.ID)
+	e.sched.remove(attachedAbsenceKey(rec.ID))
 	a := e.adapters[rec.Instance]
 	if e.d.Adapters == nil || a == nil || !a.online || !a.admitted || !a.adm.Attaches() {
 		return

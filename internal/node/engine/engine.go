@@ -143,6 +143,8 @@ type Engine struct {
 	// attached holds what the loop remembers of each open attached endpoint besides its
 	// record: the wake information, in memory only; see attach.go.
 	attached map[ident.EndpointID]attachedSession
+	// awake is the time the node has been awake since Start; see awake.go.
+	awake awakeTime
 
 	// reconciling says step 11 of the start has begun: until then a connecting adapter is
 	// not asked again for the creations it owes; see redriveCreates.
@@ -350,6 +352,7 @@ func (e *Engine) Start() {
 	}
 	now := e.d.Clock.Now()
 	e.startedAt = now
+	e.awake.begin(now, e.awakeStepCap())
 	for _, name := range e.order {
 		e.sched.set(schedKey{schedPeriodic, name}, now.Add(e.periodic[name].every))
 	}
@@ -775,8 +778,9 @@ func (e *Engine) armTimer() {
 // observe reads the wall clock into the high water mark: a reading far behind it
 // pauses everything that depends on a deadline until the owner clears it. The
 // pause is made durable before the command goes on, by running the task of the
-// clock state now.
+// clock state now. The reading also advances the awake time.
 func (e *Engine) observe(now time.Time) {
+	e.awake.advance(now)
 	if v, _ := e.hw.Observe(now); v == clock.WallRolledBack && !e.paused {
 		e.paused, e.pausedSince = true, now
 		e.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it")
@@ -938,6 +942,10 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		e.later(&cmdInstanceDrain{instance: key.id})
 	case schedPairingTick:
 		_ = e.pairingTick(now) // its failure is logged there; a fatal one is e.fatal
+	case schedAttachedAbsence:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.attachedAbsenceDue(now, id)
+		}
 	case schedPeriodic:
 		p := e.periodic[key.id]
 		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, PausedSince: e.pausedSince, SignRefusal: e.signRefusal()})

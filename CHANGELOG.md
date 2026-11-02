@@ -22,6 +22,10 @@ protocol has a version of its own.
 - **Endpoint record: the origin of a session.** A session endpoint record can say that the
   session was attached rather than created (`origin`). Records without it read as created, so
   existing state needs no migration.
+- **Attached sessions: absence of the controller.** Every `sessions.attach` counts as the
+  heartbeat of the session's controller. An attached endpoint whose controller has not attached
+  for the endpoint's queue time (30 minutes by default, and never less than three minutes),
+  counted in the time the node was awake, is closed once nothing is queued or leased on it.
 
 ### Changed
 

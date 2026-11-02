@@ -95,6 +95,11 @@ the sweep of the archive and the tasks the composition root attached would not r
 until then. A periodic task is repeatable, so running it early is harmless
 (`TestClearingThePauseSchedulesThePeriodicTasksFromTheClockTheOwnerAccepted`).
 
+The same readings advance the awake time (see attached sessions below): a rule about somebody's
+absence, which is not a deadline fixed on the wall clock, counts the steps between readings capped
+(`awakeStepCap`: half as much again the period of the clock state's task, 90 seconds in the daemon), so a
+sleep of the machine does not count as absence.
+
 **Endpoints.** `RegisterDirect` gives an adapter instance the same endpoint for the
 same key, for ever: the id is minted once and kept in `config/endpoint-ids/`, in
 the same transaction (`direct-register`) as the endpoint record. A new endpoint,
@@ -1407,6 +1412,36 @@ Closing owes no release: the native session is the person's and is never ended
 refused as a wrong endpoint kind (`1002`): its pages are read by the person's own runtime, and there is
 nothing for the adapter to observe. `endpoints.list` shows the `origin` of a session endpoint.
 
+Every `sessions.attach` is also the heartbeat of the session's controller (the tool the session runs
+repeats the request every minute while it runs). The engine remembers when the last one arrived, in the
+entry of the endpoint in memory, and closes an endpoint whose controller has been gone for the
+endpoint's queue time (`EndpointSettings`, default 30 minutes, and never less than three
+minutes, three beats of the heartbeat, so that a live controller whose beat is a little late never loses
+its endpoint: `attachedMinWindow`), the way the owner's close does it, so
+an endpoint nobody tends does not stay open and listed for ever; the closing is logged once, naming the
+endpoint and the window. The absence is measured in the time the
+node was awake, not on the wall clock: a machine that sleeps stops the controller's heartbeat as well,
+and the endpoint would be closed at the first look after the wake. The loop keeps an awake time
+(`awakeTime`), advanced at every reading of the wall clock by the step since the last one, a step counting
+at most the cap. The cap is derived from the engine's own periodic tasks when the loop starts: the
+period of the clock state's task and a half more (90 seconds in the daemon, which wakes the loop at
+least once a minute for it), the longest period of the others when there is no such task, and none when
+there is no periodic task. A longer step means the machine slept, and a sleep counts for no more than
+the cap; a reading behind the last one (the clock was set back) counts for nothing. The clock package is not asked
+for a monotonic reading: its readings are UTC wall time without one, on purpose. The first look is
+scheduled one window after the attachment on the wall clock (awake time is a lower bound of the wall
+time unless the wall clock was set back); when it comes, a controller gone for less than the window in
+awake time is looked for again when the rest could have passed. The endpoint is closed only when nothing
+is queued or leased on it, and only in the running phase; otherwise it is looked at again a minute
+later, because the messages expire under the delivery
+rules and an endpoint with a message in flight is the person's to receive, not the node's to take away;
+the close follows the expiry. An endpoint that is open when the engine starts counts the start as its
+last attachment, so a controller that went on running through a restart has a whole window to attach
+again (the endpoints are armed in the order of their identifiers, so that the order ties are broken in is fixed). A session that is open but idle for days keeps attaching and is never closed by this; a controller
+that attaches only once, as a command run from a session does, has no heartbeat and is closed a queue
+time later. The setting is read when the look comes, so a change of it takes effect at the
+next look.
+
 **Prompting.** A session endpoint that is open, mapped to its native session and whose adapter
 is online is woken by a prompt when messages wait for it. Whether to send one is the decision of
 `handoff`, which the engine asks for every waiting endpoint together (`DecideNodePrompts`; a
@@ -2026,6 +2061,7 @@ reproducible).
 | A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
 | A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
 | A session a person opened is attached by the owner's request: one open endpoint for an instance and a native session, found again and not duplicated by a repeat (with the wake information replaced), a new endpoint after a close, refused for an adapter that did not declare `attach`, a native session the node created, a missing or ambiguous instance and a full node; the adapter is asked with `session.attach` after the endpoint is written and its answer is the wake state; closing says `closed`, sends `session.detached` (also when the node restarted since the attachment) and never `session.close`; `adapter.start` lists it with its wake only to a declarer, an adapter that does not declare `attach` has its attached endpoints closed at admission, `recv.observed` for it is refused, and the directory and the answer to a close or an interrupt agree | `attach.go`, `adapters.go` (`sessionAttaches`, `admit`), `endpoints.go` (`putEndpoint`), `lease.go` (`observed`) | `TestAttachingTheSameSessionAgainIsTheSameEndpointUntilItIsClosed`, `TestAttachingASessionIsRefused`, `TestAnAttachedEndpointTakesAPlaceOfTheNodeCap`, `TestTheWakeStateIsWhatTheAdapterSaid`, `TestAdapterStartListsAnAttachedSessionOnlyToAnAdapterThatTakesIt`, `TestClosingAnAttachedSessionDetachesItAndNeverClosesTheSession`, `TestClosingAnAttachedSessionAfterARestartStillDetachesIt`, `TestRecvObservedIsRefusedForAnAttachedSession`, `TestTheDirectoryAndTheAnswerToASignalAgreeOnAnAttachedSession` |
+| An attached endpoint is closed when its controller has not attached for the endpoint's queue time (never less than three heartbeats) in awake time, and only when nothing is queued or leased on it: an attachment starts the window again, a jump of the clock (a sleep) counts for no more than the cap, which follows the periodic tasks, a restart gives a fresh window, a queued or leased message holds the endpoint open until it has expired | `attach.go` (`attachedAbsenceDue`, `attachedWindow`, `seedAttached`), `awake.go`, `engine.go` (`observe`) | `TestAnAttachedEndpointClosesWhenItsControllerHasBeenGoneForTheQueueTime`, `TestAQueueTimeShorterThanThreeHeartbeatsDoesNotCloseALiveController`, `TestAnAttachmentBeforeTheWindowEndsStartsItAgain`, `TestTheTimeTheNodeSleptIsNotAbsenceOfTheController`, `TestTheStepCapOfTheAwakeTimeFollowsThePeriodicTasks`, `TestARestartGivesTheControllerAFreshWindow`, `TestAMessageOnTheEndpointHoldsItOpenPastTheWindow` |
 | A direct endpoint is told with `endpoint.pending` how many messages wait for it, once for each message made ready by a separate command, not for a message a waiting recv took, and a session endpoint is not told | `pending.go` (`notePending`, `servePending`) | `TestADirectEndpointIsToldOnceThatAMessageWaits`, `TestAMessageHandedToAWaitingRecvIsNotAnnounced`, `TestASessionEndpointIsNotToldWithEndpointPending` |
 | A notice whose body is damaged is told again from what it covered, and a crash anywhere in the settlement loses none of it and tells it only once | `feedback.go` (`reissueCovered`), `quarantine.go` (`quarantineOwner`) | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered`, `TestADamagedNoticeIsToldAgainOnceWhereverTheNodeDiesSettlingIt`, `TestADamagedNoticeWhoseItemsAreStillQueuedToBeClearedIsToldAgainOnce` |
 | Every write of a recv and an ack survives a crash at every point | `lease`, `ack` (declared by the store) | `TestRecvAndAckRecoverFromACrashAtEveryPoint` |
