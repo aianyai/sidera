@@ -129,6 +129,7 @@ func TestDeclaredKindsAndSignals(t *testing.T) {
 	type sig = authz.Action
 	runtimeSignals := []sig{authz.ActionSessionCreate, authz.ActionEndpointStatus}
 	directSignals := []sig{authz.ActionMessageSend, authz.ActionEndpointStatus}
+	attachedSignals := []sig{authz.ActionMessageSend, authz.ActionEndpointStatus}
 	sessionSignals := func(interrupt bool) []sig {
 		if interrupt {
 			return []sig{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionSessionInterrupt, authz.ActionEndpointStatus}
@@ -164,7 +165,7 @@ func TestDeclaredKindsAndSignals(t *testing.T) {
 					if a.Declares(k) != (want[k] != nil) {
 						t.Errorf("runtime=%v direct=%v interrupt=%v: Declares(%v) = %v", hasRuntime, hasDirect, interrupt, k, !a.Declares(k))
 					}
-					got := a.Signals(k)
+					got := a.Signals(k, adapterreg.OriginCreated)
 					if !equalActions(got, want[k]) {
 						t.Errorf("runtime=%v direct=%v interrupt=%v: Signals(%v) = %v, want %v", hasRuntime, hasDirect, interrupt, k, got, want[k])
 					}
@@ -173,9 +174,18 @@ func TestDeclaredKindsAndSignals(t *testing.T) {
 						for _, w := range want[k] {
 							exp = exp || w == act
 						}
-						if a.AcceptsSignal(k, act) != exp {
+						if a.AcceptsSignal(k, adapterreg.OriginCreated, act) != exp {
 							t.Errorf("AcceptsSignal(%v, %v) = %v", k, act, !exp)
 						}
+					}
+					// An attached session takes messages and a status request whatever the
+					// adapter declared, and an origin no endpoint of the kind has accepts nothing.
+					wantAttached := []sig(nil)
+					if k == adapterreg.KindSession && hasRuntime {
+						wantAttached = attachedSignals
+					}
+					if got := a.Signals(k, adapterreg.OriginAttached); !equalActions(got, wantAttached) {
+						t.Errorf("runtime=%v interrupt=%v: Signals(%v, attached) = %v, want %v", hasRuntime, interrupt, k, got, wantAttached)
 					}
 				}
 				if got := len(a.DeclaredKinds()); got != len(want) {
@@ -233,21 +243,25 @@ func equalActions(a, b []authz.Action) bool {
 	return true
 }
 
-func TestKindSignalsWithoutAnAdmission(t *testing.T) {
+func TestGuaranteedSignalsWithoutAnAdmission(t *testing.T) {
 	for _, tc := range []struct {
-		kind adapterreg.EndpointKind
-		want []authz.Action
+		kind   adapterreg.EndpointKind
+		origin adapterreg.SessionOrigin
+		want   []authz.Action
 	}{
-		{adapterreg.KindRuntime, []authz.Action{authz.ActionSessionCreate, authz.ActionEndpointStatus}},
-		{adapterreg.KindSession, []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionEndpointStatus}},
-		{adapterreg.KindDirect, []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}},
-		{0, nil},
-		{4, nil},
-		{255, nil},
+		{adapterreg.KindRuntime, adapterreg.OriginCreated, []authz.Action{authz.ActionSessionCreate, authz.ActionEndpointStatus}},
+		{adapterreg.KindSession, adapterreg.OriginCreated, []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionEndpointStatus}},
+		{adapterreg.KindSession, adapterreg.OriginAttached, []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}},
+		{adapterreg.KindDirect, adapterreg.OriginCreated, []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}},
+		{adapterreg.KindRuntime, adapterreg.OriginAttached, nil},
+		{adapterreg.KindDirect, adapterreg.OriginAttached, nil},
+		{0, adapterreg.OriginCreated, nil},
+		{4, adapterreg.OriginCreated, nil},
+		{255, adapterreg.OriginCreated, nil},
 	} {
-		t.Run(tc.kind.String(), func(t *testing.T) {
-			if got := adapterreg.KindSignals(tc.kind); !slices.Equal(got, tc.want) {
-				t.Errorf("KindSignals(%v) = %v, want %v", tc.kind, got, tc.want)
+		t.Run(tc.kind.String()+" "+tc.origin.String(), func(t *testing.T) {
+			if got := adapterreg.GuaranteedSignals(tc.kind, tc.origin); !slices.Equal(got, tc.want) {
+				t.Errorf("GuaranteedSignals(%v, %v) = %v, want %v", tc.kind, tc.origin, got, tc.want)
 			}
 		})
 	}
@@ -256,14 +270,14 @@ func TestKindSignalsWithoutAnAdmission(t *testing.T) {
 func TestSignalsForInvalidKinds(t *testing.T) {
 	a, _ := adapterreg.Admit(runtimeCaps(true, true, true, "cli"), man())
 	for _, k := range []adapterreg.EndpointKind{0, 4, 255} {
-		if a.Declares(k) || a.Signals(k) != nil || a.AcceptsSignal(k, authz.ActionEndpointStatus) {
+		if a.Declares(k) || a.Signals(k, adapterreg.OriginCreated) != nil || a.AcceptsSignal(k, adapterreg.OriginCreated, authz.ActionEndpointStatus) {
 			t.Errorf("kind %v declares or accepts something", k)
 		}
 		if k.Valid() {
 			t.Errorf("kind %d is valid", k)
 		}
 	}
-	if (adapterreg.Admission{}).Signals(adapterreg.KindRuntime) != nil {
+	if (adapterreg.Admission{}).Signals(adapterreg.KindRuntime, adapterreg.OriginCreated) != nil {
 		t.Error("the zero admission accepts signals")
 	}
 }
@@ -296,9 +310,11 @@ func TestEndpointKindTargets(t *testing.T) {
 		if k == adapterreg.KindRuntime {
 			object = authz.RuntimeEndpoint(ep)
 		}
-		for _, act := range a.Signals(k) {
-			if _, err := authz.NewPolicy([]authz.Rule{authz.Allow(authz.Members(), object, act, authz.Conditions{})}); err != nil {
-				t.Errorf("%v accepts %v, which authorization cannot pair with its object: %v", k, act, err)
+		for _, o := range []adapterreg.SessionOrigin{adapterreg.OriginCreated, adapterreg.OriginAttached} {
+			for _, act := range a.Signals(k, o) {
+				if _, err := authz.NewPolicy([]authz.Rule{authz.Allow(authz.Members(), object, act, authz.Conditions{})}); err != nil {
+					t.Errorf("%v (%v) accepts %v, which authorization cannot pair with its object: %v", k, o, act, err)
+				}
 			}
 		}
 	}

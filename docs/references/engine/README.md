@@ -132,10 +132,19 @@ unless the transport attests that it is local.
 Only `EndpointOpen` entries appear, in endpoint ID order. Creating and closed
 endpoints do not appear, and the system endpoint has no record to list. An open
 endpoint whose instance has not been admitted still appears with
-`adapterreg.KindSignals`; an admission adds only capabilities it confirms, through
-`Admission.Signals`. In particular an interrupt is advertised only after the
-adapter has declared it. This description does not change execution: a session
-whose adapter has not connected is still asked to execute a signal it may support.
+`adapterreg.GuaranteedSignals`; an admission adds only capabilities it confirms,
+through `Admission.Signals`. In particular an interrupt is advertised only after the
+adapter has declared it, and only for a session the node created: a session a person
+opened and asked to be attached accepts messages and a status request alone.
+
+`Engine.acceptedSignals` is the one judgment of the signals an endpoint takes, from
+the endpoint's kind and origin and the instance's admission. The directory publishes
+its list, and `signalSupported` answers a close or an interrupt by it, so what an
+endpoint advertises and what it answers as unsupported cannot differ. The one thing
+`signalSupported` adds is for an instance not admitted since the engine started: the
+interrupt of a created session, which only an admission can confirm, is asked of the
+adapter, so a session whose adapter has not connected is still asked to execute a
+signal it may support.
 
 The page limit defaults to `DefaultDirectoryLimit` (100) and is at most
 `publication.MaxEndpointsPerNode` (256). Every page re-reads and authorizes the

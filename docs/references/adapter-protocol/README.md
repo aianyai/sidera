@@ -972,16 +972,19 @@ the other side.
 
 Control signals an endpoint accepts, which the node's directory publishes for the
 endpoint (`accepts`) and by which the daemon answers a signal as unsupported: runtime: `session.create`, `endpoint.status`;
-session: `message.send` (delivered as a prompt), `session.close`,
-`endpoint.status`, and `session.interrupt` when the adapter declared interrupt;
-direct: `message.send`, `endpoint.status`. A signal that authorization allows but
-the endpoint does not accept is answered by the daemon as unsupported, without
-calling the adapter.
+created session: `message.send` (delivered as a prompt), `session.close`,
+`endpoint.status`, and `session.interrupt` when the adapter declared interrupt; an
+attached session: `message.send`, `endpoint.status`, because the session is the
+person's and the node neither closes nor interrupts it; direct: `message.send`,
+`endpoint.status`. A signal that authorization allows but the endpoint does not accept
+is answered by the daemon as unsupported, without calling the adapter. The reply carries
+no reason; that an attached session is not under remote control is for the front end
+to say.
 
-`adapterreg.KindSignals` is the single table of signals guaranteed by the kind
-alone; `Admission.Signals` builds on it and adds a declared session interrupt.
-The kind-only list needs no adapter admission, so an open endpoint can still be
-described when its adapter has not connected. It makes no claim about optional
+`adapterreg.GuaranteedSignals` is the single table of signals guaranteed by the kind and
+the origin of the session alone; `Admission.Signals` builds on it and adds a declared
+interrupt for a created session. The list needs no adapter admission, so an open endpoint
+can still be described when its adapter has not connected. It makes no claim about optional
 capabilities: `session.interrupt` appears only after admission confirms it.
 
 Which methods apply to which kind (forbidden is refused with `1002`; a method

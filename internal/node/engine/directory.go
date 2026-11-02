@@ -12,7 +12,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -224,10 +223,7 @@ func (c *cmdQueryDirectory) run(e *Engine, now time.Time) {
 		if v.Outcome != authz.OutcomeAllow {
 			continue
 		}
-		signals := adapterreg.KindSignals(st.rec.Kind)
-		if adm, ok := e.admission(st.rec.Instance); ok {
-			signals = adm.Signals(st.rec.Kind)
-		}
+		signals, _ := e.acceptedSignals(st)
 		page.Endpoints = append(page.Endpoints, transport.DirectoryEntry{
 			Address: ident.Address{Node: e.d.Node, Endpoint: id}, Kind: st.rec.Kind,
 			DisplayName: st.rec.DisplayName, Description: st.rec.Description, Accepts: signals,

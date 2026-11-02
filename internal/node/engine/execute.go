@@ -3,10 +3,12 @@ package engine
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
@@ -63,17 +65,26 @@ func executable(c store.CtlRecord) bool {
 	return c.Record.State == delivery.StateAccepted && (c.Kind == envelope.KindSessionClose || c.Kind == envelope.KindSessionInterrupt)
 }
 
-// signalSupported says whether an endpoint takes the signal. What the kind of the
-// endpoint decides it decides alone; an interrupt of a session also needs the
-// adapter to have declared it, which is known once the instance has been admitted. An
+// acceptedSignals is the one judgment of the control signals an endpoint takes: the
+// directory publishes it and signalSupported answers by it. confirmed is false while
+// the instance has not been admitted since the engine started: the list is then the
+// guaranteed one, and a signal an admission may add (a created session's interrupt)
+// is asked of the adapter rather than refused.
+func (e *Engine) acceptedSignals(st *endpointState) (accepts []authz.Action, confirmed bool) {
+	if adm, ok := e.admission(st.rec.Instance); ok {
+		return adm.Signals(st.rec.Kind, st.rec.Origin()), true
+	}
+	return adapterreg.GuaranteedSignals(st.rec.Kind, st.rec.Origin()), false
+}
+
+// signalSupported says whether an endpoint takes the signal, by acceptedSignals. An
 // instance that has not been admitted since the engine started is asked, and found
-// offline, rather than answered as not taking a signal it may take.
+// offline, rather than answered as not taking a signal it may take: that is the
+// interrupt of a created session, which only an admission can confirm.
 func (e *Engine) signalSupported(st *endpointState, kind envelope.Kind) bool {
 	action, _ := kind.Action()
-	if adm, ok := e.admission(st.rec.Instance); ok {
-		return adm.AcceptsSignal(st.rec.Kind, action)
-	}
-	return st.rec.Kind == adapterreg.KindSession
+	accepts, confirmed := e.acceptedSignals(st)
+	return slices.Contains(accepts, action) || (!confirmed && st.rec.Kind == adapterreg.KindSession && st.rec.Origin() == adapterreg.OriginCreated)
 }
 
 // unsupportedResult is the reply of an endpoint that does not take the signal.

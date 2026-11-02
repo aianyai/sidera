@@ -19,9 +19,9 @@ not frame, send or store anything.
 | Name | Decides |
 | ---- | ------- |
 | `Admit(capabilities, manifest)` | Whether an adapter is admitted, and the `Admission` that records what it may do. Refusals are an `*AdmitError` with a typed `AdmitReason`. |
-| `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
+| `Admission.Declares`, `DeclaredKinds`, `Signals(kind, origin)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts, for a session by whether the node created it or it was attached. |
 | `Admission.Attaches()` | Whether the adapter declared attached sessions: only then does the daemon send it `session.attach` and `session.detached`, or list an attached session in `adapter.start`. |
-| `KindSignals(kind)` | The signals guaranteed by an endpoint's kind alone, without an adapter admission; session interrupt still requires a declaration. |
+| `GuaranteedSignals(kind, origin)` | The signals guaranteed by an endpoint's kind and origin alone, without an adapter admission; session interrupt still requires a declaration. |
 | `SessionOrigin` | Whether a session endpoint was created by the node (`OriginCreated`, the zero value) or attached at the request of a session a person opened (`OriginAttached`). |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
 | `Admission.PartBudgets(kind)` | The budgets a long message is cut for on an endpoint of that kind, whichever front end reads it: those of every front end the endpoint can be read through, so that every front end cuts it in the same parts. |
@@ -49,15 +49,18 @@ not frame, send or store anything.
   that is not a kind gives the zero one, which authorization refuses as
   malformed.
 - **Signals** an endpoint accepts: runtime: `session.create`, `endpoint.status`;
-  session: `message.send` (delivered as a prompt), `session.close`,
+  created session: `message.send` (delivered as a prompt), `session.close`,
   `endpoint.status`, and `session.interrupt` when the adapter declared interrupt;
-  direct: `message.send`, `endpoint.status`. A signal that authorization allows
+  attached session: `message.send`, `endpoint.status`; direct: `message.send`,
+  `endpoint.status`. A signal that authorization allows
   but the endpoint does not accept is answered by the daemon as unsupported,
   without calling the adapter.
-  `KindSignals` owns the kind-only table. `Admission.Signals` requires a declared
-  kind and adds the declared session interrupt capability. A directory can use
-  the kind-only signals for an open endpoint whose adapter has not connected;
-  the absence of an admission does not prove that the endpoint is closed.
+  `GuaranteedSignals` owns the table that needs no admission. `Admission.Signals`
+  requires a declared kind and adds the declared interrupt capability for a
+  created session. A directory can use the guaranteed signals for an open endpoint
+  whose adapter has not connected; the absence of an admission does not prove that
+  the endpoint is closed. An origin no endpoint of the kind has (an attached
+  runtime or direct endpoint) accepts nothing.
 - **Budgets.** A manifest budget for `cli` or `mcp` needs a runtime that declares
   that front end, and one for `direct` needs direct endpoints; otherwise the
   adapter is refused. A front end without a budget uses `handoff.DefaultBudget()`. A

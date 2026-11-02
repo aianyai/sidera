@@ -552,20 +552,20 @@ delivery to a session: when it is judged and how the verdict is recorded.
   `control_unknown`, and one whose endpoint was damaged likewise (`failCreationWithoutMessage`,
   `failCreationWithoutEndpoint`), so that nothing is made of a creation whose first message
   is gone, and the owner is told that a session may remain.
-- **A close or an interrupt is carried out when it is accepted, not queued.** A signal
-  the endpoint does not take (`Admission.AcceptsSignal`) is answered as unsupported at
-  once; one it takes is accepted and the adapter is called by a worker the engine owns
-  (`execute.go`). The control record is not in the queue recv hands out of, so a signal
-  reaches a session whose queue is full and whose turn runs. The result is a command of
-  the loop that settles the signal in one transaction: the reply, the delivery's end and,
-  for a close, the session endpoint closed with its token gone, whatever the outcome
-  (the channel closes whatever the adapter did). A call that failed, or an adapter that is
-  not connected, is tried again until `Params.ControlReplyDeadline`; then a close is
-  told as unconfirmed and an interrupt as failed. An interrupt is told failed at once
-  when the adapter is not connected. An interrupt the adapter says it asked the runtime
-  for waits `Params.InterruptConfirmWait` for the end of the turn and is told stopped if
-  it ended and requested if it did not. A start goes on with the signals that were not
-  settled.
+- **A close or an interrupt is carried out when it is accepted, not queued.** A signal the
+  endpoint does not take (`Engine.acceptedSignals`, which the directory publishes too) is
+  answered as unsupported at once; one it takes is accepted and the adapter is called by a
+  worker the engine owns (`execute.go`). The control record is not in the queue recv hands
+  out of, so a signal reaches a session whose queue is full and whose turn runs. The
+  result is a command of the loop that settles the signal in one transaction: the reply,
+  the delivery's end and, for a close, the session endpoint closed with its token gone,
+  whatever the outcome (the channel closes whatever the adapter did). A call that failed,
+  or an adapter that is not connected, is tried again until `Params.ControlReplyDeadline`;
+  then a close is told as unconfirmed and an interrupt as failed. An interrupt is told
+  failed at once when the adapter is not connected. An interrupt the adapter says it asked
+  the runtime for waits `Params.InterruptConfirmWait` for the end of the turn and is told
+  stopped if it ended and requested if it did not. A start goes on with the signals that
+  were not settled.
 - **The state kept for a session goes when its endpoint closes.** Every place the engine
   records an endpoint (`putEndpoint`) queues the removal of the checkpoint of a session
   endpoint that has just been closed, whichever way it was closed, and the scan entry

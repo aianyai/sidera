@@ -221,51 +221,58 @@ func (a Admission) MaxDirectEndpoints() int {
 	return a.caps.Direct.MaxEndpoints
 }
 
-// Signals lists the control signals an endpoint of the kind accepts, in the
-// order of authz.Actions. The node's directory publishes the list for the
+// Signals lists the control signals an endpoint of the kind and origin accepts, in
+// the order of authz.Actions. The node's directory publishes the list for the
 // endpoint (accepts), and the daemon answers by it: a signal that authorization
 // allows but the endpoint does not accept is answered as unsupported, without
 // calling the adapter.
 //
 //   - runtime: session.create and endpoint.status;
-//   - session: message.send (delivered as a prompt), session.close and
+//   - created session: message.send (delivered as a prompt), session.close and
 //     endpoint.status, and session.interrupt when the adapter declared interrupt;
+//   - attached session: message.send and endpoint.status;
 //   - direct: message.send and endpoint.status.
 //
 // An undeclared or unknown kind accepts nothing.
-func (a Admission) Signals(k EndpointKind) []authz.Action {
+func (a Admission) Signals(k EndpointKind, o SessionOrigin) []authz.Action {
 	if !a.Declares(k) {
 		return nil
 	}
-	out := KindSignals(k)
-	if k == KindSession && a.caps.Runtime.Interrupt {
+	out := GuaranteedSignals(k, o)
+	if k == KindSession && o == OriginCreated && a.caps.Runtime.Interrupt {
 		out = append(out, authz.ActionSessionInterrupt)
 		slices.Sort(out)
 	}
 	return out
 }
 
-// KindSignals lists the signals guaranteed by an endpoint's kind alone, in the
-// order of authz.Actions. It does not require an admitted adapter, so a directory
-// can describe an open endpoint before its adapter connects. Session interrupt
-// is absent: only an Admission can confirm that capability. An unknown kind
-// accepts nothing.
-func KindSignals(k EndpointKind) []authz.Action {
-	switch k {
-	case KindRuntime:
+// GuaranteedSignals lists the signals guaranteed by an endpoint's kind and origin
+// alone, in the order of authz.Actions. It does not require an admitted adapter,
+// so a directory can describe an open endpoint before its adapter connects.
+// Session interrupt is absent: only an Admission can confirm that capability, and
+// only for a created session. A session someone else runs is neither closed nor
+// interrupted by the node, so an attached session accepts only messages and a
+// status request. The origin is created for the runtime and direct kinds, which
+// have no other; a pair that no endpoint has, and an unknown kind, accept
+// nothing.
+func GuaranteedSignals(k EndpointKind, o SessionOrigin) []authz.Action {
+	switch {
+	case k == KindRuntime && o == OriginCreated:
 		return []authz.Action{authz.ActionSessionCreate, authz.ActionEndpointStatus}
-	case KindSession:
+	case k == KindSession && o == OriginCreated:
 		return []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionEndpointStatus}
-	case KindDirect:
+	case k == KindSession && o == OriginAttached:
+		return []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}
+	case k == KindDirect && o == OriginCreated:
 		return []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}
 	}
 	return nil
 }
 
-// AcceptsSignal reports whether an endpoint of the kind accepts the action as a
-// control signal.
-func (a Admission) AcceptsSignal(k EndpointKind, action authz.Action) bool {
-	return slices.Contains(a.Signals(k), action)
+// AcceptsSignal reports whether an endpoint of the kind and origin accepts the
+// action as a control signal.
+func (a Admission) AcceptsSignal(k EndpointKind, o SessionOrigin, action authz.Action) bool {
+	return slices.Contains(a.Signals(k, o), action)
 }
 
 // Budget is the output budget of recv for a front end: the one the manifest
