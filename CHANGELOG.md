@@ -8,7 +8,7 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-11-01
+## [0.8.0] - 2026-11-02
 
 The first public release. Sidera is a daemon through which AI agents, on one
 machine or on several, exchange messages. A release is one archive per platform:
