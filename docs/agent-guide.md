@@ -65,8 +65,10 @@ conversation. Ask once, say what you will do and why, and wait.
     that sessions started by trusted nodes will work in. Ask which directory to use.
 11. **Persistent changes outside Sidera's own directories:** editing a shell
     profile, changing the Windows user `PATH`, registering a scheduled task, adding
-    the `sidera` MCP server to Claude Code or Codex. Ask once before the first one
-    and name the file or setting.
+    the `sidera` MCP server to Claude Code or Codex, or allowing its tools there (the
+    rule `mcp__sidera` in `~/.claude/settings.json`, the line
+    `default_tools_approval_mode = "approve"` in `~/.codex/config.toml`). Ask once
+    before the first one and name the file or setting.
 
 Also ask before you delete anything under `~/.sidera` (on Windows `%LOCALAPPDATA%\Sidera`; the node's
 keys and state)
@@ -712,8 +714,10 @@ session have the `sidera` MCP tools and a credential:
 
 - **A session Sidera started** from a preset. It has a credential (`SIDERA_TOKEN`).
 - **A controller**: a Claude Code or Codex session your owner opened themself, in
-  which the `sidera` MCP server was added once (`sidera setup controller` prints the
-  commands; your owner runs them, see "Ask your owner before", item 11). It attaches
+  which the `sidera` MCP server was added once and its tools were allowed, so that no
+  prompt waits for a person (`sidera setup controller` prints the commands and the
+  permission step, naming the `sidera` program by its absolute path; your owner runs or
+  adds them, see "Ask your owner before", item 11). It attaches
   itself to the node the first time it uses a Sidera tool, so it needs no
   `SIDERA_TOKEN`, gets an endpoint of its own named `Claude controller (<directory>)`
   or `Codex controller (<directory>)`, and has the same tools and the same rules as
@@ -724,10 +728,11 @@ only when your session offers it (a Codex `workspace-write` sandbox offers MCP o
 `sidera` command there fails with `cannot reach the Sidera daemon`). The
 operation names are the same.
 
-If you are not inside a session (a plain terminal, or a Claude Code or Codex session
-that has no `sidera` MCP server), you have no credential:
+If you are not inside a session at all (a plain terminal), you have no credential:
 `sidera recv`, `send` and the other agent commands fail with
-`unauthenticated/token_missing`. Use the owner's console instead:
+`unauthenticated/token_missing`. Inside a Claude Code or Codex session the same
+commands first attach that session as a controller, even without the `sidera` MCP
+server (see rule 15). Use the owner's console instead:
 `sidera-adapter-console new | send | reply | recv | status | whoami`. The console has
 no `directory`, `control` or `peers`: those need a session. From outside a session,
 find a node's runtime endpoint by running `sidera endpoint list --instance codex` (or
@@ -775,9 +780,12 @@ them there without your owner's yes (see "Ask your owner before").
    (MCP: `control` with `to`, `signal` set to `session.create`, `preset`, `body`.)
    Use a preset that exists on that node. Put the whole task in the first message:
    it reaches the new session at once, so do not send it again.
-8. **Wait for answers with `recv`, not on the control reply.** The reply to a
-   session creation comes back only after the new session's first turn, which takes
-   about as long as the task. `control` itself returns at once. Call `recv` with a
+8. **Wait for answers with `recv`.** `control` returns at once with the message id
+   only: its result does not carry the new session's address. To learn the address, call
+   `status` with the message id (MCP: `status` with `message_id`): the control reply
+   appears there within seconds, as soon as the first message is in the new session, long
+   before the task ends; the `from` of the new session's first message to you is its address too. The answer
+   to the task is a message, not the control reply. Call `recv` with a
    wait (`wait_s=60`) in a loop, passing `ack_lease` from the previous page, until
    the answer arrives. A runtime caps the wait (see `recv_wait_max_s` in `me`), so
    `recv` can return early with no messages; call it again.

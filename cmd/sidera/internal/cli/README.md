@@ -2,7 +2,7 @@
 
 `Run(context.Context, argv, Config)` is the executable's dispatcher; `argv`
 includes the executable name. The owner supplies standard streams, an environment
-lookup and what the program was built from (`release.Info`). The dispatcher returns an exit code and never exits the
+lookup, the path of the running program (`Executable`) and what the program was built from (`release.Info`). The dispatcher returns an exit code and never exits the
 process itself. It borrows the streams, owns and closes the Agent client, and
 waits for a foreground daemon to finish before returning. For `mcp`, it passes
 stdin/stdout ownership to the MCP peer and borrows stderr for diagnostics. MCP
@@ -38,8 +38,14 @@ and its bound values. A local value stays attached, including a body spelled
 - `export.go`: verified online export, the precise missing-daemon offline
   fallback, and writing a new private copy through `fsx.CreatePrivateFile`.
 - `setup.go`: `setup controller`, which prints the commands that add the `sidera` MCP server to
-  Claude Code and Codex and does nothing else. A data directory that is not the default is named
-  in them by `--home`: the client's environment for the server may not carry `SIDERA_HOME`.
+  Claude Code and Codex, and the permission each client needs to run its tools without a
+  prompt, and does nothing else. The server is named by the absolute path of the running
+  program (`Config.Executable`): a client starts it without a shell and may not have the
+  program's directory on its `PATH`. A data directory that is not the default is named in the
+  commands by `--home`: the client's environment for the server may not carry `SIDERA_HOME`. A
+  program in a temporary directory (a `go run` build) is warned about on standard error: its path
+  would not last. The clients' files are named under `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when the
+  environment sets them.
 - `controller.go`: the attachment of an agent command run inside a session a person
   opened (the `controller` package does the work; the command gives its Agent client the
   token and prints the wake notice on stderr only when the adapter cannot wake the

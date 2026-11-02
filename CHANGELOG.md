@@ -42,7 +42,11 @@ protocol has a version of its own.
   of the first result, whether the session can be woken. When the endpoint is closed the next
   tool call attaches the session as a new endpoint and its result names the new address and says
   the old one is closed. `sidera setup controller` prints the commands that add the MCP server to Claude
-  Code and Codex, naming the data directory with `--home` when it is not the default.
+  Code and Codex, naming the program by its absolute path (a client starts it without a shell and may
+  not find the bare name on its `PATH`: Codex on Windows does not) and the data directory with `--home`
+  when it is not the default, and the permission each client needs so that a woken controller does not
+  stall at a prompt: the rule `mcp__sidera` for Claude Code, the line
+  `default_tools_approval_mode = "approve"` for Codex.
 - **A resumed Claude Code session is woken at once.** When it starts, the `sidera` MCP server
   of a Claude Code session looks for an endpoint the session already has and, if it finds one,
   keeps its token and starts the heartbeat, so that what waited for the session while it was

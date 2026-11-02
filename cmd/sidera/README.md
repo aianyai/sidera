@@ -17,7 +17,7 @@ A process without `SIDERA_TOKEN` inside a session a person opened (Claude Code o
 is a controller: [`internal/controller`](internal/controller/README.md) attaches it
 through the management method `sessions.attach` for `sidera mcp` and for the agent
 commands, which then hold the returned token in memory only. `sidera setup controller`
-prints the commands that add the MCP server to the two clients.
+prints the commands that add the MCP server to the two clients and the permission each needs.
 The name `siderad` (also `siderad.exe`) selects `daemon`.
 
 [`internal/acceptance`](internal/acceptance/README.md) contains test support

@@ -233,6 +233,18 @@ ends. Starting it through WMI creates a process that belongs to no session, so
 it keeps running after you log out. A process started this way does not get your
 user `PATH`, so a small script builds it first.
 
+**Start the daemon at your normal level, from a normal desktop session.** Before a
+client sends anything it verifies the process that serves the daemon's pipe, by
+opening that process and reading its user. A daemon started from an elevated shell,
+for example over SSH by an administrator account (which gets a high-integrity token),
+runs at a higher level than your desktop session, so a client there cannot verify it:
+every desktop client, the `sidera` command, the console and a controller session,
+fails with `peer_check_failed` and the daemon looks unreachable although it runs. Run
+the steps below, or a plain `sidera daemon`, from a normal (not elevated) PowerShell or
+terminal in your desktop session. If the error already appears, stop the elevated daemon
+from its own elevated shell (`sidera daemon stop`) and start it again from a normal one;
+see also [Troubleshooting](operations.md#troubleshooting).
+
 Create `%USERPROFILE%\sidera\start-daemon.cmd` (the file needs CRLF line endings):
 
 ```bat

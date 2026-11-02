@@ -18,10 +18,17 @@ func (nopWriteCloser) Close() error { return nil }
 // code, standard output and standard error.
 func runCLI(t *testing.T, env map[string]string, args ...string) (int, string, string) {
 	t.Helper()
+	return runCLIAs(t, nil, env, args...)
+}
+
+// runCLIAs is runCLI for a program whose path is exe (os.Executable); nil is a
+// program whose path the test does not use.
+func runCLIAs(t *testing.T, exe func() (string, error), env map[string]string, args ...string) (int, string, string) {
+	t.Helper()
 	var out, errs bytes.Buffer
 	code := Run(context.Background(), append([]string{"sidera"}, args...), Config{
 		Stdin: io.NopCloser(strings.NewReader("")), Stdout: nopWriteCloser{&out}, Stderr: &errs,
-		Getenv: func(name string) string { return env[name] },
+		Getenv: func(name string) string { return env[name] }, Executable: exe,
 	})
 	return code, out.String(), errs.String()
 }

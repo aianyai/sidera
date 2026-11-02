@@ -470,6 +470,15 @@ earlier build started in that directory was left running (see
 Remove the group's entries as above, move the node if it is in the profile, and end
 the old server.
 
+**On Windows every desktop client fails with `peer_check_failed` while the daemon runs.**
+The daemon was started from an elevated shell, for example over SSH by an administrator
+account, which gets a high-integrity token. A client in your desktop session verifies the
+daemon's process before it sends anything and cannot do that for a process at a higher
+level, so the `sidera` command, the console and a controller session all fail, and the
+daemon looks unreachable. Stop it from the elevated shell it runs in (`sidera daemon stop`)
+and start it from a normal desktop session, as in
+[the detached start](install.md#windows-a-detached-start-that-survives-logout).
+
 **`socket_path_too_long`.** Sidera's local sockets live under the data directory,
 and a Unix socket path has a limit of about 100 bytes. Use a shorter `--home` or
 `SIDERA_HOME`.

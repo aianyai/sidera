@@ -185,7 +185,7 @@ The values are the `tool_access.env` of `session.create` or of the session's ent
 
 **The owner may have a `sidera` server of their own.** A person who wants their own Codex
 sessions to reach Sidera adds `[mcp_servers.sidera]` to `config.toml`
-(`codex mcp add sidera -- sidera mcp`), and a thread's `config` is merged into the owner's
+(`codex mcp add sidera -- <sidera> mcp`), and a thread's `config` is merged into the owner's
 file key by key, a table into a table of the same name, not replaced by it. The adapter keeps
 the name `sidera`: under another name the thread would also start the owner's server, which
 has no token and would attach the adapter's own session as a person's. Under the same name the

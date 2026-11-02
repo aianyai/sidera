@@ -63,8 +63,8 @@ Sidera 0.8.0 is the first public release.
   - Managing nodes from other devices, in bulk, including commands that wait for a
     node that is offline.
 - Agents
-  - Replies to you that wait until you read them, instead of expiring after the
-    queue time.
+  - Replies to your own console that wait until you read them, instead of
+    expiring after the queue time.
   - Interrupting a running turn, on Claude Code and Codex.
   - Sandboxed sessions that still send and receive, and an operating-system sandbox
     for Claude Code.
@@ -111,7 +111,8 @@ sidera-adapter-console recv --wait 30
 
 To direct agents from a Claude Code or Codex session you opened yourself, make it a
 controller. Run `sidera setup controller` once; it prints the commands that add the
-`sidera` MCP server to Claude Code or Codex and changes nothing itself. From then on,
+`sidera` MCP server to Claude Code or Codex (naming the `sidera` program by its absolute
+path) and how to let each client call its tools without asking, and changes nothing itself. From then on,
 a session you open attaches itself the first time it uses a Sidera tool (no token to
 set), gets an endpoint of its own, uses the same tools as Sidera's own sessions, and
 is woken when a reply arrives: within about a second on Claude Code, within about 10

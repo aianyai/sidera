@@ -8,7 +8,7 @@ import (
 type helpEntry struct{ usage, purpose, example string }
 
 var helpEntries = map[string]helpEntry{
-	"setup controller":           {"setup controller", "Print the commands that add the sidera MCP server to Claude Code (user scope) and Codex, so that sessions you open can attach themselves as controllers. It only prints; it runs nothing and changes no configuration.", "sidera setup controller"},
+	"setup controller":           {"setup controller", "Print the commands that add the sidera MCP server to Claude Code (user scope) and Codex, and the permission each needs so that its tools run without a prompt, so that sessions you open can attach themselves as controllers. It only prints; it runs nothing and changes no configuration.", "sidera setup controller"},
 	"mcp":                        {"mcp", "Serve Agent tools over MCP stdio; stdout contains protocol messages only, including with --json.", "sidera mcp"},
 	"daemon stop":                {"daemon stop", "Ask the running node to stop after acknowledging the request.", "sidera daemon stop --json"},
 	"alerts list":                {"alerts list [--all]", "List open alerts, optionally including acknowledged alerts.", "sidera alerts list --all --json"},

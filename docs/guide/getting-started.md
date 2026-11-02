@@ -54,6 +54,12 @@ in [Run the daemon](install.md#run-the-daemon):
 sidera daemon
 ```
 
+On Windows, start it from a normal (not elevated) terminal of your desktop session: a
+daemon started from an elevated shell, for example over SSH by an administrator
+account, cannot be verified by your desktop clients, which then fail with
+`peer_check_failed` (see
+[the detached start](install.md#windows-a-detached-start-that-survives-logout)).
+
 In another terminal, check that it answers:
 
 ```sh
@@ -405,7 +411,7 @@ sidera-adapter-console new <node-id-b>/<runtime-endpoint-id> --preset light --bo
 ```
 
 `new` sends a `session.create` request with your text as the first message. It
-prints the message id, then, when the new session has finished its first turn,
+prints the message id, then, as soon as the first message is in the new session,
 its address:
 
 ```
@@ -413,9 +419,9 @@ message: <message-id>
 session: <node-id-b>/<session-endpoint-id>
 ```
 
-This takes about 10 to 30 seconds, because the answer to a session creation
-comes back only after the new session's first turn. The `session:` line is the
-address to use for every follow-up. Then read the reply:
+This takes a few seconds: the answer to a session creation comes back as soon as
+the first message is in the new session, not after its first turn. The `session:`
+line is the address to use for every follow-up. Then read the reply:
 
 ```sh
 sidera-adapter-console recv --wait 30

@@ -136,11 +136,13 @@ that starts sessions), not a console and not an existing session.
 
    `session.create` delivers the first message into the new session at once.
    There is no need to `send` it again.
-3. Wait for the answer with `recv`, as above. **Do not wait for the control
-   reply.** The reply to a session creation comes back only after the new
-   session's first turn has ended, so it takes about as long as the whole task.
-   `sidera control` itself returns as soon as the request is accepted. If you
-   want the session's address, read it later with `sidera status <message-id>`.
+3. Wait for the answer with `recv`, as above. `sidera control` returns as soon as
+   the request is accepted, and its result holds only the message id, the target and
+   `replayed`: **it does not carry the new session's address.** Read the address with
+   `sidera status <message-id>`, where the control reply appears within seconds, as
+   soon as the first message is in the new session (long before the task is done), or
+   take it from `from` in the new session's first message to you. The answer to your task is a
+   message, not the control reply: wait for it with `recv`.
 
 The new session answers to the sender of its first message, with an ordinary
 reply. For that to work, its preset must tell it to reply with `sidera reply`
@@ -159,21 +161,51 @@ directs the others. It is the **controller**. Sidera did not create it, but it c
 give it an endpoint of its own on the node: the controller then uses the same tools
 as a session Sidera started and is woken when a reply arrives.
 
-**Set it up once.** `sidera setup controller` prints the two commands that add the
-`sidera` MCP server to Claude Code and to Codex. It runs nothing and changes no
-configuration; you run the one you need.
+**Set it up once.** `sidera setup controller` prints what adds the `sidera` MCP server
+to Claude Code and to Codex, and what lets each of them call its tools without a person
+answering a prompt. It runs nothing and changes no configuration; you run or add what
+you need.
 
 ```text
 Run these once. This command only prints them; it changes no configuration.
 
 Claude Code, for every session of your user:
-  claude mcp add --scope user sidera -- sidera mcp
+  claude mcp add --scope user sidera -- /home/me/.local/bin/sidera mcp
 
-Codex, in your user configuration (~/.codex/config.toml):
-  codex mcp add sidera -- sidera mcp
+Claude Code asks before each call of a tool of a server. To let the sidera tools run without asking, add this rule to the "permissions" "allow" list of ~/.claude/settings.json:
+  "mcp__sidera"
 
-With the server added, a session you open attaches itself to this node the first time it uses a Sidera tool, and can then send and receive messages like any Sidera session.
+Codex, in your user configuration:
+  codex mcp add sidera -- /home/me/.local/bin/sidera mcp
+
+Codex asks before each call of a tool that is not read-only. To let the sidera tools run without asking, add this line to the [mcp_servers.sidera] table that the command above created in ~/.codex/config.toml:
+  default_tools_approval_mode = "approve"
+
+The path of this program is stored in each configuration. If the program moves, run "claude mcp remove --scope user sidera" before adding it to Claude Code again, and add the Codex approval line again after "codex mcp add", which rewrites the table without it.
+
+With the server added and allowed, a session you opened attaches itself to this node the first time it uses a Sidera tool, and can then send and receive messages like any Sidera session, including when it is woken without a person at its prompt.
 ```
+
+The commands name the `sidera` program that ran `setup controller` by its absolute path
+(here `/home/me/.local/bin/sidera`; on Windows, for example
+`C:\Users\me\sidera\bin\sidera.exe`, in double quotes when the path has a space), not
+by the bare name: a client starts the server without a shell, and neither Codex on
+Windows nor a session that is not a login shell on Linux (which has no `~/.local/bin`
+on its `PATH`) finds `sidera` by name. On Windows the two files are
+`%USERPROFILE%\.claude\settings.json` and `%USERPROFILE%\.codex\config.toml`; when
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` relocates a client, the text names its file in that
+directory instead (`$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml` on Windows). A
+node whose data directory is not the default is named in both commands, `<path of
+sidera> --home <dir> mcp`. Run from a `go run` build or any other temporary directory,
+the command also warns on standard error that the path will not last.
+
+The permission step matters when nobody is at the prompt. A controller is woken by a
+reply and has to call `recv`, `ack` or `control` then; without the rule or the line,
+Claude Code and Codex stop at a prompt that only a person can answer, and the woken
+controller stalls. The settings file is JSON: if it has a `permissions` object, add the
+rule to its `allow` array; otherwise add
+`{"permissions": {"allow": ["mcp__sidera"]}}`. In `config.toml` the line goes
+anywhere under the `[mcp_servers.sidera]` header and before the next header.
 
 From then on, nothing else is needed. Open a Claude Code or Codex session as you
 always do and ask it to use Sidera. Its credential comes from the node, so you do not

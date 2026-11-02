@@ -32,6 +32,8 @@ type Config struct {
 	Stdout io.WriteCloser
 	Stderr io.Writer
 	Getenv func(string) string
+	// Executable is the path of the running program (os.Executable).
+	Executable func() (string, error)
 	// Release is what the program was built from.
 	Release release.Info
 }
