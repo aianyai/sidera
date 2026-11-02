@@ -1,7 +1,7 @@
 // Package manageapi is the management interface of the daemon: HTTP over the
 // local socket (a named pipe on Windows) that the owner's commands talk to. It
-// reads a request strictly, judges it by the administrative rules, hands what
-// changes state to the engine's one door (engine.Execute), answers in the words
+// reads a request strictly, judges it by the administrative rules, hands what is
+// replay protected to the engine's one door (engine.Execute), answers in the words
 // apiwire gives, and has no rule of its own about who may do what. See README.md.
 package manageapi
 
@@ -173,8 +173,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string, m *m
 		return
 	}
 
-	if d.plan.read != nil {
-		result, err := d.plan.read(r.Context(), s.cfg.Service)
+	if d.plan.direct != nil {
+		result, err := d.plan.direct(r.Context(), s.cfg.Service)
 		if err != nil {
 			s.http.Fail(w, err)
 			return
@@ -259,7 +259,9 @@ type readEnvelope struct {
 
 // decode reads the request of a method strictly: the envelope, the identifier, the
 // version and the params, and judges its shape by the administrative rules. It is
-// the one entry that reads untrusted bytes of the interface.
+// the one entry that reads untrusted bytes of the interface. A request that is not
+// replay protected has the envelope of a read: it takes neither an operation
+// identifier nor an expected version.
 func (s *Server) decode(name string, body []byte) (*decoded, error) {
 	m := s.methods[name]
 	if m == nil {
@@ -267,7 +269,7 @@ func (s *Server) decode(name string, body []byte) (*decoded, error) {
 	}
 	d := &decoded{m: m}
 	var params json.RawMessage
-	if m.op.SideEffecting() {
+	if m.op.ReplayProtected() {
 		var env writeEnvelope
 		if err := strictjson.Decode(body, &env); err != nil {
 			return nil, err

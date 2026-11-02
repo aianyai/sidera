@@ -371,14 +371,17 @@ HTTP/1.1 over `manage/manage.sock` (a named pipe on Windows), `POST
 3. The body, at most 1 MiB (`400 invalid_argument/request_too_large`), is decoded
    strictly: an unknown member, a repeated key, `null`, a key of another case or a
    value of another type is `malformed_request` with the path of the fault where the
-   decoder can place it. A request that changes state is
+   decoder can place it. A replay-protected request (`Operation.ReplayProtected`: every
+   operation that changes state but the attachment of a session) is
    `{"operation_id": <32 lower-case hex digits, not all zero>, "expected_version"?: n,
-   "params"?: {...}}`; a read is `{"params"?: {...}}`.
-4. `admin.ValidateRequest`: a request that changes state carries an identifier
+   "params"?: {...}}`; any other request, a read or an operation that keeps its own
+   idempotency, is `{"params"?: {...}}`.
+4. `admin.ValidateRequest`: a replay-protected request carries an identifier
    (`missing_operation_id`), a change of a versioned setting carries its expected
    version, zero being none (`missing_expected_version`), and any other request
    carries no such member at all, whatever its value (`unexpected_version`).
-5. A read is answered from the engine. A request that changes state is one
+5. A request that is not replay protected is a direct call of the engine and is answered
+   from it, nothing stored. A replay-protected request is one
    `engine.Execute` command: the actor that was authorized (the engine makes no actor of
    its own and takes this one wherever it judges who asks), the key `admin.KeyFor(owner, id)`,
    the fingerprint, the expected version, the name of the method and the operation. The replay check, the
@@ -408,8 +411,8 @@ changing them can execute another operation or ask for a different change.
 The fingerprint is `SHA-256("sidera-manage-v1" NUL method NUL canonical params NUL
 decimal expected version)`; the canonical params are the decoded params encoded again
 with the fields of their type in declared order, so a resend written with another
-order or spacing is still a resend. The answer to a request that changes state is
-`{"operation_id","replayed","result"}`, the result being the one stored; a read
+order or spacing is still a resend. The answer to a replay-protected request is
+`{"operation_id","replayed","result"}`, the result being the one stored; any other
 answers `{"result"}`. When an operation stops the daemon the answer is flushed and
 then the stop is requested, once: the client has its answer before the daemon goes.
 The [shared local HTTP boundary](../local-http/README.md) owns exact method and

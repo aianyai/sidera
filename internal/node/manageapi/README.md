@@ -87,8 +87,12 @@ carries no operation identifier and stores no result.
   from being made anywhere else.
 - **The order of a request.** Method (404), verb (405), `admin.Authorize` against
   the catalogue, the body (at most 1 MiB), the strict decode of the envelope and
-  the params, `admin.ValidateRequest`, then the engine: a read is answered, a
-  request that changes state is one `Execute` command with the actor, the key
+  the params, `admin.ValidateRequest`, then the engine: a request that is not replay
+  protected (a read, or an operation that changes state and keeps its own
+  idempotency, `Operation.ReplayProtected`) is a direct call of the engine and is
+  answered with the envelope of a read: it takes neither an operation identifier
+  nor an expected version, and nothing of it is stored. A replay-protected request
+  is one `Execute` command with the actor, the key
   `admin.KeyFor(owner, id)`, the fingerprint and the expected version. The actor is
   the one that was authorized: the engine makes none of its own, so what it judges
   by who asks (the pairing) takes it from the command. The replay
@@ -97,8 +101,8 @@ carries no operation identifier and stores no result.
 - **A row is authorized as what it runs as.** Authorization uses the row's `op`
   before the params are read, and what runs is the plan's operation, which the
   engine judges by its own `Admin()`. After the params are read the server checks
-  that the two are the same catalogue entry (a change plans an operation and no read,
-  a read plans a read and no operation); a row that breaks it is answered as an
+  that the two are the same catalogue entry (a replay-protected row plans an
+  operation and no direct call, any other row plans a direct call and no operation); a row that breaks it is answered as an
   internal error and the engine is never asked, so a request can never be
   authorized as one entry and carried out as another.
 - **Strict decoding.** An unknown member, a repeated key, `null`, a key of another
@@ -115,7 +119,7 @@ carries no operation identifier and stores no result.
   rule is here and nowhere else. A default the interface applies (the instance of an
   enabling is named after the adapter) is applied before the params are encoded, so
   that a request that leaves it out and one that writes it are one request.
-- **The answer after the work.** A request that changes state is answered with the
+- **The answer after the work.** A replay-protected request is answered with the
   identifier, whether it was a resend, and the result the engine stored; the stop
   that an operation asks for is requested after the answer was flushed, once.
 - **Errors are mapped once** by `apiwire.FromError`; the text of an unexpected error

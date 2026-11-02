@@ -114,8 +114,15 @@ const (
 	OpRetireIdentity
 	// OpExportRevocation returns the revocation statement, which can void this
 	// node's identity. It is a read that needs the local owner, not view: it
-	// is not SideEffecting, and its result must never be stored.
+	// changes nothing, and its result must never be stored.
 	OpExportRevocation
+	// OpAttachSession attaches a session a person opened to this node: it
+	// registers the session as an endpoint, or finds the endpoint it already
+	// has, and hands the session its token. It changes state, but a request
+	// repeats as often as the session wants to be found again and means the
+	// same each time, so it carries no operation ID and stores no result. The
+	// reply carries a token, so the local owner alone may ask.
+	OpAttachSession
 	// OpStopDaemon asks the running daemon to shut down normally.
 	OpStopDaemon
 
@@ -232,28 +239,35 @@ func RequirementOf(op Operation) (Requirement, bool) {
 		OpEnableAdapter, OpDisableAdapter, OpChangeEndpointSettings,
 		OpChangeNodeSettings, OpAcknowledgeAlert, OpClearClockRollback,
 		OpConfirmRevocationBackup, OpRetireIdentity, OpExportRevocation,
-		OpStopDaemon:
+		OpAttachSession, OpStopDaemon:
 		return RequireLocalOwner, true
 	default:
 		return 0, false
 	}
 }
 
-// SideEffecting reports whether the operation changes state. Every
-// side-effecting management request carries an operation ID, and its result is
-// stored with the request's fingerprint.
-//
-// OpExportRevocation is the one exception among the operations that need more
-// than view: it is a read that needs a high level and changes nothing. Its
-// result is the revocation statement, so it must never be stored, and a
-// request that changes nothing has nothing for replay protection to guard.
-func (op Operation) SideEffecting() bool {
+// ChangesState reports whether the operation changes state. A reading, the
+// query of a stored result and the export of the revocation statement do not:
+// the export is a read that needs a high level.
+func (op Operation) ChangesState() bool {
 	switch op.Kind {
 	case OpRead, OpQueryOperationResult, OpUnknown, OpExportRevocation:
 		return false
 	default:
 		return true
 	}
+}
+
+// ReplayProtected reports whether the operation is guarded against being carried
+// out twice by one request: such a management request carries an operation ID,
+// and its result is stored with the request's fingerprint. Every operation that
+// changes state is, but OpAttachSession: it is idempotent by its own key and is
+// repeated by design, so a stored result per repeat would only fill the store,
+// and a repeat must be able to update the state it changed. What does not change
+// state has nothing to guard, and the result of the revocation export must never
+// be stored.
+func (op Operation) ReplayProtected() bool {
+	return op.ChangesState() && op.Kind != OpAttachSession
 }
 
 // IsConfigChange reports whether the operation changes a versioned setting.

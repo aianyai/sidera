@@ -17,7 +17,7 @@ import (
 )
 
 // The management operations all run through one door, Execute, and the order the
-// administrative rules fix for a side-effecting request is the engine's alone:
+// administrative rules fix for a replay-protected request is the engine's alone:
 // look the identifier up in every stored result, run the operation, store the
 // result with the fingerprint. These tests drive that door with the two
 // operations the engine has (closing an endpoint, stopping the daemon) and with

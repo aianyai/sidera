@@ -64,8 +64,8 @@ func FuzzDecodeRequest(f *testing.F) {
 		if d.plan == nil || len(d.plan.canonical) == 0 {
 			t.Fatalf("a request of %s decoded with no plan", name)
 		}
-		if d.m.op.SideEffecting() != (d.plan.operation != nil) {
-			t.Fatalf("%s: side effects %v, operation %v", name, d.m.op.SideEffecting(), d.plan.operation != nil)
+		if d.m.op.ReplayProtected() != (d.plan.operation != nil) {
+			t.Fatalf("%s: replay protected %v, operation %v", name, d.m.op.ReplayProtected(), d.plan.operation != nil)
 		}
 		// the canonical form of an accepted request is accepted, and is its own
 		// canonical form
@@ -103,7 +103,7 @@ func methodNames(tb testing.TB) []string {
 func canonicalRequest(d *decoded) []byte {
 	var b bytes.Buffer
 	b.WriteByte('{')
-	if d.m.op.SideEffecting() {
+	if d.m.op.ReplayProtected() {
 		fmt.Fprintf(&b, `"operation_id":"%x",`, d.id[:])
 		if d.expected != 0 {
 			fmt.Fprintf(&b, `"expected_version":%d,`, d.expected)

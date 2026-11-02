@@ -28,9 +28,9 @@ func TestValidateRequest(t *testing.T) {
 			Request{ID: id, Op: Operation{Kind: OpRejectTrustRequest}}, ReasonOK},
 		{"rejecting a trust request still needs an operation ID",
 			Request{Op: Operation{Kind: OpRejectTrustRequest}}, ReasonMissingOperationID},
-		{"a side-effecting request without an operation ID is refused",
+		{"a replay-protected request without an operation ID is refused",
 			Request{Op: Operation{Kind: OpRevokeTrust}}, ReasonMissingOperationID},
-		{"a side-effecting request with an operation ID is well formed",
+		{"a replay-protected request with an operation ID is well formed",
 			Request{ID: id, Op: Operation{Kind: OpRevokeTrust}}, ReasonOK},
 		{"a configuration change without an expected version is refused",
 			Request{ID: id, Op: Operation{Kind: OpEditDeclaration}}, ReasonMissingExpectedVersion},
@@ -52,42 +52,44 @@ func TestValidateRequest(t *testing.T) {
 	}
 }
 
-func TestEveryConfigChangeIsSideEffecting(t *testing.T) {
+func TestEveryConfigChangeIsReplayProtected(t *testing.T) {
 	for _, tc := range catalogue {
-		if tc.op.IsConfigChange() && !tc.op.SideEffecting() {
-			t.Errorf("%s: a configuration change must be side-effecting", tc.name)
+		if tc.op.IsConfigChange() && !tc.op.ReplayProtected() {
+			t.Errorf("%s: a configuration change must be replay protected", tc.name)
 		}
-	}
-	for _, kind := range []OpKind{OpRead, OpQueryOperationResult, OpUnknown} {
-		if (Operation{Kind: kind}).SideEffecting() {
-			t.Errorf("operation kind %d must not be side-effecting", kind)
-		}
-	}
-	if !(Operation{Kind: OpRejectTrustRequest}).SideEffecting() {
-		t.Error("rejecting a trust request must be side-effecting")
 	}
 }
 
-// TestSideEffectingOperations pins which operations are not side-effecting:
-// reads, the lookup of a stored result, the unknown kind and the export of the
-// revocation statement. The export changes nothing and its result, which can
-// void this node, must never be filed away; every other operation is
-// side-effecting. The expectation is the list below, not the code under test.
-func TestSideEffectingOperations(t *testing.T) {
-	notSideEffecting := map[OpKind]bool{
+// TestWhichOperationsChangeStateAndAreReplayProtected pins the two predicates
+// for every kind. Reads, the lookup of a stored result and the unknown kind
+// change nothing. The export of the revocation statement changes nothing either,
+// and its result, which can void this node, must never be filed away. Attaching
+// a session changes state but is idempotent by its own key and repeated by
+// design, so it carries no operation ID and stores no result. Every other
+// operation changes state and is replay protected. The expectation is the table
+// below, not the code under test.
+func TestWhichOperationsChangeStateAndAreReplayProtected(t *testing.T) {
+	notChanging := map[OpKind]bool{
 		OpUnknown: true, OpRead: true, OpQueryOperationResult: true, OpExportRevocation: true,
 	}
+	notProtected := map[OpKind]bool{OpAttachSession: true}
 	for k := OpUnknown; k < opEnd; k++ {
-		if got, want := (Operation{Kind: k}).SideEffecting(), !notSideEffecting[k]; got != want {
-			t.Errorf("operation kind %d: SideEffecting = %v, want %v", k, got, want)
+		op := Operation{Kind: k}
+		changes := !notChanging[k]
+		if got := op.ChangesState(); got != changes {
+			t.Errorf("operation kind %d: ChangesState = %v, want %v", k, got, changes)
+		}
+		protected := changes && !notProtected[k]
+		if got := op.ReplayProtected(); got != protected {
+			t.Errorf("operation kind %d: ReplayProtected = %v, want %v", k, got, protected)
 		}
 	}
 }
 
 // TestValidateRequestForSingleNodeManagementOperations: exporting the
-// revocation statement needs no operation ID (it is never stored); each of the
-// other nine needs one, and the four that change a versioned setting also need
-// an expected version.
+// revocation statement and attaching a session need no operation ID (neither
+// stores a result); each of the other nine needs one, and the four that change
+// a versioned setting also need an expected version.
 func TestValidateRequestForSingleNodeManagementOperations(t *testing.T) {
 	id := OperationID{1}
 	versioned := map[OpKind]bool{
@@ -97,7 +99,7 @@ func TestValidateRequestForSingleNodeManagementOperations(t *testing.T) {
 	for _, tc := range singleNodeManagementOperations {
 		op := Operation{Kind: tc.kind}
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.kind == OpExportRevocation {
+			if tc.kind == OpExportRevocation || tc.kind == OpAttachSession {
 				if got := ValidateRequest(Request{Op: op}); got != ReasonOK {
 					t.Fatalf("without an operation ID: ValidateRequest = %s, want %s", got, ReasonOK)
 				}

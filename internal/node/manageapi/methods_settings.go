@@ -39,7 +39,7 @@ var nodeShow = &method{
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			n, err := svc.NodeSettings(ctx)
 			if err != nil {
 				return nil, err

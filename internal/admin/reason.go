@@ -95,7 +95,7 @@ const (
 
 	// Reasons for management requests.
 
-	// ReasonMissingOperationID means a side-effecting request has no operation
+	// ReasonMissingOperationID means a replay-protected request has no operation
 	// ID.
 	ReasonMissingOperationID Reason = "missing_operation_id"
 	// ReasonMissingExpectedVersion means a configuration change carries no

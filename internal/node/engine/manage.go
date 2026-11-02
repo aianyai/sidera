@@ -16,7 +16,7 @@ import (
 
 // This file is the one door that every administrative operation of the owner
 // goes through, and the one place the order the administrative rules fix for a
-// side-effecting request is carried out. The management interface has already
+// replay-protected request is carried out. The management interface has already
 // judged who asks (admin.Authorize) and whether the request is well formed
 // (admin.ValidateRequest); the loop then does the rest as one command, so that no
 // other change comes between the lookup of the identifier and the storing of the
@@ -41,8 +41,9 @@ import (
 // operation is written so that doing it again is harmless.
 type Operation interface {
 	// Admin is the catalogue entry the operation is authorized as. It is
-	// side-effecting: what only reads, and the export of the revocation, which
-	// must never be stored, do not come through the door.
+	// replay-protected: what only reads, the export of the revocation, which
+	// must never be stored, and an operation that is idempotent by its own key
+	// do not come through the door.
 	Admin() admin.Operation
 
 	// run makes the effect and stores the result with the fingerprint in the one
@@ -55,7 +56,7 @@ type Operation interface {
 	stops() bool
 }
 
-// ManagementCommand is one side-effecting management request.
+// ManagementCommand is one replay-protected management request.
 type ManagementCommand struct {
 	// Actor is who asks, as the management interface made it and admin.Authorize
 	// allowed it. The engine never makes an actor of its own: an operation that
@@ -127,7 +128,7 @@ func (c *cmdExecute) run(e *Engine, now time.Time) {
 	c.done(res, e.classify(err))
 }
 
-// Execute carries out a side-effecting management request: the stored result of
+// Execute carries out a replay-protected management request: the stored result of
 // the same request is returned and nothing runs; the identifier of another
 // request is refused with ReasonOperationIDReused; otherwise the operation runs,
 // its result is stored with the fingerprint in the transaction of its effect, and
@@ -139,8 +140,8 @@ func (e *Engine) Execute(ctx context.Context, c ManagementCommand) (StoredResult
 	switch {
 	case c.Operation == nil:
 		return StoredResult{}, errors.New("engine: a management command without an operation")
-	case !c.Operation.Admin().SideEffecting():
-		return StoredResult{}, errors.New("engine: only an operation that changes state comes through Execute")
+	case !c.Operation.Admin().ReplayProtected():
+		return StoredResult{}, errors.New("engine: only a replay-protected operation comes through Execute")
 	case c.Key.ID.IsZero():
 		return StoredResult{}, errors.New("engine: a management command without an operation identifier")
 	}

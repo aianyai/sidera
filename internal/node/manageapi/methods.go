@@ -21,8 +21,9 @@ import (
 // of a request is the same for every row; a row has no rule of who may do it.
 type method struct {
 	name string
-	// op is the catalogue entry of the method. A method whose operation does not
-	// change state is a read; one that does comes through the engine's door.
+	// op is the catalogue entry of the method. A method whose operation is
+	// replay protected comes through the engine's door; any other is answered by
+	// a direct call of the engine, with the envelope of a read.
 	op admin.Operation
 	// plan reads the params, a JSON object, and says what the request asks for.
 	plan func(s *Server, params json.RawMessage) (*plan, error)
@@ -51,8 +52,11 @@ type plan struct {
 	canonical []byte
 	// operation is what the engine is asked to do, for a method that changes state.
 	operation engine.Operation
-	// read answers a read from the engine.
-	read func(ctx context.Context, svc engine.ManageService) (any, error)
+	// direct answers a request that is not replay protected from the engine at
+	// once, as a read is answered: a read, or a method that changes state and
+	// keeps its own idempotency. Its result is worded as a read's, and nothing
+	// of it is stored.
+	direct func(ctx context.Context, svc engine.ManageService) (any, error)
 }
 
 // decodeParams reads the params of a method into p with the strict rules. The
@@ -74,21 +78,21 @@ func decodeParams[P any](raw json.RawMessage, p *P) error {
 // request is authorized by the row's op before its params are read, and what runs
 // is the plan's operation, which the engine's door judges by its own Admin(): were
 // the two different, a request would be authorized as one catalogue entry and
-// carried out as another. A row that changes state must plan an operation whose
-// Admin() is its op and no read; a row that does not must plan a read and no
-// operation. A row that breaks this is a defect of the program, not of the request.
+// carried out as another. A row that is replay protected must plan an operation whose
+// Admin() is its op and no direct call; a row that is not must plan a direct call
+// and no operation. A row that breaks this is a defect of the program, not of the request.
 func (m *method) checkPlan(p *plan) error {
-	if m.op.SideEffecting() {
+	if m.op.ReplayProtected() {
 		switch {
-		case p.operation == nil || p.read != nil:
-			return fmt.Errorf("manageapi: %q is authorized as an operation that changes state and plans none", m.name)
+		case p.operation == nil || p.direct != nil:
+			return fmt.Errorf("manageapi: %q is authorized as a replay-protected operation and plans none", m.name)
 		case p.operation.Admin() != m.op:
 			return fmt.Errorf("manageapi: %q is authorized as %+v and would run as %+v", m.name, m.op, p.operation.Admin())
 		}
 		return nil
 	}
-	if p.operation != nil || p.read == nil {
-		return fmt.Errorf("manageapi: %q is authorized as a read and does not plan one", m.name)
+	if p.operation != nil || p.direct == nil {
+		return fmt.Errorf("manageapi: %q is authorized as a request that is not replay protected and does not plan a direct call", m.name)
 	}
 	return nil
 }
@@ -160,7 +164,7 @@ var endpointsList = &method{
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			views, err := svc.Endpoints(ctx)
 			if err != nil {
 				return nil, err
@@ -270,7 +274,7 @@ var operationResult = &method{
 			return nil, apiwire.FromAdmin(admin.ReasonMissingOperationID)
 		}
 		key := admin.KeyFor(s.actor(), id)
-		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			result, ok, err := svc.OperationResult(ctx, key)
 			if err != nil {
 				return nil, err

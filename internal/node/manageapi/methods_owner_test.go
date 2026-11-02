@@ -27,10 +27,10 @@ import (
 func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing.T) {
 	r := newRig(t)
 	for _, tc := range []struct {
-		method  string
-		kind    admin.OpKind
-		changes bool // SideEffecting
-		version bool // IsConfigChange
+		method    string
+		kind      admin.OpKind
+		protected bool // ReplayProtected
+		version   bool // IsConfigChange
 	}{
 		{"status", admin.OpRead, false, false},
 		{"alerts.list", admin.OpRead, false, false},
@@ -68,9 +68,9 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 			t.Errorf("no method %s", tc.method)
 			continue
 		}
-		if m.op.Kind != tc.kind || m.op.SideEffecting() != tc.changes || m.op.IsConfigChange() != tc.version {
-			t.Errorf("%s is %v (changes %v, versioned %v), want %v (%v, %v)", tc.method,
-				m.op.Kind, m.op.SideEffecting(), m.op.IsConfigChange(), tc.kind, tc.changes, tc.version)
+		if m.op.Kind != tc.kind || m.op.ReplayProtected() != tc.protected || m.op.IsConfigChange() != tc.version {
+			t.Errorf("%s is %v (replay protected %v, versioned %v), want %v (%v, %v)", tc.method,
+				m.op.Kind, m.op.ReplayProtected(), m.op.IsConfigChange(), tc.kind, tc.protected, tc.version)
 		}
 		// The owner is allowed every one of them, and by the catalogue only: the
 		// export is never allowed to a person who may only view.

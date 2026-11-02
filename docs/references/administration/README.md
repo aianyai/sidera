@@ -38,7 +38,7 @@ connection on the agent interface is never the local owner (see
 | view          | Read; query the result of an operation (the requester's own).                                                                                                      |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
 | full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter (one that replaces the package of an enabled instance is the local owner's, below); add or loosen a preset; loosen policy. |
-| local owner   | Modify the authorized-persons list; enable an adapter instance; disable an adapter instance; change an endpoint's settings; change the node's settings; acknowledge an alert; clear the clock-rollback pause; confirm the revocation backup; retire the identity; export the revocation statement; stop the daemon (the operations for managing a single node). |
+| local owner   | Modify the authorized-persons list; enable an adapter instance; disable an adapter instance; change an endpoint's settings; change the node's settings; acknowledge an alert; clear the clock-rollback pause; confirm the revocation backup; retire the identity; export the revocation statement; attach a session a person opened; stop the daemon (the operations for managing a single node). |
 
 The operations for managing a single node are held to the local owner until
 remote management exists: a level that cannot yet be exercised
@@ -60,11 +60,26 @@ splitting an operation later would change every call site.
 
 Exporting the revocation statement needs the local owner, never view: the
 statement voids this node's identity, so whoever can read it can end the node.
-It is the one operation above view that is not side-effecting. It changes
-nothing, so replay protection has nothing to guard, and the stored result of a
-side-effecting request would copy the statement into the stored results and
-widen where the secret lives, for as long as replay checks need to keep it. A
-request for it therefore needs no operation ID, and its result is never stored.
+It changes nothing, so replay protection has nothing to guard, and the stored
+result of a replay-protected request would copy the statement into the stored
+results and widen where the secret lives, for as long as replay checks need to
+keep it. A request for it therefore needs no operation ID, and its result is
+never stored.
+
+Attaching a session a person opened (`OpAttachSession`) also needs the local
+owner: the reply hands out the session's token, which only the owner of the
+machine may be given. It changes state, and it is the one operation that does so
+without replay protection. It is idempotent by its own key (the instance and the
+native session), and the person's session repeats it as often as it wants to be
+found again, so a stored result per repeat would only fill `state/admin/` for
+seven days, and a repeat must be able to update the state it changed, which
+returning a stored result would prevent. A request for it therefore carries no
+operation ID and no expected version, and its result is never stored.
+
+Two predicates on an operation say this: `ChangesState` (the reads, the query of
+a stored result and the export do not) and `ReplayProtected` (every operation
+that changes state, but the attachment). The operation ID, the replay check and
+the stored result follow `ReplayProtected`.
 
 A batch local revocation is not an operation of its own: the CLI sends the
 single local revocation to each node, and each node answers with its own verdict
@@ -140,7 +155,7 @@ and this requester, was not issued by a retired node, and the present instant is
 before its end. A proof grants no
 management right: it opens reachability records and nothing else.
 
-**Management requests.** Each side-effecting request carries an operation ID.
+**Management requests.** Each replay-protected request carries an operation ID.
 Configuration changes (inheritance, grace period, policy, presets, declaration,
 relay settings, LAN discovery, enabling and disabling an adapter, endpoint
 settings, node settings) also carry the version of the setting the sender
@@ -161,7 +176,7 @@ declaration is `OpEnableInheritance` or `OpDisableInheritance`, never a manage
 level edit.
 
 The only order of handling a request is: authorize; validate its shape; then,
-for a side-effecting request only, check replay under the sender-scoped key (a
+for a replay-protected request only, check replay under the sender-scoped key (a
 stored result is returned as it is, with no version check, because the request
 already ran), and only when it is to execute, check the version, execute, and
 store the result with its fingerprint. From the replay check to saving the
@@ -169,7 +184,7 @@ result is one serial step with no other change in between: two concurrent
 retries of one request would otherwise both find no stored result and both run.
 The replay lookup covers all stored results, under the key `KeyFor(actor, id)`:
 the `last_operation` of each versioned configuration file and the results kept
-under `state/admin/`, whose key spaces do not overlap. A request that is not side-effecting is
+under `state/admin/`, whose key spaces do not overlap. A request that is not replay-protected is
 executed after validation; it is never checked for replay and its result is
 never stored. The key is built only for a sender that was authorized, so a
 denied caller can neither file nor probe results.
@@ -324,8 +339,8 @@ operation and no interface repeats the replay check. See
   - `reachability_test.go`: `TestMayIssueReachabilityProof`,
     `TestCheckReachabilityProof`; with `publication`,
     `TestAProofOfARetiredNodeIsRefused`.
-  - `request_test.go`: `TestValidateRequest`, `TestEveryConfigChangeIsSideEffecting`,
-    `TestSideEffectingOperations`,
+  - `request_test.go`: `TestValidateRequest`, `TestEveryConfigChangeIsReplayProtected`,
+    `TestWhichOperationsChangeStateAndAreReplayProtected`,
     `TestValidateRequestForSingleNodeManagementOperations`,
     `TestConfigChangesAreTheVersionedSettings`, `TestCheckVersion`,
     `TestCheckReplay`, `TestKeyForScopesOperationIDsToThePerson`,

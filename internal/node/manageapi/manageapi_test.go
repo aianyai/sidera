@@ -215,7 +215,7 @@ func TestAuthorizationPrecedesReadingTheBody(t *testing.T) {
 // as another: it is refused as a defect of the program, whatever the request, and
 // the engine is never asked.
 func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
-	read := func(context.Context, engine.ManageService) (any, error) { return struct{}{}, nil }
+	direct := func(context.Context, engine.ManageService) (any, error) { return struct{}{}, nil }
 	closeIt := engine.CloseEndpointOp(endpointOf(1), nil)
 	setNode := engine.SetNodeSettingsOp([]byte(`{}`), nil)
 	for _, tc := range []struct {
@@ -225,11 +225,13 @@ func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
 	}{
 		{"a change authorized as another entry", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{operation: closeIt}},
 		{"a change of a preset authorized as the other class", admin.Operation{Kind: admin.OpChangePreset, PresetChange: admin.PresetChangeNarrowing}, plan{operation: engine.AddPresetOp("x", nil, nil)}},
-		{"a change that plans a read", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{read: read}},
+		{"a change that plans a direct call", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{direct: direct}},
 		{"a change that plans nothing", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{}},
-		{"a change that plans both", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{operation: setNode, read: read}},
+		{"a change that plans both", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{operation: setNode, direct: direct}},
 		{"a read that plans an operation", admin.Operation{Kind: admin.OpRead}, plan{operation: setNode}},
 		{"a read that plans nothing", admin.Operation{Kind: admin.OpRead}, plan{}},
+		{"a change without replay protection that plans an operation", admin.Operation{Kind: admin.OpAttachSession}, plan{operation: setNode}},
+		{"a change without replay protection that plans nothing", admin.Operation{Kind: admin.OpAttachSession}, plan{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, func(s *Server) {
@@ -238,7 +240,7 @@ func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
 				s.methods["test.row"] = &method{name: "test.row", op: tc.op, plan: func(*Server, json.RawMessage) (*plan, error) { return &pl, nil }}
 			})
 			body := `{}`
-			if tc.op.SideEffecting() {
+			if tc.op.ReplayProtected() {
 				body = `{"operation_id":"` + opID(5) + `"`
 				if tc.op.IsConfigChange() {
 					body += `,"expected_version":1`
@@ -263,6 +265,33 @@ func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
 			t.Fatalf("answered %d %s with %d calls, want 200 and one", status, out, len(r.svc.calls()))
 		}
 	})
+}
+
+// An operation that changes state but is not replay protected is asked of the engine
+// directly, with the envelope of a read: it takes neither an operation identifier
+// nor an expected version, goes through no door of operations and stores nothing.
+func TestARequestWithoutReplayProtectionHasTheEnvelopeOfARead(t *testing.T) {
+	r := newRig(t, func(s *Server) {
+		s.methods["test.row"] = &method{name: "test.row", op: admin.Operation{Kind: admin.OpAttachSession}, plan: func(*Server, json.RawMessage) (*plan, error) {
+			return &plan{canonical: []byte(`{}`), direct: func(context.Context, engine.ManageService) (any, error) {
+				return map[string]string{"word": "x"}, nil
+			}}, nil
+		}}
+	})
+	status, out := r.post("test.row", `{}`)
+	if status != 200 || strings.TrimSpace(string(out)) != `{"result":{"word":"x"}}` {
+		t.Fatalf("answered %d %s; want the result worded as a read's", status, out)
+	}
+	for _, body := range []string{
+		`{"operation_id":"` + opID(5) + `"}`,
+		`{"expected_version":1}`,
+	} {
+		status, out := r.post("test.row", body)
+		r.wantError(400, "invalid_argument", "malformed_request", status, out)
+	}
+	if n := len(r.svc.calls()); n != 0 {
+		t.Errorf("the door of operations was asked %d times", n)
+	}
 }
 
 // What the engine is asked: the operation identifier scoped to the local owner,

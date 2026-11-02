@@ -90,7 +90,7 @@ var status = &method{
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			st, err := svc.Status(ctx)
 			if err != nil {
 				return nil, err
@@ -179,7 +179,7 @@ var alertsList = &method{
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			alerts, err := svc.Alerts(ctx)
 			if err != nil {
 				return nil, err
