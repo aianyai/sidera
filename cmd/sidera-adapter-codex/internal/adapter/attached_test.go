@@ -575,6 +575,24 @@ func TestAttachedPromptsQueuedAreWithdrawnWhenTheEndpointDetaches(t *testing.T) 
 	}
 }
 
+// A thread the server no longer knows ends the reading. A turn that was open ends
+// with it, as failed, and the endpoint says why it takes no prompt.
+func TestAttachedThreadGoneEndsTheOpenTurnAndTheEndpointIsUnavailable(t *testing.T) {
+	h, _, owner := attachedHarness(t)
+	h.start()
+	th := owner.add(&ownedThread{id: "th-a"})
+	h.mustAttach(sessionEP, "th-a")
+	owner.begin(th, "t1", "", time.Now())
+	h.waitNote(adapterproto.MethodTurnStarted, turnIs("t1"))
+	owner.mu.Lock()
+	delete(owner.threads, "th-a")
+	owner.mu.Unlock()
+	h.waitNote(adapterproto.MethodTurnEnded, func(r json.RawMessage) bool {
+		return turnIs("t1")(r) && ended(r, adapterproto.TurnFailed)
+	})
+	waitAvailabilityNow(t, h, limitedToSession)
+}
+
 // A thread that cannot take a queued prompt refuses it as native_unavailable and
 // the endpoint stays: the prompt is certainly not queued, so it may be tried again.
 func TestAttachedPromptRefusedWhenTheThreadTakesNone(t *testing.T) {
@@ -590,12 +608,56 @@ func TestAttachedPromptRefusedWhenTheThreadTakesNone(t *testing.T) {
 	if got.Stage != adapterproto.PromptRefused || got.Reason != adapterproto.RefusalNativeUnavailable {
 		t.Fatalf("archived: %+v", got)
 	}
+	// The condition is the endpoint's alone, so the adapter's other sessions go on.
+	waitAvailabilityNow(t, h, limitedToSession)
 	owner.mu.Lock()
 	th.archived = false
 	owner.mu.Unlock()
 	if got := h.deliverTo(sessionEP, attempt1, "hello"); got.Stage != adapterproto.PromptAccepted || owner.queued(th) != 1 {
 		t.Fatalf("again, after the thread was restored: %+v", got)
 	}
+	waitAvailabilityNow(t, h, func(r json.RawMessage) bool { return len(decode[adapterproto.AvailabilityParams](r).Conditions) == 0 })
+}
+
+// waitAvailabilityNow waits until the newest availability snapshot satisfies ok; an
+// earlier one that did is no answer, since a snapshot replaces the one before.
+func waitAvailabilityNow(t *testing.T, h *harness, ok func(json.RawMessage) bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !ok(h.lastAvailability()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the newest availability is %s", h.lastAvailability())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// limitedToSession reports whether a snapshot is exactly the condition of a thread that
+// takes no prompt, limited to the attached session's endpoint.
+func limitedToSession(raw json.RawMessage) bool {
+	c := decode[adapterproto.AvailabilityParams](raw).Conditions
+	return len(c) == 1 && c[0].Condition == adapterproto.ConditionNativeUnavailable &&
+		len(c[0].Endpoints) == 1 && c[0].Endpoints[0] == sessionEP && c[0].SinceMS != 0 && c[0].Detail != ""
+}
+
+// The condition of a thread that takes no prompt ends with the endpoint, and the
+// thread the person runs is left as it is.
+func TestTheConditionOfAThreadEndsWhenItsEndpointDetaches(t *testing.T) {
+	h, _, owner := attachedHarness(t)
+	h.start()
+	th := owner.add(&ownedThread{id: "th-a"})
+	h.mustAttach(sessionEP, "th-a")
+	owner.mu.Lock()
+	th.archived = true
+	owner.mu.Unlock()
+	if got := h.deliverTo(sessionEP, attempt1, "hello"); got.Stage != adapterproto.PromptRefused {
+		t.Fatalf("archived: %+v", got)
+	}
+	waitAvailabilityNow(t, h, limitedToSession)
+	if err := h.daemon.Notify(context.Background(), adapterproto.MethodSessionDetached, adapterproto.SessionDetachedParams{Endpoint: sessionEP}); err != nil {
+		t.Fatal(err)
+	}
+	waitAvailabilityNow(t, h, func(r json.RawMessage) bool { return len(decode[adapterproto.AvailabilityParams](r).Conditions) == 0 })
 }
 
 // The adapter stops reading a session when the daemon says its endpoint is closed.

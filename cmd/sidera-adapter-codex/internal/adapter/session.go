@@ -39,6 +39,13 @@ type session struct {
 	// the checkpoint.
 	access map[string]string
 
+	// refusal says why the server takes no prompt for an attached session's thread
+	// (archived, ephemeral, a sub-agent's, unknown) since refusalSince, in Unix
+	// milliseconds; empty while it takes them. It is reported as an availability
+	// condition of the endpoint alone.
+	refusal      string
+	refusalSince int64
+
 	status string // the thread's state in the server: an appserver.Thread* value
 	lost   bool   // the thread's record is gone
 	// creating is set while session.create is still working on the session: the

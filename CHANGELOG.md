@@ -66,7 +66,8 @@ protocol has a version of its own.
   of its own waits in the person's queue: an older one nobody took is withdrawn when a newer
   one is queued and when the endpoint detaches. The adapter's
   connection now asks for Codex's experimental API, which the queue needs. A thread that takes
-  connection now asks for Codex's experimental API, which the queue needs.
+  no prompt (archived, unknown) is reported as the availability condition `native_unavailable`
+  of that endpoint alone, until it takes one again or the endpoint detaches.
 
 ### Changed
 

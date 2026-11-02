@@ -64,6 +64,15 @@ func (a *App) AttachSession(ctx context.Context, p adapterproto.SessionAttachPar
 	a.attachMu.Lock()
 	defer a.attachMu.Unlock()
 	s := a.sessionOf(p.Endpoint)
+	if s != nil {
+		a.mu.Lock()
+		wasLost := s.lost
+		a.mu.Unlock()
+		if wasLost {
+			// The thread is back: the watch begins again, and so does the endpoint.
+			a.setRefusal(s, "")
+		}
+	}
 	if s == nil {
 		s = newAttachedSession(p.Endpoint, threadID)
 		if err := a.pollAttached(ctx, c, s, true); err != nil {
@@ -231,9 +240,17 @@ func (a *App) watchAttached(ctx context.Context, s *session) {
 			return
 		case appserver.IsThreadGone(err):
 			a.log.Warn("the thread of an attached session is gone", "endpoint", s.endpoint)
+			// What the person's session cannot take any more is the endpoint's alone to
+			// say: a turn that was open is over with the thread, and the condition
+			// tells the daemon why prompts are not delivered.
 			a.mu.Lock()
 			s.lost, s.watchCancel = true, nil
+			end := a.abandonActiveLocked(s)
 			a.mu.Unlock()
+			if end != nil {
+				end()
+			}
+			a.setRefusal(s, cut("the thread is gone: "+err.Error(), adapterproto.MaxDetailLen))
 			return
 		default:
 			if !failing {
@@ -333,8 +350,7 @@ func (a *App) pollAttached(ctx context.Context, c *appserver.Client, s *session,
 	}
 	// A turn the record no longer lists cannot be waited for.
 	if id := s.activeTurn; id != "" && !slices.ContainsFunc(turns, func(t appserver.Turn) bool { return t.ID == id }) {
-		s.turn(id).ended, s.activeTurn = true, ""
-		notify = append(notify, func() { a.reportEnded(s, id, appserver.TurnFailed) })
+		notify = append(notify, a.abandonActiveLocked(s))
 	}
 	s.baselined = true
 	a.mu.Unlock()
@@ -343,6 +359,18 @@ func (a *App) pollAttached(ctx context.Context, c *appserver.Client, s *session,
 		f()
 	}
 	return nil
+}
+
+// abandonActiveLocked ends the books on the turn reported started and not ended, as
+// failed, and returns the notification that says so; nil when there is none. The
+// caller holds App.mu and sends the notification after releasing it.
+func (a *App) abandonActiveLocked(s *session) func() {
+	id := s.activeTurn
+	if id == "" {
+		return nil
+	}
+	s.turn(id).ended, s.activeTurn = true, ""
+	return func() { a.reportEnded(s, id, appserver.TurnFailed) }
 }
 
 // stale reports whether a turn is old enough to be taken for abandoned if it shows
@@ -423,16 +451,21 @@ func (a *App) deliverAttached(ctx context.Context, s *session, p adapterproto.Pr
 	a.mu.Unlock()
 	queued, err := c.ThreadQueueAdd(ctx, s.threadID, string(p.Attempt), []appserver.UserInput{appserver.TextInput(p.Text)})
 	s.attachedPoke() // the quick pace begins, whatever the answer
+	// The server refuses a thread that cannot take a prompt (archived, ephemeral, a
+	// sub-agent's, unknown) as an invalid request, before it queues anything, and says
+	// "no rollout found" for an unknown one in an internal error. Any other failure
+	// leaves the outcome unknown, which the daemon settles by asking (prompt.reconcile).
+	threadRefuses := err != nil && (appserver.IsInvalidRequest(err) || appserver.IsThreadGone(err))
+	if err == nil || threadRefuses {
+		// The answer is the adapter's only sign that the thread takes prompts or
+		// does not, so it also ends or begins the condition of the endpoint.
+		a.notePromptRefusal(s, err)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err != nil {
 		delete(s.prompts, p.Attempt)
-		// The server refuses a thread that cannot take a prompt (archived,
-		// ephemeral, a sub-agent's, unknown) as an invalid request, before it queues
-		// anything, and says "no rollout found" for an unknown one in an internal
-		// error. Any other failure leaves the outcome unknown, which the daemon
-		// settles by asking (prompt.reconcile).
-		if appserver.IsInvalidRequest(err) || appserver.IsThreadGone(err) {
+		if threadRefuses {
 			a.log.Warn("a prompt cannot be queued for an attached session", "endpoint", s.endpoint, "error", err)
 			return refused(adapterproto.RefusalNativeUnavailable), nil
 		}

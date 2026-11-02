@@ -301,7 +301,9 @@ a second one. This was not run on Windows.
 
 **Availability.** A full snapshot at `adapter.start`, and again whenever it changes:
 `dependency_missing` when `codex` or `sidera` is not found, `native_unavailable` while
-there is no connection to the server, `runtime_auth` when the server has no account.
+there is no connection to the server, `runtime_auth` when the server has no account, and
+`native_unavailable` limited to one endpoint while the thread of an attached session takes
+no prompt (below). The snapshot is always the whole of these together.
 
 **Tool probes.** The MCP front end is started by Codex outside the sandbox, so its
 probe runs `sidera mcp` the same way, with `SIDERA_PROBE_TOKEN` and the request's
@@ -467,6 +469,12 @@ cannot do with a thread another process has loaded:
   experimental API, which is why the adapter's connection asks for it at `initialize`
   (`experimentalApi`); the request is refused without it.
 
+The connection is one for created and attached sessions, so `experimentalApi: true` reaches the
+created ones too. For them it changes two things: experimental requests and notifications become
+available, which the adapter ignores unless it handles them, and the server stops stripping
+`additionalPermissions` from approval requests, a member the adapter's handling of server
+requests never reads. Nothing else changes.
+
 **`session.attach`.** `thread/read` on the thread. `attached` for a normal stored thread;
 `not_found` when the server does not know it; `failed` with `wake_unavailable` for an ephemeral
 thread or a sub-agent's, which take no queued prompt, with `native_unreachable` when the server
@@ -546,10 +554,18 @@ the limits of this delivery and not failures:
 
 A thread that cannot take a prompt (archived, ephemeral, a sub-agent's, unknown) is refused by the
 server as an invalid request before anything is queued, or with "no rollout found" for an unknown
-one; the adapter answers `refused` with `native_unavailable` and the endpoint stays open. No
-availability condition is published for it: availability is one snapshot for the whole adapter,
-and a single archived thread must not block the sessions the adapter created. An answer that says
-nothing of the thread leaves the outcome unknown, which the daemon settles with `prompt.reconcile`.
+one; the adapter answers `refused` with `native_unavailable` and the endpoint stays open. It
+also publishes the availability condition `native_unavailable` limited to that endpoint
+(`endpoints`), with the server's words as the detail and the time of the first refusal as
+`since_ms`, merged into the one snapshot with the adapter's other conditions: a single archived
+thread must not block the sessions the adapter created or the other attached ones. The
+condition ends when the server queues a prompt for the thread again, or when the endpoint
+detaches. Only a refusal that names the thread begins it; an answer that says nothing of the
+thread leaves the outcome unknown, which the daemon settles with `prompt.reconcile`.
+A thread the server says is gone while it is being read (`thread not loaded`) ends the watch:
+a turn that was open ends with `turn.ended` as `failed`, and the endpoint gets the same
+`native_unavailable` condition with the server's words. The next `session.attach` that finds
+the thread again ends the condition and starts the watch again.
 No connection is `refused` with `native_unavailable`. `busy` is never answered: a running turn
 is no reason not to queue.
 
@@ -776,7 +792,7 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 `TestAttachSessionOutcomes`, `TestAttachSessionBeforeStartIsAnError`, `TestAttachedHumanTurns`,
 `TestAttachedTurnWithoutStartIsStaleFromFirstSight`, `TestAttachedReconcileWhileTheOwnerRunsTheTurn`,
 `TestAttachedReadingPaceFollowsWhatIsAwaited`, `TestAttachedPromptDelivery`,
-`TestAttachedPromptsQueuedAreWithdrawnWhenSuperseded`,
+`TestAttachedThreadGoneEndsTheOpenTurnAndTheEndpointIsUnavailable`, `TestAttachedPromptsQueuedAreWithdrawnWhenSuperseded`,
 `TestAttachedPromptsQueuedAreWithdrawnWhenTheEndpointDetaches`, `TestAttachedPromptRefusedWhenTheThreadTakesNone`, `TestSessionDetachedStopsTheReading`,
 `TestAttachedSessionTakesNeitherCloseNorInterrupt`, `TestStartResumesAttachedSessions` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
 against a stand-in program).
