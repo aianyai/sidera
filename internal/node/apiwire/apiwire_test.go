@@ -77,6 +77,7 @@ var engineReasons = map[engine.Reason]want{
 	// An attached session is refused for what the adapter or the native session is.
 	engine.ReasonAttachUnsupported:    {"refused", "attach_unsupported"},
 	engine.ReasonNativeSessionCreated: {"refused", "native_session_created"},
+	engine.ReasonSessionNotAttached:   {"not_found", "session_not_attached"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {

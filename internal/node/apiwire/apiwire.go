@@ -345,6 +345,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryRefused, "attach_unsupported", "the adapter of this instance does not take attached sessions")
 	case engine.ReasonNativeSessionCreated:
 		return New(CategoryRefused, "native_session_created", "the native session is one this node created and controls; it cannot be attached")
+	case engine.ReasonSessionNotAttached:
+		return New(CategoryNotFound, "session_not_attached", "no open endpoint is attached to this session")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

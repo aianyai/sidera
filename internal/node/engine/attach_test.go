@@ -186,6 +186,49 @@ func TestAttachingTheSameSessionAgainIsTheSameEndpointUntilItIsClosed(t *testing
 	}
 }
 
+// A request that only finds the endpoint of a session is the ordinary attachment when
+// the session has an open endpoint (the token, the wake held and the adapter's answer),
+// and makes nothing when it has none, before the session was ever attached and after
+// its endpoint is closed.
+func TestFindingTheEndpointOfASessionMakesNoEndpoint(t *testing.T) {
+	_, e, d := attachRig(t, true)
+	d.answerAttach(attachedAnswer, nil)
+	find := engine.AttachRequest{Adapter: "chat", NativeRef: "native-a", FindOnly: true, Wake: adapterproto.WakeInfo{"WAKE_KEY": "wake-secret-value-0002"}}
+
+	open := openEndpoints(t, e)
+	_, err := e.AttachSession(ctx, find)
+	wantReason(t, err, engine.ReasonSessionNotAttached)
+	if got := openEndpoints(t, e); got != open {
+		t.Fatalf("a find made an endpoint: %d open, want %d", got, open)
+	}
+
+	made, err := e.AttachSession(ctx, attachChat("native-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := e.AttachSession(ctx, find)
+	if err != nil {
+		t.Fatalf("finding the endpoint of an attached session: %v", err)
+	}
+	if found.Endpoint != made.Endpoint || found.Token != made.Token || found.Wake != (engine.WakeReport{State: engine.WakeReady}) {
+		t.Errorf("the find answered %+v, want the endpoint and token of %+v and a wake that is ready", found, made)
+	}
+	sent := d.sentAttaches()
+	if len(sent) != 2 || sent[1].params.Wake["WAKE_KEY"] != "wake-secret-value-0002" {
+		t.Errorf("the adapter was sent %+v, want the wake of the find in the second attach", sent)
+	}
+
+	if _, err := e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: made.Endpoint.Endpoint}); err != nil {
+		t.Fatal(err)
+	}
+	open = openEndpoints(t, e)
+	_, err = e.AttachSession(ctx, find)
+	wantReason(t, err, engine.ReasonSessionNotAttached)
+	if got := openEndpoints(t, e); got != open {
+		t.Errorf("a find after the close made an endpoint: %d open, want %d", got, open)
+	}
+}
+
 // The ways an attachment is refused, and that a refusal writes nothing.
 func TestAttachingASessionIsRefused(t *testing.T) {
 	createdOpen := store.EndpointRecord{

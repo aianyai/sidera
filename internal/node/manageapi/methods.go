@@ -261,11 +261,16 @@ var sessionsAttach = &method{
 			NativeRef   string                `json:"native_ref"`
 			DisplayName string                `json:"display_name,omitempty"`
 			Wake        adapterproto.WakeInfo `json:"wake,omitempty"`
+			// Create is true when absent; false only finds the endpoint the session has.
+			Create *bool `json:"create,omitempty"`
 		}
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
 		}
-		req := engine.AttachRequest{Adapter: p.Adapter, Instance: p.Instance, NativeRef: p.NativeRef, DisplayName: p.DisplayName, Wake: p.Wake}
+		req := engine.AttachRequest{
+			Adapter: p.Adapter, Instance: p.Instance, NativeRef: p.NativeRef, DisplayName: p.DisplayName, Wake: p.Wake,
+			FindOnly: p.Create != nil && !*p.Create,
+		}
 		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
 			res, err := svc.AttachSession(ctx, req)
 			if err != nil {

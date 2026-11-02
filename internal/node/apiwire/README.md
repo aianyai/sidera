@@ -77,6 +77,11 @@ not import it: the words of the wire never enter the engine.
   instance is `invalid_argument/instance_required`. The two refusals are `-32603` for an
   adapter, which makes no such request, and `instance_required` is `-32602` as every
   `invalid_argument` is.
+- **A find that finds nothing is `not_found`.** `session_not_attached` answers an
+  attachment that asked only to find the endpoint of a session (`create` false) and the
+  session has none; the request lacks nothing and the session is not wrong, so it is
+  `not_found` like the other unknown things, and `-32603` for an adapter, which makes no such
+  request.
 - **The owner's operations on trust have a reason for each way they are refused.**
   `pairing_paused` is `backpressure` (nothing was done and the node takes it again
   later), `pairing_in_progress` is `conflict` (one pairing with a node at a time, as one

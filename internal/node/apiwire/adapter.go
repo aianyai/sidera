@@ -207,6 +207,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	// Attaching a session is the owner's request; an adapter makes none.
 	engine.ReasonAttachUnsupported:    internalCode,
 	engine.ReasonNativeSessionCreated: internalCode,
+	engine.ReasonSessionNotAttached:   internalCode,
 
 	engine.ReasonNodeQueueFull:      backPressure,
 	engine.ReasonStorageFull:        backPressure,

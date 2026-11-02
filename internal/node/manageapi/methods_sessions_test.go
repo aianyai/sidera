@@ -47,8 +47,19 @@ func TestSessionsAttachIsAnsweredWithTheEndpointTheTokenAndTheWakeState(t *testi
 	if status != 200 || strings.TrimSpace(string(out)) != want {
 		t.Fatalf("answered %d %s\nwant %s", status, out, want)
 	}
-	if got := r.svc.attaches[1]; got.Instance != "" || got.DisplayName != "" || got.Wake != nil {
+	if got := r.svc.attaches[1]; got.Instance != "" || got.DisplayName != "" || got.Wake != nil || got.FindOnly {
 		t.Errorf("the engine was asked %+v for a request that left the optional params out", got)
+	}
+
+	// create: false only finds, and create: true is the default said out loud.
+	for body, findOnly := range map[string]bool{
+		`{"params":{"adapter":"chat","native_ref":"native-a","create":false}}`: true,
+		`{"params":{"adapter":"chat","native_ref":"native-a","create":true}}`:  false,
+	} {
+		r.post("sessions.attach", body)
+		if got := r.svc.attaches[len(r.svc.attaches)-1]; got.FindOnly != findOnly {
+			t.Errorf("%s asked the engine %+v, want find only %v", body, got, findOnly)
+		}
 	}
 }
 
@@ -60,6 +71,7 @@ func TestSessionsAttachTakesStrictParams(t *testing.T) {
 		{"a member the method does not take", `{"params":{"adapter":"chat","native_ref":"n","preset":"default"}}`, "params.preset"},
 		{"a wake of the wrong type", `{"params":{"adapter":"chat","native_ref":"n","wake":["x"]}}`, "params.wake"},
 		{"a wake value of the wrong type", `{"params":{"adapter":"chat","native_ref":"n","wake":{"K":1}}}`, "params.wake.K"},
+		{"create of the wrong type", `{"params":{"adapter":"chat","native_ref":"n","create":"no"}}`, "params.create"},
 		{"null for the native session", `{"params":{"adapter":"chat","native_ref":null}}`, "params.native_ref"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -92,6 +92,10 @@ type AttachRequest struct {
 	// Wake is the wake information for the adapter; nil for none. It replaces the one
 	// held for the session.
 	Wake adapterproto.WakeInfo
+	// FindOnly asks only for the open attached endpoint the session already has. When
+	// there is one the request is the same as without it; when there is none nothing is
+	// made and the request is refused as ReasonSessionNotAttached.
+	FindOnly bool
 }
 
 // The wake states of an attachment: what the adapter said to the request to attach.
@@ -161,7 +165,8 @@ func (c *cmdAttach) run(e *Engine, now time.Time) {
 // session, while its endpoint is open) is the same endpoint with the same token; the
 // request replaces the wake information held and the display name when one is given.
 // An endpoint that is closed is never opened again: a later attachment makes a new
-// one.
+// one. With FindOnly a session that has no open endpoint is refused and nothing is
+// made.
 func (e *Engine) AttachSession(ctx context.Context, r AttachRequest) (AttachResult, error) {
 	c := &cmdAttach{call: newCall[attachStep](), req: r}
 	step, err := roundTrip(ctx, e, submitExternal, c, c.call)
@@ -205,6 +210,9 @@ func (e *Engine) attach(now time.Time, r AttachRequest) (attachStep, error) {
 			e.putEndpoint(rec, st.decl)
 		}
 	} else {
+		if r.FindOnly {
+			return none, refuse(ReasonSessionNotAttached)
+		}
 		if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {
 			return none, &Refusal{Reason: ReasonEndpointLimit, Limit: LimitNode}
 		}

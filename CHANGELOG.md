@@ -19,6 +19,9 @@ protocol has a version of its own.
   can deliver prompts to the session. The request is safe to repeat, carries no operation
   identifier and stores no result. Because the answer holds a token, a sandbox has to deny the
   management socket to an agent. `endpoints.list` shows the `origin` of a session endpoint.
+- **Management: `sessions.attach` can only find.** With the new parameter `create` set to false
+  the method answers like any attachment when the session already has an open endpoint, and
+  with `not_found/session_not_attached` when it has none, without making one.
 - **Endpoint record: the origin of a session.** A session endpoint record can say that the
   session was attached rather than created (`origin`). Records without it read as created, so
   existing state needs no migration.

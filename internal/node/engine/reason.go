@@ -127,6 +127,10 @@ const (
 	// controls, an open session endpoint or one whose release is still owed, so it is
 	// not one a person opened and cannot be attached.
 	ReasonNativeSessionCreated
+	// ReasonSessionNotAttached: a request that only finds the endpoint of a session a
+	// person opened (AttachRequest.FindOnly) met no open attached endpoint for it, and
+	// made none.
+	ReasonSessionNotAttached
 
 	reasonEnd
 )
@@ -168,6 +172,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonNotPermitted:         "not_permitted",
 	ReasonAttachUnsupported:    "attach_unsupported",
 	ReasonNativeSessionCreated: "native_session_created",
+	ReasonSessionNotAttached:   "session_not_attached",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

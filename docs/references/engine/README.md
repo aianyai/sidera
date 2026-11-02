@@ -1368,6 +1368,14 @@ record (`endpoint-update`, no new transaction: the endpoint is garbage to nobody
 handed out, and recovery orphans only an endpoint that is being created). The node cap applies as to
 any endpoint (`endpoint_limit`, `node`).
 
+A request can ask only to find (`AttachRequest.FindOnly`, the parameter `create` false of the
+management method): when the session has an open attached endpoint it is the ordinary request
+(the token, the wake information replaced, the adapter asked, the heartbeat recorded), and when it
+has none nothing is written and the request is refused as `session_not_attached`, after the checks
+of the instance and of the adapter above. A front end uses it to learn, when it starts, whether its
+session is attached already (a session resumed after its controller was away is) without making an
+endpoint for a session that may never use Sidera.
+
 The key of an attachment is the instance and the native session: while an endpoint with that key is
 open, the same request finds it and answers with the same endpoint and token, replacing the wake
 information the node holds (an absent one clears it) and the display name when one is given and
