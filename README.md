@@ -70,6 +70,7 @@ sidera trust expect <node-id-b>                # and on B: sidera trust expect <
 sidera trust request <node-id-b> --wait 60s    # on A, once both expect
 
 # On A: the first message across machines, then its reply
+# <runtime-address-on-b> is the open `runtime` row of `sidera endpoint list --instance codex`, run on B
 sidera-adapter-console new <runtime-address-on-b> --preset light --body 'Say hello from B.'
 sidera-adapter-console recv --wait 30
 ```

@@ -196,7 +196,10 @@ directory named by `--home`, then by `SIDERA_HOME`, then `~/.sidera` (on Windows
 `%LOCALAPPDATA%\Sidera`). A second node
 on the same machine needs its own data directory and its own port
 (`SIDERA_HOME=<directory> sidera init --port <n>`), and every command for it needs
-the same `SIDERA_HOME`.
+the same `SIDERA_HOME`. It also needs a tmux session name and a log file of its own
+below (for example `sidera-2` and `~/sidera-2-daemon.log`), or on Windows its own
+script and log names plus a `set "SIDERA_HOME=<directory>"` line in the script, so
+that it does not collide with the first node's.
 
 ### macOS and Linux: a terminal multiplexer
 

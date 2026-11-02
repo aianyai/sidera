@@ -117,8 +117,19 @@ be ended too (step 4).
    ls ~/.sidera          # Windows: dir $env:LOCALAPPDATA\Sidera
    ```
 
-   If it exists, a node is already here. Ask your owner before you go on, and do not
-   run `init` again.
+   If it exists, a node is already here. Do not run `init` in it, and ask your owner
+   before you go on: do they want that node used as it is, or a second node next to
+   it? For a second node, choose a data directory that does not exist (for example
+   `~/sidera-2`, on Windows `%LOCALAPPDATA%\Sidera-2`) and a free port (run the
+   check of 1.3 for that port; the first node holds 7744 or the port it was created
+   with). Then:
+
+   - every `sidera` and `sidera-adapter-console` command for the new node carries
+     `SIDERA_HOME=<that directory>` (`export SIDERA_HOME=...` in the shell, or
+     `$env:SIDERA_HOME = '...'` in PowerShell, or `--home <directory>` on each
+     command), and the first node's commands do not;
+   - step 3 creates it with `sidera init --port <n>`;
+   - step 4 gives it a tmux session name and a log file of its own.
 
 ## 2. Get Sidera
 
@@ -233,9 +244,11 @@ home <home>
 Run `sidera identity export-revocation` to export it.
 ```
 
-To use another port (step 1.3), run `sidera init --port <n>` instead. Record the
+To use another port (step 1.3), run `sidera init --port <n>` instead; for a second
+node (step 1.4) set its `SIDERA_HOME` first. Record the
 `node <node-id>` value: it is this machine's identity. Check: `ls ~/.sidera` (Windows:
-`dir $env:LOCALAPPDATA\Sidera`) shows the directory. If `init` says the directory is already initialized, a node exists:
+`dir $env:LOCALAPPDATA\Sidera`; for a second node, its `SIDERA_HOME`) shows the
+directory. If `init` says the directory is already initialized, a node exists:
 stop (see step 1.4). `init` never overwrites.
 
 Tell your owner to back up the self-revocation (step 9 does it).
@@ -248,6 +261,12 @@ The daemon must run with an environment in which `sidera` and the agent runtime
 Start the daemon from your home directory, not from a directory that may be deleted
 later, such as a git worktree.
 
+The commands below name the first node on the machine: session `sidera`, log
+`~/sidera-daemon.log` (Windows: `start-daemon.cmd` and `daemon.log`). A second node
+(step 1.4) must not reuse them: give it names of its own in every command of this
+step, for example session `sidera-2`, log `~/sidera-2-daemon.log`, `start-daemon-2.cmd`
+and `daemon-2.log`, and its `SIDERA_HOME` (below).
+
 **macOS and Linux.** Use `tmux` (or `screen`):
 
 ```sh
@@ -259,7 +278,8 @@ the server may be much older. `-e PATH="$PATH"` hands the session your shell's
 `PATH` (tmux 3.2 or newer), so run the command in a shell where `command -v sidera`
 and `command -v codex claude` print paths. If the node uses a `SIDERA_HOME`, add
 `-e SIDERA_HOME=<directory>`. If `tmux` is an alias, use `/usr/bin/env tmux`.
-Without tmux, `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &` also works.
+Without tmux, `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &` also works;
+there, set `SIDERA_HOME` in the shell first.
 
 Check right away and again after a few seconds:
 
@@ -267,7 +287,8 @@ Check right away and again after a few seconds:
 tmux ls
 ```
 
-Expected: a line for the session `sidera`. If it is gone, the daemon exited: run
+Expected: a line for the session `sidera` (your session name for a second node). If
+it is gone, the daemon exited: run
 `sidera daemon` once in the foreground, in the same shell, read the error, and
 stop it with Ctrl-C.
 
@@ -294,7 +315,9 @@ $codex = if ($target) { @($target)[0] + '\bin;' } else { '' }
 ```
 
 (The `$current` lines handle Codex's standalone install; they are harmless if you
-do not have it.) Then:
+do not have it.) For a second node, add `set "SIDERA_HOME=<directory>"` above the
+last line of the `.cmd` file, because a WMI process does not get your shell's
+variables, and use the file and log names of its own. Then:
 
 ```powershell
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="cmd.exe /c `"$env:USERPROFILE\sidera\start-daemon.cmd`""; CurrentDirectory=$env:USERPROFILE}
@@ -601,8 +624,10 @@ warning about the unconfirmed backup on every call.
 
 ## 10. Verify end to end
 
-1. From this machine's console, find the other machine's agent runtime. On the
-   other machine, `sidera endpoint list --instance codex` (or `claude`) lists
+1. Get the address of the other machine's agent runtime. The console on this
+   machine cannot list another node's endpoints (`sidera directory` can, but only
+   inside a session), so read it on the other machine: run
+   `sidera endpoint list --instance codex` (or `claude`) there as its owner. It lists
    endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`;
    its address is `<node-id>/<endpoint-id>`. Get that address from the other
    machine's owner or agent.
@@ -750,22 +775,34 @@ them there without your owner's yes (see "Ask your owner before").
     `backlog_expired`: the work is done and the report is lost. macOS and Linux:
 
     ```sh
-    while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>/dev/null || sleep 5; done &
+    while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>> ~/sidera-inbox.err || sleep 5; done &
+    echo $! > ~/sidera-inbox.pid
     ```
 
     PowerShell:
 
     ```powershell
-    Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>$null | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
+    $inbox = Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>> $HOME\sidera-inbox.err | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
     ```
 
-    If your runtime has background tasks, run the loop as one. Read the file with
-    `tail ~/sidera-inbox.txt` (`Get-Content $HOME\sidera-inbox.txt -Tail 40`). The
-    console inbox is shared by everything on the node that uses the console: run one
-    reader at a time, or handle only the messages whose `from` is a session you
-    created. Sessions that Sidera created on your request have their own endpoint
-    and are woken by a message, so between them no loop is needed. Giving a session
-    started by hand its own endpoint and wake-up is planned.
+    If your runtime has background tasks, run the loop as one instead. Read the file
+    with `tail ~/sidera-inbox.txt` (`Get-Content $HOME\sidera-inbox.txt -Tail 40`).
+    A `recv` that waits 30 seconds and finds nothing exits 0 and writes `no messages`
+    to standard error, so that line, repeated, is normal in `sidera-inbox.err`. A
+    `recv` that fails (the daemon is down, `SIDERA_HOME` names a directory whose daemon is not running) exits 1
+    at once with an error line there, and the loop sleeps 5 seconds before it tries
+    again. So when nothing arrives, read `sidera-inbox.err`: any line other than
+    `no messages` means the loop is not working. The loop never ends by itself. Run
+    one loop per console, that is per node (for a node with its own `SIDERA_HOME`,
+    start its loop with that variable set, and give it files of its own), and stop it
+    when every task has replied: `kill "$(cat ~/sidera-inbox.pid)"`, or
+    `Stop-Job $inbox; Remove-Job $inbox` in the PowerShell session that started it
+    (a job ends with its session). The console inbox is shared by everything on the
+    node that uses the console: run one reader at a time, or handle only the
+    messages whose `from` is a session you created. Sessions that Sidera created on
+    your request have their own endpoint and are woken by a message, so between them
+    no loop is needed. Giving a session started by hand its own endpoint and wake-up
+    is planned.
 
 ## An example, step by step
 

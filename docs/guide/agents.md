@@ -168,17 +168,30 @@ What a controller has to do today:
   macOS and Linux:
 
   ```sh
-  while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>/dev/null || sleep 5; done &
+  while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>> ~/sidera-inbox.err || sleep 5; done &
+  echo $! > ~/sidera-inbox.pid
   ```
 
   PowerShell:
 
   ```powershell
-  Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>$null | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
+  $inbox = Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>> $HOME\sidera-inbox.err | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
   ```
 
   Then read the file, for example `tail ~/sidera-inbox.txt`, whenever you expect
-  an answer. `--wait` is at most 30 seconds.
+  an answer. `--wait` is at most 30 seconds. A `recv` that waits and finds nothing
+  exits 0 and writes `no messages` to standard error, so that line, repeated, is
+  normal in `sidera-inbox.err`. A `recv` that fails (the daemon is down,
+  `SIDERA_HOME` names a directory whose daemon is not running) exits 1 at once with an error line there, and
+  the loop sleeps 5 seconds before it tries again. When nothing arrives, read
+  `sidera-inbox.err`: any line other than `no messages` means the loop is not
+  working.
+
+  The loop never ends by itself. Run one loop per console, that is per node (for a
+  node with its own `SIDERA_HOME`, start its loop with that variable set and files
+  of its own), and stop it when every task has replied:
+  `kill "$(cat ~/sidera-inbox.pid)"`, or `Stop-Job $inbox; Remove-Job $inbox` in
+  the PowerShell session that started it (a job ends with its session).
 - **Read promptly.** A message nobody reads within the endpoint's queue time (30
   minutes by default; see
   [deadlines](../references/delivery/README.md#deadlines-and-retention)) is
