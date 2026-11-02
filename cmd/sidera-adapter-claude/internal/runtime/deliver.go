@@ -29,6 +29,9 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	if err := a.requireStarted(); err != nil {
 		return adapterproto.PromptDeliverResult{}, err
 	}
+	if as := a.attachedSession(p.Endpoint); as != nil {
+		return a.deliverAttached(ctx, as, p)
+	}
 	s := a.session(p.Endpoint)
 	if s == nil {
 		return adapterproto.PromptDeliverResult{}, unknownEndpoint()
@@ -142,6 +145,9 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adapterproto.ReconcileResult, error) {
 	if err := a.requireStarted(); err != nil {
 		return adapterproto.ReconcileResult{}, err
+	}
+	if as := a.attachedSession(p.Endpoint); as != nil {
+		return a.reconcileAttached(as, p)
 	}
 	s := a.session(p.Endpoint)
 	if s == nil {

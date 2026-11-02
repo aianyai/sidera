@@ -107,9 +107,10 @@ after spawning.
 
 The adapter is served by `sdk/go/adapterkit`, which answers `initialize` (taking the instance
 lock first), ping and shutdown and gates everything else. It declares one runtime with the
-front ends `cli` and `mcp`, and neither `interrupt`, `ack_on_behalf` nor `server_requests`: a
-`claude -p` process sends the adapter no request that needs an answer, and interrupting and
-acknowledging on the agent's behalf are not built yet. The identity answered in `initialize` is
+front ends `cli` and `mcp` and with `attach` (see [Attached sessions](#attached-sessions)), and
+neither `interrupt`, `ack_on_behalf` nor `server_requests`: a `claude -p` process sends the
+adapter no request that needs an answer, and interrupting and acknowledging on the agent's
+behalf are not built yet. The identity answered in `initialize` is
 read from the manifest built into the executable.
 
 - **`adapter.start`** carries the instance configuration, the presets and the sessions to take
@@ -121,7 +122,8 @@ read from the manifest built into the executable.
   `unreachable` (and logged) when its checkpoint is missing or unusable, and otherwise
   `attached`, with `turn_active` true exactly when a turn process of the session runs. A process
   of the session that the checkpoint does not know is the writer all the same and is followed. What
-  the adapter lost while it was away is reported after the answer (see turn events).
+  the adapter lost while it was away is reported after the answer (see turn events). An entry of an
+  attached session is taken back differently (see [Attached sessions](#attached-sessions)).
 - **`adapter.probe`** reports the runtime (`claude-code` and the version of `claude --version`), the
   login (`claude auth status`: valid or invalid, the method is logged and the account never read),
   the dependencies `claude` and `sidera`, whether each preset can be used (values valid, working
@@ -130,7 +132,9 @@ read from the manifest built into the executable.
   own probe on connection is waited for, each with the probe token in `SIDERA_PROBE_TOKEN` and no
   model turn; both are reported as `unsandboxed`, `failed` when `sidera` is not found, and
   `not_run` for a preset that is not configured or a front end that has no probe. It then sends the availability snapshot:
-  `dependency_missing` for a program that is not found, `runtime_auth` when not logged in.
+  `dependency_missing` for a program that is not found, `runtime_auth` when not logged in. Every
+  snapshot the adapter sends holds the probe's conditions together with the `native_unavailable`
+  conditions of its attached sessions, because the daemon takes each as the whole truth.
 
 ### Configuration
 
@@ -217,10 +221,147 @@ session held under another open endpoint is left alone and answered `closed`. A 
 cannot be read is `close_unconfirmed` with `native_unreachable`. The session file stays as history;
 the daemon removes the checkpoint.
 
+### Attached sessions
+
+A session a person opened in a terminal can ask to be attached (the management method
+`sessions.attach`, made by the session's own `sidera mcp` server or `sidera` command), and the
+daemon then asks the adapter with `session.attach`. The adapter does not start, interrupt or close
+such a session: it follows its turns and wakes it. It needs neither `claude` nor a preset for this.
+
+**What is read and written.** All of it lives in Claude Code's configuration directory (the
+adapter's `CLAUDE_CONFIG_DIR`, else `~/.claude`):
+
+| What | Where | Used for |
+| ---- | ----- | -------- |
+| The registry entry of the running process | `sessions/<pid>.json`: `pid`, `sessionId`, `cwd`, `kind`, `procStart`, `status`, `statusUpdatedAt`, `peerProtocol` or `messagingSocketPath` | that the session exists and is the same process; its status; its current session id |
+| The session record (transcript) | `projects/<record directory>/<sessionId>.jsonl`, the record directory derived from `cwd` as for a created session | the user record of a delivered prompt; the end of a turn |
+| The inbox socket | the wake's `CLAUDE_CODE_MESSAGING_SOCKET`, one line `{"type":"user","message":{"role":"user","content":"<text>"},"uuid":"<attempt>"}` per prompt, preceded by `{"type":"auth","token":"<token>"}` when the wake has `CLAUDE_CODE_MESSAGING_TOKEN` | delivering a prompt; the runtime answers nothing |
+
+The wake is the three keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
+`CLAUDE_PID`, copied from the environment of the process that attached. The adapter holds it in
+memory only. Nothing of it is logged, stored with the daemon (the session's checkpoint holds the
+process id alone), put in an argument vector or in an error. The socket's path and the process id
+are not secret, but are not logged at the information level either.
+
+**Formats this relies on.** The registry file, the transcript's `turn_duration` record and the
+socket line are not documented by Claude Code. They were checked against Claude Code 2.1.316 on
+macOS and are read in two places only: package `attached` (registry, socket line, the turns) and
+`record.Index` (the lines of the transcript). A form that stops matching shows, never silently: an
+unreadable registry entry is `native_error` at attachment and, if it stays so for a second, an
+error in the log and `native_unavailable` for the endpoint; a transcript whose user lines lack a
+`uuid` or `sessionId` makes a prompt undecidable (`record_unreadable`); a turn that the transcript
+never ends is ended by the registry after two seconds as `interrupted` and a warning is logged.
+`procStart` is read as `ps -o lstart` in UTC and compared with the process table's start within two
+seconds; that is how a registry entry whose process number was reused by another process is told
+from a live session.
+
+**`session.attach`** reads the registry entry of `CLAUDE_PID` and answers:
+
+| Found | Answer |
+| ----- | ------ |
+| no entry, the process is gone, the process started at another time than the entry says, or the entry is not `kind` interactive | `not_found` |
+| an entry that is not in the form the adapter reads | `failed`, `native_error` |
+| the entry or the process table cannot be read | `failed`, `native_unreachable` |
+| the wake has no `CLAUDE_PID`, or no socket (the detail says "too old" when the entry lists no messaging support) | `failed`, `wake_unavailable` |
+| the session, and a wake with a socket | `attached` |
+
+The session is followed and its endpoint is held also when the answer is `wake_unavailable`, so a
+later attachment that brings the socket makes it work. A repeat for the endpoint replaces the wake
+(none sent means none held) and finds the session again; it starts nothing twice. The first attachment
+stores the session's checkpoint (the process id), and reads the transcript once to pass over its
+history: only what is written afterwards is followed.
+
+**`adapter.start`** takes an attached entry back from the process id in the wake or, as the daemon
+holds the wake in memory only and may have none after a restart, in the checkpoint. The answer is
+`attached` with `turn_active` true when the registry shows a turn running, `lost` when the session
+is gone, and `unreachable` when nothing names its process or the registry cannot be read. A session
+without a wake is followed; it waits for the next `session.attach` to bring the wake, and until then
+refuses prompts as below.
+
+**Turns.** One follower per session turns the registry's `status` and the transcript into
+notifications:
+
+- `busy` or `waiting` (a permission prompt) is a turn running; `idle` and `shell` (the turn is over
+  and a background command runs) are not; a status the adapter does not know counts as no turn, and
+  is logged once. A turn the registry shows begins with `turn.started` without an attempt, `person-<time
+  of the status>` as its reference. A turn also begins with `turn.started` without an attempt when
+  the transcript shows a user record of origin `human`, `peer` or `task-notification` and no turn is
+  running (`person-<uuid of the record>` is its reference): a session that stays busy from one turn
+  to the next keeps its status and the time of it, so the registry shows no new turn. A message of
+  those origins that arrives in a turn that runs begins none. A record of such an origin that is not
+  the start of a turn (for example one written after the turn's end for a message queued during it)
+  would show as a short turn of the person, ended by the registry's idle status.
+- A prompt written by the adapter is found by its attempt, which is the uuid of the message and
+  becomes the uuid of the user record. When that record is in the transcript the adapter sends
+  `prompt.persisted` and, if no turn runs, `turn.started` with the attempt (the reference is the attempt).
+  If a turn already runs, the session takes the message in at its next tool boundary and starts no
+  turn: only `prompt.persisted` is sent, and the turn goes on without an attempt.
+- A turn ends with `turn.ended` `completed` when the transcript's `turn_duration` record follows. If the
+  transcript never shows it, the end is told from the registry once no turn has run for two seconds
+  (longer than the 0.1 to 0.3 seconds the runtime takes to write it), as `interrupted`: the
+  likeliest cause is that the person stopped the turn.
+- The registry is the fast signal (about a tenth of a second) and the transcript the exact one. A
+  look reads the registry (for the process and the session id), then the transcript, then the
+  registry again, and acts on the last reading, so that the status is never older than the records
+  it goes with: a status read before the transcript could show a turn that the records already
+  ended. A status that belongs to a turn the transcript already ended is not a new turn. (A second
+  reading that fails or names another session leaves the first one in use.)
+- `/clear` gives the process a new session id and a new record file: the follower reads the
+  registry's `sessionId` at every look. It first reads what is left in the old file (a turn end or a
+  prompt written just before the clear is told), then ends a running turn as `interrupted` and
+  follows the new file. The endpoint keeps the id it was attached with.
+- A session whose entry or process is gone has its running turn ended as `interrupted` and the endpoint
+  reported `native_unavailable`; the reports stop when it comes back, or at once when an attachment or a
+  delivery reads its registry successfully. A session that is down is looked at every five seconds
+  instead of five times a second. What its transcript still shows is told before the turn ends.
+
+**`prompt.deliver`** answers a repeat of the attempt from what it knows (`1005` for another text). The
+adapter first reads the registry: a session that is gone, or one with no socket in its wake, is
+`refused` as `native_unavailable` and the endpoint is reported `native_unavailable` (the endpoint stays
+open; the condition is cleared by the next delivery that is written, or by an attachment with a new
+socket). It then stores the attempt's dispatch checkpoint, which `prompt.reconcile` takes as proof that
+something may have been written, and writes the lines. A socket that cannot be connected is a refusal,
+as nothing was written; a failure after the connection was made is an error, since the message may have
+arrived and the transcript decides. The answer is `accepted`, or `persisted` for a repeat whose record
+was seen: delivery is proved by the record, never by the write.
+
+**`prompt.reconcile`** reads the transcript of the session now running: the attempt's user record
+decides `found`, the turn being `running` (the registry shows a turn and none ended since the prompt),
+`completed` (a `turn_duration` follows the record) or `interrupted` (neither); an attempt without a
+checkpoint is `provably_absent`; an attempt that is not in the record is `indeterminate` while the
+session is busy or its registry cannot be read, and `provably_absent` otherwise. A prompt written just before a `/clear` is in the file before it and is judged absent.
+
+**`session.close` and `session.interrupt`** are answered `1002`, and the person's session is not
+touched. `session.detached` stops the watch, drops the wake and clears the endpoint's availability
+condition; the same holds for an endpoint that `adapter.start` no longer lists, and a delivery
+that was under way cannot bring the condition back. `recv.observed` is never sent for an attached session, and the adapter acknowledges nothing
+on the session's behalf.
+
+**Guarantees and limits.**
+
+- A prompt is delivered to an idle session within about a tenth of a second. Written to a busy session
+  it is taken in at its next tool boundary; written to one waiting on a permission prompt it is held
+  until the person answers. A controller in `bypassPermissions` mode may hold a wake-up for approval
+  as well (this could not be checked).
+- A prompt can be reported as taken into a person's turn when the registry showed the turn a moment
+  before the record appeared: the delivery is proved all the same.
+- The adapter runs on macOS only. The inbox of Claude Code on Windows is a named pipe, which the socket
+  writer does not reach, and the authentication line, which Windows requires and macOS does not check,
+  is sent but was never tested against a runtime that enforces it.
+- Only the transcript of the session now running is read: after a `/clear` the history of the old
+  session is not looked at again. A record directory name over 200 characters cannot be located: such a
+  session is followed from the registry alone, and its prompts are never reported persisted.
+- Turns shorter than a look (a fifth of a second) the person starts are not seen from the registry;
+  the transcript shows them when it carries their start. One the adapter's prompt starts is told from
+  the transcript.
+- The adapter remembers the last 128 prompts it delivered, for a repeat of an attempt to be told from
+  a new one; a prompt older than that, whose record never came, is no longer waited for, and its
+  record, if it comes, shows as a message of another sender.
+
 ### What is not built yet
 
 Claude's operating-system sandbox, which would make the denial of the data directory hold against
-Bash (see the turn process), `session.interrupt` (SIGINT of the turn process on Unix, with the process's end as the confirmation;
+Bash (see the turn process), `session.interrupt` of a created session (SIGINT of the turn process on Unix, with the process's end as the confirmation;
 the runtime's messaging socket is another way worth testing), `recv.observed` (it needs the
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
@@ -566,7 +707,13 @@ at another path.
   line, MCP configuration, preset and system prompt (`TestArgv`, `TestSanitizeEnv`,
   `TestEnviron`, `TestUserLine`, `TestParsePreset`).
 - `.../internal/record`: the record directory, the session-file index and the last result
-  of an output stream (`TestSanitize`, `TestDir`, `TestIndex`, `TestLastResult`).
+  of an output stream (`TestSanitize`, `TestDir`, `TestIndex`, `TestIndexMarkersFollowTheFile`,
+  `TestIndexMarksTheUserRecordsThatBeginATurn`, `TestIndexForgetsAnUnwatchedUUID`, `TestLastResult`).
+- `.../internal/attached`: the registry entry, the wake and the socket line, and the follower of an
+  attached session's turns (`TestParseRegistry`, `TestParseRegistryRefusesAFormItDoesNotRead`,
+  `TestWakeLines`, `TestWakeNeverPrintsItsSecrets`, `TestTranscriptSample`, and the follower's tests
+  in `follow_test.go`, among them `TestBackToBackTurnsAreToldFromTheTranscript` and
+  `TestFinishTellsTheMarkersFirst`), on the synthetic samples in `testdata/`.
 - `.../internal/turn`: the event state machine, including the pickup after a restart
   (`TestStep`, `TestRestartAdoption`).
 - `.../internal/reconcile`: the verdicts (`TestDecide`).
@@ -576,11 +723,19 @@ at another path.
   (`TestPackageIsWrittenOnlyForAListedPlatform`).
 - `.../internal/runtime`: the adapter. `app.go` (construction, initialize), `config.go` (instance
   configuration, preset resolution), `create.go` (the creation loop), `deliver.go` (delivery and
-  reconciliation), `close.go`, `start.go`, `probe.go` and `probe_mcp.go`, `session.go` (turn launch,
+  reconciliation), `close.go`, `start.go`, `probe.go` and `probe_mcp.go`, `attached.go` (attached sessions), `availability.go` (the conditions
+  sent), `session.go` (turn launch,
   the turn monitor, notifications), `checkpoint.go` (the checkpoints), `world.go` (the interfaces to the
   outside) and `osworld.go` (their implementations). Tests run against an in-memory world
   (`fake_test.go`): `create_test.go` (`TestCreateAStartedSessionAndReportItsTurn`,
   `TestCreateAfterACrashBetweenStartingAndRecording`), `session_test.go` (delivery, closing,
-  reconciliation, `TestStartTakesSessionsBack`, `TestProbe`). `real_test.go`
+  reconciliation, `TestStartTakesSessionsBack`, `TestProbe`), `attached_test.go` (attached sessions:
+  `TestAttachOutcomes`, `TestADeliveredPromptIsWrittenAndFollowedToTheEndOfItsTurn`,
+  `TestATurnThePersonStartsIsReportedWithoutAnAttempt`, `TestClearIsFollowed`,
+  `TestAGoneSessionRefusesPromptsAndIsReportedUnavailable`, `TestAnAttachedEndpointIsNotClosedOrInterrupted`,
+  `TestDetachingStopsTheWatch`, `TestAnAttachedSessionIsTakenBackAtStart`, `TestTheWakeNeverReachesTheLog`,
+  `TestAStatusReadBeforeTheTranscriptOpensNoTurn`, `TestBackToBackTurnsWhileTheSessionStaysBusy`,
+  `TestTheEndOfATurnWrittenJustBeforeAClearIsNotLost`, `TestAReachableSessionIsNotReportedUnavailableAnyLonger`,
+  `TestADroppedEndpointGetsNoConditionBack`, `TestPromptsNeverSeenAreForgottenWithTheMemoryOfThem`). `real_test.go`
   (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) probes the installed Claude Code and finds, then
   interrupts, a real turn process given no input, so it costs no model turn.

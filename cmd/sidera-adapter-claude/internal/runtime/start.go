@@ -22,6 +22,9 @@ import (
 //   - the others are attached, with the turn active exactly when a turn process
 //     of the session runs. The turns they left behind are followed, and what was
 //     lost with the adapter is reported after the answer.
+//
+// A session a person opened and attached is taken back from its registry entry
+// (see resumeAttached) and not from a process table: the adapter started none.
 func (a *App) Start(_ context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
 	cfg := parseInstanceConfig(p.Config)
 	claude := a.findExecutable(cfg.claudePath, "claude")
@@ -53,6 +56,7 @@ func (a *App) Start(_ context.Context, p adapterproto.StartParams) (adapterproto
 	a.started = true
 	a.mu.Unlock()
 
+	a.dropUnlistedAttached(p.Sessions)
 	res := adapterproto.StartResult{Sessions: make([]adapterproto.SessionState, 0, len(p.Sessions))}
 	if len(p.Sessions) == 0 {
 		return res, nil
@@ -63,6 +67,11 @@ func (a *App) Start(_ context.Context, p adapterproto.StartParams) (adapterproto
 	}
 	for _, attach := range p.Sessions {
 		state := adapterproto.SessionState{Endpoint: attach.Endpoint, State: adapterproto.AttachUnreachable}
+		if attach.Attached {
+			a.resumeAttached(attach, &state)
+			res.Sessions = append(res.Sessions, state)
+			continue
+		}
 		if s := a.attach(attach, snap, snapErr, &state); s != nil {
 			a.mu.Lock()
 			a.sessions[s.endpoint] = s

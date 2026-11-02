@@ -100,17 +100,8 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		res.ToolProbes = append(res.ToolProbes, a.probeTool(ctx, req, sidera))
 	}
 
-	if err := a.conn().Availability(ctx, adapterproto.AvailabilityParams{Conditions: nonNil(conditions)}); err != nil {
-		a.log.Warn("the availability was not sent", "error", err)
-	}
+	a.setProbe(ctx, conditions)
 	return res, nil
-}
-
-func nonNil(c []adapterproto.Availability) []adapterproto.Availability {
-	if c == nil {
-		return []adapterproto.Availability{}
-	}
-	return c
 }
 
 // probeTool starts the front end's tool as a session would and reports whether

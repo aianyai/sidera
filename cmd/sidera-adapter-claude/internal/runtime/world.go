@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -50,4 +51,17 @@ type CommandResult struct {
 // `sidera probe`.
 type Runner interface {
 	Run(ctx context.Context, c Command) (CommandResult, error)
+}
+
+// ErrInboxUnreachable is wrapped by the error of an Inbox write that could not
+// connect: nothing was written, so nothing was delivered.
+var ErrInboxUnreachable = errors.New("the inbox socket cannot be connected")
+
+// Inbox writes to the inbox socket of a session that someone else runs. The data
+// may hold a secret, so an error of a write never carries it, nor the socket's path.
+type Inbox interface {
+	// Write connects to the socket, writes the data and closes the connection. An
+	// error that does not wrap ErrInboxUnreachable comes from a connection that was
+	// made, so whether the data arrived is unknown.
+	Write(ctx context.Context, socket string, data []byte) error
 }

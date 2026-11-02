@@ -28,7 +28,6 @@ protocol has a version of its own.
   counted in the time the node was awake, is closed once nothing is queued or leased on it.
 - **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
   counts the turns of attached sessions, and a full node no longer holds back their prompts.
-
 - **Controller sessions.** A Claude Code or Codex session you opened becomes a controller
   when it has the `sidera` MCP server (or runs `sidera` agent commands) and no `SIDERA_TOKEN`:
   it attaches itself through `sessions.attach` on first use, keeps the token in memory only
@@ -39,6 +38,12 @@ protocol has a version of its own.
 - **Agent client: a token supplied later.** `agentapi.Client.SetToken` replaces the endpoint
   credential for the calls that follow, so a caller that obtains its token after the client
   exists keeps it in memory only.
+- **Claude adapter: attached sessions.** The adapter declares `attach`. A Claude Code session a
+  person opened and that attached itself is woken through the session's inbox socket and followed
+  through its registry entry and its session record: the turns the person starts are reported
+  without an attempt (also when a busy session goes from one turn straight to the next), `/clear` is
+  followed, and a session that is gone refuses prompts as
+  `native_unavailable`. Closing or interrupting such an endpoint is a wrong endpoint kind.
 
 ### Changed
 

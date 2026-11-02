@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // osFiles is Files on the operating system's file system.
@@ -107,4 +109,36 @@ func (b *capped) Write(p []byte) (int, error) {
 		b.Buffer.Write(p[:min(len(p), room)])
 	}
 	return len(p), nil
+}
+
+// inboxTimeout bounds the connection to an inbox socket and the write.
+const inboxTimeout = 3 * time.Second
+
+// osInbox is Inbox on a Unix domain socket. Claude Code on Windows listens on a
+// named pipe, which this does not reach.
+type osInbox struct{}
+
+func (osInbox) Write(ctx context.Context, socket string, data []byte) error {
+	d := net.Dialer{Timeout: inboxTimeout}
+	conn, err := d.DialContext(ctx, "unix", socket)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInboxUnreachable, withoutPath(err))
+	}
+	defer conn.Close()
+	if err := conn.SetWriteDeadline(time.Now().Add(inboxTimeout)); err != nil {
+		return fmt.Errorf("write to the inbox: %v", withoutPath(err))
+	}
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("write to the inbox: %v", withoutPath(err))
+	}
+	return nil
+}
+
+// withoutPath is the cause of a network error without the address it names.
+func withoutPath(err error) error {
+	var op *net.OpError
+	if errors.As(err, &op) && op.Err != nil {
+		return op.Err
+	}
+	return err
 }

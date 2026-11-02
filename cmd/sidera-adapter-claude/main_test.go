@@ -29,6 +29,9 @@ func TestManifestAndDeclarationAgree(t *testing.T) {
 	if cfg.Adapter.ID != m.ID || cfg.Adapter.Version != m.Version {
 		t.Fatalf("identity %+v, manifest %s %s", cfg.Adapter, m.ID, m.Version)
 	}
+	if !cfg.Capabilities.Runtime.Attach {
+		t.Fatal("the adapter implements attached sessions and must declare it")
+	}
 	var declared []string
 	for _, f := range cfg.Capabilities.Runtime.Frontends {
 		declared = append(declared, string(f))

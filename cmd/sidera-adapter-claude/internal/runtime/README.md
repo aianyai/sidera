@@ -12,8 +12,10 @@ for the rules and their reasons.
 | Name | Does |
 | ---- | ---- |
 | `New(Options)` | Builds the adapter. Every `Options` field left zero takes the operating system's implementation; tests pass fakes. |
-| `App` methods | `Initialize`, `Start`, `Probe`, `CreateSession`, `DeliverPrompt`, `Reconcile`, `CloseSession`, `Shutdown`; `Interrupt` and the rest are `adapterkit.Base`'s (not declared). |
-| `Daemon`, `Files`, `Runner` | What the adapter sends to the daemon, how it reaches the file system and how it runs short programs. `proc.Table`, `proc.Launcher` and `proc.Signaller` are the rest of its outside. |
+| `App` methods | `Initialize`, `Start`, `Probe`, `CreateSession`, `DeliverPrompt`, `Reconcile`, `CloseSession`, `AttachSession`, `SessionDetached`, `Shutdown`; `Interrupt` is `adapterkit.Base`'s (not declared) except that an attached endpoint answers `1002`. |
+| `Daemon`, `Files`, `Runner`, `Inbox` | What the adapter sends to the daemon, how it reaches the file system, how it runs short programs and how it writes to the inbox socket of a session someone else runs. `proc.Table`, `proc.Launcher` and `proc.Signaller` are the rest of its outside. |
+| `attached.go` | Attached sessions: `AttachSession`, `SessionDetached`, the entries of `adapter.start`, the monitor that follows a session, delivery to its inbox and its reconciliation. |
+| `availability.go` | The one snapshot of conditions the daemon takes as the whole truth: the probe's and those of the attached endpoints. |
 
 ## Invariants
 
@@ -28,9 +30,24 @@ for the rules and their reasons.
   durable transaction with the daemon.
 - Nothing the adapter logs or stores holds a token or a prompt's text (a digest is stored).
 - The turn files (`turns/<session>/<attempt>.{in,out,err}.jsonl`) are private to the user.
+- An attached session is the person's: the adapter never starts, signals or closes anything of it
+  (`session.close` and `session.interrupt` for its endpoint are `1002`), and writes to it only a
+  prompt, to its inbox socket, after the attempt's dispatch checkpoint is stored.
+- The wake (inbox socket and token) lives in memory only. `attached.Wake` prints as redacted
+  whatever the verb or log handler, errors from the socket writer carry neither path nor data, and the
+  attached session's checkpoint holds the process id alone.
+- An attached session is followed by one monitor goroutine under the session's lock, which also
+  orders its notifications. A look reads the registry, then the transcript, then the registry again and
+  acts on the last reading, so that the status is never older than the markers; the session's `dropped`
+  flag, set under the same lock when its endpoint goes, keeps a look or a delivery that was in progress
+  from reporting anything for it afterwards.
+- Every condition the adapter reports goes through `availability.go`, never straight to the daemon:
+  a snapshot replaces the last, so a lone report would drop the others.
 
 ## Testing
 
 `fake_test.go` is an in-memory world that implements every interface; the tests drive the
-handlers against it. `real_test.go` (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) runs against the
+handlers against it. Attached sessions add `attached_test.go`, which drives them against the same world: registry files
+and a process in the fake file system and process table, an `Inbox` that records what was written, and
+the session record appended to by the test as Claude Code would. `real_test.go` (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) runs against the
 installed Claude Code and gives it no input, so it costs no model turn.

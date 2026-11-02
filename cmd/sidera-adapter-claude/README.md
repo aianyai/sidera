@@ -19,7 +19,8 @@ adapter and the protocol types of `sdk/go/adapterproto`.
 | ---- | ----- |
 | `internal/create/` | The decision logic for creating one session: what to start, wait for, record or report next, given the persisted attempt and what was observed. |
 | `internal/claudeargs/` | What a turn process is started with: the argument vector, the environment, the user message it reads, the MCP configuration, the preset's values and the adapter's system prompt. |
-| `internal/record/` | How Claude Code keeps a session on disk: the record directory of a working directory, finding a prompt in a session file, and how a turn ended from its output stream. |
+| `internal/record/` | How Claude Code keeps a session on disk: the record directory of a working directory, finding a prompt in a session file and the ends of turns in it, and how a turn process ended from its output stream. |
+| `internal/attached/` | How a session a person runs shows itself: its registry entry, the wake that opens its inbox socket and the line written there, and the follower that turns the registry's status and the session record into the notifications of the protocol. |
 | `internal/reconcile/` | The answer to `prompt.reconcile`, from the facts the runtime gathered. |
 | `internal/turn/` | The state machine of the events a turn process gives rise to: when `turn.started` and `turn.ended` are sent, for a process just started and for one found again after a restart. |
 
@@ -32,7 +33,7 @@ library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys
 
 | Path | Holds |
 | ---- | ----- |
-| `internal/runtime/` | The adapter itself, an `adapterkit.Application`: creation, delivery, reconciliation, closing, `adapter.start`, `adapter.probe`, the turn monitor and the checkpoints. See its README. |
+| `internal/runtime/` | The adapter itself, an `adapterkit.Application`: creation, delivery, reconciliation, closing, `adapter.start`, `adapter.probe`, the turn monitor, the checkpoints and attached sessions. See its README. |
 | `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and signals. Implemented for macOS; the other platforms compile and fail every call with `ErrUnsupported`. |
 
 `main.go` serves the adapter protocol over the standard input and output with

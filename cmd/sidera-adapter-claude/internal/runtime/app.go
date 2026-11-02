@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,13 @@ type Options struct {
 	Signaller proc.Signaller
 	Files     Files
 	Runner    Runner
+	// Inbox writes to the inbox sockets of attached sessions.
+	Inbox Inbox
+
+	// ClaudeDir is the runtime's configuration directory, where it keeps the
+	// registry of running sessions and the session records. Default: the
+	// CLAUDE_CONFIG_DIR of Environ, else ~/.claude.
+	ClaudeDir string
 
 	// Now is the clock. Rand is where uuids come from.
 	Now  func() time.Time
@@ -82,6 +90,9 @@ type App struct {
 	presets   map[string]adapterproto.ConfigValues
 	sessions  map[adapterproto.EndpointRef]*session
 	attempts  map[adapterproto.AttemptID]*attempt
+	attached  map[adapterproto.EndpointRef]*attachedSession
+
+	avail availability
 }
 
 // New builds the adapter.
@@ -107,6 +118,12 @@ func New(o Options) *App {
 	if o.Runner == nil {
 		o.Runner = osRunner{}
 	}
+	if o.Inbox == nil {
+		o.Inbox = osInbox{}
+	}
+	if o.ClaudeDir == "" {
+		o.ClaudeDir = claudeDir(o.Environ)
+	}
 	if o.Now == nil {
 		o.Now = time.Now
 	}
@@ -131,6 +148,7 @@ func New(o Options) *App {
 		presets:  map[string]adapterproto.ConfigValues{},
 		sessions: map[adapterproto.EndpointRef]*session{},
 		attempts: map[adapterproto.AttemptID]*attempt{},
+		attached: map[adapterproto.EndpointRef]*attachedSession{},
 	}
 }
 
@@ -144,6 +162,22 @@ func (a *App) Initialize(_ context.Context, conn *adapterkit.Conn, instance adap
 	defer a.mu.Unlock()
 	a.daemon, a.instance = conn, instance
 	return nil
+}
+
+// claudeDir is the runtime's configuration directory as a process with this
+// environment finds it; "" when neither CLAUDE_CONFIG_DIR nor the home
+// directory is known.
+func claudeDir(environ []string) string {
+	for _, kv := range environ {
+		if v, ok := strings.CutPrefix(kv, "CLAUDE_CONFIG_DIR="); ok && v != "" {
+			return v
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
 }
 
 // Shutdown stops the monitors. The turn processes are detached and run on.

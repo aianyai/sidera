@@ -53,6 +53,35 @@ type world struct {
 	// onInterrupt runs when a process is interrupted.
 	onInterrupt func(w *world, p *fakeProc)
 	loggedIn    bool
+
+	// inbox: what was written to inbox sockets, and what the next write does.
+	inbox     []inboxWrite
+	inboxErr  error
+	lookupErr error
+	notes     []string // the notices about attached sessions, in order
+	avail     []adapterproto.AvailabilityParams
+}
+
+// inboxWrite is one write to an inbox socket.
+type inboxWrite struct {
+	socket string
+	data   string
+}
+
+func (w *world) Write(_ context.Context, socket string, data []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.inboxErr != nil {
+		return w.inboxErr
+	}
+	w.inbox = append(w.inbox, inboxWrite{socket, string(data)})
+	return nil
+}
+
+func (w *world) inboxWrites() []inboxWrite {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.inbox)
 }
 
 type fakeProc struct {
@@ -77,6 +106,9 @@ func (w *world) info(p *fakeProc) proc.Info {
 func (w *world) Lookup(pid int) (proc.Info, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.lookupErr != nil {
+		return proc.Info{}, w.lookupErr
+	}
 	if p, ok := w.procs[pid]; ok {
 		return w.info(p), nil
 	}
@@ -236,7 +268,14 @@ func (w *world) event(format string, args ...any) {
 	w.order = append(w.order, e)
 }
 
+func (w *world) note(format string, args ...any) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.notes = append(w.notes, fmt.Sprintf(format, args...))
+}
+
 func (w *world) PromptPersisted(_ context.Context, p adapterproto.PromptPersistedParams) error {
+	w.note("persisted %s", p.Attempt)
 	w.event("persisted %s", p.Attempt)
 	return nil
 }
@@ -245,6 +284,7 @@ func (w *world) TurnStarted(_ context.Context, p adapterproto.TurnStartedParams)
 	if err := p.Validate(); err != nil {
 		w.t.Errorf("an invalid turn.started: %v", err)
 	}
+	w.note("started %s attempt=%s", p.Turn, p.Attempt)
 	w.event("started %s", p.Attempt)
 	return nil
 }
@@ -253,11 +293,17 @@ func (w *world) TurnEnded(_ context.Context, p adapterproto.TurnEndedParams) err
 	if err := p.Validate(); err != nil {
 		w.t.Errorf("an invalid turn.ended: %v", err)
 	}
+	w.note("ended %s %s", p.Turn, p.Final)
 	w.event("ended %s %s", p.Turn, p.Final)
 	return nil
 }
 
-func (w *world) Availability(context.Context, adapterproto.AvailabilityParams) error { return nil }
+func (w *world) Availability(_ context.Context, p adapterproto.AvailabilityParams) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.avail = append(w.avail, p)
+	return nil
+}
 
 func (w *world) eventList() []string {
 	w.mu.Lock()
@@ -287,7 +333,8 @@ func absPath(elem ...string) string {
 }
 
 var (
-	projectsDir = absPath("claude", "projects")
+	claudeHome  = absPath("claude")
+	projectsDir = filepath.Join(claudeHome, "projects")
 	workDir     = absPath("work", "dir")
 	recordDir   = func() string { d, _ := record.Dir(projectsDir, workDir); return d }()
 	stateDir    = absPath("state")
@@ -310,7 +357,7 @@ func newApp(t *testing.T, w *world, sessions ...adapterproto.SessionAttach) (*Ap
 			}
 			return "", errors.New("not found")
 		},
-		Table: w, Launcher: w, Signaller: w, Files: w, Runner: w,
+		Table: w, Launcher: w, Signaller: w, Files: w, Runner: w, Inbox: w, ClaudeDir: claudeHome,
 		PollInterval: 2 * time.Millisecond, CloseWait: 2 * time.Second,
 	})
 	t.Cleanup(app.stop)

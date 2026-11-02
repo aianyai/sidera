@@ -85,6 +85,9 @@ func config(app adapterkit.Application, logger *slog.Logger) (adapterkit.Config,
 			// `claude -p` sends the adapter no requests that need an answer.
 			Interrupt: false, AckOnBehalf: false, ServerRequests: false,
 			Frontends: []adapterproto.Frontend{adapterproto.FrontendCLI, adapterproto.FrontendMCP},
+			// A session a person opened can be attached: woken through its inbox socket and
+			// followed through its registry entry and its transcript.
+			Attach: true,
 		}},
 		App: app, Logger: logger,
 	}, nil

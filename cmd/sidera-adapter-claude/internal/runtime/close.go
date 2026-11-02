@@ -28,6 +28,9 @@ func (a *App) CloseSession(ctx context.Context, p adapterproto.CloseParams) (ada
 	if err := a.requireStarted(); err != nil {
 		return adapterproto.CloseResult{}, err
 	}
+	if a.attachedSession(p.Endpoint) != nil {
+		return adapterproto.CloseResult{}, wrongEndpointKind()
+	}
 	s := a.session(p.Endpoint)
 	if s == nil {
 		if p.NativeRef == "" {

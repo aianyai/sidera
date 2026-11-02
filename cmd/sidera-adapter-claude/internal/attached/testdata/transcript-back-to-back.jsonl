@@ -1,0 +1,7 @@
+{"type":"user","uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","origin":{"kind":"human"},"message":{"role":"user","content":"first"},"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"assistant","uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","message":{"role":"assistant","content":[{"type":"text","text":"done"}]},"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"system","subtype":"turn_duration","durationMs":900,"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"user","uuid":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","origin":{"kind":"task-notification"},"message":{"role":"user","content":"task finished"},"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"user","uuid":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","origin":{"kind":"human"},"message":{"role":"user","content":"typed while it ran"},"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"assistant","uuid":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","message":{"role":"assistant","content":[{"type":"text","text":"done"}]},"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
+{"type":"system","subtype":"turn_duration","durationMs":1100,"sessionId":"6ee62271-42c1-4558-89cf-0e32c50e0c1b"}
