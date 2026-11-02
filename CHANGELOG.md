@@ -14,6 +14,9 @@ protocol has a version of its own.
   `attach` and take hold of a session a person opened: the new request `session.attach`, the
   notification `session.detached` and the `attached` and `wake` members of an `adapter.start`
   session entry. The daemon sends none of them to an adapter that did not declare it.
+- **Endpoint record: the origin of a session.** A session endpoint record can say that the
+  session was attached rather than created (`origin`). Records without it read as created, so
+  existing state needs no migration.
 
 ### Changed
 

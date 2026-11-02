@@ -69,6 +69,14 @@ func goldenWant(t *testing.T, name string) store.Record {
 		r := session(5, store.EndpointClosed, strings.TrimSuffix(ctlKey(1).FileName(store.KindCtl), ".rec"))
 		r.Session.NativeRef, r.Session.Released = "sess_1", name == "endpoint released"
 		return r
+	case "endpoint attached":
+		r := session(5, store.EndpointOpen, "")
+		r.Session = &store.SessionInfo{Origin: adapterreg.OriginAttached, NativeRef: "sess_1"}
+		return r
+	case "endpoint attached closed":
+		r := session(5, store.EndpointClosed, "")
+		r.Session = &store.SessionInfo{Origin: adapterreg.OriginAttached, NativeRef: "sess_1"}
+		return r
 	case "endpoint named":
 		r := directEndpoint(6, "chat")
 		r.Declaration = nil
@@ -113,6 +121,35 @@ func goldenWant(t *testing.T, name string) store.Record {
 // oneSender is the sender of the feedback item of the golden vector of an out-lost
 // record: the local node and the endpoint of its key.
 const oneSender = "node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/" + e1
+
+// A closed session endpoint owes its adapter a release of the native session until the
+// adapter confirms it, except an attached one, whose native session is the person's.
+func TestReleasePending(t *testing.T) {
+	closed := func(info store.SessionInfo) store.EndpointRecord {
+		r := session(5, store.EndpointClosed, "")
+		r.Session = &info
+		return r
+	}
+	for _, tc := range []struct {
+		name string
+		rec  store.EndpointRecord
+		want bool
+	}{
+		{"closed with a native session to release", closed(store.SessionInfo{Preset: "default", NativeRef: "sess_1"}), true},
+		{"closed and released", closed(store.SessionInfo{Preset: "default", NativeRef: "sess_1", Released: true}), false},
+		{"closed without a native session", closed(store.SessionInfo{Preset: "default"}), false},
+		{"closed and attached", closed(store.SessionInfo{Origin: adapterreg.OriginAttached, NativeRef: "sess_1"}), false},
+		{"open with a native session", func() store.EndpointRecord {
+			r := session(5, store.EndpointOpen, "")
+			r.Session.NativeRef = "sess_1"
+			return r
+		}(), false},
+	} {
+		if got := tc.rec.ReleasePending(); got != tc.want {
+			t.Errorf("%s: ReleasePending = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
 
 func TestRecordGoldenVectors(t *testing.T) {
 	for _, g := range goldenRecords {
@@ -277,6 +314,14 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an endpoint display name that is not UTF-8", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"B` + "\xff" + `ro phone"`},
 		{"a native session released on an endpoint that is not closed", "endpoint", `"preset":"default"`, `"preset":"default","released":true`},
 		{"a native session released that is not there", "endpoint released", `"native_ref":"sess_1",`, ``},
+		{"an attached session written with the origin created", "endpoint attached", `"origin":"attached"`, `"origin":"created"`},
+		{"an attached session with an origin that is not one", "endpoint attached", `"origin":"attached"`, `"origin":"adopted"`},
+		{"an attached session being created", "endpoint attached", `"status":"open"`, `"status":"creating"`},
+		{"an attached session without a native session", "endpoint attached", `,"native_ref":"sess_1"`, ``},
+		{"an attached session with a preset", "endpoint attached", `"native_ref":"sess_1"`, `"preset":"default","native_ref":"sess_1"`},
+		{"an attached session with tool access", "endpoint attached", `"native_ref":"sess_1"`, `"native_ref":"sess_1","tool_access":["SIDERA_TOKEN"]`},
+		{"an attached session created by a control record", "endpoint attached", `}}`, `},"created_by":"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d"}`},
+		{"an attached session released", "endpoint attached", `"native_ref":"sess_1"`, `"native_ref":"sess_1","released":true`},
 		{"a session endpoint with created_by that is not a hash", "endpoint", `"created_by":"`, `"created_by":"x`},
 		{"an in record that still carries the revision it once had", "in", `{"record":`, `{"rev":1,"record":`},
 		{"an in record without its record", "in", `"record":{"side":"target","state":"accepted","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"},`, ``},

@@ -604,7 +604,7 @@ func (s *Store) Tick(b TickBatch) error {
 	return tx.Commit()
 }
 
-// EndpointUpdate replaces an endpoint record.
+// EndpointUpdate writes an endpoint record, replacing the one it has or as a new one.
 func (s *Store) EndpointUpdate(ep EndpointRecord) error {
 	ef, err := recordFile(EndpointsDir, ep)
 	if err != nil {

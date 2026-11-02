@@ -1111,9 +1111,24 @@ may never have put one (`TestCheckpointDropRemovesOnlyTheCheckpointNamed`).
 the order they are written: `kind`, `instance`, `display_name` and `description`
 (both optional, omitted when empty), `status`, `token` (32 bytes, present while the
 endpoint is creating or open, absent once it is closed), `declaration` (compact
-JSON owned by the engine), `session` (the mapping of a session endpoint: `preset`, `native_ref`, `process`,
+JSON owned by the engine), `session` (the mapping of a session endpoint: `origin`, `preset`, `native_ref`, `process`,
 `tool_access`, and `released`) and
-`created_by` (the control record that created a session endpoint). `released` says
+`created_by` (the control record that created a session endpoint). `origin` says how the
+session came to be and is written only as `attached`, for a session a person opened and
+asked to be attached; a session the node created leaves it out. Absent therefore means
+created, which is how every record written before attached sessions existed reads: a
+required member would have quarantined them, and an explicit `created` is a second spelling
+of the same fact that the canonical re-encoding refuses. An attached session is held to
+what it can be, when it is written and when it is read: an open or closed session endpoint
+(never one being created), with a `native_ref` from the start, no `preset`, no
+`tool_access`, no `created_by` and no `released`, because no control record made it, it
+has no preset or tool access of its own, and the node owes no release of a native session
+that is the person's (`EndpointRecord.ReleasePending` is false for it, which is the one
+place that says a release is owed; `TestReleasePending`). A new attached endpoint is written
+open, with its token, by `endpoint-update`, which writes an endpoint record, replacing the one
+it has or as a new one; no creation to recover is involved, so no recovery rule applies to it
+(`TestRecordGoldenVectors`, vector `endpoint attached`, and the attached rows of
+`TestDecodeRecordBodyRules`). `released` says
 the adapter confirmed that the native session is released, or that it no longer
 exists, after the endpoint was closed; only a closed endpoint with a `native_ref`
 can have it, and a record that says otherwise is refused when it is written and when it

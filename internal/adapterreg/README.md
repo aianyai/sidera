@@ -22,6 +22,7 @@ not frame, send or store anything.
 | `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
 | `Admission.Attaches()` | Whether the adapter declared attached sessions: only then does the daemon send it `session.attach` and `session.detached`, or list an attached session in `adapter.start`. |
 | `KindSignals(kind)` | The signals guaranteed by an endpoint's kind alone, without an adapter admission; session interrupt still requires a declaration. |
+| `SessionOrigin` | Whether a session endpoint was created by the node (`OriginCreated`, the zero value) or attached at the request of a session a person opened (`OriginAttached`). |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
 | `Admission.PartBudgets(kind)` | The budgets a long message is cut for on an endpoint of that kind, whichever front end reads it: those of every front end the endpoint can be read through, so that every front end cuts it in the same parts. |
 | `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |

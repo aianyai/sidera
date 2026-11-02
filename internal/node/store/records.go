@@ -312,6 +312,11 @@ type EndpointRecord struct {
 
 // SessionInfo is what a session endpoint maps to.
 type SessionInfo struct {
+	// Origin says whether the node created the session or a person opened it and
+	// asked to be attached. An attached session has a native session from the
+	// start, no preset, no tool access and no creating control record, and owes
+	// no release.
+	Origin     adapterreg.SessionOrigin
 	Preset     string
 	NativeRef  string
 	Process    *adapterproto.ProcessIdentity
@@ -327,14 +332,24 @@ type SessionInfo struct {
 // empty reports whether the mapping says nothing. Such a mapping is neither
 // written nor read: an endpoint without one has a nil Session.
 func (s SessionInfo) empty() bool {
-	return s.Preset == "" && s.NativeRef == "" && s.Process == nil && len(s.ToolAccess) == 0
+	return s.Origin == adapterreg.OriginCreated && s.Preset == "" && s.NativeRef == "" && s.Process == nil && len(s.ToolAccess) == 0
 }
 
 // ReleasePending says the endpoint is a closed session endpoint whose native
 // session the adapter has not confirmed released: the channel is closed, and the
-// native session may still exist.
+// native session may still exist. An attached session is never owed a release:
+// the native session is the person's, and the node does not end it.
 func (r EndpointRecord) ReleasePending() bool {
-	return r.Kind == adapterreg.KindSession && r.Status == EndpointClosed && r.Session != nil && r.Session.NativeRef != "" && !r.Session.Released
+	return r.Kind == adapterreg.KindSession && r.Status == EndpointClosed && r.Session != nil && r.Session.NativeRef != "" && !r.Session.Released && r.Session.Origin != adapterreg.OriginAttached
+}
+
+// Origin says how the endpoint came to be: the origin of its session, and created
+// for an endpoint that has no session mapping.
+func (r EndpointRecord) Origin() adapterreg.SessionOrigin {
+	if r.Session == nil {
+		return adapterreg.OriginCreated
+	}
+	return r.Session.Origin
 }
 
 // Name is the file name of the record.

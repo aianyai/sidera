@@ -20,6 +20,9 @@ import (
 var statusNames = names[EndpointStatus]{{EndpointCreating, "creating"}, {EndpointOpen, "open"}, {EndpointClosed, "closed"}}
 
 type sessionJSON struct {
+	// Origin is written only as "attached"; a created session leaves it out, which is
+	// also how every record written before attached sessions existed reads.
+	Origin     string                        `json:"origin,omitempty"`
 	Preset     string                        `json:"preset,omitempty"`
 	NativeRef  string                        `json:"native_ref,omitempty"`
 	Process    *adapterproto.ProcessIdentity `json:"process,omitempty"`
@@ -46,6 +49,30 @@ var errEmptySession = errors.New("an empty session mapping is not written")
 func checkReleased(status EndpointStatus, s SessionInfo) error {
 	if s.Released && (status != EndpointClosed || s.NativeRef == "") {
 		return errors.New("only a closed session endpoint with a native session has it released")
+	}
+	return nil
+}
+
+// originAttached is the one spelling of the origin a record carries.
+const originAttached = "attached"
+
+// checkAttached holds an attached session to what it can be: an open or closed
+// session endpoint with a native session from the start, that no control record
+// created, that has no preset and no tool access, and that owes no release.
+func checkAttached(status EndpointStatus, createdBy string, s SessionInfo) error {
+	switch {
+	case s.Origin != adapterreg.OriginAttached:
+		return nil
+	case status == EndpointCreating:
+		return errors.New("an attached session endpoint is never being created")
+	case s.NativeRef == "":
+		return errors.New("an attached session has a native session")
+	case s.Preset != "" || len(s.ToolAccess) != 0:
+		return errors.New("an attached session has no preset and no tool access")
+	case createdBy != "":
+		return errors.New("an attached session endpoint is created by no control record")
+	case s.Released:
+		return errors.New("an attached session is never released")
 	}
 	return nil
 }
@@ -123,6 +150,9 @@ func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 			return nil, errors.New("a session mapping belongs to a session endpoint")
 		}
 		s := r.Session
+		if !s.Origin.Valid() {
+			return nil, fmt.Errorf("a session origin is %s", s.Origin)
+		}
 		if s.empty() {
 			return nil, errEmptySession
 		}
@@ -134,7 +164,13 @@ func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 		if err := checkReleased(r.Status, *s); err != nil {
 			return nil, err
 		}
+		if err := checkAttached(r.Status, r.CreatedBy, *s); err != nil {
+			return nil, err
+		}
 		j.Session = &sessionJSON{Preset: s.Preset, NativeRef: s.NativeRef, Process: s.Process, ToolAccess: s.ToolAccess, Released: s.Released}
+		if s.Origin == adapterreg.OriginAttached {
+			j.Session.Origin = originAttached
+		}
 	}
 	if r.CreatedBy != "" {
 		if r.Kind != adapterreg.KindSession {
@@ -187,10 +223,20 @@ func decodeEndpoint(id ident.EndpointID, body []byte) (EndpointRecord, error) {
 			return r, errors.New("a session mapping belongs to a session endpoint")
 		}
 		s := &SessionInfo{Preset: j.Session.Preset, NativeRef: j.Session.NativeRef, Process: j.Session.Process, ToolAccess: j.Session.ToolAccess, Released: j.Session.Released}
+		switch j.Session.Origin {
+		case "":
+		case originAttached:
+			s.Origin = adapterreg.OriginAttached
+		default:
+			return r, fmt.Errorf("a session origin is written only as %q, got %q", originAttached, j.Session.Origin)
+		}
 		if s.empty() {
 			return r, errEmptySession
 		}
 		if err := checkReleased(r.Status, *s); err != nil {
+			return r, err
+		}
+		if err := checkAttached(r.Status, j.CreatedBy, *s); err != nil {
 			return r, err
 		}
 		if s.Process != nil {

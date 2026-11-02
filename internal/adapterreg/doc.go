@@ -53,6 +53,33 @@ func (k EndpointKind) String() string {
 	return fmt.Sprintf("invalid(%d)", uint8(k))
 }
 
+// SessionOrigin says how a session endpoint came to be. The zero value is a
+// created session, so a record or a value that says nothing is one.
+type SessionOrigin uint8
+
+const (
+	// OriginCreated is a session the node created with session.create: it owns
+	// the native session, and releases it when the endpoint is closed.
+	OriginCreated SessionOrigin = iota
+	// OriginAttached is a session a person opened and asked to be attached. The
+	// node does not control it: it never closes or interrupts it, and closing the
+	// endpoint releases nothing.
+	OriginAttached
+)
+
+var originNames = [...]string{OriginCreated: "created", OriginAttached: "attached"}
+
+// Valid reports whether o is one of the origins.
+func (o SessionOrigin) Valid() bool { return o <= OriginAttached }
+
+// String returns the name of the origin.
+func (o SessionOrigin) String() string {
+	if o.Valid() {
+		return originNames[o]
+	}
+	return fmt.Sprintf("invalid(%d)", uint8(o))
+}
+
 // TargetKind is the kind authorization uses for a request aimed at an endpoint
 // of this kind. A value that is not a kind gives the zero authz.TargetKind,
 // which authorization refuses as a malformed request, so a request about it is

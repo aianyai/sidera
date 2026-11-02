@@ -38,6 +38,16 @@ var goldenRecords = []struct {
 	{name: "endpoint closed unreleased", dir: store.EndpointsDir,
 		file: "sidera-record 1 endpoint 18a620b2 220 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"closed\",\"session\":{\"preset\":\"default\",\"native_ref\":\"sess_1\",\"tool_access\":[\"SIDERA_TOKEN\"]},\"created_by\":\"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d\"}",
 		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
+	// An attached session: a session a person opened, open, with its native session from the
+	// start and neither preset nor tool access. The origin is written only for it.
+	{name: "endpoint attached", dir: store.EndpointsDir,
+		file: "sidera-record 1 endpoint fea1301f 162 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"open\",\"token\":\"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU\",\"session\":{\"origin\":\"attached\",\"native_ref\":\"sess_1\"}}",
+		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
+	// An attached session that was closed: it keeps its origin and its native session, and
+	// owes no release, so nothing in the record says it was released.
+	{name: "endpoint attached closed", dir: store.EndpointsDir,
+		file: "sidera-record 1 endpoint dc12d27b 110 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"closed\",\"session\":{\"origin\":\"attached\",\"native_ref\":\"sess_1\"}}",
+		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
 	// A direct endpoint with the name and the description its adapter registered
 	// it under (the name holds a character of two bytes: the length counts bytes).
 	{name: "endpoint named", dir: store.EndpointsDir,
