@@ -1,9 +1,16 @@
 name: CI
 
+# A push or pull request that changes only Markdown files starts no run: no job
+# builds, tests or packages a Markdown file, so such a run could only repeat the
+# verdict of the commit before it. A job that comes to read one (a link check, a
+# test that compares a document with the code) must remove this filter first, or
+# a change to that document would go unchecked. Manual dispatch always runs.
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md']
   pull_request:
+    paths-ignore: ['**.md']
   workflow_dispatch:
     inputs:
       # How much of the crash walk of the built binary the crash-walk jobs take.

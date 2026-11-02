@@ -9,8 +9,12 @@ see "Release" below.
 ## What
 
 The workflow runs on every push to `main`, on every pull request and on manual
-dispatch. The `crashwalk` job runs on manual dispatch only; every other job runs
-on all three triggers. Every step fails its job on any failure; there is no
+dispatch, except that a push or pull request whose changed files are all Markdown
+(`**.md`) starts no run: no job builds, tests or packages a Markdown file, so the
+verdict of the commit before it still holds. A job that comes to read a Markdown
+file has to remove that filter first. The `crashwalk` job runs on manual dispatch
+only; every other job runs on all three triggers. Every step fails its job on any
+failure; there is no
 `continue-on-error`; the only tests left out of a job are the power-loss tests on
 macOS and Windows and the crash walk of the built binary, which has jobs of its
 own (see below), and the suite runs without `-short`. The `-race` steps run every
