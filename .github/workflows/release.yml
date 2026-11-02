@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag v<version> builds the archives of that version and publishes them
-# as a GitHub Release. The work is in scripts/release.sh, which can be run on a
+# Pushing a tag v<version> builds the archives of that version and creates a draft
+# GitHub Release, published by hand once its archives are checked. The work is in scripts/release.sh, which can be run on a
 # development machine to see what a release would contain; this file only gives it
 # a runner, a token and the tag.
 on:
@@ -50,6 +50,7 @@ jobs:
           case $version in *-*) flags+=(--prerelease) ;; esac
           gh release create "$TAG" "$RUNNER_TEMP"/dist/* \
             --verify-tag \
+            --draft \
             --title "Sidera $version" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             "${flags[@]}"

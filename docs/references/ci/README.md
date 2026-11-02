@@ -164,11 +164,16 @@ To cut a release:
    that CI is green on that commit.
 3. `git tag -a v<version> -m "Sidera <version>"` on that commit and
    `git push origin v<version>`.
+4. The workflow leaves the release as a draft. Download its archives, check them
+   against `checksums.txt` and install them on each platform; then publish it with
+   `gh release edit v<version> --draft=false`.
 
 `release.yml` checks out the tag, installs Go as `ci.yml` does, takes the release
 notes from the changelog (a tag without a section fails here, before anything is
-built), runs `scripts/release.sh`, and creates the GitHub Release with
-`gh release create`, using the job's `GITHUB_TOKEN`. A version with a pre-release
+built), runs `scripts/release.sh`, and creates the GitHub Release as a draft with
+`gh release create --draft`, using the job's `GITHUB_TOKEN`. A draft is visible only to
+the repository's maintainers, so the archives are checked before anyone can download
+them. A version with a pre-release
 part (`0.9.0-rc.1`) is marked as a pre-release. It does not run the tests: they ran
 on `main`.
 
