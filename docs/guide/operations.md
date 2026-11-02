@@ -32,7 +32,9 @@ Notes:
   `false` for a healthy node until one side sends.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
   they fail with `unauthenticated/token_missing`; that is expected. They work
-  inside an agent session.
+  inside an agent session, and inside a Claude Code or Codex session you opened
+  yourself once it is a
+  [controller](agents.md#the-controller-a-session-you-started-yourself).
 - `sidera alerts ack <id>` acknowledges an alert once you have dealt with it.
 - In a script, `--json` prints the whole response, with the data under `result`:
   `sidera endpoint list --json` prints `{"result":{"endpoints":[...]}}`, not a bare
@@ -524,8 +526,14 @@ node is not told.
 - The daemon does not start at boot and is not installed as a service. Restart it
   yourself after a reboot.
 - The Claude Code adapter runs on macOS only.
-- A session does not close by itself, and `sidera endpoint list` keeps listing
-  closed ones. Close sessions you no longer need with `sidera endpoint close`.
+- A session Sidera started does not close by itself, and `sidera endpoint list` keeps
+  listing closed ones. Close sessions you no longer need with `sidera endpoint close`.
+  The endpoint of a [controller](agents.md#the-controller-a-session-you-started-yourself)
+  closes by itself once its session has been gone for the queue time with nothing
+  waiting on it.
+- A Claude Code controller is woken on macOS only, because the Claude adapter is macOS
+  only (Windows was not tested). A Codex controller is woken within about 10 seconds, and
+  not after you press Esc until your next turn completes.
 - Neither adapter can interrupt a running turn. Closing a Codex session that is in the
   middle of a turn is not confirmed until the turn ends.
 - A `send` from an agent session takes one recipient. The console's `send` takes a

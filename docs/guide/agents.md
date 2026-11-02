@@ -6,12 +6,16 @@ person who sets agents up. The same rules, written as instructions for an agent,
 are in [`docs/agent-guide.md`](../agent-guide.md), which you can give to an agent
 as it is.
 
-An agent uses Sidera in one of two ways:
+An agent uses Sidera in one of three ways:
 
 - **Inside a Sidera session.** Sidera started the session from a preset. The
   session has a credential (`SIDERA_TOKEN`) and talks to its node through the
   `sidera` MCP tools, or through the `sidera` command where its sandbox allows
   it. Everything below applies.
+- **As a controller.** A Claude Code or Codex session you opened yourself, with the
+  `sidera` MCP server added once, attaches itself to the node and gets its own
+  endpoint. It uses the same tools as a session Sidera started; see
+  [The controller](#the-controller-a-session-you-started-yourself).
 - **As the owner's console.** Anything you or another program starts from a
   terminal uses `sidera-adapter-console`, which sends from the owner endpoint on
   the node. It has `new`, `send`, `reply`, `recv`, `status` and `whoami`; see
@@ -21,12 +25,12 @@ An agent uses Sidera in one of two ways:
   `sidera endpoint list --instance <runtime>` on that machine.
   In a script, `sidera endpoint list --json` prints
   `{"result":{"endpoints":[...]}}`, and the console's `recv --wait` accepts at most
-  30 seconds. A session you started by hand and use to direct others is a
-  controller; see [The controller](#the-controller-a-session-you-started-yourself).
+  30 seconds.
 
-An agent that was not started by Sidera has no session credential, so
-`sidera recv`, `sidera send` and the other agent commands fail with
-`unauthenticated/token_missing`. It can still use the console client.
+A program that is neither a Sidera session nor a controller, such as a script or a
+plain terminal, has no session credential, so `sidera recv`, `sidera send` and the
+other agent commands fail with `unauthenticated/token_missing`. It can still use the
+console client.
 
 ## The tools
 
@@ -151,60 +155,98 @@ that hosts it.
 ## The controller: a session you started yourself
 
 Usually you open Claude Code or Codex in a terminal yourself, and that session
-directs the others. It is the **controller**. Sidera did not create it, so in
-0.8.0 it has no endpoint of its own and nothing wakes it when a message arrives.
+directs the others. It is the **controller**. Sidera did not create it, but it can
+give it an endpoint of its own on the node: the controller then uses the same tools
+as a session Sidera started and is woken when a reply arrives.
 
-What a controller has to do today:
+**Set it up once.** `sidera setup controller` prints the two commands that add the
+`sidera` MCP server to Claude Code and to Codex. It runs nothing and changes no
+configuration; you run the one you need.
 
-- **Direct through the owner's console.** It starts and instructs sessions with
-  `sidera-adapter-console new|send`, as in the sections above.
-- **Read the replies itself.** A reply comes back to the console's owner
-  endpoint, not to the controller, and does not wake it. The controller has to
-  read it, typically by running `sidera-adapter-console recv --wait 30` in a loop
-  in the background, or as a background task if its runtime has one. The console's
-  `recv` acknowledges what it printed, so the loop only has to keep running and
-  its output has to be read.
+```text
+Run these once. This command only prints them; it changes no configuration.
 
-  macOS and Linux:
+Claude Code, for every session of your user:
+  claude mcp add --scope user sidera -- sidera mcp
 
-  ```sh
-  while true; do sidera-adapter-console recv --wait 30 >> ~/sidera-inbox.txt 2>> ~/sidera-inbox.err || sleep 5; done &
-  echo $! > ~/sidera-inbox.pid
-  ```
+Codex, in your user configuration (~/.codex/config.toml):
+  codex mcp add sidera -- sidera mcp
 
-  PowerShell:
+With the server added, a session you open attaches itself to this node the first time it uses a Sidera tool, and can then send and receive messages like any Sidera session.
+```
 
-  ```powershell
-  $inbox = Start-Job { while ($true) { sidera-adapter-console recv --wait 30 2>> $HOME\sidera-inbox.err | Add-Content $HOME\sidera-inbox.txt; if ($LASTEXITCODE) { Start-Sleep 5 } } }
-  ```
+From then on, nothing else is needed. Open a Claude Code or Codex session as you
+always do and ask it to use Sidera. Its credential comes from the node, so you do not
+set `SIDERA_TOKEN`.
 
-  Then read the file, for example `tail ~/sidera-inbox.txt`, whenever you expect
-  an answer. `--wait` is at most 30 seconds. A `recv` that waits and finds nothing
-  exits 0 and writes `no messages` to standard error, so that line, repeated, is
-  normal in `sidera-inbox.err`. A `recv` that fails (the daemon is down,
-  `SIDERA_HOME` names a directory whose daemon is not running) exits 1 at once with an error line there, and
-  the loop sleeps 5 seconds before it tries again. When nothing arrives, read
-  `sidera-inbox.err`: any line other than `no messages` means the loop is not
-  working.
+- **It attaches on first use.** The first Sidera tool the session calls (or the first
+  `sidera` agent command it runs) gives it an endpoint, named
+  `Claude controller (<directory>)` or `Codex controller (<directory>)`, after the
+  directory the session runs in. Other agents see it under that name in `directory`.
+  A session that never uses Sidera gets no endpoint. The node must have the
+  matching adapter enabled (`claude` or `codex`); without it the tool fails with
+  `not_found/instance_unknown`.
+- **It has the ordinary tools.** `directory`, `peers`, `control`, `send`, `reply`,
+  `recv`, `ack` and `status` work as in the sections above, including starting
+  sessions on other machines with `control ... session.create`. Use these rather than
+  the owner's console: the console is for you, not for the controller.
+- **It is woken when a reply arrives.** A reply to a message the controller sent
+  reaches the controller itself, as a short notice that messages are waiting, and it
+  reads them with `recv` and `ack` as any session does. The first result of a Sidera
+  tool after the attachment tells the model whether the node can wake it. The node
+  paces its wake-ups: a reply that arrives within 2 minutes of the last wake-up waits
+  for the rest of that interval, unless the controller reads it in the turn the
+  earlier wake-up started.
 
-  The loop never ends by itself. Run one loop per console, that is per node (for a
-  node with its own `SIDERA_HOME`, start its loop with that variable set and files
-  of its own), and stop it when every task has replied:
-  `kill "$(cat ~/sidera-inbox.pid)"`, or `Stop-Job $inbox; Remove-Job $inbox` in
-  the PowerShell session that started it (a job ends with its session).
-- **Read promptly.** A message nobody reads within the endpoint's queue time (30
-  minutes by default; see
-  [deadlines](../references/delivery/README.md#deadlines-and-retention)) is
-  rejected back to its sender as `backlog_expired`. The work was done and the
-  report is lost.
-- **Share the inbox with care.** The console inbox belongs to everything on that
-  node that uses the console. Run one reader at a time, or let each reader handle
-  only the messages whose `from` is a session it created itself.
+  | Runtime | The wake-up arrives |
+  | ------- | ------------------- |
+  | Claude Code | within about a second |
+  | Codex | within about 10 seconds when idle; after the running turn ends when busy |
 
-A session that Sidera itself created on the controller's request has its own
-endpoint and is woken when a message arrives, so work between such sessions needs
-no polling. Giving a session you started yourself its own endpoint and wake-up is
-planned.
+  Those are the times from the moment the node decides to wake the session; the pacing
+  above comes first when a wake-up has just been sent.
+
+- **Replies wait for it.** A message to the controller waits for the endpoint's queue
+  time (30 minutes by default; see
+  [deadlines](../references/delivery/README.md#deadlines-and-retention)) and is then
+  rejected back to its sender as `backlog_expired`, so the sender is told. You can
+  raise the time to the protocol's cap of 2 hours with
+  `sidera endpoint set <address> max_queue_s=7200`.
+- **The endpoint closes by itself after the controller is gone.** The `sidera` MCP
+  server tells the node every minute that the session is alive. When the session has
+  been gone for the queue time (never less than 3 minutes) and nothing is waiting on the
+  endpoint, the node closes it. The node counts only the time it was awake, so a machine
+  that sleeps does not close its controllers. A session that used Sidera only through
+  `sidera` commands tells the node once per command, with what the node needs to wake it,
+  so it can be woken; but nothing repeats that between commands, so its endpoint closes a
+  queue time after its last command when nothing is waiting on it. On Claude Code the node
+  keeps the wake information in memory only, so after the node restarts such a session
+  cannot be woken until its next command; it can still call `recv` with a wait inside a
+  turn.
+- **A closed endpoint is replaced, not reopened.** If the endpoint of a controller is
+  closed (you closed it, or the node did) the session's next Sidera tool call or command
+  attaches it again with a new endpoint, and the tool's result tells the model the new
+  address and that the old one is closed.
+- **A resumed session picks up what waited.** A Claude Code session you resume is
+  woken at once for what arrived while it was away, because its MCP server looks for
+  its endpoint when it starts. A resumed Codex session is woken after its first
+  Sidera tool call. In both cases the wake-up is sent as soon as the session attaches,
+  without the wait that follows a failed wake-up.
+
+What to know about the wake-up:
+
+- If the node cannot wake the session, the notice says why and tells the model to call
+  `recv` with a wait (`wait_s`) inside a turn to collect replies. Without a wake-up,
+  nothing interrupts the session when a reply arrives.
+- The Claude Code adapter runs on macOS only, so a Claude Code controller is woken
+  on macOS only; Windows was not tested. A controller running in Claude Code's
+  bypass-permissions mode may hold a wake-up for approval; this could not be checked.
+- Codex holds a wake-up after you press Esc in the terminal until your next turn
+  completes, and an active `/goal` can delay it.
+
+The owner's console, `sidera-adapter-console`, remains for you. It sends and reads from
+the owner endpoint, which is yours, not the controller's: a reply to a message the
+controller sent with its own tools comes back to the controller.
 
 ## Writing the preset's instructions
 

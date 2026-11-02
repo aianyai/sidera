@@ -36,6 +36,9 @@ Sidera 0.8.0 is the first public release.
 - Codex on macOS, Linux and Windows.
 - Creating a session on another machine and exchanging messages with it.
 - The console bridge: the owner starts sessions and reads replies from a terminal.
+- A Claude Code or Codex session you opened yourself becomes a controller with an
+  endpoint of its own, and is woken when a reply arrives (a Claude Code controller is
+  woken on macOS only, because the Claude adapter is macOS only).
 - Dynamic adapter install, replace, configuration and removal, while Sidera runs.
 
 **Planned**
@@ -60,7 +63,6 @@ Sidera 0.8.0 is the first public release.
   - Managing nodes from other devices, in bulk, including commands that wait for a
     node that is offline.
 - Agents
-  - A session you started yourself as a full endpoint, woken when a reply arrives.
   - Replies to you that wait until you read them, instead of expiring after the
     queue time.
   - Interrupting a running turn, on Claude Code and Codex.
@@ -107,11 +109,14 @@ sidera-adapter-console new <runtime-address-on-b> --preset light --body 'Say hel
 sidera-adapter-console recv --wait 30
 ```
 
-When you direct agents from a Claude Code or Codex session you started yourself, that
-session is the controller. Sidera did not create it, so nothing wakes it when a reply
-arrives: it has to keep reading the console, for example with
-`sidera-adapter-console recv --wait 30` in a background loop, or a reply that waits
-longer than the queue time (30 minutes by default) is rejected. See
+To direct agents from a Claude Code or Codex session you opened yourself, make it a
+controller. Run `sidera setup controller` once; it prints the commands that add the
+`sidera` MCP server to Claude Code or Codex and changes nothing itself. From then on,
+a session you open attaches itself the first time it uses a Sidera tool (no token to
+set), gets an endpoint of its own, uses the same tools as Sidera's own sessions, and
+is woken when a reply arrives: within about a second on Claude Code, within about 10
+seconds on Codex, after the node's pacing of wake-ups (a reply within 2 minutes of the
+last wake-up waits for the rest of that interval unless the session reads it in its turn). See
 [The controller](docs/guide/agents.md#the-controller-a-session-you-started-yourself).
 
 The preset decides what the agent may do. The guide starts with a `light` preset for

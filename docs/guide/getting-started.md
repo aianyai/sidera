@@ -392,8 +392,8 @@ sidera endpoint list --instance codex
 the address of the `runtime` row whose `STATE` is `open`. An address is
 `<node-id>/<endpoint-id>`. Give it to A. (An agent can find the same address with
 `sidera directory --node <node-id-b>`; that command works only inside an agent
-session. For the owner on A there is no directory command, so ask B's owner or
-read it on B.)
+session, including a [controller](agents.md#the-controller-a-session-you-started-yourself).
+For the owner on A there is no directory command, so ask B's owner or read it on B.)
 
 In a script, `sidera endpoint list --json` prints `{"result":{"endpoints":[...]}}`: the
 rows are under `result.endpoints`, not a bare list.
@@ -443,6 +443,9 @@ Sessions do not close by themselves. When you are done with one, run
 
 - [Working with agents](agents.md): how agents send, receive and start sessions on
   other machines, and what to put in presets.
+- [The controller](agents.md#the-controller-a-session-you-started-yourself): let a
+  Claude Code or Codex session you open yourself direct the others, and be woken when
+  they reply.
 - [Operations](operations.md): health checks, upgrades, backups and troubleshooting.
 - Or give [`docs/agent-guide.md`](../agent-guide.md) to your own agent and let it
   do the setup.
