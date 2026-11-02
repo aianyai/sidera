@@ -362,38 +362,51 @@ func TestAttachedHumanTurns(t *testing.T) {
 // quick only while something is waited for: a prompt of the adapter's own, queued
 // or taken and not yet seen, or a turn that is open. Queueing a prompt ends the
 // slow wait at once.
+//
+// The slow wait is far longer than the test, so a reading that comes while nothing
+// is awaited can only be the quick pace's, and the quick pace is shown by readings
+// that keep coming unprompted, which only it can bring. How many come in a window
+// depends on the machine's timers and scheduler, so no rate is asserted.
 func TestAttachedReadingPaceFollowsWhatIsAwaited(t *testing.T) {
 	codex := newFakeCodex(t)
 	owner := newFakeOwner(t, codex)
 	h := newHarnessWith(t, codex, func(o *adapter.Options) {
-		o.AttachPollEvery, o.AttachIdlePollEvery = 20*time.Millisecond, 400*time.Millisecond
+		o.AttachPollEvery, o.AttachIdlePollEvery = 20*time.Millisecond, time.Hour
 	})
 	h.start()
 	th := owner.add(&ownedThread{id: "th-a"})
 	h.mustAttach(sessionEP, "th-a")
-	readings := func(window time.Duration) int {
-		before := len(codex.callsOf("thread/turns/list"))
-		time.Sleep(window)
-		return len(codex.callsOf("thread/turns/list")) - before
+	readings := func() int { return len(codex.callsOf("thread/turns/list")) }
+	// quick fails unless n more readings come, one after another, without being asked.
+	quick := func(n int, what string) {
+		t.Helper()
+		target := readings() + n
+		deadline := time.Now().Add(10 * time.Second)
+		for readings() < target {
+			if time.Now().After(deadline) {
+				t.Fatalf("fewer than %d readings in 10s %s", n, what)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
-	if n := readings(800 * time.Millisecond); n > 4 {
-		t.Fatalf("%d readings in 800ms of an idle thread", n)
+	quiet := func(what string) {
+		t.Helper()
+		before := readings()
+		time.Sleep(500 * time.Millisecond)
+		if n := readings() - before; n != 0 {
+			t.Fatalf("%d readings in 500ms %s", n, what)
+		}
 	}
+	quiet("of an idle thread")
 	h.deliverTo(sessionEP, attempt1, "hello")
-	if n := readings(300 * time.Millisecond); n < 8 {
-		t.Fatalf("%d readings in 300ms with a prompt queued", n)
-	}
+	quick(5, "with a prompt queued")
 	owner.take(th, "t1")
 	h.waitNote(adapterproto.MethodTurnStarted, turnIs("t1"))
-	if n := readings(300 * time.Millisecond); n < 8 {
-		t.Fatalf("%d readings in 300ms with a turn open", n)
-	}
+	quick(5, "with a turn open")
 	owner.finish(th, "t1", "completed")
 	h.waitNote(adapterproto.MethodTurnEnded, turnIs("t1"))
-	readings(500 * time.Millisecond) // the pace is chosen after a reading
-	if n := readings(800 * time.Millisecond); n > 4 {
-		t.Fatalf("%d readings in 800ms after the turn ended", n)
-	}
+	time.Sleep(200 * time.Millisecond) // the pace is chosen after a reading
+	quiet("after the turn ended")
 }
 
 // A turn that shows no start is counted from when the adapter first saw it, so that
