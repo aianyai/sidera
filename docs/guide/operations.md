@@ -335,7 +335,7 @@ stays behind with nothing to use it. Ending it ends any turn that runs in it.
   the one whose command line shows this node's directory.
 
   ```sh
-  ps -axo pid,command | grep '[a]pp-server --listen unix://.*adapter-state'
+  ps -axo pid,command | grep "[a]pp-server --listen unix://${SIDERA_HOME:-$HOME/.sidera}/adapter-state"
   kill <pid>
   ```
 

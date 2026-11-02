@@ -97,8 +97,17 @@ be ended too (step 4).
 
    Codex works on all three platforms; Claude Code only on macOS. At least one of
    them must be installed and signed in as the owner. Check: the command prints a
-   path. If neither is found, tell your owner and stop; Sidera still runs without
-   an agent but has nothing to start.
+   path. If neither is found, try an interactive shell, which reads the profile
+   that a shell over `ssh` or a tool's shell may skip:
+
+   ```sh
+   "$SHELL" -i -c 'command -v codex claude'
+   ```
+
+   If that prints a path, the runtime is installed but its directory is not on
+   this shell's `PATH`: add that directory to `PATH` for every command below and
+   for the daemon (step 4). If neither is found there either, tell your owner and
+   stop; Sidera still runs without an agent but has nothing to start.
 
 3. Check that port 7744 is free.
 
@@ -344,11 +353,13 @@ To stop the daemon, run `sidera daemon stop`. It leaves the **Codex App Server**
 running, by design: the Codex adapter starts it detached so that a running turn
 survives a restart of the daemon. Before you delete a data directory, end it, after
 the daemon has stopped. On macOS and Linux, find the process whose command line
-names this node's `adapter-state` directory and end it (do not touch an App Server
-of the owner's own Codex):
+names this node's `adapter-state` directory and end it. The command below matches
+only the node whose data directory `SIDERA_HOME` names (an absolute path), or
+`~/.sidera` when it is unset; do not touch an App Server of another node or of the
+owner's own Codex:
 
 ```sh
-ps -axo pid,command | grep '[a]pp-server --listen unix://.*adapter-state'
+ps -axo pid,command | grep "[a]pp-server --listen unix://${SIDERA_HOME:-$HOME/.sidera}/adapter-state"
 kill <pid>
 ```
 
