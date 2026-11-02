@@ -26,10 +26,10 @@ test, the crash walks of `internal/node/store` included.
 | `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
 | `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
-| `crashwalk` | Linux (3 shards), macOS (2), Windows (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
+| `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
-| `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
-| `release-dry-run` | Linux | `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, then `sha256sum -c checksums.txt` in that directory and a check that it names five archives; nothing is published |
+| `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64 |
+| `release-dry-run` | Linux | `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
 
 Limits of every job, in minutes. `go test -timeout` is set a few minutes under
 the job's limit so that a hang ends with the goroutine dump of the test binary:
@@ -40,19 +40,19 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | `test` | 3 | 40 | 30m per test step; benchmarks 10m, 10m, 30m |
 | `test-tags` | 3 | 40 | 30m per step |
 | `acceptance` | 3 | 30 | 25m |
-| `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
+| `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
 | `sdk-standalone` | 1 | 15 | go default |
-| `cross-compile` | 5 | 15 | none |
+| `cross-compile` | 6 | 15 | none |
 | `release-dry-run` | 1 | 20 | none |
 
-A push to `main` or a pull request starts 17 jobs, three of them on macOS; a
-manual dispatch adds the nine `crashwalk` jobs, 26 in all, five of them on macOS.
+A push to `main` or a pull request starts 18 jobs, three of them on macOS; a
+manual dispatch adds the nine `crashwalk` jobs, 27 in all, five of them on macOS.
 GitHub limits how many jobs of a plan run at once, macOS jobs more tightly than
 the others, so some of them may wait for a runner.
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
-five platforms are the ones Sidera ships binaries for.
+six platforms are the ones Sidera ships binaries for.
 
 ### Build tags
 
@@ -170,7 +170,9 @@ To cut a release:
    `git push origin v<version>`.
 4. The workflow leaves the release as a draft. Download its archives, check them
    against `checksums.txt` and install them on each platform; then publish it with
-   `gh release edit v<version> --draft=false`.
+   `gh release edit v<version> --draft=false`. The windows/arm64 archive is checked
+   on an Arm Windows machine when one is at hand; otherwise it relies on the CI
+   jobs on the `windows-11-arm` runner.
 
 `release.yml` checks out the tag, installs Go as `ci.yml` does, takes the release
 notes from the changelog (a tag without a section fails here, before anything is
@@ -184,7 +186,7 @@ on `main`.
 `scripts/release.sh <version> <outdir>` builds, with `CGO_ENABLED=0` and the
 version stamped into every program (see
 [`internal/release`](../../../internal/release/README.md)), for darwin/arm64,
-darwin/amd64, linux/amd64, linux/arm64 and windows/amd64: `sidera`,
+darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64: `sidera`,
 `sidera-adapter-codex` and `sidera-adapter-console`, and `sidera-adapter-claude` on
 darwin only, since its manifest lists darwin only. Each adapter's `package`
 subcommand then writes its package, which is where a package gets the release
@@ -195,7 +197,7 @@ client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 
 | File | Holds |
 | ---- | ----- |
-| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), five of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
@@ -204,7 +206,7 @@ does not report the version it was given.
 `THIRD_PARTY_NOTICES` is written by `scripts/third-party-notices.sh` before anything
 is built, and every archive holds the same file. It lists the Go standard library
 and every module that `go list -deps` reports for the four programs
-(`sidera` and the three adapters) on all five platforms, built with
+(`sidera` and the three adapters) on all six platforms, built with
 `CGO_ENABLED=0` as the release is, so a module that only one platform or one
 program links is listed. For each it gives the path, the version, the name of the
 licence and the text of every licence file (`LICENSE*`, `COPYING*`) and notice file
@@ -296,7 +298,7 @@ to the workflow.
   points. It is split over shards so that no job's limit has to hold a whole
   platform's walk, and the shard counts differ by platform because the cost of a
   rerun is expected to: starting processes is slowest on Windows. The counts
-  (Linux 3, macOS 2, Windows 4) and the limits were estimated from the expected
+  (Linux 3, macOS 2, Windows x64 4) and the limits were estimated from the expected
   number of reruns, not measured: the first run of the workflow is the first
   measurement (see below).
 - **The walk of the binary runs on demand, not on every push**: the full walk
@@ -408,7 +410,7 @@ to the workflow.
   `sdk/go/go.mod` keeps its own, lower minimum: it is a published module and does
   not depend on go-winio, which is what raises the root module's minimum. Module
   and build caches are keyed on every `go.sum` in the tree. The cross-compile
-  matrix does not use the cache, because its five jobs would try to save the same
+  matrix does not use the cache, because its six jobs would try to save the same
   entry.
 
 ### Observed baseline
@@ -510,12 +512,12 @@ SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=1/3 go test -count=1 -v -timeout 40
 
 (cd sdk/go && GOWORK=off go build ./... && GOWORK=off go test ./... && GOWORK=off go mod tidy -diff)
 
-# the release archives: five platforms into an empty directory, then the changelog section
+# the release archives: six platforms into an empty directory, then the changelog section
 dist=$(mktemp -d)
 scripts/release.sh 0.8.0 "$dist" && (cd "$dist" && shasum -a 256 -c checksums.txt)
 scripts/release-notes.sh 0.8.0
 
-for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
+for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
   CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go build ./... ./sdk/go/... || echo "build failed: $p"
 done
 ```

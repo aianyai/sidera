@@ -17,7 +17,7 @@ func TestManifestAndCapabilitiesAreValid(t *testing.T) {
 	if !Capabilities().Runtime.Attach {
 		t.Error("the adapter does not declare attach")
 	}
-	for _, p := range [][2]string{{"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}} {
+	for _, p := range [][2]string{{"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}, {"windows", "arm64"}} {
 		raw, err := manifest.Encode(Manifest(p[0], p[1]))
 		if err != nil {
 			t.Fatalf("%v: %v", p, err)

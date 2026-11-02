@@ -10,6 +10,8 @@ protocol has a version of its own.
 
 ### Added
 
+- **A Windows arm64 package.** A release carries `sidera_<version>_windows_arm64.zip` beside
+  the five archives it had, with the Codex and console adapter packages for windows/arm64.
 - **Adapter protocol: attached sessions.** An adapter can declare the runtime capability
   `attach` and take hold of a session a person opened: the new request `session.attach`, the
   notification `session.detached` and the `attached` and `wake` members of an `adapter.start`

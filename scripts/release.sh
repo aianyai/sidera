@@ -16,7 +16,7 @@
 set -euo pipefail
 
 module=github.com/aianyai/sidera
-platforms="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64"
+platforms="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
 # The adapters, each shipped as a package. The Claude adapter's manifest lists the
 # darwin platforms only (cmd/sidera-adapter-claude), so it is built for those.
 adapters="claude codex console"

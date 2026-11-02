@@ -663,8 +663,8 @@ go build -o <binary> ./cmd/sidera-adapter-codex   # with GOOS and GOARCH set
 ```
 
 writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-codex` (with `.exe`
-for Windows) through `manifest.WritePackage`, which every adapter's `package` shares. The platforms are `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64` and
-`windows/amd64`. The version in the manifest, in `initialize` and in the client information sent to
+for Windows) through `manifest.WritePackage`, which every adapter's `package` shares. The platforms are `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`,
+`windows/amd64` and `windows/arm64`. The version in the manifest, in `initialize` and in the client information sent to
 the App Server is the release version (`internal/release`; a build without it is `0.0.0-dev`), and
 `<binary> version` prints it with the commit and the Go version. Receive budgets are 8000 tokens for both front ends (Codex cuts a tool
 result at 10,000 tokens and counts CJK text conservatively); a receive through MCP waits

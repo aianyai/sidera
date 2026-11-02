@@ -106,8 +106,8 @@ constants `initialize` answers from (the version is the release version), so the
 is `["serve"]`, and it declares no budgets (a direct endpoint takes the default)
 and no configuration. The directory must be new or empty (checked here; the files
 are written by `manifest.WritePackage`, which every adapter's `package` shares). The supported platforms are the
-five the project builds for: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64
-and windows/amd64.
+six the project builds for: darwin/arm64, darwin/amd64, linux/amd64, linux/arm64,
+windows/amd64 and windows/arm64.
 
 ```
 go build -o /tmp/console ./cmd/sidera-adapter-console

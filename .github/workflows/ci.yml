@@ -288,6 +288,7 @@ jobs:
           - {goos: linux, goarch: amd64}
           - {goos: linux, goarch: arm64}
           - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: arm64}
     env:
       CGO_ENABLED: "0"
       GOOS: ${{ matrix.goos }}
@@ -296,7 +297,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The five matrix jobs would race to save one identical cache entry.
+      # The matrix jobs would race to save one identical cache entry.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -324,8 +325,8 @@ jobs:
           cache-dependency-path: "**/go.sum"
       - name: scripts/release.sh
         run: scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"
-      - name: checksums.txt verifies and names the five archives
+      - name: checksums.txt verifies and names the six archives
         working-directory: ${{ runner.temp }}/dist
         run: |
           sha256sum -c checksums.txt
-          test "$(wc -l < checksums.txt)" -eq 5
+          test "$(wc -l < checksums.txt)" -eq 6

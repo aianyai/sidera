@@ -88,8 +88,10 @@ be ended too (step 4).
    uname -sm            # macOS and Linux
    ```
 
-   On Windows, run `$env:PROCESSOR_ARCHITECTURE` in PowerShell. Supported:
-   macOS (arm64, amd64), Linux (amd64, arm64), Windows (amd64).
+   On Windows, run `(Get-CimInstance Win32_Processor).Architecture` in PowerShell:
+   `9` is amd64 and `12` is arm64. Do not use `$env:PROCESSOR_ARCHITECTURE`: an
+   x64 PowerShell running under emulation on Arm reports `AMD64`. Supported:
+   macOS (arm64, amd64), Linux (amd64, arm64), Windows (amd64, arm64).
 
 2. Find which agent runtime this machine has and whether the daemon will find it.
 
@@ -152,7 +154,8 @@ Choose A (release archive) or B (source).
 1. Download the archive for your platform and `checksums.txt` from
    <https://github.com/aianyai/sidera/releases>. The archive is named
    `sidera_<version>_<os>_<arch>.tar.gz`, `.zip` on Windows, with `<os>` one of
-   `darwin`, `linux`, `windows` and `<arch>` one of `arm64`, `amd64`. With the
+   `darwin`, `linux`, `windows` and `<arch>` one of `arm64`, `amd64`: the architecture
+   you found in 1.1. With the
    GitHub CLI:
 
    ```sh
@@ -164,7 +167,7 @@ Choose A (release archive) or B (source).
    ```sh
    shasum -a 256 -c checksums.txt --ignore-missing     # macOS
    sha256sum -c checksums.txt --ignore-missing         # Linux
-   (Get-FileHash .\sidera_<version>_windows_amd64.zip -Algorithm SHA256).Hash   # Windows: compare with checksums.txt
+   (Get-FileHash .\sidera_<version>_windows_<arch>.zip -Algorithm SHA256).Hash   # Windows: compare with checksums.txt
    ```
 
    Expected: `OK` for the archive. If not, delete it and download again. Never
@@ -191,7 +194,7 @@ Choose A (release archive) or B (source).
    Windows (PowerShell):
 
    ```powershell
-   Expand-Archive .\sidera_<version>_windows_amd64.zip -DestinationPath $env:USERPROFILE\sidera-release
+   Expand-Archive .\sidera_<version>_windows_<arch>.zip -DestinationPath $env:USERPROFILE\sidera-release
    New-Item -ItemType Directory -Force $env:USERPROFILE\sidera\bin | Out-Null
    Copy-Item $env:USERPROFILE\sidera-release\*.exe $env:USERPROFILE\sidera\bin\
    [Environment]::SetEnvironmentVariable('Path', "$([Environment]::GetEnvironmentVariable('Path','User'));$env:USERPROFILE\sidera\bin", 'User')

@@ -10,10 +10,13 @@ with [Getting started](getting-started.md).
 | -------- | ------------- | ----------------------- |
 | macOS | arm64, amd64 | Claude Code, Codex |
 | Linux | amd64, arm64 | Codex |
-| Windows | amd64 | Codex |
+| Windows | amd64, arm64 | Codex |
 
 The adapter for Claude Code is built for macOS only. On Linux and Windows a
-node can still carry messages and run Codex sessions.
+node can still carry messages and run Codex sessions. A Windows on Arm machine
+takes the arm64 archive (the commands below name the amd64 one); Settings >
+System > About shows it as "System type", or in PowerShell
+`(Get-CimInstance Win32_Processor).Architecture` is 12 for ARM64.
 
 Sidera does not install the agents themselves. To drive one, install it first
 and log in once as yourself:

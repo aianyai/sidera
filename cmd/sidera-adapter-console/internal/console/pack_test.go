@@ -11,7 +11,7 @@ import (
 )
 
 func TestEveryTargetGetsAManifestTheDaemonAccepts(t *testing.T) {
-	for _, p := range [][2]string{{"darwin", "arm64"}, {"darwin", "amd64"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}} {
+	for _, p := range [][2]string{{"darwin", "arm64"}, {"darwin", "amd64"}, {"linux", "amd64"}, {"linux", "arm64"}, {"windows", "amd64"}, {"windows", "arm64"}} {
 		t.Run(p[0]+"/"+p[1], func(t *testing.T) {
 			bin := filepath.Join(t.TempDir(), "built")
 			if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {

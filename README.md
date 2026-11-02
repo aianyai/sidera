@@ -79,8 +79,7 @@ Sidera 0.8.0 is the first public release.
   - Upgrades in place, diagnostics and metrics.
   - Detecting a node restored from an old backup or running twice, and stopping it
     from acting until the owner confirms.
-  - Packages for Windows on arm64; signed release archives, a Homebrew tap and
-    `go install`.
+  - Signed release archives, a Homebrew tap and `go install`.
 
 ## Quick start
 
