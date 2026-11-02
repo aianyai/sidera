@@ -37,6 +37,9 @@ and its bound values. A local value stays attached, including a body spelled
   commands use the common management path in `manage.go`.
 - `export.go`: verified online export, the precise missing-daemon offline
   fallback, and writing a new private copy through `fsx.CreatePrivateFile`.
+- `setup.go`: `setup controller`, which prints the commands that add the `sidera` MCP server to
+  Claude Code and Codex and does nothing else. A data directory that is not the default is named
+  in them by `--home`: the client's environment for the server may not carry `SIDERA_HOME`.
 - `help.go`: usage, purpose and example for every command.
 
 Agent flags are assembled into presence-preserving objects for `Client.Call`;

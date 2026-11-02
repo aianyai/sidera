@@ -14,10 +14,6 @@ import (
 	"github.com/aianyai/sidera/internal/release"
 )
 
-type nopWriteCloser struct{ io.Writer }
-
-func (nopWriteCloser) Close() error { return nil }
-
 // A machine that still has the data directory where earlier versions kept it is
 // refused by every command that uses the directory, with the way to move it; the
 // commands that use none keep working.
