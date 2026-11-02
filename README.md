@@ -40,13 +40,45 @@ Sidera 0.8.0 is the first public release.
 
 **Planned**
 
-- NAT traversal and relays, to connect across the internet and behind routers.
-- Inherited trust: trust that reaches one step further.
-- People and remote management of nodes from other devices.
-- Chat adapters, so you can talk to your agents from a chat app.
-- Installing the daemon as a background service that starts at boot.
-- Claude Code on Linux and Windows.
-- Messages to several recipients.
+- Connecting machines
+  - NAT traversal and relays, one or more, to connect across the internet and
+    behind routers.
+  - Nodes that learn each other's addresses by themselves: on the local network,
+    and from the nodes they trust.
+  - Reconnecting by itself after a node restarts.
+- Trust
+  - Pairing confirmed by comparing a verification code on both machines.
+  - Inherited trust: trust that reaches one step further, kept up by the node in
+    between and paused while that node is offline.
+  - Removing trust that reaches the network: the other node is told, and the trust
+    that depended on it is withdrawn.
+  - Policy rules: the owner decides which nodes may message or start sessions on
+    which endpoints, and how often.
+- People and management
+  - People with their own keys and devices, and the level at which each may manage
+    a node.
+  - Managing nodes from other devices, in bulk, including commands that wait for a
+    node that is offline.
+- Agents
+  - A session you started yourself as a full endpoint, woken when a reply arrives.
+  - Replies to you that wait until you read them, instead of expiring after the
+    queue time.
+  - Interrupting a running turn, on Claude Code and Codex.
+  - Sandboxed sessions that still send and receive, and an operating-system sandbox
+    for Claude Code.
+  - Approval and input requests an agent raises that its preset does not allow are
+    refused at once, so a turn never hangs.
+  - Claude Code on Linux and Windows.
+  - Chat adapters, so you can talk to your agents from a chat app.
+- Messages
+  - Messages to several recipients.
+- Running Sidera
+  - Installing the daemon as a background service that starts at boot.
+  - Upgrades in place, diagnostics and metrics.
+  - Detecting a node restored from an old backup or running twice, and stopping it
+    from acting until the owner confirms.
+  - Packages for Windows on arm64; signed release archives, a Homebrew tap and
+    `go install`.
 
 ## Quick start
 
