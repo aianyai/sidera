@@ -323,7 +323,9 @@ func TestOwnIdentityCertificateClosesTheConnection(t *testing.T) {
 	twin.setMembership(1, a)
 	twin.knows(a)
 
-	twin.dialRaw(a)
+	// Either side may close the connection as soon as the exchange shows it the
+	// other's certificate, before the dial's caller could look the connection up.
+	twin.dial(a)
 	eventually(t, "the log to name the second instance", func() bool {
 		return strings.Contains(a.log.String(), "another instance uses this node's identity")
 	})

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	lnet "github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	ma "github.com/multiformats/go-multiaddr"
@@ -349,10 +350,12 @@ func (p *peerNode) knows(others ...*peerNode) {
 	}
 }
 
-// dialRaw connects to the other node with the library's own dial, bypassing the
-// router's rule that only a member is called, and returns this side's entry of
-// the connection once its exchange has an outcome.
-func (p *peerNode) dialRaw(other *peerNode) *connEntry {
+// dial connects to the other node with the library's own dial, bypassing the
+// router's rule that only a member is called. The exchange starts as the dial
+// returns and may already have closed the connection when the caller looks, so a
+// test of a connection the exchange refuses dials with this and watches the
+// outcome rather than the entry.
+func (p *peerNode) dial(other *peerNode) lnet.Conn {
 	p.t.Helper()
 	m, err := ma.NewMultiaddr(other.contact(true))
 	if err != nil {
@@ -366,7 +369,14 @@ func (p *peerNode) dialRaw(other *peerNode) *connEntry {
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	e := p.net.entryOf(c)
+	return c
+}
+
+// dialRaw is dial for a connection the exchange keeps open, and returns this
+// side's entry of it; its ready is closed once the exchange has an outcome.
+func (p *peerNode) dialRaw(other *peerNode) *connEntry {
+	p.t.Helper()
+	e := p.net.entryOf(p.dial(other))
 	if e == nil {
 		p.t.Fatal("the connection is not in the table")
 	}
