@@ -57,6 +57,26 @@ func (h *Host) NotifyPending(instance string, p adapterproto.PendingParams) {
 	}
 }
 
+// Attach sends session.attach. The wake information it carries is never logged.
+func (h *Host) Attach(ctx context.Context, instance string, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	return callAdapter[adapterproto.SessionAttachResult](ctx, h, instance, adapterproto.MethodSessionAttach, p)
+}
+
+// NotifyDetached sends session.detached. It is best effort, as NotifyPending is.
+func (h *Host) NotifyDetached(instance string, p adapterproto.SessionDetachedParams) {
+	c, err := h.serviceConn(instance)
+	if err != nil {
+		return
+	}
+	if err := p.Validate(); err != nil {
+		c.log.Warn("session.detached was not sent: the parameters are not valid", "err", err)
+		return
+	}
+	if err := c.p.Notify(context.Background(), adapterproto.MethodSessionDetached, p); err != nil {
+		c.log.Debug("session.detached was not sent", "err", err)
+	}
+}
+
 func callAdapter[R any, PR interface {
 	*R
 	adapterproto.Message

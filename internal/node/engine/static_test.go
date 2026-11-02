@@ -10,14 +10,15 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
-// A session endpoint comes only from a session creation: the engine has no
-// method that registers one, and a method that took or gave a record of one
-// would be the beginning of such a method. The list of the methods is the point
+// A session endpoint comes only from a session creation or from the owner's
+// attachment of a session a person opened: the engine has no method that registers
+// one, and a method that took or gave a record of one would be the beginning of
+// such a method. The list of the methods is the point
 // of review: a new method is added to it by a change that says what it is for.
 func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
 		"Ack", "Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
-		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
+		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "AttachSession", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
 		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "PairingClosed", "PairingFrame", "PairingOpened", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "TrustView", "UnregisterDirect",
 	}
@@ -95,7 +96,7 @@ func TestTheEnginesTransactionsAreInTheTableOfTheProgram(t *testing.T) {
 // The engine asks the adapter host for these things and no others; a new call is
 // added to the list by a change that says what it is for.
 func TestAdaptersListsWhatTheEngineAsksOfTheAdapterHost(t *testing.T) {
-	want := []string{"Close", "Counts", "CreateSession", "DeliverPrompt", "EnsureRunning", "Interrupt", "NotifyPending", "Reconcile", "Stop", "Stopping"}
+	want := []string{"Attach", "Close", "Counts", "CreateSession", "DeliverPrompt", "EnsureRunning", "Interrupt", "NotifyDetached", "NotifyPending", "Reconcile", "Stop", "Stopping"}
 	typ := reflect.TypeOf((*engine.Adapters)(nil)).Elem()
 	var got []string
 	for i := 0; i < typ.NumMethod(); i++ {

@@ -32,7 +32,8 @@ type AgentService interface {
 // are added as the engine learns to do them.
 //
 // Everything that changes state comes through Execute, the one door of the
-// administrative rules (manage.go); the others only read. ExportRevocation reads
+// administrative rules (manage.go), except the attachment of a session; the others
+// only read. ExportRevocation reads
 // the statement that retires the node, and is the one read that is not judged as a
 // read: the interface authorizes it as an operation of the owner's alone, and it
 // stores nothing.
@@ -47,6 +48,10 @@ type ManageService interface {
 	Presets(ctx context.Context) (config.Presets, error)
 	ExportRevocation(ctx context.Context) (RevocationExport, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
+	// AttachSession is the one request that changes state without coming through
+	// Execute: it is idempotent by its own key (attach.go) and repeated by design, so
+	// it carries no operation identifier and stores no result.
+	AttachSession(ctx context.Context, r AttachRequest) (AttachResult, error)
 	OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error)
 }
 

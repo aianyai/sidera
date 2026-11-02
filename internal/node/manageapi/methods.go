@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
@@ -122,7 +124,7 @@ func defaultMethods() (map[string]*method, error) {
 		adaptersInstall, adaptersList, adaptersEnable, adaptersConfig, adaptersDisable, adaptersRemove,
 		presetsList, presetsAdd, presetsRemove,
 		trustExpect, trustForget, trustReject, trustRequest, trustList, trustRemove, trustClear,
-		endpointsList, endpointsClose, endpointsSet, daemonStop, operationResult,
+		endpointsList, endpointsClose, endpointsSet, sessionsAttach, daemonStop, operationResult,
 	}
 	for _, m := range append(rows, testMethods()...) {
 		if err := checkRow(m); err != nil {
@@ -176,10 +178,14 @@ var endpointsList = &method{
 				if p.Instance != "" && v.Instance != p.Instance {
 					continue
 				}
-				out.Endpoints = append(out.Endpoints, endpointJSON{
+				j := endpointJSON{
 					Address: v.Address.String(), Kind: v.Kind.String(), Instance: v.Instance,
 					State: stateName(v.Status), Queued: v.Queued, Draining: v.Draining,
-				})
+				}
+				if v.Kind == adapterreg.KindSession {
+					j.Origin = v.Origin.String()
+				}
+				out.Endpoints = append(out.Endpoints, j)
 			}
 			return out, nil
 		}}, nil
@@ -193,6 +199,8 @@ type endpointJSON struct {
 	State    string `json:"state"`
 	Queued   int    `json:"queued"`
 	Draining bool   `json:"draining"`
+	// Origin is "created" or "attached", for a session endpoint only.
+	Origin string `json:"origin,omitempty"`
 }
 
 func stateName(s store.EndpointStatus) string {
@@ -235,6 +243,53 @@ var endpointsClose = &method{
 		})
 		return &plan{canonical: canonical(p), operation: op}, nil
 	},
+}
+
+// sessions.attach: attach a session a person opened to an enabled instance of its
+// adapter, and answer with the endpoint, the instance, the token of the endpoint and
+// whether the adapter can deliver prompts to the session (the wake state). It is the
+// one method whose answer carries a token. The request is idempotent by the instance
+// and the native session and is repeated by design, so it is no operation of the
+// engine's door: no operation identifier, no expected version, nothing stored. The wake
+// information is opaque, is never logged and is not part of any error.
+var sessionsAttach = &method{
+	name: "sessions.attach", op: admin.Operation{Kind: admin.OpAttachSession},
+	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			Adapter     string                `json:"adapter"`
+			Instance    string                `json:"instance,omitempty"`
+			NativeRef   string                `json:"native_ref"`
+			DisplayName string                `json:"display_name,omitempty"`
+			Wake        adapterproto.WakeInfo `json:"wake,omitempty"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		req := engine.AttachRequest{Adapter: p.Adapter, Instance: p.Instance, NativeRef: p.NativeRef, DisplayName: p.DisplayName, Wake: p.Wake}
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
+			res, err := svc.AttachSession(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			return attachJSON{
+				Endpoint: res.Endpoint.String(), Instance: res.Instance, Token: res.Token,
+				Wake: wakeJSON{State: res.Wake.State, Reason: res.Wake.Reason, Detail: res.Wake.Detail},
+			}, nil
+		}}, nil
+	},
+}
+
+type attachJSON struct {
+	Endpoint string   `json:"endpoint"`
+	Instance string   `json:"instance"`
+	Token    string   `json:"token"`
+	Wake     wakeJSON `json:"wake"`
+}
+
+type wakeJSON struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // daemon.stop: shut the daemon down normally, once the answer has been written.

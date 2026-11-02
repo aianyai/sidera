@@ -29,9 +29,12 @@ The methods are a table in `methods.go`, one row each: the name on the wire, the
 catalogue entry of the operation, and how the params are read. The owner of an
 operation adds a row (and its type in the engine); the handling of a request does
 not change. `operation.result` is one of the rows: a read of the result stored for an
-operation identifier of the requester.
+operation identifier of the requester. `sessions.attach` is the one row that changes state
+and is not replay protected: its plan is a `direct` call of the engine (`AttachSession`), the
+envelope is a read's, and its answer is the only one of the interface that carries a token,
+which is why the interface is the local owner's alone and a sandbox must deny it to an agent.
 
-The rows are in `methods.go` (`endpoints.list`, `endpoints.close`,
+The rows are in `methods.go` (`endpoints.list`, `endpoints.close`, `sessions.attach`,
 `daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
 `alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
 `identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and
@@ -166,7 +169,9 @@ connections; contexts own in-flight calls.
 
 ## Where the tests are
 
-`manageapi_test.go`: malformed requests with
+`methods_sessions_test.go` (`sessions.attach`: the words of its answer, the envelope of a read and
+the strict params, the refusals of the engine as the wire words them, and the `origin` of a session
+endpoint in the list); `manageapi_test.go`: malformed requests with
 their paths, the operation identifier, the expected version (present or not), the
 catalogue, `operation.result`, test rows and the rule for a row's name, what
 the engine is asked (key, fingerprint worked out by hand, name, kind), the

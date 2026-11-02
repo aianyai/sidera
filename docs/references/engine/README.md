@@ -199,8 +199,9 @@ stands for its instance.
 
 When the owner asks for the close, the request comes through the door of the
 administrative operations (below), and its operation builds the result from the
-outcome the close reached (`closed`, `closing` for a session endpoint,
-`already_closed` for one that was closed before) and stores it with the
+outcome the close reached (`closed`, `closing` for a session endpoint the node
+created, whose native session is still to be released, `already_closed` for one
+that was closed before) and stores it with the
 fingerprint as the last write of the transaction of the head record. A close of an
 endpoint that is closed already writes that record again as it is, only to carry
 the result.
@@ -1339,6 +1340,73 @@ closed, by whichever of the ways to close one: every place the engine records an
 (`putEndpoint`) queues the removal of the checkpoint of a session endpoint that has just been
 closed, and the scan entry removes one a crash left (`checkpoint-drop`).
 
+**Attached sessions.** A session a person opened can be given an endpoint on the node, so that
+messages are delivered to it as to a session the node created (to tell the two apart: the
+"re-attach" of `adapter.start` is the node taking back the sessions it already has). The owner asks
+for it through the management interface (`AttachSession`, the management method `sessions.attach`),
+naming the adapter, the native session and, when the adapter has more than one enabled instance, the
+instance. The instance is the one named, or the only enabled instance of the adapter; none is
+`instance_unknown`, several `invalid_argument/instance_required`, one that runs another adapter
+`invalid_argument` on `instance`. The request is refused as `attach_unsupported` when the instance's
+admission (the current one, or the last since the engine started) does not declare `attach`, and as
+`native_session_created` when an open session endpoint of any instance, or a closed one whose release
+is still owed, holds the native session: that session is one the node created and controls. An
+instance not admitted since the engine started has declared nothing yet and is allowed, and its first
+admission settles it (below). The endpoint is written in one command of the loop, open from the start,
+with a token, `origin` attached, the native reference and no preset, tool access or creating control
+record (`endpoint-update`, no new transaction: the endpoint is garbage to nobody until its token is
+handed out, and recovery orphans only an endpoint that is being created). The node cap applies as to
+any endpoint (`endpoint_limit`, `node`).
+
+The key of an attachment is the instance and the native session: while an endpoint with that key is
+open, the same request finds it and answers with the same endpoint and token, replacing the wake
+information the node holds (an absent one clears it) and the display name when one is given and
+differs; the native reference never changes. A closed endpoint is never opened again, and the same
+session attached later is a new endpoint with a new token. The request is therefore safe to repeat,
+which a session does as a heartbeat; for that reason it is the one management request that changes
+state without an operation identifier and without a stored result (see the administration reference).
+After the command the engine asks the adapter, from the caller's goroutine and outside the loop,
+`session.attach` with the endpoint, the native reference and the wake information, waiting at most
+`Params.AttachWait` (10 seconds, on the real clock, since it is the time a person waits for an
+answer). Nothing is written for the answer; it is the wake state the owner is told: `ready` (the
+adapter holds the session and can deliver prompts), `unavailable` (the adapter answered that it
+cannot: `native_not_found`, or the adapter's own reason and remark of a failure), or `unknown` (the
+adapter was not asked or did not answer: `adapter_offline` for one that is not connected or not in
+service yet, `no_answer` for a call that failed, timed out or answered with an outcome nobody
+knows). The endpoint and the token are returned whatever the state is: the session may use its token
+before the adapter can reach it, and the next repeat asks the adapter again. The reply is the one place
+a management answer carries a token.
+
+The wake information is the adapter's own (how it reaches the running session) and opaque to the
+node. It is held in memory only, one entry for each open attached endpoint (an endpoint that is open
+when the engine starts has one without wake information), and goes to the adapter
+unchanged in `session.attach` and in the entry of `adapter.start`; it is never written to disk or to a
+log, and no refusal names a value of it (a key that is not valid is named by its key). After a restart
+the entry comes without it until the session attaches again, which the adapter learns as another
+`session.attach`. `adapter.start` lists an attached endpoint as an entry with `attached` and the wake
+information when the node has it, with no preset and no tool access, and only to an instance whose
+admission declares `attach`. An instance whose admission does not (the adapter was replaced by one
+that does not, or declares less than it did) has its open attached endpoints closed when it is
+admitted, the way the owner's close does it with the drain of what was queued, so that they are not
+prompted against an adapter that would refuse; the closing sends the adapter nothing. They are
+closed one at a time, so a failure of the disk part way refuses the admission with some closed and
+some open, and the next admission closes the rest.
+
+An attached endpoint is prompted like any session endpoint, its turns that a prompt did not start are
+the person's and name no attempt, and the signals differ: it takes messages and a status request only
+(`acceptedSignals`), so a close or an interrupt for it is answered `unsupported` at once, as the
+directory announces in `accepts`, and the adapter is never sent `session.close` or
+`session.interrupt` for it. The owner can close the endpoint: `putEndpoint` forgets its wake
+information and, when the instance is online and was admitted with `attach`, sends the adapter
+`session.detached` (best effort, like `endpoint.pending`: nothing records it and nothing repeats it, and
+an adapter that missed it stops watching at its next `adapter.start`, which no longer lists the
+endpoint; a late `session.attach` can reach the adapter after `session.detached` when the close races
+the call the attachment makes, and the adapter drops that state at its next `adapter.start` too).
+Closing owes no release: the native session is the person's and is never ended
+(`ReleasePending` is false for an attached endpoint). `recv.observed` for an attached endpoint is
+refused as a wrong endpoint kind (`1002`): its pages are read by the person's own runtime, and there is
+nothing for the adapter to observe. `endpoints.list` shows the `origin` of a session endpoint.
+
 **Prompting.** A session endpoint that is open, mapped to its native session and whose adapter
 is online is woken by a prompt when messages wait for it. Whether to send one is the decision of
 `handoff`, which the engine asks for every waiting endpoint together (`DecideNodePrompts`; a
@@ -1596,8 +1664,8 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
 - **Chunks by count, not time.** A time budget would move the boundary of a chunk,
   and so the crash point that a write is, with the speed of the machine.
 - **The loop builds the result record, from the outcome.** A result made by the
-  caller before the command ran can only guess the outcome (a session endpoint says
-  `closing`, a direct one `closed`, and a repeated close `already_closed`), and a
+  caller before the command ran can only guess the outcome (a created session endpoint says
+  `closing`, an attached or a direct one `closed`, and a repeated close `already_closed`), and a
   caller that stores it separately loses the one-transaction guarantee. The request
   carries the key, the fingerprint, the name of the operation and the encoder; the
   command checks the replay, closes and stores in one step. A result is stored in
@@ -1957,6 +2025,7 @@ reproducible).
 | Nothing is handed out or written by a recv after a fatal storage error, whether it met it ticking or settling a body | `pull.go` (`recv`, `buildPage`), `quarantine.go` (`readBody`) | `TestRecvHandsNothingOutAfterAFatalStorageError` |
 | A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
 | A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
+| A session a person opened is attached by the owner's request: one open endpoint for an instance and a native session, found again and not duplicated by a repeat (with the wake information replaced), a new endpoint after a close, refused for an adapter that did not declare `attach`, a native session the node created, a missing or ambiguous instance and a full node; the adapter is asked with `session.attach` after the endpoint is written and its answer is the wake state; closing says `closed`, sends `session.detached` (also when the node restarted since the attachment) and never `session.close`; `adapter.start` lists it with its wake only to a declarer, an adapter that does not declare `attach` has its attached endpoints closed at admission, `recv.observed` for it is refused, and the directory and the answer to a close or an interrupt agree | `attach.go`, `adapters.go` (`sessionAttaches`, `admit`), `endpoints.go` (`putEndpoint`), `lease.go` (`observed`) | `TestAttachingTheSameSessionAgainIsTheSameEndpointUntilItIsClosed`, `TestAttachingASessionIsRefused`, `TestAnAttachedEndpointTakesAPlaceOfTheNodeCap`, `TestTheWakeStateIsWhatTheAdapterSaid`, `TestAdapterStartListsAnAttachedSessionOnlyToAnAdapterThatTakesIt`, `TestClosingAnAttachedSessionDetachesItAndNeverClosesTheSession`, `TestClosingAnAttachedSessionAfterARestartStillDetachesIt`, `TestRecvObservedIsRefusedForAnAttachedSession`, `TestTheDirectoryAndTheAnswerToASignalAgreeOnAnAttachedSession` |
 | A direct endpoint is told with `endpoint.pending` how many messages wait for it, once for each message made ready by a separate command, not for a message a waiting recv took, and a session endpoint is not told | `pending.go` (`notePending`, `servePending`) | `TestADirectEndpointIsToldOnceThatAMessageWaits`, `TestAMessageHandedToAWaitingRecvIsNotAnnounced`, `TestASessionEndpointIsNotToldWithEndpointPending` |
 | A notice whose body is damaged is told again from what it covered, and a crash anywhere in the settlement loses none of it and tells it only once | `feedback.go` (`reissueCovered`), `quarantine.go` (`quarantineOwner`) | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered`, `TestADamagedNoticeIsToldAgainOnceWhereverTheNodeDiesSettlingIt`, `TestADamagedNoticeWhoseItemsAreStillQueuedToBeClearedIsToldAgainOnce` |
 | Every write of a recv and an ack survives a crash at every point | `lease`, `ack` (declared by the store) | `TestRecvAndAckRecoverFromACrashAtEveryPoint` |

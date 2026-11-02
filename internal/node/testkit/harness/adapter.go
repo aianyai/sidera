@@ -94,8 +94,8 @@ func AdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptio
 }
 
 // RuntimeAdapterManifest is AdapterManifest for an adapter that also declares a
-// runtime: the command line and MCP front ends, interrupt and acknowledging on
-// behalf, with the runtime the fake adapter declares by default.
+// runtime: the command line and MCP front ends, interrupt, acknowledging on
+// behalf and attached sessions, with the runtime the fake adapter declares by default.
 func RuntimeAdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
 	return RuntimeAdapterManifestOf(Instance, maxDirect)
 }
@@ -105,7 +105,7 @@ func RuntimeAdapterManifestOf(instance string, maxDirect int) fakeadapter.Manife
 	o := AdapterManifestOf(instance, maxDirect)
 	d := fakeadapter.DefaultManifestOptions()
 	o.Runtime = true
-	o.Frontends, o.Interrupt, o.AckOnBehalf = d.Frontends, d.Interrupt, d.AckOnBehalf
+	o.Frontends, o.Interrupt, o.AckOnBehalf, o.Attach = d.Frontends, d.Interrupt, d.AckOnBehalf, d.Attach
 	o.RecvWaitS, o.Budgets = d.RecvWaitS, d.Budgets
 	o.RuntimeName, o.RuntimeVersion, o.AckMarkers = d.RuntimeName, d.RuntimeVersion, d.AckMarkers
 	return o
@@ -569,6 +569,16 @@ func (a *abandonableAdapters) NotifyPending(instance string, p adapterproto.Pend
 	if !a.abandoned.Load() {
 		a.inner.NotifyPending(instance, p)
 	}
+}
+
+func (a *abandonableAdapters) NotifyDetached(instance string, p adapterproto.SessionDetachedParams) {
+	if !a.abandoned.Load() {
+		a.inner.NotifyDetached(instance, p)
+	}
+}
+
+func (a *abandonableAdapters) Attach(ctx context.Context, instance string, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	return unlessAbandoned(a.abandoned, func() (adapterproto.SessionAttachResult, error) { return a.inner.Attach(ctx, instance, p) })
 }
 
 func (a *abandonableAdapters) CreateSession(ctx context.Context, instance string, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {

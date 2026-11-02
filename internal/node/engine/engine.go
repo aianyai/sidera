@@ -140,6 +140,10 @@ type Engine struct {
 	// key of the control record; see create.go.
 	creations map[store.TargetKey]*creation
 
+	// attached holds what the loop remembers of each open attached endpoint besides its
+	// record: the wake information, in memory only; see attach.go.
+	attached map[ident.EndpointID]attachedSession
+
 	// reconciling says step 11 of the start has begun: until then a connecting adapter is
 	// not asked again for the creations it owes; see redriveCreates.
 	reconciling bool
@@ -262,6 +266,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		parked:   map[ident.EndpointID][]command{},
 
 		creations:  map[store.TargetKey]*creation{},
+		attached:   map[ident.EndpointID]attachedSession{},
 		executions: map[store.TargetKey]*execution{},
 		prompts:    map[ident.EndpointID]*promptState{},
 

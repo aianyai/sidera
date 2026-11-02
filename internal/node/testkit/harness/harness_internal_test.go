@@ -350,6 +350,13 @@ func (d *adaptersDouble) Stopping(string) bool { return false }
 func (d *adaptersDouble) NotifyPending(string, adapterproto.PendingParams) {
 	d.note("NotifyPending")
 }
+func (d *adaptersDouble) NotifyDetached(string, adapterproto.SessionDetachedParams) {
+	d.note("NotifyDetached")
+}
+func (d *adaptersDouble) Attach(context.Context, string, adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	d.note("Attach")
+	return adapterproto.SessionAttachResult{Outcome: adapterproto.SessionAttachAttached}, errDouble
+}
 func (d *adaptersDouble) CreateSession(context.Context, string, adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
 	d.note("CreateSession")
 	return adapterproto.SessionCreateResult{Outcome: adapterproto.CreateCreated}, errDouble
@@ -389,6 +396,14 @@ var adapterCalls = []adapterCall{
 	{"NotifyPending", false, func(a engine.Adapters) (bool, error) {
 		a.NotifyPending("chat", adapterproto.PendingParams{})
 		return true, nil
+	}},
+	{"NotifyDetached", false, func(a engine.Adapters) (bool, error) {
+		a.NotifyDetached("chat", adapterproto.SessionDetachedParams{})
+		return true, nil
+	}},
+	{"Attach", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.Attach(context.Background(), "chat", adapterproto.SessionAttachParams{})
+		return reflect.ValueOf(r).IsZero(), err
 	}},
 	{"CreateSession", true, func(a engine.Adapters) (bool, error) {
 		r, err := a.CreateSession(context.Background(), "chat", adapterproto.SessionCreateParams{})

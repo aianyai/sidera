@@ -341,6 +341,10 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryUnavailable, "node_unreachable", "the node could not be reached, or the pairing ended without an answer; check its address and try again")
 	case engine.ReasonNotPermitted:
 		return New(CategoryRefused, "not_permitted", "this request is not permitted to do what it would do here")
+	case engine.ReasonAttachUnsupported:
+		return New(CategoryRefused, "attach_unsupported", "the adapter of this instance does not take attached sessions")
+	case engine.ReasonNativeSessionCreated:
+		return New(CategoryRefused, "native_session_created", "the native session is one this node created and controls; it cannot be attached")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

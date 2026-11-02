@@ -54,6 +54,8 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonExpectationsFull:     {-32603, ""},
 	engine.ReasonNodeUnreachable:      {-32603, ""},
 	engine.ReasonNotPermitted:         {-32603, ""},
+	engine.ReasonAttachUnsupported:    {-32603, ""},
+	engine.ReasonNativeSessionCreated: {-32603, ""},
 
 	engine.ReasonNodeQueueFull:      {1012, `{"reason":"node_queue_full"}`},
 	engine.ReasonStorageFull:        {1012, `{"reason":"storage_full"}`},

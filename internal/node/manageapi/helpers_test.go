@@ -84,6 +84,20 @@ type fakeService struct {
 	presets  config.Presets
 	network  engine.NetworkView
 	trust    engine.TrustView
+	// attach answers AttachSession, and attaches are the requests it was asked.
+	attach   func(ctx context.Context, r engine.AttachRequest) (engine.AttachResult, error)
+	attaches []engine.AttachRequest
+}
+
+func (f *fakeService) AttachSession(ctx context.Context, r engine.AttachRequest) (engine.AttachResult, error) {
+	f.mu.Lock()
+	f.attaches = append(f.attaches, r)
+	run := f.attach
+	f.mu.Unlock()
+	if run == nil {
+		return engine.AttachResult{}, nil
+	}
+	return run(ctx, r)
 }
 
 func (f *fakeService) NetworkView(context.Context) (engine.NetworkView, error) {

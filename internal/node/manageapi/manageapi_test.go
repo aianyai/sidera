@@ -389,7 +389,7 @@ func TestAReadAnswersItsResult(t *testing.T) {
 	}
 	status, out := r.post("endpoints.list", `{}`)
 	want := fmt.Sprintf(`{"result":{"endpoints":[{"address":"%s","kind":"direct","instance":"chat","state":"open","queued":3,"draining":false},`+
-		`{"address":"%s","kind":"session","instance":"other","state":"closed","queued":0,"draining":true}]}}`, addressOf(1), addressOf(2))
+		`{"address":"%s","kind":"session","instance":"other","state":"closed","queued":0,"draining":true,"origin":"created"}]}}`, addressOf(1), addressOf(2))
 	if status != 200 || strings.TrimSpace(string(out)) != want {
 		t.Errorf("%d\n%s\nwant\n%s", status, out, want)
 	}

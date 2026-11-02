@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
@@ -213,6 +214,11 @@ func (e *Engine) observed(now time.Time, instance string, p adapterproto.RecvObs
 	st, err := e.view.resolveSession(instance, p.Endpoint)
 	if err != nil {
 		return none, err
+	}
+	// The pages of an attached session are read by the person's own runtime, not
+	// through a front end the adapter watches, so the adapter has nothing to observe.
+	if st.rec.Origin() == adapterreg.OriginAttached {
+		return none, refuse(ReasonWrongEndpointKind)
 	}
 	refused := func(r adapterproto.AckReason) (adapterproto.RecvObservedResult, error) {
 		return adapterproto.RecvObservedResult{Verdict: adapterproto.AckRefused, Reason: r, Items: []adapterproto.PartAck{}}, nil

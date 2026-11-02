@@ -200,6 +200,12 @@ type Adapters interface {
 	// NotifyPending tells a direct endpoint's adapter that messages wait; it is
 	// best effort and does not block.
 	NotifyPending(instance string, p adapterproto.PendingParams)
+	// Attach asks the adapter to take hold of a session a person opened; the wake
+	// information it carries is never logged.
+	Attach(ctx context.Context, instance string, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error)
+	// NotifyDetached tells the adapter that the endpoint of an attached session is
+	// closed; it is best effort and does not block.
+	NotifyDetached(instance string, p adapterproto.SessionDetachedParams)
 
 	// Counts is what the host counts of the connection of the instance, for
 	// Quiesce. It reads counters and never waits.

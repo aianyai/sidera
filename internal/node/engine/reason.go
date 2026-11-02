@@ -120,6 +120,13 @@ const (
 	// installation that replaces the package of an enabled instance is for the
 	// local owner). Nothing of the request was done.
 	ReasonNotPermitted
+	// ReasonAttachUnsupported: the adapter of the instance did not declare that it
+	// takes attached sessions, so a session a person opened cannot be attached to it.
+	ReasonAttachUnsupported
+	// ReasonNativeSessionCreated: the native session is one this node created and
+	// controls, an open session endpoint or one whose release is still owed, so it is
+	// not one a person opened and cannot be attached.
+	ReasonNativeSessionCreated
 
 	reasonEnd
 )
@@ -159,6 +166,8 @@ var reasonNames = [reasonEnd]string{
 	ReasonExpectationsFull:     "expectations_full",
 	ReasonNodeUnreachable:      "node_unreachable",
 	ReasonNotPermitted:         "not_permitted",
+	ReasonAttachUnsupported:    "attach_unsupported",
+	ReasonNativeSessionCreated: "native_session_created",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.
@@ -225,6 +234,9 @@ const (
 	// DetailCursorInvalid: a directory continuation is malformed, belongs to
 	// another source endpoint, or was issued by another process instance.
 	DetailCursorInvalid
+	// DetailInstanceRequired: the request names no adapter instance and more than
+	// one instance of the adapter is enabled, so the node cannot choose.
+	DetailInstanceRequired
 
 	detailEnd
 )
@@ -236,6 +248,7 @@ var detailNames = [detailEnd]string{
 	DetailProbeFrontendMismatch: "probe_frontend_mismatch",
 	DetailSourceUnreadable:      "source_unreadable",
 	DetailCursorInvalid:         "cursor_invalid",
+	DetailInstanceRequired:      "instance_required",
 }
 
 // String returns the name of the detail; the zero value has none.

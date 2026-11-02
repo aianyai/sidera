@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"time"
@@ -154,8 +155,8 @@ type cmdAdmit struct {
 }
 
 func (c *cmdAdmit) gate() gate { return gateAlways }
-func (c *cmdAdmit) run(e *Engine, _ time.Time) {
-	start, err := e.admit(c.instance, c.adm, c.info)
+func (c *cmdAdmit) run(e *Engine, now time.Time) {
+	start, err := e.admit(now, c.instance, c.adm, c.info)
 	c.done(start, e.classify(err))
 }
 
@@ -165,7 +166,9 @@ func (c *cmdAdmit) run(e *Engine, _ time.Time) {
 // runtime gets its runtime endpoint made (or opened again) in the same command;
 // what adapter.start carries is returned. A later admission of the instance
 // replaces the earlier one, and only once everything has succeeded: an admission
-// that is refused leaves the instance as it was. An admission that succeeds
+// that is refused leaves the instance as it was, except that the attached endpoints
+// closed before the failure stay closed (they are closed one at a time, and a failure
+// of one refuses the admission); the next admission closes the rest. An admission that succeeds
 // forgets the busy states and the availability snapshot of the earlier connection.
 //
 // It is the entry the adapter host calls, and the one a test calls to give an
@@ -175,7 +178,7 @@ func (e *Engine) AdapterAdmitted(ctx context.Context, instance string, a adapter
 	return roundTrip(ctx, e, submitInternal, c, c.call)
 }
 
-func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterproto.InitializeResult) (adapterproto.StartParams, error) {
+func (e *Engine) admit(now time.Time, instance string, a adapterreg.Admission, info adapterproto.InitializeResult) (adapterproto.StartParams, error) {
 	var none adapterproto.StartParams
 	in, ok := e.enabledInstance(instance)
 	if !ok {
@@ -195,6 +198,14 @@ func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterprot
 	}
 	if err := start.Validate(); err != nil {
 		return none, fmt.Errorf("engine: what adapter.start carries for instance %q is not valid: %w", instance, err)
+	}
+	// An adapter that does not take attached sessions (it was replaced by one that
+	// does not, or declares less than it did) is listed none, and prompting an
+	// endpoint it refuses would never end: the endpoints are closed.
+	if !a.Attaches() {
+		if err := e.closeAttached(now, instance); err != nil {
+			return none, err
+		}
 	}
 	st := e.adapter(instance)
 	st.admitted, st.adm, st.info = true, a, info
@@ -300,7 +311,7 @@ func (e *Engine) startParams(instance string, in config.Instance, a adapterreg.A
 			p.DirectEndpoints = append(p.DirectEndpoints, adapterproto.DirectAttach{Endpoint: adapterproto.EndpointRef(direct[key].String()), Key: key})
 		}
 	}
-	sessions, err := e.sessionAttaches(instance)
+	sessions, err := e.sessionAttaches(instance, a.Attaches())
 	if err != nil {
 		return adapterproto.StartParams{}, err
 	}
@@ -313,26 +324,36 @@ func (e *Engine) startParams(instance string, in config.Instance, a adapterreg.A
 // access its tools need (the token of the endpoint, which the session was created
 // with and holds in its environment) and the state the adapter kept for it. A session
 // whose creation has not ended has no native session to take back: its creation is
-// called again, as a creation is, and a closed one is not listed. They come sorted
-// by endpoint.
-func (e *Engine) sessionAttaches(instance string) ([]adapterproto.SessionAttach, error) {
+// called again, as a creation is, and a closed one is not listed. An attached session
+// is listed with the wake information the node holds (none after a restart, until the
+// owner attaches it again) and no preset or access, and only to an adapter that
+// declared it takes attached sessions. They come sorted by endpoint.
+func (e *Engine) sessionAttaches(instance string, attaches bool) ([]adapterproto.SessionAttach, error) {
 	out := []adapterproto.SessionAttach{}
 	var ids []ident.EndpointID
 	for id, st := range e.view.endpoints {
-		if st.rec.Kind == adapterreg.KindSession && st.rec.Instance == instance && st.rec.Status == store.EndpointOpen && st.rec.Session != nil && st.rec.Session.NativeRef != "" {
+		if st.rec.Kind == adapterreg.KindSession && st.rec.Instance == instance && st.rec.Status == store.EndpointOpen && st.rec.Session != nil && st.rec.Session.NativeRef != "" &&
+			(attaches || st.rec.Origin() != adapterreg.OriginAttached) {
 			ids = append(ids, id)
 		}
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	for _, id := range ids {
 		rec := e.view.endpoints[id].rec
-		access, err := e.toolAccess(rec.Token)
-		if err != nil {
-			return nil, err
-		}
 		a := adapterproto.SessionAttach{
-			Endpoint: adapterproto.EndpointRef(id.String()), Preset: rec.Session.Preset, NativeRef: adapterproto.NativeRef(rec.Session.NativeRef),
-			Process: rec.Session.Process, ToolAccess: &access,
+			Endpoint: adapterproto.EndpointRef(id.String()), NativeRef: adapterproto.NativeRef(rec.Session.NativeRef), Process: rec.Session.Process,
+		}
+		if rec.Origin() == adapterreg.OriginAttached {
+			a.Attached = true
+			if w := e.attached[id].wake; len(w) > 0 {
+				a.Wake = maps.Clone(w)
+			}
+		} else {
+			access, err := e.toolAccess(rec.Token)
+			if err != nil {
+				return nil, err
+			}
+			a.Preset, a.ToolAccess = rec.Session.Preset, &access
 		}
 		if cp, ok := e.view.checkpoints[store.CheckpointKey{Scope: string(adapterproto.ScopeSession), ID: id.String()}]; ok {
 			a.Checkpoint = append([]byte(nil), cp...)

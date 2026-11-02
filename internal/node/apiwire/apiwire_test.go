@@ -74,6 +74,9 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonExpectationsFull:  {"refused", "expectations_full"},
 	engine.ReasonNodeUnreachable:   {"unavailable", "node_unreachable"},
 	engine.ReasonNotPermitted:      {"refused", "not_permitted"},
+	// An attached session is refused for what the adapter or the native session is.
+	engine.ReasonAttachUnsupported:    {"refused", "attach_unsupported"},
+	engine.ReasonNativeSessionCreated: {"refused", "native_session_created"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
@@ -434,7 +437,7 @@ func TestNoTwoCategoriesShareAnExitCode(t *testing.T) {
 var listedInvalidArgumentCodes = []string{
 	"malformed_request", "request_too_large", "single_recipient_only", "empty_patch", "cursor_invalid",
 	"probe_frontend_mismatch", "node_mismatch", "digest_mismatch", "unexpected_version", "method_not_allowed",
-	"config_invalid", "source_unreadable", "socket_path_too_long",
+	"config_invalid", "source_unreadable", "socket_path_too_long", "instance_required",
 }
 
 func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(t *testing.T) {

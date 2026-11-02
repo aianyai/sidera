@@ -229,13 +229,15 @@ into codes. An error of any other method means the connection cannot be used: th
 host ends it, reports it, and starts the instance again after the backoff.
 
 The calls the engine makes on an adapter (`CreateSession`, `DeliverPrompt`,
-`Reconcile`, `Interrupt`, `Close`, `NotifyPending`) run on the caller's goroutine,
+`Reconcile`, `Interrupt`, `Close`, `Attach`, and the notifications `NotifyPending` and `NotifyDetached`) run on the caller's goroutine,
 bounded by its context. Their parameters are validated before anything is written
 and their results are decoded strictly. A call to an instance with no connection
 past `adapter.start` returns `ErrNotConnected` at once and sends nothing. An error
 of a call that was sent comes back as the peer returned it, for the caller to judge
 with the effect rule; a result that does not decode is an error that is not a
-`*peer.Error`, which the effect rule counts as an unknown outcome.
+`*peer.Error`, which the effect rule counts as an unknown outcome. The parameters of
+`Attach` carry the wake information of an attached session, which the host passes through
+and never logs, and which the validation of the parameters does not echo.
 
 ### Counts and `Working`
 

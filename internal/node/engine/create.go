@@ -56,6 +56,19 @@ type creation struct {
 // token, naming the control record that creates it. It is written with the record,
 // so it is garbage until the record is there.
 func (e *Engine) newSessionEndpoint(runtime *endpointState, c store.CtlRecord) (store.EndpointRecord, error) {
+	rec, err := e.freshSessionEndpoint(runtime.rec.Instance)
+	if err != nil {
+		return store.EndpointRecord{}, err
+	}
+	rec.Status, rec.CreatedBy = store.EndpointCreating, ctlName(c)
+	rec.Session = &store.SessionInfo{Preset: c.Preset, ToolAccess: []string{TokenEnv, HomeEnv}}
+	return rec, nil
+}
+
+// freshSessionEndpoint is the part of a new session endpoint that every origin
+// shares: an identifier no endpoint of the view has, a token and an empty
+// declaration, on the instance. The caller sets the status and the session.
+func (e *Engine) freshSessionEndpoint(instance string) (store.EndpointRecord, error) {
 	var id ident.EndpointID
 	for {
 		var err error
@@ -74,11 +87,7 @@ func (e *Engine) newSessionEndpoint(runtime *endpointState, c store.CtlRecord) (
 	if err != nil {
 		return store.EndpointRecord{}, err
 	}
-	return store.EndpointRecord{
-		ID: id, Kind: adapterreg.KindSession, Instance: runtime.rec.Instance, Status: store.EndpointCreating, Token: token,
-		Declaration: decl, CreatedBy: ctlName(c),
-		Session: &store.SessionInfo{Preset: c.Preset, ToolAccess: []string{TokenEnv, HomeEnv}},
-	}, nil
+	return store.EndpointRecord{ID: id, Kind: adapterreg.KindSession, Instance: instance, Token: token, Declaration: decl}, nil
 }
 
 // newAttemptID draws the identifier of a creation attempt: a version 4 UUID from

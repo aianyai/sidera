@@ -95,6 +95,13 @@ to most first-level folders of `%USERPROFILE%`, `.sidera` included; a protected 
 not take them from a folder under `AppData`, and a start that finds one anywhere in the
 tree refuses it (see [daemon](../daemon/README.md)).
 
+The management socket is a secret of the same kind. It authenticates its peer by the user's uid
+alone, and the answer of `sessions.attach` is the token of a session endpoint, so an agent that
+can connect to it can obtain a credential and act as an endpoint of the node, besides
+administering the node. The management socket therefore hands out session tokens, and a sandbox
+must deny it to every agent: the reason to allow the agent socket and not the management socket is
+this, not only that an agent has no business with the node's settings.
+
 The rule for a sandbox is therefore: deny reading and writing `<SIDERA_HOME>`
 entirely, and allow only connecting to `<SIDERA_HOME>/run/agent.sock`. An example
 for Claude Code, with the home at `~/.sidera`:

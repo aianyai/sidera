@@ -62,6 +62,7 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 		{"trust.list", admin.OpRead, false, false},
 		{"trust.remove", admin.OpLocallyRevokeNode, true, false},
 		{"trust.clear", admin.OpClearLocallyRevoked, true, false},
+		{"sessions.attach", admin.OpAttachSession, false, false},
 	} {
 		m := r.srv.methods[tc.method]
 		if m == nil {

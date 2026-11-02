@@ -46,14 +46,20 @@ func TestCloseEndpointAnswersForWhatCannotBeClosed(t *testing.T) {
 	}
 }
 
-func TestACloseSaysClosingForASessionEndpointAndClosedForTheRest(t *testing.T) {
-	for k, want := range map[adapterreg.EndpointKind]CloseOutcome{
-		adapterreg.KindSession: CloseOutcomeClosing,
-		adapterreg.KindDirect:  CloseOutcomeClosed,
-		adapterreg.KindRuntime: CloseOutcomeClosed,
+func TestACloseSaysClosingOnlyForASessionTheNodeCreatedAndClosedForTheRest(t *testing.T) {
+	attached := endpointRec(t, 4, adapterreg.KindSession, store.EndpointOpen, "chat")
+	attached.Session = &store.SessionInfo{Origin: adapterreg.OriginAttached, NativeRef: "native-1"}
+	for name, tc := range map[string]struct {
+		rec  store.EndpointRecord
+		want CloseOutcome
+	}{
+		"a session endpoint the node created": {endpointRec(t, 1, adapterreg.KindSession, store.EndpointOpen, "chat"), CloseOutcomeClosing},
+		"an attached session endpoint":        {attached, CloseOutcomeClosed},
+		"a direct endpoint":                   {endpointRec(t, 2, adapterreg.KindDirect, store.EndpointOpen, "chat"), CloseOutcomeClosed},
+		"a runtime endpoint":                  {endpointRec(t, 3, adapterreg.KindRuntime, store.EndpointOpen, "chat"), CloseOutcomeClosed},
 	} {
-		if got := closeOutcomeOf(k); got != want {
-			t.Errorf("closeOutcomeOf(%v) = %v, want %v", k, got, want)
+		if got := closeOutcomeOf(tc.rec); got != tc.want {
+			t.Errorf("closeOutcomeOf(%s) = %v, want %v", name, got, tc.want)
 		}
 	}
 	if CloseOutcomeClosing.String() != "closing" || CloseOutcomeClosed.String() != "closed" || CloseOutcomeAlreadyClosed.String() != "already_closed" {

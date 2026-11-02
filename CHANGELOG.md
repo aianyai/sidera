@@ -14,6 +14,11 @@ protocol has a version of its own.
   `attach` and take hold of a session a person opened: the new request `session.attach`, the
   notification `session.detached` and the `attached` and `wake` members of an `adapter.start`
   session entry. The daemon sends none of them to an adapter that did not declare it.
+- **Management: `sessions.attach`.** The owner can attach a session a person opened to an
+  adapter that declared `attach`: the answer is the endpoint, its token and whether the adapter
+  can deliver prompts to the session. The request is safe to repeat, carries no operation
+  identifier and stores no result. Because the answer holds a token, a sandbox has to deny the
+  management socket to an agent. `endpoints.list` shows the `origin` of a session endpoint.
 - **Endpoint record: the origin of a session.** A session endpoint record can say that the
   session was attached rather than created (`origin`). Records without it read as created, so
   existing state needs no migration.

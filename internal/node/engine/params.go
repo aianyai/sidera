@@ -68,6 +68,10 @@ type Params struct {
 	// no answer, so that an adapter that hangs cannot keep an endpoint busy, and a turn
 	// that never started cannot hold a place of the node's cap, for ever.
 	PromptCallDeadline time.Duration
+	// AttachWait is how long the owner's request to attach a session waits for the
+	// adapter's answer to session.attach, on the real clock: the endpoint and the
+	// token are returned all the same, with the wake state unknown.
+	AttachWait time.Duration
 	// PromptConfirmWait is how long an accepted prompt waits for prompt.persisted
 	// or turn.started before the node asks prompt.reconcile, on the injected clock.
 	PromptConfirmWait time.Duration
@@ -98,6 +102,7 @@ func DefaultParams() Params {
 		ControlReplyDeadline: 2 * time.Minute,
 		InterruptConfirmWait: 30 * time.Second,
 		PromptCallDeadline:   time.Minute,
+		AttachWait:           10 * time.Second,
 		PromptConfirmWait:    time.Minute,
 		Feedback:             delivery.DefaultFeedbackParams(),
 	}
@@ -143,6 +148,9 @@ func (p Params) withDefaults() Params {
 	}
 	if p.PromptCallDeadline <= 0 {
 		p.PromptCallDeadline = d.PromptCallDeadline
+	}
+	if p.AttachWait <= 0 {
+		p.AttachWait = d.AttachWait
 	}
 	if p.PromptConfirmWait <= 0 {
 		p.PromptConfirmWait = d.PromptConfirmWait

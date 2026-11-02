@@ -327,9 +327,11 @@ func (o CloseOutcome) String() string {
 	return "invalid"
 }
 
-// closeOutcomeOf is what closing an endpoint of the kind says.
-func closeOutcomeOf(k adapterreg.EndpointKind) CloseOutcome {
-	if k == adapterreg.KindSession {
+// closeOutcomeOf is what closing the endpoint says: closing when a native session is
+// still to be released, which only a session the node created owes, and closed for
+// the rest.
+func closeOutcomeOf(rec store.EndpointRecord) CloseOutcome {
+	if rec.Kind == adapterreg.KindSession && rec.Origin() == adapterreg.OriginCreated {
 		return CloseOutcomeClosing
 	}
 	return CloseOutcomeClosed
@@ -395,7 +397,7 @@ func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, via *closeVia
 	outcome := CloseOutcomeAlreadyClosed
 	if rec.Status != store.EndpointClosed {
 		rec.Status, rec.Token = store.EndpointClosed, nil
-		outcome = closeOutcomeOf(rec.Kind)
+		outcome = closeOutcomeOf(rec)
 	}
 	var result []byte
 	switch {
@@ -453,6 +455,9 @@ type EndpointView struct {
 	// Draining: the endpoint is closed and the records queued for it are not all
 	// closed yet.
 	Draining bool
+	// Origin says whether a session endpoint was created by the node or attached at
+	// the request of a session a person opened; it is created for any other kind.
+	Origin adapterreg.SessionOrigin
 }
 
 type cmdEndpoints struct{ call[[]EndpointView] }
@@ -470,6 +475,7 @@ func (e *Engine) endpointViews() []EndpointView {
 			Kind: st.rec.Kind, Instance: st.rec.Instance, Status: st.rec.Status,
 			DisplayName: st.rec.DisplayName, Description: st.rec.Description,
 			Declaration: cloneDeclaration(st.decl), Queued: len(e.view.queued[id]), Draining: e.view.Draining(id),
+			Origin: st.rec.Origin(),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })
@@ -492,9 +498,14 @@ func (e *Engine) Endpoints(ctx context.Context) ([]EndpointView, error) {
 // confirmed releasing it, is released after the command (see release.go), whichever way
 // the endpoint was closed. A session that may be prompted is judged by the prompt rules
 // again, since this is where one that was being created opens, with the end of a turn
-// that was kept while it was (see noteTurnEnded).
+// that was kept while it was (see noteTurnEnded). An attached session that is closed is
+// told to its adapter as detached, and its wake information is forgotten (see
+// notifyDetached).
 func (e *Engine) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
 	e.view.putEndpoint(rec, decl)
+	if rec.Status == store.EndpointClosed && rec.Origin() == adapterreg.OriginAttached {
+		e.notifyDetached(rec)
+	}
 	if promptable(e.view.endpoints[rec.ID]) {
 		e.promptsDirty = true
 	}

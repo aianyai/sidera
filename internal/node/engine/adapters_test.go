@@ -45,6 +45,27 @@ type hostDouble struct {
 	// calls are the starts and stops the engine asked for, in order, as
 	// "run:<instance>" and "stop:<instance>".
 	calls []string
+	// attachAnswer and attachErr are what Attach answers; without them the instance is
+	// not connected. attaches and detaches are what the engine sent, in order.
+	attachAnswer adapterproto.SessionAttachResult
+	attachErr    error
+	attaches     []sentAttach
+	detaches     []sentDetach
+	// attachHold, when set, is waited for by Attach before it answers, or until the
+	// context of the call ends.
+	attachHold chan struct{}
+	// closes is how many times the engine asked the adapter to close a session.
+	closes atomic.Int64
+}
+
+type sentAttach struct {
+	instance string
+	params   adapterproto.SessionAttachParams
+}
+
+type sentDetach struct {
+	instance string
+	params   adapterproto.SessionDetachedParams
 }
 
 var _ engine.Adapters = (*hostDouble)(nil)
@@ -110,9 +131,54 @@ func (h *hostDouble) Interrupt(context.Context, string, adapterproto.InterruptPa
 	return adapterproto.InterruptResult{}, adapterhost.ErrNotConnected
 }
 func (h *hostDouble) Close(context.Context, string, adapterproto.CloseParams) (adapterproto.CloseResult, error) {
+	h.closes.Add(1)
 	return adapterproto.CloseResult{}, adapterhost.ErrNotConnected
 }
 func (h *hostDouble) NotifyPending(string, adapterproto.PendingParams) {}
+
+func (h *hostDouble) Attach(ctx context.Context, instance string, p adapterproto.SessionAttachParams) (adapterproto.SessionAttachResult, error) {
+	h.mu.Lock()
+	h.attaches = append(h.attaches, sentAttach{instance, p})
+	answer, err, hold := h.attachAnswer, h.attachErr, h.attachHold
+	h.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return adapterproto.SessionAttachResult{}, ctx.Err()
+		}
+	}
+	if answer.Outcome == "" && err == nil {
+		return adapterproto.SessionAttachResult{}, adapterhost.ErrNotConnected
+	}
+	return answer, err
+}
+
+func (h *hostDouble) NotifyDetached(instance string, p adapterproto.SessionDetachedParams) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.detaches = append(h.detaches, sentDetach{instance, p})
+}
+
+// answerAttach sets what Attach answers.
+func (h *hostDouble) answerAttach(r adapterproto.SessionAttachResult, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.attachAnswer, h.attachErr = r, err
+}
+
+// sentAttaches and sentDetaches are what the engine sent to the adapter so far.
+func (h *hostDouble) sentAttaches() []sentAttach {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.attaches)
+}
+
+func (h *hostDouble) sentDetaches() []sentDetach {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.detaches)
+}
 
 // runtimeAdmission is the admission of an adapter that declares a runtime with
 // the front ends, in that order, and direct endpoints when direct is above zero.

@@ -21,7 +21,7 @@ outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports, and the
 feedback the sender's node tells its endpoints, and the control signals: their sending,
 their taking in, the creation of sessions they ask for with the initial message they may carry,
-the closing and the interrupting of a session, the release of the native session of a session endpoint that is closed (`release.go`: what is owed is read from the endpoint record, `store.EndpointRecord.ReleasePending`, and every way of closing an endpoint goes through `putEndpoint`, which begins it), and the pulling of messages: what
+the closing and the interrupting of a session, the attachment of a session a person opened (`attach.go`), the release of the native session of a session endpoint that is closed (`release.go`: what is owed is read from the endpoint record, `store.EndpointRecord.ReleasePending`, and every way of closing an endpoint goes through `putEndpoint`, which begins it), and the pulling of messages: what
 recv hands out under a lease, what ack settles and what a lease that runs out does, and the
 prompts that wake a session: when one is sent, how its attempt is recorded before the adapter is
 called, and how one whose outcome is not known is asked about at the start; and the blocked
@@ -53,7 +53,8 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `Directory`, `DirectoryQuery`, `DirectoryPage`, `DefaultDirectoryLimit` | A caller's bounded directory read through the outbound FIFO. The target returns only visible open endpoints, with live pagination bound to the full source address and this process. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Me`, `MeView`, `FrontendView`, `Peers`, `PeerView` | Reads for a resolved caller: its own endpoint and declared front-end limits, and the visible nodes: this node (`PeerTrustSelf`, always connected) and each node the trust evaluator allows directly (`PeerTrustDirect`), with whether the network says a connection is up now. |
-| `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, and the alerts. The numbers of the status are `Status`'s. |
+| `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, and the alerts. The numbers of the status are `Status`'s. A session endpoint's view says whether it was created or attached (`EndpointView.Origin`). |
+| `AttachSession`, `AttachRequest`, `AttachResult`, `WakeReport`, `WakeReady`, `WakeUnavailable`, `WakeUnknown` | The owner's attachment of a session a person opened (`attach.go`), the one management request that changes state outside `Execute`: it is idempotent by the instance and the native session, so it carries no operation identifier and stores no result. The reply has the endpoint, the instance, the token and the wake state, which is what the adapter answered to `session.attach` within `Params.AttachWait`. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner. The command carries the actor the management interface made for it; the engine never makes one, and an operation that needs who asks (the pairing judges it) takes it from the command. The replay check, the operation and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
 | `ClearClockRollbackOp`, `ConfirmRevocationBackupOp`, `RetireIdentityOp`, `AcknowledgeAlertOp`, `SetNodeSettingsOp`, `SetEndpointSettingsOp` | The owner's operations on the clock, the identity, the alerts and the settings, each an `Operation` with the effect in the loop and its result made by a function the interface passes in (`ClockClear`, `BackupConfirmed`, `EndpointChange` say what was done). |
 | `ExpectNodeOp`, `ForgetNodeOp`, `RejectPairingOp`, `RequestPairingOp`, `RemoveNodeOp`, `ClearNodeOp`, `TrustView` | The owner's operations on trust and the read of it (`operations_trust.go`, `pairing_request.go`): each an `Operation` whose result is stored with its effect (`trust-expect`, `trust-forget`, `trust-reject`, `trust-request`, `trust-local-revoke`, `trust-clear`, and `trust-result` when the effect wrote nothing). A request for a pairing is not run but started: a worker dials, and the call of the pairing state machine that ends the online segment stores the result and answers. A command of the pairing that is not an execution is a refusal and stores nothing: `ReasonPairingPaused` (with the `RetryAfter` of the `Refusal`), `ReasonPairingInProgress` (also the same request sent again while the first runs), `ReasonExpectationsFull` and, for a node that cannot be reached, `ReasonNodeUnreachable`. |
@@ -552,6 +553,15 @@ delivery to a session: when it is judged and how the verdict is recorded.
   `control_unknown`, and one whose endpoint was damaged likewise (`failCreationWithoutMessage`,
   `failCreationWithoutEndpoint`), so that nothing is made of a creation whose first message
   is gone, and the owner is told that a session may remain.
+- **An attached session is an endpoint the node does not create or end.** `AttachSession` writes an
+  open endpoint with a token (`endpoint-update`, no transaction of its own) in one command and asks
+  the adapter after it, from the caller's goroutine; the answer is only the wake state, and nothing
+  is written for it. The wake information the owner passes is memory (`Engine.attached`), goes to
+  the adapter in `session.attach` and in the attached entry of `adapter.start` (listed only to an
+  adapter that declared `attach`), and is never written or logged. An adapter admitted without
+  `attach` has the instance's attached endpoints closed at admission. A close sends
+  `session.detached` (`putEndpoint`), never `session.close`, and owes no release. `observed` refuses
+  an attached endpoint, and `acceptedSignals` lists neither close nor interrupt for it.
 - **A close or an interrupt is carried out when it is accepted, not queued.** A signal the
   endpoint does not take (`Engine.acceptedSignals`, which the directory publishes too) is
   answered as unsupported at once; one it takes is accepted and the adapter is called by a

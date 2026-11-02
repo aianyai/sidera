@@ -70,6 +70,13 @@ not import it: the words of the wire never enter the engine.
 - **`not_permitted` is `refused`**: the actor may make the request but not have it do
   what it would do here (an installation that replaces the package of an enabled instance
   is the local owner's). It is `-32603` for an adapter, which makes no such request.
+- **The refusals of an attached session are `refused`.** `attach_unsupported` (the
+  adapter of the instance did not declare that it takes attached sessions) and
+  `native_session_created` (the native session is one this node created and controls) say
+  what the adapter or the session is, not what the request lacks; the missing choice of an
+  instance is `invalid_argument/instance_required`. The two refusals are `-32603` for an
+  adapter, which makes no such request, and `instance_required` is `-32602` as every
+  `invalid_argument` is.
 - **The owner's operations on trust have a reason for each way they are refused.**
   `pairing_paused` is `backpressure` (nothing was done and the node takes it again
   later), `pairing_in_progress` is `conflict` (one pairing with a node at a time, as one
