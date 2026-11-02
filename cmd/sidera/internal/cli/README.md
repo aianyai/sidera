@@ -40,6 +40,14 @@ and its bound values. A local value stays attached, including a body spelled
 - `setup.go`: `setup controller`, which prints the commands that add the `sidera` MCP server to
   Claude Code and Codex and does nothing else. A data directory that is not the default is named
   in them by `--home`: the client's environment for the server may not carry `SIDERA_HOME`.
+- `controller.go`: the attachment of an agent command run inside a session a person
+  opened (the `controller` package does the work; the command gives its Agent client the
+  token and prints the wake notice on stderr only when the adapter cannot wake the
+  session). The attachment is made by the command's first call to the node, after its
+  arguments are parsed and checked, so a command refused for them attaches nothing. It
+  carries the wake keys but is not repeated between commands: the endpoint is closed a
+  queue time after the last command when nothing waits on it, and the wake values the
+  node holds in memory are lost when it restarts until the next command.
 - `help.go`: usage, purpose and example for every command.
 
 Agent flags are assembled into presence-preserving objects for `Client.Call`;

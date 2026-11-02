@@ -29,6 +29,13 @@ protocol has a version of its own.
 - **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
   counts the turns of attached sessions, and a full node no longer holds back their prompts.
 
+- **Controller sessions.** A Claude Code or Codex session you opened becomes a controller
+  when it has the `sidera` MCP server (or runs `sidera` agent commands) and no `SIDERA_TOKEN`:
+  it attaches itself through `sessions.attach` on first use, keeps the token in memory only
+  and uses the ordinary Agent tools. `sidera mcp` repeats the attachment every minute while it
+  runs and tells the model, in a second text item of the first result, whether the session can
+  be woken. `sidera setup controller` prints the commands that add the MCP server to Claude
+  Code and Codex.
 - **Agent client: a token supplied later.** `agentapi.Client.SetToken` replaces the endpoint
   credential for the calls that follow, so a caller that obtains its token after the client
   exists keeps it in memory only.

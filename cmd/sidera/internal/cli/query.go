@@ -4,11 +4,9 @@ import (
 	"context"
 	"flag"
 	"strings"
-
-	"github.com/aianyai/sidera/internal/node/agentapi"
 )
 
-func (c *command) query(ctx context.Context, client *agentapi.Client, args []string) error {
+func (c *command) query(ctx context.Context, client agentCaller, args []string) error {
 	f := c.arguments.flags
 	q := &c.arguments.query
 	p, err := parse(f, args[1:])

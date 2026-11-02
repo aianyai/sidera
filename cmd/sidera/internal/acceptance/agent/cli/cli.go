@@ -34,6 +34,22 @@ var _ fakeagent.Agent = (*Agent)(nil)
 
 func New(cfg Config) *Agent { return &Agent{cfg} }
 
+// HostEnvironment is the environment of the test process without the variables that
+// show it runs inside a person's Claude Code or Codex session. A sidera process started
+// with it and without a token would otherwise attach itself as a controller, so a test
+// of the tokenless behaviour would depend on where it is run. Every test that starts the
+// executable takes its environment from here.
+func HostEnvironment() []string {
+	out := []string{}
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.HasPrefix(name, "CLAUDE") && !strings.HasPrefix(name, "CODEX_") {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 func (a *Agent) call(ctx context.Context, args []string, body *string, out any) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, a.cfg.Binary, append([]string{"--json", "--home", a.cfg.Home}, args...)...)
 	cmd.Dir = a.cfg.Dir
@@ -46,7 +62,7 @@ func (a *Agent) call(ctx context.Context, args []string, body *string, out any) 
 		name, _, _ := strings.Cut(entry, "=")
 		replaced[name] = true
 	}
-	for _, entry := range os.Environ() {
+	for _, entry := range HostEnvironment() {
 		name, _, _ := strings.Cut(entry, "=")
 		if !replaced[name] {
 			cmd.Env = append(cmd.Env, entry)

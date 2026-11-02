@@ -31,7 +31,13 @@ must keep credentials and request bodies out of error text and panic values;
 internal causes and standard HTTP diagnostics are logged whole, as described in
 [the shared local HTTP boundary](../local-http/README.md). Only open session
 endpoints can act through this interface; adapters
-read and write direct endpoints through the adapter protocol.
+read and write direct endpoints through the adapter protocol. The holder of a session
+endpoint's token is a session Sidera created, which gets the token in `SIDERA_TOKEN`, or a
+session the owner opened that attached itself through the management method
+`sessions.attach`, which gets the token in the answer and keeps it in memory (the front ends
+that do this are described in [the MCP](../mcp/README.md#controller-mode) and
+[command line](../command-line/README.md#controller-sessions) references). The interface does
+not tell the two apart, and an attached session accepts only the signals its endpoint allows.
 
 A new server accepts only probes. Every other known method answers
 `503 unavailable/probe_only` before credentials or body are examined. After the

@@ -246,6 +246,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return err
 	}
 	defer client.Close()
+	agent := &attachingClient{Client: client, attach: func(ctx context.Context) error { return c.attachController(ctx, home, client) }}
 	switch args[0] {
 	case "mcp":
 		p, err := parse(c.arguments.flags, args[1:])
@@ -276,15 +277,15 @@ func (c *command) run(ctx context.Context, args []string) error {
 		if len(p) != 1 {
 			return usage("status needs a message identifier")
 		}
-		out, err := client.Call(ctx, "status", map[string]any{"message_id": p[0]})
+		out, err := agent.Call(ctx, "status", map[string]any{"message_id": p[0]})
 		if err != nil {
 			return err
 		}
 		return c.result(out)
 	case "me", "peers", "directory", "declare", "probe":
-		return c.query(ctx, client, args)
+		return c.query(ctx, agent, args)
 	case "send", "reply", "control":
-		return c.message(ctx, client, args)
+		return c.message(ctx, agent, args)
 	case "recv":
 		f := c.arguments.flags
 		in := map[string]any{"frontend": "cli"}
@@ -299,7 +300,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		addPresent(f, in, "msg", "msg", c.arguments.recv.msg)
 		addPresent(f, in, "part", "part", c.arguments.recv.part)
 		addPresent(f, in, "ack", "ack_lease", c.arguments.recv.ack)
-		out, err := client.Call(ctx, "recv", in)
+		out, err := agent.Call(ctx, "recv", in)
 		if err != nil {
 			return err
 		}
@@ -329,7 +330,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 		if len(items) > 0 {
 			in["items"] = items
 		}
-		out, err := client.Call(ctx, "ack", in)
+		out, err := agent.Call(ctx, "ack", in)
 		if err != nil {
 			return err
 		}

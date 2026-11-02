@@ -60,7 +60,7 @@ func (c *command) body(f *flag.FlagSet, b bodyFlags) (string, error) {
 	return body, nil
 }
 
-func (c *command) message(ctx context.Context, client *agentapi.Client, args []string) error {
+func (c *command) message(ctx context.Context, client agentCaller, args []string) error {
 	f := c.arguments.flags
 	m := &c.arguments.message
 	p, err := parse(f, args[1:])

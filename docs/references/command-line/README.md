@@ -79,6 +79,40 @@ stdin implicitly. Every explicitly provided Agent flag retains its presence,
 including empty strings, false and zero, through `Client.Call`. The existing
 interface owns whether a value is valid; the CLI does not normalize it away.
 
+### Controller sessions
+
+An agent command run inside a session a person opened works without `SIDERA_TOKEN`.
+The environment shows such a session: `CLAUDE_CODE_SESSION_ID` (Claude Code; with
+`CLAUDECODE` alone the session id is unknown and the command fails with
+`unauthenticated/token_missing` and a message saying so) or `CODEX_THREAD_ID` (Codex);
+Claude wins when both are set. A process with `SIDERA_TOKEN`, or with
+`SIDERA_PROBE_TOKEN` (an adapter's probe), is never a controller, and a plain terminal
+keeps `token_missing` from the node.
+
+Once its arguments have been checked, and just before it first calls the node, the command
+calls the management method `sessions.attach` (so a command refused for its arguments attaches
+nothing; see
+[the daemon reference](../daemon/README.md)) with the adapter id (`claude` or `codex`),
+the native session id, the display name `<Claude|Codex> controller (<base name of the
+working directory>)` and, for Claude, the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`,
+`CLAUDE_CODE_MESSAGING_TOKEN` and `CLAUDE_PID` copied from its environment when present.
+The call is idempotent. The Agent client takes the token from the answer in memory: it is
+never put into the environment, argv, a log or a file. A refusal is the command's error,
+with words for the cases a person can act on: no enabled instance of the runtime's
+adapter (`not_found/instance_unknown`), an adapter that does not take attached sessions
+(`refused/attach_unsupported`), a native session Sidera created
+(`refused/native_session_created`) and several instances to choose from
+(`invalid_argument/instance_required`). When the answer says the adapter cannot wake the
+session, one line on stderr says why and that `recv` with a wait inside a turn is the way to collect replies.
+A command attaches once per run and nothing repeats it between commands. Every attachment
+carries the wake keys, so the node can wake a session that only uses commands, and it
+keeps the endpoint for a queue time after the last command (30 minutes by default, never
+less than 3 minutes) when nothing is queued or leased on it; `sidera mcp` repeats the
+attachment every minute, so a session that has it keeps its endpoint while it is open. The
+wake values are kept in the node's memory only: for Claude they are lost when the node
+restarts, and a session that only uses commands cannot be woken until its next command.
+The management commands are unchanged.
+
 ## Management requests
 
 Settings assignments split at the first `=`. A JSON value stays raw JSON,

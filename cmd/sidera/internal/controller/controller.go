@@ -200,5 +200,5 @@ func Notice(w Wake) string {
 		why += ": " + w.Detail
 	}
 	return "Sidera: this session is attached as a controller, but the node cannot wake it (" + why + "). " +
-		"Replies will not interrupt you: call recv with wait_s inside a turn, or run a background watcher, to collect them."
+		"Replies will not interrupt you: call recv with a wait (wait_s, or --wait on the command line) inside a turn, or run a background watcher, to collect them."
 }

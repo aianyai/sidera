@@ -13,6 +13,11 @@ client; management commands use the management client; `init` and the foreground
 the MCP peer takes ownership of stdin/stdout and reserves stdout for protocol
 messages even with `--json`. Its wire contract and manual client check are in
 [the MCP reference](../../docs/references/mcp/README.md).
+A process without `SIDERA_TOKEN` inside a session a person opened (Claude Code or Codex)
+is a controller: [`internal/controller`](internal/controller/README.md) attaches it
+through the management method `sessions.attach` for `sidera mcp` and for the agent
+commands, which then hold the returned token in memory only. `sidera setup controller`
+prints the commands that add the MCP server to the two clients.
 The name `siderad` (also `siderad.exe`) selects `daemon`.
 
 [`internal/acceptance`](internal/acceptance/README.md) contains test support

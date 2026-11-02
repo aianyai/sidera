@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	cliagent "github.com/aianyai/sidera/cmd/sidera/internal/acceptance/agent/cli"
 	mcpagent "github.com/aianyai/sidera/cmd/sidera/internal/acceptance/agent/mcp"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -93,7 +94,7 @@ func TestMCPUnknownMethodsValidateEraThroughTheRealProgram(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	cmd := exec.CommandContext(ctx, program, "--home", home, "mcp")
-	cmd.Env = append(hostEnv(), "SIDERA_TOKEN=", "SIDERA_PROBE_TOKEN=")
+	cmd.Env = append(cliagent.HostEnvironment(), "SIDERA_TOKEN=", "SIDERA_PROBE_TOKEN=")
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

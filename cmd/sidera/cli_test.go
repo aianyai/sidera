@@ -38,21 +38,6 @@ var buildOnce sync.Once
 var cliBinary string
 var buildError error
 
-// hostEnv is the test process's environment without the variables that show it runs
-// inside a person's Claude Code or Codex session. A program started with it and
-// without a token would otherwise attach itself as a controller, so a test of the
-// tokenless behaviour would depend on where it is run.
-func hostEnv() []string {
-	out := []string{}
-	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if !strings.HasPrefix(name, "CLAUDE") && !strings.HasPrefix(name, "CODEX_") {
-			out = append(out, entry)
-		}
-	}
-	return out
-}
-
 func binary(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
@@ -229,7 +214,7 @@ func (n *cliNode) session(id adapterproto.EndpointRef) session {
 func (n *cliNode) command(s session, args ...string) *exec.Cmd {
 	cmd := exec.Command(binary(n.t), args...)
 	cmd.Dir = n.home
-	cmd.Env = append(hostEnv(), "SIDERA_HOME="+n.home, "SIDERA_TOKEN="+s.token, "SIDERA_PROBE_TOKEN=")
+	cmd.Env = append(cliagent.HostEnvironment(), "SIDERA_HOME="+n.home, "SIDERA_TOKEN="+s.token, "SIDERA_PROBE_TOKEN=")
 	return cmd
 }
 
@@ -1091,6 +1076,7 @@ func runHome(t *testing.T, home string, args ...string) (int, string, string) {
 	t.Helper()
 	cmd := exec.Command(binary(t), append([]string{"--home", home}, args...)...)
 	cmd.Dir = home
+	cmd.Env = cliagent.HostEnvironment()
 	var out, diag bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &diag
