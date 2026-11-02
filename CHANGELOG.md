@@ -29,6 +29,9 @@ protocol has a version of its own.
   heartbeat of the session's controller. An attached endpoint whose controller has not attached
   for the endpoint's queue time (30 minutes by default, and never less than three minutes),
   counted in the time the node was awake, is closed once nothing is queued or leased on it.
+- **Attached sessions: a session that attaches again is prompted at once.** An attachment
+  judges the endpoint for a prompt at once, without the minute that follows a failed prompt, so
+  that a session the person resumed is prompted for what waited while it was away.
 - **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
   counts the turns of attached sessions, and a full node no longer holds back their prompts.
 - **Controller sessions.** A Claude Code or Codex session you opened becomes a controller

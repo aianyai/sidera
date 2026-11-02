@@ -51,6 +51,11 @@ type promptState struct {
 	// that brought it, whenever a place may have fallen free. Zero: no event, and the
 	// endpoint is not judged.
 	trigger handoff.PromptTrigger
+	// sessionBack says the session attached (again) since the endpoint was last
+	// prompted: the prompts that failed before it were for a session that was away,
+	// so the wait after a failed prompt does not apply to the next decision. It stays
+	// until a prompt is sent or nothing waits.
+	sessionBack bool
 	// lastRecv is when the endpoint last called recv.
 	lastRecv time.Time
 	// flight is the prompt whose outcome is not on disk.
@@ -119,6 +124,17 @@ func (e *Engine) noteArrival(id ident.EndpointID) {
 			p.trigger = handoff.TriggerArrival
 		}
 		e.promptsDirty = true
+	}
+}
+
+// noteSessionAttached is the event of a session that attached, or attached again: it
+// may have been away while messages waited and prompts to it failed, so the endpoint
+// is judged now, without the wait that follows a failed prompt, and not at its next
+// event.
+func (e *Engine) noteSessionAttached(id ident.EndpointID) {
+	if st := e.view.endpoints[id]; promptable(st) {
+		e.promptOf(id).sessionBack = true
+		e.noteArrival(id)
 	}
 }
 
@@ -308,13 +324,13 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 		}
 		pending := e.pendingOf(now, st)
 		if len(pending) == 0 {
-			p.trigger = 0
+			p.trigger, p.sessionBack = 0, false
 			e.sched.remove(promptKey(schedPromptRetry, id))
 			continue
 		}
 		in := handoff.PromptInput{
 			Trigger: p.trigger, Pending: len(pending), LastArrivalAt: pending[len(pending)-1].AcceptedAt,
-			LastRecvAt: p.lastRecv, Busy: flying || a.busy[adapterproto.EndpointRef(id.String())] || executing[id],
+			LastRecvAt: p.lastRecv, RetryNow: p.sessionBack, Busy: flying || a.busy[adapterproto.EndpointRef(id.String())] || executing[id],
 		}
 		if head := e.view.attempts[id]; head.Attempts != nil {
 			in.Attempts = head.Attempts
@@ -428,7 +444,7 @@ func (e *Engine) dispatchPrompt(now time.Time, id ident.EndpointID, d handoff.Pr
 	}
 	e.view.attempts[id] = head
 	p.flight = &promptFlight{attempt: attempt, kind: d.Kind, trigger: p.trigger, covers: covers, at: now}
-	p.turn, p.trigger = true, 0
+	p.turn, p.trigger, p.sessionBack = true, 0, false
 	params := adapterproto.PromptDeliverParams{
 		Endpoint: adapterproto.EndpointRef(id.String()), Attempt: attempt, Text: handoff.PromptText(d.Count),
 	}

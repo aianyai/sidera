@@ -231,6 +231,7 @@ func (e *Engine) attach(now time.Time, r AttachRequest) (attachStep, error) {
 	}
 	e.attached[rec.ID] = attachedSession{wake: wake, lastAttach: e.awake.total}
 	e.armAttachedAbsence(now, rec)
+	e.noteSessionAttached(rec.ID)
 
 	a := e.adapters[inst]
 	return attachStep{
