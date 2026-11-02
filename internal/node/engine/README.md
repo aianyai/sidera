@@ -568,7 +568,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   the clock state's task, derived from the periodic tasks, so a sleep counts for no more than the cap),
   is closed the way the owner's close does it, but only with nothing queued or leased on it and only in
   the running phase (`attachedAbsenceDue`, the `schedAttachedAbsence` entry). The start counts as the last
-  attachment of an endpoint that was open before it.
+  attachment of an endpoint that was open before it. An attached session is outside the node's cap
+  on prompt-started turns (`countsAgainstNodeCap` in `prompts.go`): its turns are not counted and its
+  prompts are not held by a full node.
 - **A close or an interrupt is carried out when it is accepted, not queued.** A signal the
   endpoint does not take (`Engine.acceptedSignals`, which the directory publishes too) is
   answered as unsupported at once; one it takes is accepted and the adapter is called by a

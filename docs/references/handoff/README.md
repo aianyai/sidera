@@ -62,6 +62,15 @@ checks that the model saw it before acknowledging for the agent.
   `DecidePrompt` would prompt is released while there are free slots (the cap
   less the running turns); the rest are held with `PromptNodeFull`. An endpoint
   that `DecidePrompt` would not prompt keeps that decision and takes no slot.
+- An endpoint can be marked as outside the cap (`WaitingPrompt.OutsideCap`): a
+  session that runs in someone else's runtime, as an attached session does, is
+  not load the node is there to limit. Its turns are left out of the running
+  count by the caller, and it takes no slot and is never held with
+  `PromptNodeFull`; every other rule of `DecidePrompt` (the unread prompt, the
+  re-prompt, the hourly cap) holds for it as for any endpoint. The mark is a
+  property of the waiting endpoint and the running count is the caller's, so the
+  caller decides in one place which endpoints count (the engine's
+  `countsAgainstNodeCap`) and uses that answer for both.
 - Being held by the node cap is not an attempt: nothing is recorded, nothing
   counts toward the hourly cap, and no failure exists that could make delivery
   blocked. The message stays queued and readable with `recv`.
@@ -421,7 +430,7 @@ The delivery side that these rules call into is described in
   `TestNewSessionPromptText`, `TestNewSessionPromptIsNotAnAttempt`,
   `TestDecidePrompt`, `TestPromptScenario*`, `TestPromptParamsValidate`.
 - `internal/handoff/nodeprompt.go`: `DecideNodePrompts`, `WaitingPrompt`,
-  `NodePromptDecision`. Tests: `TestDecideNodePrompts` (one row per rule),
+  `NodePromptDecision`. Tests: `TestDecideNodePrompts` (one row per rule, the endpoint outside the cap among them),
   `TestDecideNodePromptsRejectsInvalidInput`,
   `TestDecideNodePromptsDoesNotModifyItsInput`,
   `TestNodePromptScenarioFreedSlotReleasesWaitersOldestFirst`,

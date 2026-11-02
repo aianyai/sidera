@@ -108,7 +108,7 @@ patch is merged into the current settings and the result is validated whole.
 | `reply_permission` | whether a reply with evidence may reach an endpoint that did not ask for it | on | a boolean; it is written explicitly because the zero value of the rule it feeds is "off" |
 | `node_queue_limit` | unfinished deliveries the node holds before new sends are refused | 10,000 (`config`) | at least 1, and the reserve rule below |
 | `disk_reserve_bytes` | free space below which new work is refused | 256 MiB (`config`) | at least 1, and the reserve rule below |
-| `node_prompt_turns` | turns started by prompts that may run at once on the node | `handoff.DefaultMaxConcurrentTurns` | `handoff.PromptParams.Validate` accepts it (positive) |
+| `node_prompt_turns` | turns started by prompts that may run at once on the node, not counting attached sessions | `handoff.DefaultMaxConcurrentTurns` | `handoff.PromptParams.Validate` accepts it (positive) |
 | `archive_retention_days` | days the archive keeps its summaries | 30 (`config`) | from 1 to 106,751, the days a `time.Duration` holds |
 | `log_total_bytes` | space all logs together may take | 150 MiB (`config`) | at least 1, and the reserve rule below |
 | `endpoint_defaults.max_queue_s` | longest an endpoint keeps a message queued, in seconds | `delivery.DefaultEndpointMaxQueue` | `delivery.ValidateEndpointMaxQueue` accepts it |

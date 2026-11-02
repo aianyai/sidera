@@ -64,6 +64,13 @@ func repromptWaiter(n byte, since time.Duration) WaitingPrompt {
 	return w
 }
 
+// outsideWaiter is a waiter whose turns are not counted by the node cap.
+func outsideWaiter(n byte, since time.Duration) WaitingPrompt {
+	w := waiter(n, since)
+	w.OutsideCap = true
+	return w
+}
+
 // nodeNow is the offset of the evaluation instant used by the tables.
 const nodeNow = 3 * time.Hour
 
@@ -164,6 +171,12 @@ func TestDecideNodePrompts(t *testing.T) {
 		{"a re-prompt after a turn end competes for a slot like a first prompt",
 			[]WaitingPrompt{repromptWaiter(1, time.Minute), waiter(2, 2*time.Minute)}, 2,
 			[]nodeWant{wantSend(1, PromptReprompt), wantHold(2, PromptNodeFull)}},
+		{"an endpoint outside the cap is released when the node is full and takes no slot",
+			[]WaitingPrompt{outsideWaiter(1, time.Minute), waiter(2, 2*time.Minute), waiter(3, 3*time.Minute)}, 2,
+			[]nodeWant{wantSend(1, PromptFirst), wantSend(2, PromptFirst), wantHold(3, PromptNodeFull)}},
+		{"every slot taken: only the endpoint outside the cap is released",
+			[]WaitingPrompt{outsideWaiter(2, 2*time.Minute), waiter(1, time.Minute)}, 3,
+			[]nodeWant{wantHold(1, PromptNodeFull), wantSend(2, PromptFirst)}},
 		{"no waiting endpoints: nothing is decided", nil, 0, nil},
 	}
 	for _, r := range rows {

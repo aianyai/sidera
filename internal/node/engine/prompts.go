@@ -261,6 +261,15 @@ func (e *Engine) promptParams() handoff.PromptParams {
 	return p
 }
 
+// countsAgainstNodeCap says the turns of the session endpoint are the node's to limit
+// (PromptParams.MaxConcurrentTurns). A session the node created runs on the node's
+// resources. An attached session is the person's own, in their own runtime: its turns
+// are not the node's load, and the cap on the node's turns must neither count them nor
+// hold its prompts back. Its prompts still obey the rules of the endpoint.
+func countsAgainstNodeCap(st *endpointState) bool {
+	return st.rec.Origin() != adapterreg.OriginAttached
+}
+
 // promptRound collects what the decision needs. An endpoint whose adapter is offline
 // is neither waiting (a prompt for it is bound to fail, and the failure would be
 // taken for a reason to call delivery blocked) nor running (the state of its turn is
@@ -290,7 +299,8 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 			continue
 		}
 		flying := p.turn || p.flight != nil
-		if flying {
+		outsideCap := !countsAgainstNodeCap(st)
+		if flying && !outsideCap {
 			r.running++
 		}
 		if p.trigger == 0 || !a.inService {
@@ -314,7 +324,7 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 			keys[i] = m.Key
 		}
 		r.covers[id] = keys
-		r.waiting = append(r.waiting, handoff.WaitingPrompt{Endpoint: id, WaitingSince: pending[0].AcceptedAt, Input: in})
+		r.waiting = append(r.waiting, handoff.WaitingPrompt{Endpoint: id, WaitingSince: pending[0].AcceptedAt, Input: in, OutsideCap: outsideCap})
 	}
 	return r
 }

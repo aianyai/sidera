@@ -16,7 +16,7 @@ to the delivery side, which calls into this package.
 | -------- | ------- |
 | `PromptText(count)`, `NewSessionPromptText` | The wake-up text for waiting messages, and the first prompt of a session created without an initial message. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | The per-endpoint rule that `DecideNodePrompts` applies: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. A `PromptSend` from it alone never authorizes a prompt. |
-| `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
+| `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit; an endpoint marked `OutsideCap` takes no slot and is not held by it. |
 | `DefaultPromptParams()`, `DefaultBlockedParams()` | The decided values of `PromptParams` and `BlockedParams`. |
 | `TrimAttempts(attempts, now)` | The attempts of an endpoint that the rules still read, for the caller to keep: the last hour, the newest delivered first prompt with the delivered attempts after it, and the earliest failure of the current failing run. The caller trims through it and keeps nothing else back. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. A short run with an active cause carries `RetryAt`, the first instant the run is longer than the threshold. |
@@ -62,7 +62,9 @@ Node-wide concurrency of prompt-started turns:
   capped (`PromptParams.MaxConcurrentTurns`). The cap protects the machine's
   CPU, memory and subscription use. It does not count turns a person or another
   tool started. `DecidePrompt` judges one endpoint and does not read it;
-  `DecideNodePrompts` is the node-wide entry.
+  `DecideNodePrompts` is the node-wide entry. A waiting endpoint marked
+  `OutsideCap` (a session in someone else's runtime) takes no slot and is never
+  held by the cap; its turns are not in `running`.
 - Only an endpoint that `DecidePrompt` would prompt takes a slot. An endpoint
   that is busy, has nothing pending, is at its hourly cap or has a prompt unread
   keeps its own hold and leaves the slot to the next waiter.
@@ -87,7 +89,8 @@ Node-wide concurrency of prompt-started turns:
 - A turn whose adapter is offline is not counted in `running`: its state is
   unknown, and a turn nobody can observe must not stop the whole node. When the
   adapter returns and reports the turn still running it is counted again, so
-  `running` can exceed the cap; nothing is released until it falls below it.
+  `running` can exceed the cap; no endpoint inside the cap is released until it falls
+  below it.
 - An endpoint whose adapter is offline is not in `waiting`: it would take a slot
   for an attempt that is bound to fail, and the failure would feed `AssessBlocked`.
 

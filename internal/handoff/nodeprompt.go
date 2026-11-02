@@ -29,6 +29,11 @@ type WaitingPrompt struct {
 	// Input is what DecidePrompt reads about the endpoint. Trigger is the
 	// endpoint's pending trigger; see DecideNodePrompts.
 	Input PromptInput
+	// OutsideCap says the endpoint's turns are not the node's: the session runs
+	// on someone else's resources, and its turns are not part of running. It
+	// takes no slot of the cap and is never held for want of one; DecidePrompt
+	// alone decides it.
+	OutsideCap bool
 }
 
 // NodePromptDecision is the verdict for one waiting endpoint.
@@ -47,23 +52,26 @@ type NodePromptDecision struct {
 // AssessBlocked.
 //
 // running is the number of turns that prompts started and that are still
-// running on the node. A prompt counts from its dispatch, the moment the
-// endpoint's Busy becomes true, until its turn ends or it is confirmed not to
-// have started one. Only turns that prompts started count, and only those of
-// online adapters: the state of an offline adapter's turn is unknown, and an
-// unobservable turn must not stop the whole node. When the adapter returns and
-// reports the turn still running, it is counted again, and running may then
-// exceed the cap. No endpoint is released until it falls below the cap.
+// running on the node, those of the endpoints outside the cap not among them. A
+// prompt counts from its dispatch, the moment the endpoint's Busy becomes true,
+// until its turn ends or it is confirmed not to have started one. Only turns
+// that prompts started count, and only those of online adapters: the state of
+// an offline adapter's turn is unknown, and an unobservable turn must not stop
+// the whole node. When the adapter returns and reports the turn still running,
+// it is counted again, and running may then exceed the cap. No endpoint inside
+// the cap is released until it falls below the cap; one outside it is released
+// whatever running is.
 //
 // Each endpoint is first judged by DecidePrompt, on its own. Only an endpoint
-// that DecidePrompt would prompt takes a slot; any other keeps its own hold and
-// reason and leaves the slot to the next waiter. A PromptSend of DecidePrompt
-// alone never authorizes a prompt: the caller sends only to the endpoints this
-// function releases. Of the endpoints that would be prompted, the ones that have
-// waited longest are released, no more than the free slots (the cap less
-// running); ties in WaitingSince go to the endpoint with the lower ID, in byte
-// order, so the result does not depend on the order of the input. The others
-// are held with PromptNodeFull.
+// that DecidePrompt would prompt takes a slot, and not one that is outside the
+// cap (WaitingPrompt.OutsideCap), which is released whatever the slots; any
+// other keeps its own hold and reason and leaves the slot to the next waiter.
+// A PromptSend of DecidePrompt alone never authorizes a prompt: the caller
+// sends only to the endpoints this function releases. Of the endpoints that
+// would be prompted, the ones that have waited longest are released, no more
+// than the free slots (the cap less running); ties in WaitingSince go to the
+// endpoint with the lower ID, in byte order, so the result does not depend on
+// the order of the input. The others are held with PromptNodeFull.
 //
 // The result has one decision per waiting endpoint, ordered by WaitingSince and
 // then by endpoint ID. The input is not modified.
@@ -125,7 +133,7 @@ func DecideNodePrompts(waiting []WaitingPrompt, running int, p PromptParams, now
 		if err != nil {
 			return nil, err
 		}
-		if d.Action == PromptSend {
+		if d.Action == PromptSend && !w.OutsideCap {
 			if free > 0 {
 				free--
 			} else {

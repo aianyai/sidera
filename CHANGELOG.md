@@ -26,6 +26,8 @@ protocol has a version of its own.
   heartbeat of the session's controller. An attached endpoint whose controller has not attached
   for the endpoint's queue time (30 minutes by default, and never less than three minutes),
   counted in the time the node was awake, is closed once nothing is queued or leased on it.
+- **Attached sessions: outside the node's turn cap.** The setting `node_prompt_turns` no longer
+  counts the turns of attached sessions, and a full node no longer holds back their prompts.
 
 ### Changed
 
