@@ -52,6 +52,8 @@ Prompts:
   passed since a failed attempt that is the newest of all: reason
   `PromptRetryAfterFailure`, with `RetryAt`. The caller evaluates again then with
   the same `Trigger`.
+  `PromptInput.RetryNow` lifts that wait for one decision: the caller says what
+  failed is over (a session that was away attached again); no other rule changes.
 - A failed attempt is otherwise invisible: it is not an unread prompt, spends no
   allowance and does not count toward the cap. An unknown outcome counts toward
   the cap only.

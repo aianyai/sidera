@@ -51,7 +51,9 @@ checks that the model saw it before acknowledging for the agent.
   `PromptRetryAfterFailure` and `RetryAt`, the failure time plus that span, and
   the caller evaluates again then with the same trigger. Any other hold keeps
   its own reason. The wait is a rule of the prompt decision, not of its caller,
-  so every caller retries at the same pace. Neither changes anything outside the endpoint: the
+  so every caller retries at the same pace; the one exception is the caller that
+  knows what failed is over (`PromptInput.RetryNow`: a session that was away
+  attached again), whose decision is made without the wait. Neither changes anything outside the endpoint: the
   message stays queued and readable with `recv`.
 - The number of turns that prompts have started and that are still running on
   a node is capped. `DecidePrompt` judges one endpoint and knows nothing of the
@@ -300,7 +302,9 @@ The delivery side that these rules call into is described in
   the instant (`RetryAt`) as it does for the cap and the interval, so a caller
   needs no backoff of its own and no special case for the failure it saw; a
   caller that borrowed another subsystem's backoff would retry at that
-  subsystem's pace.
+  subsystem's pace. The one fact that does end the wait is a cause known to be
+  over, which only the caller can know, so it passes it in (`RetryNow`) rather
+  than keep a backoff of its own.
 - **Failed attempts are not counted by the cap.** The cap protects the agent
   from being woken too often. A prompt that never reached the session woke
   nobody, and counting it would keep a recovered adapter from waking the agent

@@ -187,6 +187,11 @@ type PromptInput struct {
 	// Busy reports that the session must not be prompted now: a turn is
 	// running, or the caller holds it. The caller asks again when that ends.
 	Busy bool
+	// RetryNow says that what made the newest attempt fail is known to be over (a
+	// session that was away has come back), so the wait that a failed attempt puts
+	// on the next prompt does not apply. Every other rule applies as it does without
+	// it, and an attempt that fails after it is waited for as usual.
+	RetryNow bool
 	// Attempts is the endpoint's prompt attempts in ascending time order.
 	// Attempts older than the hourly window and older than the last first
 	// prompt that was read may be dropped.
@@ -324,7 +329,7 @@ func DecidePrompt(in PromptInput, p PromptParams, now time.Time) (PromptDecision
 		d.RetryAt = oldest.Add(hourlyWindow)
 		return d, nil
 	}
-	if n := len(in.Attempts); n > 0 && in.Attempts[n-1].Outcome == AttemptFailed {
+	if n := len(in.Attempts); n > 0 && !in.RetryNow && in.Attempts[n-1].Outcome == AttemptFailed {
 		if retryAt := in.Attempts[n-1].At.Add(p.RetryAfterFailure); now.Before(retryAt) {
 			d := hold(PromptRetryAfterFailure)
 			d.RetryAt = retryAt
