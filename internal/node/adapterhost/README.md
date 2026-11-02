@@ -33,7 +33,7 @@ and its own log goes through the handle the daemon gives it.
 | `Params`, `DefaultParams`, `OfflineAfterPingFailures` | The tunables, and the one decided rule: two pings in a row unanswered make an adapter offline. |
 | `ErrNotConnected` | What a call to an adapter that is not in service returns without sending anything. |
 | `Env`, `Source`, `LogOpener` | What the host needs of the node when it starts: the data directory, a read-only view of the configuration, the opener of the adapters' logs, and the engine. |
-| `ConnCounts` | What the host counts of one connection. |
+| `ConnCounts`, `CallID` | What the host counts of one connection, and the identity (method and a digest of the params) by which it lists the requests in flight, so that two of one method differ. |
 
 ## Rules
 
@@ -117,7 +117,8 @@ and its own log goes through the handle the daemon gives it.
   offline itself), and what is still buffered for the engine is dropped. **Abort** kills every process at once and writes nothing, not even a
   cancellation of a request in flight. After either, calls return
   `ErrNotConnected` and `Start` fails; both are idempotent.
-- **Counts** are exact. `Calls` lists the requests the host sent that have no
+- **Counts** are exact. `Calls` lists the identities (`CallID`: the method, a `#`
+  and a digest of the params in a canonical form) of the requests the host sent that have no
   answer yet, a ping included: while one is out the host is parked with its timeout
   armed, so a caller that found the host quiet would move the test clock into it.
   A request is counted before the host starts to wait for its answer, and until

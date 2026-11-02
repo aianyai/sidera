@@ -421,21 +421,38 @@ func TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost(t *testing.
 			t.Fatal(err)
 		}
 		results := make(chan error, 3)
-		for i := range 2 {
+		// The identity of a request is built on each side from its own view of the
+		// params (the host before it encodes them, the fake from what it received), so
+		// the two agree only if the canonical forms do; two prompts differ by attempt
+		// and text, with characters the encoder may escape.
+		identity := func(method string, params any) string {
+			raw, err := json.Marshal(params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return adapterhost.CallID(method, raw)
+		}
+		prompts := []adapterproto.PromptDeliverParams{
+			{Endpoint: "s-1", Attempt: "00000000-0000-4000-8000-000000000010", Text: "more <b>&</b>"},
+			{Endpoint: "s-1", Attempt: "00000000-0000-4000-8000-000000000011", Text: "more"},
+		}
+		closing := adapterproto.CloseParams{Endpoint: "s-1"}
+		for _, p := range prompts {
 			go func() {
-				_, err := r.host.DeliverPrompt(ctx, "chat", adapterproto.PromptDeliverParams{Endpoint: "s-1", Attempt: adapterproto.AttemptID(fmt.Sprintf("00000000-0000-4000-8000-00000000001%d", i)), Text: "more"})
+				_, err := r.host.DeliverPrompt(ctx, "chat", p)
 				results <- err
 			}()
 		}
 		go func() {
-			_, err := r.host.Close(ctx, "chat", adapterproto.CloseParams{Endpoint: "s-1"})
+			_, err := r.host.Close(ctx, "chat", closing)
 			results <- err
 		}()
 		eventually(t, "three requests to be held", func() bool { return len(k.Held()) == 3 })
-		want := []string{adapterproto.MethodPromptDeliver, adapterproto.MethodPromptDeliver, adapterproto.MethodSessionClose}
+		want := []string{identity(adapterproto.MethodPromptDeliver, prompts[0]), identity(adapterproto.MethodPromptDeliver, prompts[1]), identity(adapterproto.MethodSessionClose, closing)}
+		slices.Sort(want)
 		held := k.Held()
 		slices.Sort(held)
-		if got := r.host.Counts("chat").Calls; !slices.Equal(got, held) || !slices.Equal(got, want) {
+		if got := r.host.Counts("chat").Calls; !slices.Equal(got, held) || !slices.Equal(got, want) || got[0] == got[1] {
 			t.Fatalf("Calls = %v, held by the adapter = %v, want %v", got, held, want)
 		}
 		k.ReleaseHeld()
@@ -462,8 +479,8 @@ func TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost(t *testing.
 		// advance returns when the host is idle: a caller that finds it so, as the
 		// engine's quiet check does, must already find the ping in the counts.
 		r.advance(testParams().PingInterval)
-		if c := r.host.Counts("chat"); !slices.Equal(c.Calls, []string{adapterproto.MethodPing}) {
-			t.Fatalf("Calls = %v while a ping is out, want [%s]", c.Calls, adapterproto.MethodPing)
+		if c := r.host.Counts("chat"); !slices.Equal(c.Calls, []string{adapterhost.CallID(adapterproto.MethodPing, []byte(`{}`))}) {
+			t.Fatalf("Calls = %v while a ping is out, want one %s", c.Calls, adapterproto.MethodPing)
 		}
 		waitPings(t, a, 1)
 		r.advance(testParams().PingTimeout)

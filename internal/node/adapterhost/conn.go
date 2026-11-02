@@ -48,7 +48,15 @@ type conn struct {
 	handled  int
 	buffered int
 	requests int
-	calls    map[string]int
+	calls    map[uint64]trackedCall // the requests sent and not answered, by the order of tracking
+	nextCall uint64
+}
+
+// trackedCall is a request of the host as it was sent: what CallID is made from,
+// kept as it is so that the identity is built only when the counts are asked for.
+type trackedCall struct {
+	method string
+	params adapterproto.Message
 }
 
 type pendingNote struct {
@@ -69,7 +77,7 @@ func (s *supervisor) newConn(proc Process, logw *logWriter) *conn {
 		cancel:  cancel,
 		notes:   make(chan pendingNote, s.h.params.NotificationBuffer),
 		fwdDone: make(chan struct{}),
-		calls:   map[string]int{},
+		calls:   map[uint64]trackedCall{},
 	}
 	go func() {
 		_ = proc.Wait()
@@ -89,10 +97,8 @@ func (c *conn) counts() ConnCounts {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := ConnCounts{Handled: c.handled, Buffered: c.buffered, Requests: c.requests}
-	for m, n := range c.calls {
-		for range n {
-			out.Calls = append(out.Calls, m)
-		}
+	for _, call := range c.calls {
+		out.Calls = append(out.Calls, callIDOf(call.method, call.params))
 	}
 	slices.Sort(out.Calls)
 	return out
@@ -105,15 +111,17 @@ func (c *conn) counts() ConnCounts {
 // own and waits for it elsewhere counts it before it starts waiting and stops
 // counting it once it has taken the answer, so that a caller that finds the host
 // idle finds in the counts every request whose answer the host has not acted on.
-func (c *conn) track(method string) (done func()) {
+// The params are encoded into an identity only by counts, and are not changed by
+// the host once they are sent.
+func (c *conn) track(method string, params adapterproto.Message) (done func()) {
 	c.mu.Lock()
-	c.calls[method]++
+	c.nextCall++
+	key := c.nextCall
+	c.calls[key] = trackedCall{method: method, params: params}
 	c.mu.Unlock()
 	return func() {
 		c.mu.Lock()
-		if c.calls[method]--; c.calls[method] == 0 {
-			delete(c.calls, method)
-		}
+		delete(c.calls, key)
 		c.mu.Unlock()
 	}
 }
@@ -121,7 +129,7 @@ func (c *conn) track(method string) (done func()) {
 // call sends one request to the adapter, counted while it is out, and decodes its
 // result strictly.
 func (c *conn) call(ctx context.Context, method string, params, result adapterproto.Message) error {
-	defer c.track(method)()
+	defer c.track(method, params)()
 	return c.send(ctx, method, params, result)
 }
 

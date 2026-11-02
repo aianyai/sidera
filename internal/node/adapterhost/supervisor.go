@@ -362,7 +362,7 @@ func (s *supervisor) rpc(c *conn, method string, params, result adapterproto.Mes
 	// no longer counted knows the supervisor has acted on its answer. A helper that
 	// stopped counting it would leave a moment when the answer is on its way to
 	// the supervisor and the host looks quiet.
-	defer c.track(method)()
+	defer c.track(method, params)()
 	s.spawn(func() { res <- c.send(ctx, method, params, result) })
 	sl, err := s.park(waits{res: res, limit: t.C()}, true)
 	switch sl {

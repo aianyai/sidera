@@ -175,7 +175,7 @@ func (a NativeRequestArgs) validate() error {
 type StatsReply struct {
 	NotificationsSent int `json:"notifications_sent"`
 	Outstanding       int `json:"outstanding"`
-	// Held are the methods of the requests held on purpose (see Knobs.Held), and
+	// Held are the identities of the requests held on purpose (see Knobs.Held), and
 	// HeldPoints the pause points some of them stopped at.
 	Held       []string `json:"held,omitempty"`
 	HeldPoints []string `json:"held_points,omitempty"`

@@ -596,3 +596,13 @@ func (r *rig) ready() string {
 }
 
 func newPipe() (*io.PipeReader, *io.PipeWriter) { return io.Pipe() }
+
+// methodsOf is the methods of request identities (see Knobs.Held): what an
+// identity says before its "#".
+func methodsOf(ids []string) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i], _, _ = strings.Cut(id, "#")
+	}
+	return out
+}

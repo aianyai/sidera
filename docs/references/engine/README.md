@@ -499,7 +499,10 @@ named in `Expect.Adapters` against the host's counts: the notifications handled
 equal what the adapter says it sent, none is buffered, no request of the adapter is
 being answered, the host is not working, and the requests the host has sent that
 have no answer are exactly the ones the caller says the adapter holds on purpose
-(as multisets). Instances not named are not judged. A worker of the engine that is
+(as multisets of identities: the method and a digest of the params, `adapterhost.CallID`,
+not the method alone, because a request cancelled at its deadline that the adapter still holds
+and the next of the same method, sent and not yet received, are one method and must not be
+taken for each other). Instances not named are not judged. A worker of the engine that is
 inside a call to an adapter is work until the adapter answers, except for the calls the
 caller says the adapter holds on purpose: those are the requests the host's own check
 has just matched with the held list, so the workers that wait for them are not counted.

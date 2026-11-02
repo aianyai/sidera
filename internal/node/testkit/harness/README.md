@@ -133,7 +133,7 @@ By default the node has one instance, `Instance`, and every accessor without a n
   has not answered (`Controller.Stats().Outstanding` is zero), and its progress is the
   notifications it has sent. The engine is asked with `Expect.Adapters[instance]` set to
   the notifications the latest launch has sent and the requests it holds on purpose
-  (`Stats().NotificationsSent`, `Held`), made again for every round, and each round is
+  (`Stats().NotificationsSent`, `Held`, identities of the requests), made again for every round, and each round is
   given 100 ms of real time at most, because the numbers the engine holds do not follow
   an adapter that sends while it is asked. Only the latest launch is asked, so a process
   that is hung or abandoned never makes the fixture wait for ever once the host has

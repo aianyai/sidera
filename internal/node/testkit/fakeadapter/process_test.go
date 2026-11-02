@@ -493,7 +493,7 @@ func TestProcessAdapterKnobsOverTheControlChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := k.Stats(ctx)
-	if err != nil || !reflect.DeepEqual(st.Held, []string{adapterproto.MethodSessionCreate}) || !reflect.DeepEqual(st.HeldPoints, []string{fakeadapter.PauseCreateAfterNative}) {
+	if err != nil || !reflect.DeepEqual(methodsOf(st.Held), []string{adapterproto.MethodSessionCreate}) || !reflect.DeepEqual(st.HeldPoints, []string{fakeadapter.PauseCreateAfterNative}) {
 		t.Fatalf("Stats while paused: %+v, %v; want the method held, and the point it stopped at", st, err)
 	}
 	// The process also says that it stopped, over the control channel.
@@ -545,7 +545,7 @@ var goldenArgs = []struct {
 	{"native request", fakeadapter.KnobNativeReq, `{"endpoint":"sess-1","method":"item/tool/call","disposition":"preset"}`, fakeadapter.NativeRequestArgs{Endpoint: "sess-1", Method: "item/tool/call", Disposition: adapterproto.DispositionPreset}},
 	{"external inputs", fakeadapter.KnobExternalInputs, `{"create_refusal":"native_error","prompt_refusal":"runtime_auth","availability":[{"condition":"runtime_auth","since_ms":1792832400000}]}`, fakeadapter.ExternalInputs{CreateRefusal: adapterproto.CreateFailNativeError, PromptRefusal: adapterproto.RefusalRuntimeAuth, Availability: []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: 1792832400000}}}},
 	{"external clear", fakeadapter.KnobExternalInputs, `{}`, fakeadapter.ExternalInputs{}},
-	{"stats reply", fakeadapter.KnobStats + ".reply", `{"notifications_sent":3,"outstanding":1,"held":["session.create"],"held_points":["create.after-native"]}`, fakeadapter.StatsReply{NotificationsSent: 3, Outstanding: 1, Held: []string{"session.create"}, HeldPoints: []string{"create.after-native"}}},
+	{"stats reply", fakeadapter.KnobStats + ".reply", `{"notifications_sent":3,"outstanding":1,"held":["session.create#0123456789abcdef"],"held_points":["create.after-native"]}`, fakeadapter.StatsReply{NotificationsSent: 3, Outstanding: 1, Held: []string{"session.create#0123456789abcdef"}, HeldPoints: []string{"create.after-native"}}},
 }
 
 func TestGoldenKnobArguments(t *testing.T) {

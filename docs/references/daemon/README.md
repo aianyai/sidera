@@ -470,7 +470,8 @@ request is `method_unknown`, which is how a test asserts that the way in is miss
 `test.ping` exists with either tag. `testclock` adds `test.clock.set` with
 `{to_ms}` (absolute Unix milliseconds, including rollback) and `test.quiesce`
 with `{expect: {instance: {notifications, held}}, timeout_ms}`. `held` is a
-multiset of request method names. A positive timeout is required. Quiescence
+multiset of request identities (a method, a `#` and a digest of the params, as
+`adapterhost.CallID` builds it). A positive timeout is required. Quiescence
 returns `inbox_len`, `continuations`, `due_entries`, `parked`, `workers`,
 `adapters_pending`, `satisfied`, and an `error` string when it fails; a failure
 keeps the counters in a successful HTTP response for the fixture to explain.

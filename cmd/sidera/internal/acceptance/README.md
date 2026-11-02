@@ -85,8 +85,8 @@ ordinary errors. No runtime session is created by this base fixture;
 the fake runtime currently records its creation before its fixture control
 connection exists, so that initial event cannot acquire a current step here.
 
-`Quiesce` samples every enabled adapter's notification count, held-method
-multiset and outstanding requests, requires the remote runtime to be idle,
+`Quiesce` samples every enabled adapter's notification count, held-request
+identity multiset and outstanding requests, requires the remote runtime to be idle,
 submits the expectations to `test.quiesce`, and samples again. It succeeds only
 when both samples agree and the daemon and fakes are satisfied. With no enabled
 adapters, the request omits the optional `expect` field: the strict wire decoder

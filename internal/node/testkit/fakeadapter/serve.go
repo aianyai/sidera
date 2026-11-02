@@ -234,6 +234,7 @@ func (a *adapter) register() {
 // answered.
 func (a *adapter) handle(method string, h func(context.Context, json.RawMessage) (any, error)) {
 	a.p.Handle(method, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		ctx = withRequestID(ctx, method, raw)
 		if a.knobs.hanging() {
 			a.mu.Lock()
 			first := !a.hangLogged
@@ -247,7 +248,7 @@ func (a *adapter) handle(method string, h func(context.Context, json.RawMessage)
 			// A request a hung adapter keeps is held like any other, so that a fixture
 			// that asks whether the system is quiet finds the request the daemon has in
 			// flight among the ones expected.
-			held := &heldRequest{method: method}
+			held := &heldRequest{id: requestIDOf(ctx)}
 			a.knobs.addHeld(held)
 			defer a.knobs.removeHeld(held)
 			<-ctx.Done()
@@ -405,7 +406,7 @@ func (a *adapter) sessionDetached(_ context.Context, raw json.RawMessage) {
 // outcome returns the knob outcome for the next request of a kind, if any, after
 // writing its hit. A held request waits here and then goes its normal way; an
 // error that has no effect is returned for the handler to answer with.
-func (a *adapter) outcome(ctx context.Context, request, method string) (Outcome, bool, error) {
+func (a *adapter) outcome(ctx context.Context, request string) (Outcome, bool, error) {
 	o, ok := a.knobs.next(request)
 	if !ok {
 		return Outcome{}, false, nil
@@ -415,7 +416,7 @@ func (a *adapter) outcome(ctx context.Context, request, method string) (Outcome,
 	}
 	switch {
 	case o.Kind == OutcomeHold:
-		if err := a.knobs.hold(ctx, method); err != nil {
+		if err := a.knobs.hold(ctx); err != nil {
 			return Outcome{}, false, err
 		}
 		return Outcome{}, false, nil
@@ -507,7 +508,7 @@ func (a *adapter) start(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
-	o, has, err := a.outcome(ctx, forStart, adapterproto.MethodAdapterStart)
+	o, has, err := a.outcome(ctx, forStart)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +614,7 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 	var has bool
 	if refusal == "" {
 		var err error
-		o, has, err = a.outcome(ctx, forCreate, adapterproto.MethodSessionCreate)
+		o, has, err = a.outcome(ctx, forCreate)
 		if err != nil {
 			return nil, err
 		}
@@ -730,7 +731,7 @@ func (a *adapter) promptDeliver(ctx context.Context, raw json.RawMessage) (any, 
 	if reason := a.knobs.promptRefusal(); reason != "" {
 		return answer(adapterproto.PromptDeliverResult{Stage: adapterproto.PromptRefused, Reason: reason})
 	}
-	o, has, err := a.outcome(ctx, forPrompt, adapterproto.MethodPromptDeliver)
+	o, has, err := a.outcome(ctx, forPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -785,7 +786,7 @@ func (a *adapter) promptReconcile(ctx context.Context, raw json.RawMessage) (any
 	if err != nil {
 		return nil, err
 	}
-	o, has, err := a.outcome(ctx, forReconcile, adapterproto.MethodPromptReconcile)
+	o, has, err := a.outcome(ctx, forReconcile)
 	if err != nil {
 		return nil, err
 	}
@@ -837,7 +838,7 @@ func (a *adapter) sessionInterrupt(ctx context.Context, raw json.RawMessage) (an
 	if err := a.log(ledger.KindInterruptReceived, ledger.Attrs{Endpoint: string(p.Endpoint)}); err != nil {
 		return nil, err
 	}
-	o, has, err := a.outcome(ctx, forInterrupt, adapterproto.MethodSessionInterrupt)
+	o, has, err := a.outcome(ctx, forInterrupt)
 	if err != nil {
 		return nil, err
 	}
@@ -929,7 +930,7 @@ func (a *adapter) sessionClose(ctx context.Context, raw json.RawMessage) (any, e
 	if err := a.log(ledger.KindCloseReceived, ledger.Attrs{Endpoint: string(p.Endpoint)}); err != nil {
 		return nil, err
 	}
-	o, has, err := a.outcome(ctx, forClose, adapterproto.MethodSessionClose)
+	o, has, err := a.outcome(ctx, forClose)
 	if err != nil {
 		return nil, err
 	}

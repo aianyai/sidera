@@ -286,7 +286,7 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 			// taken the answer, as rpc counts its request: a caller that finds the
 			// host idle with no ping counted knows the supervisor has acted on the
 			// answer, the next interval armed included.
-			pingDone = c.track(adapterproto.MethodPing)
+			pingDone = c.track(adapterproto.MethodPing, adapterproto.Empty{})
 			s.spawn(func() { res <- c.send(ctx, adapterproto.MethodPing, adapterproto.Empty{}, &adapterproto.Empty{}) })
 		case slotRes, slotLimit:
 			// The ping is over: answered, failed, or too slow.

@@ -90,8 +90,8 @@ and not sleep. The conditions that are the fakes' to answer:
   (`Knobs.NotificationsSent`) are all handled by the daemon, which matters because
   the protocol peer handles notifications in order after the answer of a ping;
 - the requests a knob holds on purpose are expected, not in flight: `Knobs.Held` is
-  a multiset of methods, compared with the multiset of methods the daemon has in
-  flight to the adapter.
+  a multiset of request identities (the method and a digest of the params), compared
+  with the multiset of identities the daemon has in flight to the adapter.
 
 The conditions that are the daemon's (empty loop, no due timer, empty buffers) are
 checked by the engine.

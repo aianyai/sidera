@@ -137,12 +137,12 @@ type Knobs struct {
 }
 
 // heldRequest is a request of the daemon that the adapter is holding on purpose:
-// the method it came with, the pause point it stopped at (empty otherwise), and
-// whether an outcome holds it. An entry is told apart from an equal one by its
+// its identity (see requestID), the pause point it stopped at (empty otherwise),
+// and whether an outcome holds it. An entry is told apart from an equal one by its
 // address, so removing it twice removes nothing the second time.
 type heldRequest struct {
-	method, point string
-	byOutcome     bool
+	id, point string
+	byOutcome bool
 }
 
 type pausePoint struct {
@@ -267,15 +267,6 @@ const (
 
 var pauseNames = []string{PauseCreateAfterNative, PausePromptAfterForward, PauseInterruptAfterForward, PauseCloseAfterForward, PauseStartBeforeReply}
 
-// pauseMethods is the method of the request that stops at each pause point.
-var pauseMethods = map[string]string{
-	PauseCreateAfterNative:     adapterproto.MethodSessionCreate,
-	PausePromptAfterForward:    adapterproto.MethodPromptDeliver,
-	PauseInterruptAfterForward: adapterproto.MethodSessionInterrupt,
-	PauseCloseAfterForward:     adapterproto.MethodSessionClose,
-	PauseStartBeforeReply:      adapterproto.MethodAdapterStart,
-}
-
 // OnPause sets a function that is called, outside any lock, each time a request
 // stops at a pause point, with the name of the point. The adapter program uses it to
 // tell the fixture over the control channel.
@@ -356,7 +347,7 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 		k.stopped[point] = pp
 		// Held in the same step as stopped, so that Release, which takes it out of
 		// both, never finds one without the other.
-		pp.held = &heldRequest{method: pauseMethods[point], point: point}
+		pp.held = &heldRequest{id: requestIDOf(ctx), point: point}
 		k.holds = append(k.holds, pp.held)
 	}
 	k.mu.Unlock()
@@ -401,19 +392,21 @@ func (k *Knobs) removeHeldLocked(h *heldRequest) {
 	}
 }
 
-// Held lists the methods of the requests the adapter is holding on purpose, one
-// entry per request, in the order they were stopped: a multiset of methods, which
-// a fixture compares with the multiset of methods of the requests the daemon has
-// in flight to this adapter when it asks whether the system is quiet. A request is
-// held at a pause point, by OutcomeHold or by Hang; either way it appears here
-// under its method (session.create, prompt.deliver, …) and never under the name of
-// a point.
+// Held lists the identities of the requests the adapter is holding on purpose, one
+// entry per request, in the order they were stopped: a multiset, which a fixture
+// compares with the multiset of identities of the requests the daemon has in
+// flight to this adapter when it asks whether the system is quiet. An identity is
+// the method (session.create, prompt.deliver, …), a "#" and a digest of the
+// request's params (see requestID), so that of two requests of one method the
+// adapter holds one and the daemon has both in flight, the fixture sees that. A
+// request is held at a pause point, by OutcomeHold or by Hang; either way it
+// appears here under its identity and never under the name of a point.
 func (k *Knobs) Held() []string {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	out := make([]string, len(k.holds))
 	for i, h := range k.holds {
-		out[i] = h.method
+		out[i] = h.id
 	}
 	return out
 }
@@ -432,11 +425,11 @@ func (k *Knobs) HeldPoints() []string {
 	return out
 }
 
-// hold waits for ReleaseHeld or the end of ctx; method labels the request.
-func (k *Knobs) hold(ctx context.Context, method string) error {
+// hold waits for ReleaseHeld or the end of ctx; ctx is the request's own.
+func (k *Knobs) hold(ctx context.Context) error {
 	// The channel is read and the request held in one step, so that a ReleaseHeld
 	// that closes the channel also takes out every request that waits on it.
-	held := &heldRequest{method: method, byOutcome: true}
+	held := &heldRequest{id: requestIDOf(ctx), byOutcome: true}
 	k.mu.Lock()
 	open := k.holdOpen
 	k.holds = append(k.holds, held)

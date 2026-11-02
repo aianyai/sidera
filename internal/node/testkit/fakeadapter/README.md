@@ -127,10 +127,14 @@ and the direct methods (`Register`, `Recv`, `Ack`, `Send`, `MessageStatus`,
 `Unregister`), and `CheckpointPut` send what the name says and return the daemon's answer. `Held`,
 `NotificationsSent` and `Outstanding` tell a fixture which unanswered requests are
 expected and how many notifications the daemon must have handled before the system
-counts as quiet. `Held` is a multiset of methods (`session.create`, …), one per held
-request, whether an outcome, a pause point or `Hang` holds it (a hung adapter holds every
+counts as quiet. `Held` is a multiset of request identities, one per held
+request: the method (`session.create`, …), a `#` and a digest of the request's params, so
+that two requests of one method are two entries, whether an outcome, a pause point or `Hang` holds it (a hung adapter holds every
 request it receives, a ping included): the fixture compares it with
-the multiset of methods the daemon has in flight to the adapter. A request leaves
+the multiset of identities the daemon has in flight to the adapter (`adapterhost.CallID`
+builds the same string from the params the host encodes; the fake builds it from the params it
+received with `RequestID`, a copy of `CallID` because this package may not import the host,
+and `TestCallIDAgreesWithTheFakeAdapter` checks that the two agree on every kind of value). A request leaves
 `Held` before `Release` or `ReleaseHeld` returns, so a fixture that asks for quiet
 right after letting it go waits for its answer instead of counting it as still held.
 `HeldPoints` names the pause points some of them stopped at.
@@ -252,6 +256,6 @@ clock and the step reaching both, an adapter killed and a second one taking the
 session back, a native process killed, the knobs over the control channel, and the
 decoders (`FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig`). `rules_test.go`
 holds the rest of the rules above: one knob script run in both layers, `Held` as a
-multiset of methods, the first turn and the end of a killed one, what the ledger
+multiset of request identities, the first turn and the end of a killed one, what the ledger
 names, how the program finds its configuration, and that the daemon side has been
 told before the call that caused an event returns.

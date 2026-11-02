@@ -305,9 +305,9 @@ func TestPauseAtCreateAfterNativeStopsBeforeTheAnswer(t *testing.T) {
 		t.Fatalf("the adapter answered while paused: %+v %v", o.res, o.err)
 	case <-time.After(50 * time.Millisecond):
 	}
-	// Held names the method of the request, whether an outcome or a pause point holds
+	// Held names the request by its method, whether an outcome or a pause point holds
 	// it; the point is reported apart.
-	if held := r.knobs.Held(); len(held) != 1 || held[0] != adapterproto.MethodSessionCreate {
+	if held := methodsOf(r.knobs.Held()); len(held) != 1 || held[0] != adapterproto.MethodSessionCreate {
 		t.Fatalf("Held() = %v, want [%s]", held, adapterproto.MethodSessionCreate)
 	}
 	if points := r.knobs.HeldPoints(); len(points) != 1 || points[0] != fakeadapter.PauseCreateAfterNative {
@@ -381,7 +381,7 @@ func TestHeldCreateWaitsForReleaseThenGoesItsWay(t *testing.T) {
 		done <- res
 	}()
 	r.waitFor("the hold", func() bool { return len(r.knobs.Held()) == 1 })
-	if r.knobs.Held()[0] != adapterproto.MethodSessionCreate {
+	if methodsOf(r.knobs.Held())[0] != adapterproto.MethodSessionCreate {
 		t.Fatalf("Held() = %v", r.knobs.Held())
 	}
 	if countKind(r.ledgerLog(), ledger.KindRuntimeSessionCreated) != 0 {

@@ -431,9 +431,13 @@ type AdapterExpect struct {
 	// Notifications is how many notifications the adapter says it sent: the
 	// connection is quiet only when the engine has finished with that many.
 	Notifications int
-	// Held lists the methods of the requests that the host has sent the adapter and
-	// that the adapter holds on purpose, one entry per request. The order does not
-	// matter and a method held twice is listed twice.
+	// Held lists the identities (adapterhost.CallID) of the requests that the host
+	// has sent the adapter and that the adapter holds on purpose, one entry per
+	// request. The order does not matter and a request held twice is listed twice.
+	// An identity is the method and a digest of the params, not the method alone:
+	// when one request of a method was cancelled and the adapter still holds it, a
+	// second of the same method that has not reached the adapter yet must not be
+	// taken for it.
 	Held []string
 }
 
@@ -457,7 +461,7 @@ func (x AdapterExpect) holds(c adapterhost.ConnCounts) (bool, string) {
 	slices.Sort(calls)
 	slices.Sort(held)
 	if !slices.Equal(calls, held) {
-		why = append(why, fmt.Sprintf("requests held by the adapter %v, expected %v", calls, held))
+		why = append(why, fmt.Sprintf("requests in flight to the adapter %v, held by it %v", calls, held))
 	}
 	return len(why) == 0, strings.Join(why, "; ")
 }

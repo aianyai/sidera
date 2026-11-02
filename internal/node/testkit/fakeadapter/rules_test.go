@@ -20,14 +20,16 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest: a request is held by an
-// outcome or at a pause point, and either way it is listed under its method, never
-// under the name of a point. A fixture compares this multiset with the methods of
-// the requests the daemon has in flight to the adapter; a list that mixed methods
-// and points could never be equal to it. A request leaves the list as it is let go,
-// not when its handler next runs: a fixture that asks for quiet right after a
-// release would otherwise discount a request that is about to be answered.
-func TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest(t *testing.T) {
+// TestHeldIsAMultisetOfRequestIdentitiesWhateverHoldsTheRequest: a request is held
+// by an outcome or at a pause point, and either way it is listed by its identity,
+// its method and a digest of its params, never by the name of a point. A fixture
+// compares this multiset with the identities of the requests the daemon has in
+// flight to the adapter; a list that mixed requests and points could never be
+// equal to it, and one of bare methods could not tell two requests of a method
+// apart. A request leaves the list as it is let go, not when its handler next
+// runs: a fixture that asks for quiet right after a release would otherwise
+// discount a request that is about to be answered.
+func TestHeldIsAMultisetOfRequestIdentitiesWhateverHoldsTheRequest(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	r.ready()
 	if err := r.knobs.SetCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}); err != nil {
@@ -49,14 +51,18 @@ func TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest(t *testing.T) {
 	r.waitFor("two held creations", func() bool { return len(r.knobs.Held()) == 3 })
 	held := r.knobs.Held()
 	sort.Strings(held)
-	if want := []string{adapterproto.MethodPromptDeliver, adapterproto.MethodSessionCreate, adapterproto.MethodSessionCreate}; !reflect.DeepEqual(held, want) {
-		t.Fatalf("Held() = %v, want the multiset of methods %v", held, want)
+	if want := []string{adapterproto.MethodPromptDeliver, adapterproto.MethodSessionCreate, adapterproto.MethodSessionCreate}; !reflect.DeepEqual(methodsOf(held), want) {
+		t.Fatalf("Held() = %v, want requests of the methods %v", held, want)
+	}
+	// Two creations are two requests: their params differ, and so do their identities.
+	if creates := held[1:]; creates[0] == creates[1] {
+		t.Fatalf("Held() = %v: two requests of one method with different params have one identity", held)
 	}
 	if got := r.knobs.HeldPoints(); !reflect.DeepEqual(got, []string{fakeadapter.PausePromptAfterForward}) {
 		t.Fatalf("HeldPoints() = %v, want only the point a request stopped at", got)
 	}
 	r.knobs.ReleaseHeld()
-	if held := r.knobs.Held(); !reflect.DeepEqual(held, []string{adapterproto.MethodPromptDeliver}) {
+	if held := r.knobs.Held(); !reflect.DeepEqual(methodsOf(held), []string{adapterproto.MethodPromptDeliver}) {
 		t.Fatalf("Held() = %v once the creations were let go, want only the paused prompt", held)
 	}
 	r.knobs.Release(fakeadapter.PausePromptAfterForward)
@@ -96,7 +102,7 @@ func knobScript(t *testing.T, ctl fakeadapter.Controller, call func(method strin
 	}()
 	waitUntil(t, "a held create", func() bool {
 		st, err := ctl.Stats(ctx)
-		return err == nil && reflect.DeepEqual(st.Held, []string{adapterproto.MethodSessionCreate}) && len(st.HeldPoints) == 0
+		return err == nil && reflect.DeepEqual(methodsOf(st.Held), []string{adapterproto.MethodSessionCreate}) && len(st.HeldPoints) == 0
 	})
 	if err := ctl.ReleaseHeld(ctx); err != nil {
 		t.Fatal(err)
@@ -121,7 +127,7 @@ func knobScript(t *testing.T, ctl fakeadapter.Controller, call func(method strin
 		t.Fatal(err)
 	}
 	st, err := ctl.Stats(ctx)
-	if err != nil || !reflect.DeepEqual(st.Held, []string{adapterproto.MethodSessionCreate}) || !reflect.DeepEqual(st.HeldPoints, []string{fakeadapter.PauseCreateAfterNative}) {
+	if err != nil || !reflect.DeepEqual(methodsOf(st.Held), []string{adapterproto.MethodSessionCreate}) || !reflect.DeepEqual(st.HeldPoints, []string{fakeadapter.PauseCreateAfterNative}) {
 		t.Fatalf("Stats while paused: %+v, %v", st, err)
 	}
 	if err := ctl.Release(ctx, fakeadapter.PauseCreateAfterNative); err != nil {

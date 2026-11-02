@@ -70,7 +70,8 @@ carries no operation identifier and stores no result.
 - `testclock` alone enables `test.clock.set` with `{to_ms}` (absolute Unix
   milliseconds, rollback allowed) and `test.quiesce` with
   `{expect: {instance: {notifications, held}}, timeout_ms}`. Held entries are
-  request methods, including repetitions for multiple held requests. A positive
+  request identities (a method, a `#` and a digest of the params), including
+  repetitions for multiple held requests. A positive
   timeout is required. Quiescence returns the engine counters, `satisfied` and,
   on failure, `error`, so the caller retains the report that explains a timeout.
 - `crashtest` alone enables `test.crashpoints`, returning

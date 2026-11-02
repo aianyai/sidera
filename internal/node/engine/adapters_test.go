@@ -1766,6 +1766,9 @@ func TestQuiesceJudgesTheAdapterHostsCounts(t *testing.T) {
 		return c
 	}
 	expect4 := engine.AdapterExpect{Notifications: 4}
+	// Identities as the host and the adapter build them (adapterhost.CallID): the
+	// method and a digest of the params.
+	const create1, deliver1, deliver2 = "session.create#1", "prompt.deliver#1", "prompt.deliver#2"
 	for _, tc := range []struct {
 		name   string
 		counts adapterhost.ConnCounts
@@ -1778,17 +1781,25 @@ func TestQuiesceJudgesTheAdapterHostsCounts(t *testing.T) {
 		{"a notification is buffered", with(func(c *adapterhost.ConnCounts) { c.Buffered = 1 }), expect4, false},
 		{"a request of the adapter is being answered", with(func(c *adapterhost.ConnCounts) { c.Requests = 1 }), expect4, false},
 		{"the host is working", with(func(c *adapterhost.ConnCounts) { c.Working = true }), expect4, false},
-		{"held calls equal in another order", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"prompt.deliver", "session.create"} }),
-			engine.AdapterExpect{Notifications: 4, Held: []string{"session.create", "prompt.deliver"}}, true},
-		{"held calls with a repeated method", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"a", "b", "a"} }),
-			engine.AdapterExpect{Notifications: 4, Held: []string{"a", "a", "b"}}, true},
-		{"an extra call", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"session.create", "prompt.deliver"} }),
-			engine.AdapterExpect{Notifications: 4, Held: []string{"session.create"}}, false},
-		{"a call that is missing", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"session.create"} }),
-			engine.AdapterExpect{Notifications: 4, Held: []string{"session.create", "prompt.deliver"}}, false},
-		{"a call where none is held", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"session.create"} }), expect4, false},
-		{"the same number of calls, not the same multiset", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{"a", "b", "b"} }),
-			engine.AdapterExpect{Notifications: 4, Held: []string{"a", "a", "b"}}, false},
+		{"held calls equal in another order", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{create1, deliver1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{deliver1, create1}}, true},
+		{"held calls with a repeated request", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{deliver1, create1, deliver1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{deliver1, deliver1, create1}}, true},
+		{"an extra call", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{create1, deliver1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{create1}}, false},
+		{"a call that is missing", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{create1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{create1, deliver1}}, false},
+		{"a call where none is held", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{create1} }), expect4, false},
+		{"the same number of calls, not the same multiset", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{create1, deliver1, deliver1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{create1, create1, deliver1}}, false},
+		// A cancelled prompt call the adapter still holds and the next one, sent and
+		// not yet received: the same method, so only the params tell them apart.
+		{"two calls of one method, only one held", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{deliver1, deliver2} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{deliver1}}, false},
+		{"two calls of one method, the held one is not the one in flight", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{deliver2} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{deliver1}}, false},
+		{"two calls of one method, both held", with(func(c *adapterhost.ConnCounts) { c.Calls = []string{deliver2, deliver1} }),
+			engine.AdapterExpect{Notifications: 4, Held: []string{deliver1, deliver2}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			host := newHostDouble()
@@ -1825,7 +1836,7 @@ func TestQuiesceJudgesTheAdapterHostsCounts(t *testing.T) {
 
 	t.Run("an instance that is not named is not judged", func(t *testing.T) {
 		host := newHostDouble()
-		host.set("other", adapterhost.ConnCounts{Handled: 9, Buffered: 3, Requests: 2, Working: true, Calls: []string{"x"}})
+		host.set("other", adapterhost.ConnCounts{Handled: 9, Buffered: 3, Requests: 2, Working: true, Calls: []string{"x#1"}})
 		r := newRig(t, 10, withAdapters(host))
 		e := r.start()
 		rep, err := e.Quiesce(ctx, engine.Expect{Adapters: map[string]engine.AdapterExpect{"chat": {}}})
@@ -1874,6 +1885,9 @@ func TestQuiesceJudgesTheAdapterHostsCounts(t *testing.T) {
 	})
 }
 
+// heldPrompt is the identity of the prompt call that holdingHost keeps.
+const heldPrompt = "prompt.deliver#held"
+
 // holdingHost is an adapter host whose prompt call goes on after its context is
 // cancelled, as a real call does until its worker wakes and sends the cancel: the
 // host keeps counting the call, and the adapter keeps holding it, until the test lets
@@ -1886,7 +1900,7 @@ type holdingHost struct {
 }
 
 func (h *holdingHost) DeliverPrompt(ctx context.Context, _ string, _ adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
-	h.set("chat", adapterhost.ConnCounts{Connected: true, Calls: []string{adapterproto.MethodPromptDeliver}})
+	h.set("chat", adapterhost.ConnCounts{Connected: true, Calls: []string{heldPrompt}})
 	close(h.entered)
 	<-ctx.Done()
 	close(h.cancelled)
@@ -1912,7 +1926,7 @@ func TestQuiesceDoesNotTakeACallTheEngineCancelledForOneTheAdapterHolds(t *testi
 	}
 	r.clk.Advance(engine.DefaultParams().RetryBackoff)
 	<-host.entered
-	held := engine.Expect{Adapters: map[string]engine.AdapterExpect{"chat": {Held: []string{adapterproto.MethodPromptDeliver}}}}
+	held := engine.Expect{Adapters: map[string]engine.AdapterExpect{"chat": {Held: []string{heldPrompt}}}}
 	quietBy := func(d time.Duration) error {
 		qctx, cancel := context.WithTimeout(ctx, d)
 		defer cancel()

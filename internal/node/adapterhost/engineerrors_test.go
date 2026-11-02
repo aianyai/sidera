@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -102,7 +103,7 @@ func TestAHandshakeCallThatIsNotAnsweredEndsThePassAtTheHandshakeTimeout(t *test
 	started := make(chan error, 1)
 	go func() { started <- r.host.Start(timeoutCtx(t), r.env(false)) }()
 	eventually(t, "initialize to reach the adapter", func() bool { a := av.Load(); return a != nil && a.count(adapterproto.MethodInitialize) == 1 })
-	if c := r.host.Counts("chat"); len(c.Calls) != 1 || c.Calls[0] != adapterproto.MethodInitialize {
+	if c := r.host.Counts("chat"); len(c.Calls) != 1 || !strings.HasPrefix(c.Calls[0], adapterproto.MethodInitialize+"#") {
 		t.Fatalf("Calls = %v while initialize is out, want [initialize]", c.Calls)
 	}
 	limit := testParams().HandshakeTimeout

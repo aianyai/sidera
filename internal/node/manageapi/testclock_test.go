@@ -44,7 +44,7 @@ func jsonNumber(n int64) string { b, _ := json.Marshal(n); return string(b) }
 func TestQuiesceRetainsHeldMultiplicityAndFailureReport(t *testing.T) {
 	s := &quietService{fakeService: &fakeService{}}
 	r := newRig(t, func(server *Server) { server.cfg.Service = s })
-	status, out := r.post("test.quiesce", `{"params":{"expect":{"fake":{"notifications":3,"held":["session.create","session.create"]}},"timeout_ms":1000}}`)
+	status, out := r.post("test.quiesce", `{"params":{"expect":{"fake":{"notifications":3,"held":["session.create#1","session.create#1"]}},"timeout_ms":1000}}`)
 	var result struct {
 		Result struct {
 			Workers int    `json:"workers"`

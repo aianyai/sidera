@@ -242,10 +242,16 @@ and never logs, and which the validation of the parameters does not echo.
 ### Counts and `Working`
 
 `Counts(instance)` returns the notifications handled and buffered, the requests of
-the adapter being answered, the methods of the requests the host sent that have no
+the adapter being answered, the identities of the requests the host sent that have no
 answer (one entry each, a ping included: while one is out the host is parked
 with its timeout armed, and a caller that found the host quiet would move the test
-clock past it), whether a connection is in service and
+clock past it; an identity is the method, a `#` and a digest of the params, built by
+`CallID` from the params as the host encodes them, so that two requests of one method
+differ, and a third party that builds it from the params it received gets the same string;
+absent and `null` params count as `{}`, as the peer sends them. Two requests with equal params
+outstanding on one connection would share an identity, which the engine never has. The identity is
+built when the counts are asked for, not on each request),
+whether a connection is in service and
 whether the host is working. `Working` is true while the supervisor does anything of
 its own and while a timer of the instance is due and not yet taken; the supervisor
 answers from inside its park, so the call returns when it next parks. After the test
@@ -423,6 +429,7 @@ check on every test):
 | The adapter's requests, the engine's errors, the optional parts | `TestRequestsOfTheAdapterReachTheEngineAndItsErrorsReachTheAdapter` |
 | The engine's calls, validation, not in service | `TestCallsToTheAdapterAreForwardedValidatedAndRefusedWhenItIsNotInService` |
 | The counts and `Working` | `TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost` |
+| The identity of a request in flight follows the method and the meaning of the params, and the fake adapter's copy agrees | `TestCallIDFollowsTheMethodAndTheMeaningOfTheParams`, `TestCallIDOfANestedObjectFollowsItsContent`, `TestCallIDAgreesWithTheFakeAdapter` |
 | What an error of the engine does to the connection | `TestAnErrorOfTheEngineEndsTheConnection`, `TestRequestsAfterShutdownBeganAreAnsweredAsShuttingDown` |
 | `Start`, `StartWait`, refusals | `TestStartReturnsWhenEveryEnabledInstanceHasStartedOrBeenJudgedOffline`, `TestStartRefusesWhatItCannotStart`, `TestStartEndsWithItsContext` |
 | `EnsureRunning` and `Stop` | `TestEnsureRunningAndStopOfAnInstance` |

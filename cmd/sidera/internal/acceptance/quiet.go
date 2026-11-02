@@ -47,7 +47,7 @@ func (f *Fixture) sample(ctx context.Context) (map[string]fakeadapter.StatsReply
 		}
 		s.Held = append([]string(nil), s.Held...)
 		slices.Sort(s.Held)
-		s.HeldPoints = nil // pause labels are not the held-method multiset
+		s.HeldPoints = nil // pause labels are not the multiset of held request identities
 		stats[in.Instance] = s
 	}
 	return stats, nil
