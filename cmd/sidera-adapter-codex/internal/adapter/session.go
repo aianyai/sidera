@@ -1,7 +1,9 @@
 package adapter
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -9,10 +11,29 @@ import (
 
 // session is a thread this adapter holds as a session endpoint. Its fields are
 // guarded by App.mu, except the mutexes and the wake channel.
+//
+// A session is one of two kinds. A created one is a thread this adapter's server
+// started and holds loaded, and the server's events tell its turns. An attached one
+// is a thread a person's Codex runs: another process has it loaded, so this server
+// can neither resume it nor hear of its turns, and the adapter reads its turns
+// (watchAttached) and puts prompts into its queue (deliverAttached).
 type session struct {
 	endpoint adapterproto.EndpointRef
-	preset   string
+	preset   string // empty for an attached session
 	threadID string
+	attached bool
+	// watchCancel stops the reading of an attached session's turns; nil while none
+	// runs.
+	watchCancel context.CancelFunc
+	// queued holds, for each prompt this adapter put into the thread's queue that was
+	// not seen taken yet, the id the queue gave it: the adapter takes back only items
+	// it can name by it.
+	queued map[adapterproto.AttemptID]string
+	// poke makes the reading of an attached session come now; capacity one.
+	poke chan struct{}
+	// baselined is set once the turns the thread already had when it was attached
+	// were read and counted as history.
+	baselined bool
 	// access is what the thread's tools need to reach the daemon (SIDERA_TOKEN and
 	// SIDERA_HOME). It lives in memory only: it is not written anywhere, not even
 	// the checkpoint.
@@ -41,9 +62,14 @@ type session struct {
 
 // turnRec is what is known of a turn that was reported.
 type turnRec struct {
+	// seenAt is when the adapter first read the turn of an attached session.
+	seenAt  time.Time
 	attempt string
 	started bool
 	ended   bool
+	// looks counts the readings of an attached session's turn that found it open
+	// without a prompt in it, while one of the adapter's own prompts was awaited.
+	looks int
 }
 
 // promptRec is the answer given to a prompt.deliver, kept so that a repeat of the
@@ -74,11 +100,29 @@ func newSession(ep adapterproto.EndpointRef, preset, threadID string, access map
 	}
 }
 
+// newAttachedSession returns the session of a thread a person runs.
+func newAttachedSession(ep adapterproto.EndpointRef, threadID string) *session {
+	s := newSession(ep, "", threadID, nil)
+	s.attached = true
+	s.poke = make(chan struct{}, 1)
+	s.queued = map[adapterproto.AttemptID]string{}
+	return s
+}
+
 // signal wakes whoever waits on the session; a signal that finds one pending is
 // dropped, since a waiter re-reads the state after any wake.
 func (s *session) signal() {
 	select {
 	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// attachedPoke asks the reading of an attached session to come now, for a change
+// in what the adapter waits for; a request that finds one pending is dropped.
+func (s *session) attachedPoke() {
+	select {
+	case s.poke <- struct{}{}:
 	default:
 	}
 }

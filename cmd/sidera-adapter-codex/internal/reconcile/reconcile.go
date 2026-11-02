@@ -26,6 +26,9 @@ type Input struct {
 	// not ended. The server may hold a turn's events back while the thread's tools
 	// start, so the thread can look idle to the server while the turn runs.
 	TurnRunning bool
+	// Queued says the prompt may still wait in the thread's queue of a session
+	// that someone else runs, which takes it when its turn is over.
+	Queued bool
 	// Unreachable says the server could not be asked; the other fields are then
 	// empty.
 	Unreachable bool
@@ -36,7 +39,8 @@ type Input struct {
 // An attempt in the record is found whatever else holds. Absence is only
 // concluded from a whole record of a thread that is not running a turn, by the
 // server's word, the adapter's books or a turn of the record that is still in
-// progress: a turn still running may be about to record the prompt, and a record that was not read
+// progress, or a queue that may hold the prompt: a turn still running may be about to
+// record the prompt, and a record that was not read
 // to its end, or whose format was not recognized, may hold it (the caller reports
 // both as not complete). A server that was killed while a prompt was being taken
 // in leaves a record that ends in an interrupted turn without the prompt, which is
@@ -57,7 +61,7 @@ func Judge(in Input) adapterproto.ReconcileResult {
 		}
 	}
 	switch {
-	case in.ThreadActive || in.TurnRunning || runningIn(in.Turns):
+	case in.ThreadActive || in.TurnRunning || in.Queued || runningIn(in.Turns):
 		return indeterminate(adapterproto.GroundsTurnRunning)
 	case !in.Complete:
 		return indeterminate(adapterproto.GroundsRecordUnreadable)

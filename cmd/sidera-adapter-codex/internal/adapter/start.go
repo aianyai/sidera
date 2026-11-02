@@ -59,12 +59,25 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	byThread := make(map[string]*session, len(p.Sessions))
 	order := make([]*session, 0, len(p.Sessions))
 	for _, sa := range p.Sessions {
-		s := newSession(sa.Endpoint, sa.Preset, string(sa.NativeRef), sa.ToolAccess.Env)
+		var s *session
+		if sa.Attached {
+			s = newAttachedSession(sa.Endpoint, string(sa.NativeRef))
+		} else {
+			s = newSession(sa.Endpoint, sa.Preset, string(sa.NativeRef), sa.ToolAccess.Env)
+		}
 		sessions[sa.Endpoint], byThread[s.threadID] = s, s
 		order = append(order, s)
 	}
 
 	a.mu.Lock()
+	// adapter.start is a full re-attachment: the readings of the sessions of an
+	// earlier one end with them.
+	for _, old := range a.sessions {
+		if old.watchCancel != nil {
+			old.watchCancel()
+			old.watchCancel = nil
+		}
+	}
 	a.started = true
 	a.runtimeEP, a.instance = p.RuntimeEndpoint, inst
 	a.codexPath, a.sideraPath, a.codexVer, a.missing = codexPath, sideraPath, version, missing
@@ -82,7 +95,9 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	}
 	for _, s := range order {
 		state, active := adapterproto.AttachUnreachable, false
-		if c != nil {
+		if s.attached {
+			state, active = a.resumeAttached(ctx, c, s)
+		} else if c != nil {
 			state, active = a.attach(ctx, c, s, false)
 			if state == adapterproto.AttachUnreachable {
 				// The reconnect loop resumes the sessions still not loaded.

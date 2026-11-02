@@ -44,6 +44,16 @@ protocol has a version of its own.
   without an attempt (also when a busy session goes from one turn straight to the next), `/clear` is
   followed, and a session that is gone refuses prompts as
   `native_unavailable`. Closing or interrupting such an endpoint is a wrong endpoint kind.
+- **Codex adapter: attached sessions.** The adapter declares `attach` and takes hold of a Codex
+  thread a person opened: it reads the thread's turns (once a second while it waits for a
+  prompt it queued or a turn is open, every ten seconds otherwise), reports the turns the person
+  runs, and delivers a prompt by queueing it in the Codex home it shares with the person's
+  Codex (delivered within about ten seconds when the session is idle, after the current turn
+  when it is busy, and held while no Codex process has the thread loaded). At most one wake-up
+  of its own waits in the person's queue: an older one nobody took is withdrawn when a newer
+  one is queued and when the endpoint detaches. The adapter's
+  connection now asks for Codex's experimental API, which the queue needs. A thread that takes
+  connection now asks for Codex's experimental API, which the queue needs.
 
 ### Changed
 
@@ -55,6 +65,11 @@ protocol has a version of its own.
   is now a `*ToolAccess` and is absent for an attached entry, and `Preset` may be empty for
   one. `adapterkit.Application` gained `AttachSession` and `SessionDetached`; an application
   that embeds `adapterkit.Base` keeps compiling.
+- **Codex adapter: the thread's `sidera` MCP server states `enabled = true`.** A person who
+  also has a `[mcp_servers.sidera]` table in their own `config.toml` has it merged key by key
+  with the one the adapter gives a session; the adapter now states every key it depends on, so
+  a `enabled = false` in the person's table no longer switches the session's channel off. A
+  `url` key in that table still makes the thread fail to start and has to be removed.
 
 ### Fixed
 

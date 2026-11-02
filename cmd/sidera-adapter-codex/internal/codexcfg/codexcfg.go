@@ -308,6 +308,14 @@ func (p Preset) ThreadConfig(a Access) (map[string]any, error) {
 		"shell_environment_policy": map[string]any{"set": env()},
 		"mcp_servers": map[string]any{
 			ServerName: map[string]any{
+				// The owner's own config.toml may name the same server (that is how
+				// a person's session reaches Sidera), and Codex merges a thread's
+				// table into it key by key, so a key left out here keeps the owner's
+				// value. Every key the session depends on is therefore stated, and
+				// the owner's "enabled = false" cannot switch the channel off. A
+				// "url" of the owner's cannot be removed by a merge; it makes the
+				// thread fail to start, and is the owner's to take out.
+				"enabled":                     true,
 				"command":                     a.Program,
 				"args":                        []any{"mcp"},
 				"env":                         env(),

@@ -58,9 +58,11 @@ func (a *App) ensureClient(ctx context.Context) (*appserver.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The experimental API is asked for because the queue of a thread's prompts,
+	// which delivers a prompt to a session a person runs, is part of it.
 	init, err := c.Initialize(ctx, appserver.InitializeParams{
 		ClientInfo:   appserver.ClientInfo{Name: "sidera-adapter-codex", Version: ClientVersion()},
-		Capabilities: &appserver.InitializeCapabilities{OptOutNotificationMethods: appserver.QuietNotifications},
+		Capabilities: &appserver.InitializeCapabilities{OptOutNotificationMethods: appserver.QuietNotifications, ExperimentalAPI: true},
 	})
 	if err != nil {
 		_ = c.Close()
@@ -160,7 +162,9 @@ func (a *App) resync(c *appserver.Client) (failed int) {
 	a.mu.Lock()
 	sessions := make([]*session, 0, len(a.sessions))
 	for _, s := range a.sessions {
-		if !s.creating && s.status == appserver.ThreadNotLoaded {
+		// An attached session is never loaded here; its watcher reaches the server
+		// again by itself.
+		if !s.attached && !s.creating && s.status == appserver.ThreadNotLoaded {
 			sessions = append(sessions, s)
 		}
 	}

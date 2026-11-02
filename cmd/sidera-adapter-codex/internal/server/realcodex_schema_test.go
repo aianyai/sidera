@@ -111,6 +111,51 @@ func TestSchemaGuard(t *testing.T) {
 	if out, err := exec.Command(program, "app-server", "generate-json-schema", "--experimental", "--out", experimental).CombinedOutput(); err != nil {
 		t.Fatalf("generate-json-schema --experimental: %v\n%s", err, out)
 	}
+	// The queue of a thread's prompts is experimental: its methods and members are
+	// in the experimental schema only.
+	queueRequests := methodsOf(t, filepath.Join(experimental, "ClientRequest.json"))
+	for _, m := range []string{appserver.MethodThreadRead, appserver.MethodThreadQueueAdd, appserver.MethodThreadQueueList, appserver.MethodThreadQueueDelete} {
+		if !slices.Contains(queueRequests, m) {
+			t.Errorf("the server has no request %s", m)
+		}
+	}
+	for file, members := range map[string][]string{
+		"ThreadQueueAddParams":    {"threadId", "clientUserMessageId", "input"},
+		"ThreadQueueListParams":   {"threadId", "limit"},
+		"ThreadQueueDeleteParams": {"threadId", "queuedSubmissionId"},
+		"ThreadReadParams":        {"threadId", "includeTurns"},
+	} {
+		props, _ := readJSON(t, filepath.Join(experimental, "v2", file+".json"))["properties"].(map[string]any)
+		for _, m := range members {
+			if _, ok := props[m]; !ok {
+				t.Errorf("%s has no member %s", file, m)
+			}
+		}
+	}
+	if props, _ := readJSON(t, filepath.Join(experimental, "v2", "ThreadQueueDeleteResponse.json"))["properties"].(map[string]any); props["deleted"] == nil {
+		t.Error("ThreadQueueDeleteResponse has no member deleted, which says whether a withdrawn prompt was still queued")
+	}
+	for _, file := range []string{"ThreadQueueAddResponse", "ThreadQueueListResponse"} {
+		raw, err := os.ReadFile(filepath.Join(experimental, "v2", file+".json"))
+		if err != nil || !strings.Contains(string(raw), `"clientUserMessageId"`) {
+			t.Errorf("%s no longer carries clientUserMessageId, which a queued prompt is found by (%v)", file, err)
+		}
+	}
+	// The end of a turn another process runs is read from its completion time; a
+	// thread that takes no queued prompt is told by these members.
+	for file, members := range map[string][]string{"Turn": {"startedAt", "completedAt"}, "Thread": {"ephemeral", "parentThreadId", "source"}} {
+		defs, _ := readJSON(t, filepath.Join(experimental, "v2", "ThreadReadResponse.json"))["definitions"].(map[string]any)
+		if file == "Turn" {
+			defs, _ = readJSON(t, filepath.Join(experimental, "v2", "ThreadTurnsListResponse.json"))["definitions"].(map[string]any)
+		}
+		def, _ := defs[file].(map[string]any)
+		props, _ := def["properties"].(map[string]any)
+		for _, m := range members {
+			if _, ok := props[m]; !ok {
+				t.Errorf("%s has no member %s", file, m)
+			}
+		}
+	}
 	for _, file := range []string{"ThreadStartResponse", "ThreadResumeResponse"} {
 		props, _ := readJSON(t, filepath.Join(experimental, "v2", file+".json"))["properties"].(map[string]any)
 		if _, ok := props["activePermissionProfile"]; !ok {

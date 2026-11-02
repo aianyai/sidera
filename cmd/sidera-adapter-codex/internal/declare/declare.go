@@ -43,10 +43,11 @@ func Info() adapterproto.AdapterInfo {
 
 // Capabilities is what the adapter declares. It cannot interrupt a turn yet and
 // does not acknowledge on the agent's behalf; it does answer the requests Codex
-// sends it.
+// sends it, and it takes over sessions a person opened (attach).
 func Capabilities() adapterproto.Capabilities {
 	return adapterproto.Capabilities{Runtime: &adapterproto.RuntimeCapabilities{
 		ServerRequests: true,
+		Attach:         true,
 		Frontends:      []adapterproto.Frontend{adapterproto.FrontendMCP, adapterproto.FrontendCLI},
 	}}
 }

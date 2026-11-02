@@ -174,7 +174,7 @@ parameter does it, in `thread/start` and again in every `thread/resume`:
 
 ```
 shell_environment_policy.set = {SIDERA_TOKEN, SIDERA_HOME}
-mcp_servers.sidera = {command: <sidera program>, args: ["mcp"],
+mcp_servers.sidera = {enabled: true, command: <sidera program>, args: ["mcp"],
                       env: {SIDERA_TOKEN, SIDERA_HOME},
                       default_tools_approval_mode: "approve", tool_timeout_sec: 120}
 default_permissions, permissions.<profile>   # presets with a sandbox only; see below
@@ -182,6 +182,20 @@ default_permissions, permissions.<profile>   # presets with a sandbox only; see 
 
 The values are the `tool_access.env` of `session.create` or of the session's entry in
 `adapter.start`. They are held in memory only: not in a checkpoint, not in a file.
+
+**The owner may have a `sidera` server of their own.** A person who wants their own Codex
+sessions to reach Sidera adds `[mcp_servers.sidera]` to `config.toml`
+(`codex mcp add sidera -- sidera mcp`), and a thread's `config` is merged into the owner's
+file key by key, a table into a table of the same name, not replaced by it. The adapter keeps
+the name `sidera`: under another name the thread would also start the owner's server, which
+has no token and would attach the adapter's own session as a person's. Under the same name the
+adapter's `env` carries the token, and the server does not enter that mode. Every key the
+session depends on is therefore stated: `enabled = true` keeps an owner's `enabled = false`
+from switching the channel off, and `command`, `args`, `env`, the approval mode and the tool
+timeout replace the owner's. What the adapter does not state stays the owner's, such as the
+tool allow- and deny-lists of that server. A `url` in the owner's table cannot be removed by a
+merge and makes the thread fail to start; the error is Codex's, and the owner takes the key
+out.
 
 Measured on Codex 0.164.0 with two threads in one server, each with its own pair:
 
@@ -277,11 +291,12 @@ a second one. This was not run on Windows.
 
 | Protocol | What the adapter does |
 | -------- | --------------------- |
-| `initialize` | Declares a runtime with `interrupt: false`, `ack_on_behalf: false`, `server_requests: true` and front ends `mcp` and `cli`. It does not touch the server. |
-| `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, connects or starts the server, `initialize` and `account/read`, then resumes every session listed: `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), `unreachable` otherwise or when the preset is unusable. It ends with a full availability snapshot. A server that cannot be reached is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
+| `initialize` | Declares a runtime with `interrupt: false`, `ack_on_behalf: false`, `server_requests: true`, `attach: true` and front ends `mcp` and `cli`. It does not touch the server. |
+| `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, connects or starts the server, `initialize` and `account/read`, then resumes every session listed: `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), `unreachable` otherwise or when the preset is unusable. Attached entries are taken back as described in "Attached sessions". It ends with a full availability snapshot. A server that cannot be reached is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
 | `adapter.probe` | The runtime version; `auth` from `account/read` (`valid` with an account, `invalid` without, `unknown` when the server is unreachable); the dependencies `codex`, `sidera` and `app-server`; each preset's problems and whether its directory exists; the tool probes. |
 | `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.close` | Below. |
-| `session.interrupt` | Not declared. The id of the running turn is kept, so that `turn/interrupt` can be added without a change of format. |
+| `session.attach`, `session.detached` | "Attached sessions". |
+| `session.interrupt` | Not declared. The id of the running turn is kept, so that `turn/interrupt` can be added without a change of format. For an attached endpoint it is `1002`, whatever the declaration. |
 | `checkpoint.put` | `scope: attempt` while creating, and only there. |
 
 **Availability.** A full snapshot at `adapter.start`, and again whenever it changes:
@@ -435,6 +450,124 @@ alone and answered `closed`; otherwise it is archived, and a thread the server d
 have is as closed as an archived one. No server connection is `close_unconfirmed` with
 `native_unreachable`; an endpoint not held and without a reference is `1001`.
 
+### Attached sessions
+
+An attached session is a thread that a person's own Codex runs (the terminal interface, or the
+shared daemon behind it) and that attached itself: its `sidera mcp` server called
+`sessions.attach` with the thread id as `native_ref`. Codex has no wake keys, so the attachment
+carries none. The adapter's server shares `CODEX_HOME` with the person's Codex, which is the
+whole mechanism: both see the same thread store and the same queue file. What the server can and
+cannot do with a thread another process has loaded:
+
+- It **cannot resume** it (`already has an active writer`) and gets **no event** of it.
+- It **can read** it: `thread/read` for the thread's metadata and `thread/turns/list` for its
+  turns, from the stored record.
+- It **can queue a prompt** for it: `thread/queue/add` puts the prompt in the queue file of the
+  Codex home, and the process that has the thread loaded takes it. The queue is part of the
+  experimental API, which is why the adapter's connection asks for it at `initialize`
+  (`experimentalApi`); the request is refused without it.
+
+**`session.attach`.** `thread/read` on the thread. `attached` for a normal stored thread;
+`not_found` when the server does not know it; `failed` with `wake_unavailable` for an ephemeral
+thread or a sub-agent's, which take no queued prompt, with `native_unreachable` when the server
+cannot be reached and `native_error` for any other answer of the server. An archived thread is
+not told apart here (the record carries no flag); it is refused when a prompt is queued. The
+call is idempotent: a repeat (the heartbeat of the session's `sidera mcp` server) reads the
+thread again and starts no second watch. The wake is ignored. A request that comes before
+`adapter.start` is answered with an error, since `adapter.start` replaces the sessions and would
+lose one attached before it; the daemon asks again.
+
+**`adapter.start`** takes an attached entry back the same way: `lost` when the thread is gone
+or takes no prompt, `unreachable` when the server cannot be asked, `attached` otherwise with
+`turn_active` when a turn runs. The watch runs in either case and keeps trying while the
+server is unreachable.
+
+**Reading the turns.** For each attached session, while it is attached, the adapter calls
+`thread/turns/list` (the five newest turns, summary view). Every call makes the server rebuild
+the thread's history, so the pace follows need: once a second (`AttachPollEvery`) while one of
+the adapter's own prompts is awaited (queued, or taken and its turn not yet seen) or a turn is
+open, and every ten seconds (`AttachIdlePollEvery`) otherwise; queueing a prompt ends the slow
+wait at once. The slow pace cannot cause a prompt in the middle of a person's turn that the
+adapter has not seen yet: Codex's queue never puts an item into a running turn, the owner takes
+it only when the turn is over. While the server is unavailable or the call fails, the wait
+doubles up to the reconnect limit and falls back to the pace of the moment after a success. The
+first reading counts the turns the thread has as history and reports none, except that a
+running turn is reported started (`adapter.start` tells the daemon through `turn_active`
+instead). Later, a turn that was not there before is reported `turn.started` and, when it is
+over, `turn.ended`, within about a second of the change while the quick pace holds. A turn a
+prompt started names its attempt; a turn the person started names none, which is how the
+engine knows the session is busy with the person's work and does not prompt it. The summary
+view keeps only the first user message of a turn, which is the one a queued prompt starts the
+turn with; `prompt.reconcile` reads the full view.
+
+A turn that another process runs reads from outside as `status: "interrupted"` with
+`completedAt: null`; it has ended when `completedAt` is set, with the status the record gives
+(`completed`, `interrupted` after the person pressed Esc, `failed`). Two rules keep a turn from
+looking busy for ever: a turn that is not the newest cannot still be running, and one that began
+more than two hours ago and shows no end is taken for abandoned (its Codex died) and reported
+ended as `failed`. A turn that shows no start is counted from when the adapter first read it,
+which also covers a thread forked in the middle of a turn that holds an old unfinished turn. The
+second rule can end the books on a turn that does run for longer; the prompts the engine then
+sends are queued and wait for the turn, so nothing is lost.
+
+**`prompt.deliver`.** `thread/queue/add` with the text unchanged and the attempt as
+`clientUserMessageId`; the answer is `accepted` and nothing more is reported until the owner
+takes the prompt. The owner's process polls the queue file every ten seconds, so an idle
+session starts the turn within about ten seconds (0.4 to 9 seconds measured), and a busy one
+starts it about 0.3 seconds after the running turn ends; the prompt is never put into a turn that
+runs. The server keeps the client id on the user message of the turn that takes the prompt, and
+the adapter finds the turn by it: `prompt.persisted` and `turn.started` with the attempt come
+from the reading that first shows that message. A turn is written before its prompt, so a turn
+seen with no prompt in it is looked at once more when a prompt of ours is awaited before it is
+reported. The match is on the client id only, never on the text: a prompt whose id did not
+survive would show as a turn the person started, and a repeat of the attempt would be judged by
+`prompt.reconcile` from the record and the queue.
+
+Sidera keeps at most one wake-up waiting in the person's queue. The adapter keeps the id
+`thread/queue/add` gave each prompt it queued, and before it queues a new prompt it reads the
+queue and deletes (`thread/queue/delete`) its own items that are still there; a prompt the owner
+took in the meantime is no longer queued and is left to its turn, and an item the adapter did not
+add is never touched. A prompt that was taken back is judged by `prompt.reconcile` like any
+that is not in the record, and a repeat of its attempt is queued as new. The ids are in memory
+only: after the adapter restarts, an item it queued earlier is no longer known to it and stays
+for the owner.
+
+A prompt that stays queued stays queued, and nothing is reported for it; it is delivered when the
+person returns. The queue is shared, so the prompt waits in the following cases, which are
+the limits of this delivery and not failures:
+
+- It arrives as an unattributed user message after the current turn, not inside it.
+- After the person presses Esc in the terminal interface, the queue is held until their next
+  turn completes.
+- An active `/goal` can starve the queue.
+- When no process has the thread loaded (the terminal interface is closed and the shared daemon
+  unloaded the thread after about a minute) there is no delivery; the item stays in the queue
+  file until some process loads the thread.
+
+A thread that cannot take a prompt (archived, ephemeral, a sub-agent's, unknown) is refused by the
+server as an invalid request before anything is queued, or with "no rollout found" for an unknown
+one; the adapter answers `refused` with `native_unavailable` and the endpoint stays open. No
+availability condition is published for it: availability is one snapshot for the whole adapter,
+and a single archived thread must not block the sessions the adapter created. An answer that says
+nothing of the thread leaves the outcome unknown, which the daemon settles with `prompt.reconcile`.
+No connection is `refused` with `native_unavailable`. `busy` is never answered: a running turn
+is no reason not to queue.
+
+**`prompt.reconcile`** is the same judgement over the thread's record, with one more fact:
+`thread/queue/list` (one page of a hundred; a longer queue counts as holding the prompt). A
+prompt still in the queue is `indeterminate` with `turn_running`, since the turn that will record
+it has not begun; one the queue list could not be read for makes the record count as not read.
+A turn another process runs, `interrupted` with no completion time and not abandoned by the rule
+above, counts as running for an attached session (for a created one that shape means the server
+died): the turn the owner took the prompt into is written before its user message, and the
+verdict must not be `provably_absent` in that gap, nor report a turn that runs as interrupted.
+
+**`session.detached`** takes back the adapter's own prompts that are still queued (a wake-up
+must not outlive its endpoint), stops the watch and forgets the session; the person's thread and
+the rest of its queue are not touched. **`session.close`** and **`session.interrupt`** answer `1002` and touch nothing, and
+`recv.observed` is never sent for an attached session (the adapter does not declare
+acknowledgement on the agent's behalf).
+
 ### Requests of the server
 
 Every request of the server is answered at once, from the preset, and reported with
@@ -527,15 +660,19 @@ about ten seconds to the background.
 
 - **No interrupt, and no acknowledgement on the agent's behalf**; `ack_markers` is
   absent for the same reason.
+- **An attached session is reached through the shared queue** (see "Attached sessions"):
+  seconds of latency, a prompt held behind the person's turn, after Esc and behind an active
+  `/goal`, and none delivered while no process has the thread loaded. That a prompt taken by the
+  terminal interface keeps its client id is read from the server's source, not measured with it.
 - **The command-line front end needs `danger-full-access`** (above).
 - **A session's own token is readable by its commands**, and the data directory is
   readable wherever no sandbox applies (see "The data directory is denied to the sandbox"),
   including after an approved escalation. On Windows another Codex session sharing the
   `CODEX_HOME` can revoke the denial.
 - **The token is in Codex's logs** and in anything a model prints.
-- **A thread's configuration replaces the `-c` layer** of the server's flags and the
-  owner's `shell_environment_policy.set` entries of the same name; whether it replaces
-  that table as a whole is not measured.
+- **A thread's configuration replaces the `-c` layer** of the server's flags and is merged
+  into the owner's `config.toml` key by key, tables into tables of the same name (the
+  `shell_environment_policy.set` entries of the same name are the thread's, the others stay).
 - **Not measured**: resuming, with a configuration, a thread that is running a turn
   (the adapter resumes only after a connection ended or a thread was unloaded); that the
   server replays a request that was pending when the connection ended, which the
@@ -621,6 +758,7 @@ about ten seconds to the background.
 | Answers to the server's requests | `internal/serverreq/` |
 | Identity, capabilities, manifest, package | `internal/declare/` |
 | The adapter's methods, events, reconnect | `internal/adapter/` |
+| Attached sessions: attachment, the watch of a person's thread, queued prompts | `internal/adapter/attached.go` |
 | The executable and the `package` subcommand | `cmd/sidera-adapter-codex/main.go` |
 
 Tests: `TestCallsAndNotificationsOverBothTransports`, `TestServerRequestsAreAnsweredFromTheHandler`,
@@ -634,7 +772,13 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
 `TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
 `TestCloseSession`, `TestThreadsTurnsAndCommandsNameThePresetDirectory`,
-`TestSandboxIsAPermissionProfileThatDeniesTheDataDirectory`, `TestThreadWithoutTheProfileIsNotUsed` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
+`TestSandboxIsAPermissionProfileThatDeniesTheDataDirectory`, `TestThreadWithoutTheProfileIsNotUsed`,
+`TestAttachSessionOutcomes`, `TestAttachSessionBeforeStartIsAnError`, `TestAttachedHumanTurns`,
+`TestAttachedTurnWithoutStartIsStaleFromFirstSight`, `TestAttachedReconcileWhileTheOwnerRunsTheTurn`,
+`TestAttachedReadingPaceFollowsWhatIsAwaited`, `TestAttachedPromptDelivery`,
+`TestAttachedPromptsQueuedAreWithdrawnWhenSuperseded`,
+`TestAttachedPromptsQueuedAreWithdrawnWhenTheEndpointDetaches`, `TestAttachedPromptRefusedWhenTheThreadTakesNone`, `TestSessionDetachedStopsTheReading`,
+`TestAttachedSessionTakesNeitherCloseNorInterrupt`, `TestStartResumesAttachedSessions` (the adapter against the fake server); `TestRunMCPProbe` (the MCP probe
 against a stand-in program).
 
 Against the installed Codex, in `internal/server/realcodex_test.go`,
@@ -649,7 +793,8 @@ SIDERA_REALCODEX=1 go test -tags realcodex -count=1 ./cmd/sidera-adapter-codex/.
 `TestSchemaGuard` generates the schema with `codex app-server generate-json-schema` and
 fails when the server's requests are not exactly those `serverreq` answers (a new one
 has to be decided on, not refused by default), when a method, member or notification the
-adapter uses is missing, or when `clientUserMessageId` or `clientId` is gone.
+adapter uses is missing (the queue methods, `thread/queue/delete` included, and the turn and thread members attached sessions read
+are looked up in the experimental schema), or when `clientUserMessageId` or `clientId` is gone.
 `TestThreadEnvironmentAndServerCleanup` starts a real server, gives a thread its
 credentials through its configuration, reads them back from a command the thread runs,
 runs a command under each legacy sandbox policy, checks that a sandboxed command cannot write to the

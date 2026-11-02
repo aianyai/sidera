@@ -113,7 +113,7 @@ func TestSandboxIsAProfileNotALegacyMode(t *testing.T) {
 func TestThreadConfig(t *testing.T) {
 	dir := t.TempDir()
 	access := Access{Program: "/bin/sidera", Env: map[string]string{"SIDERA_TOKEN": "tok", "SIDERA_HOME": "/home"}, DataDir: dir}
-	const base = `"mcp_servers":{"sidera":{"args":["mcp"],"command":"/bin/sidera","default_tools_approval_mode":"approve","env":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"},"tool_timeout_sec":120}},"shell_environment_policy":{"set":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"}}`
+	const base = `"mcp_servers":{"sidera":{"args":["mcp"],"command":"/bin/sidera","default_tools_approval_mode":"approve","enabled":true,"env":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"},"tool_timeout_sec":120}},"shell_environment_policy":{"set":{"SIDERA_HOME":"/home","SIDERA_TOKEN":"tok"}}`
 	profile := func(extends string) string {
 		d, _ := json.Marshal(dir)
 		return `"default_permissions":"` + ProfileName + `",` + base + `,"permissions":{"` + ProfileName + `":{"extends":"` + extends + `","filesystem":{` + string(d) + `:"deny"}}}`

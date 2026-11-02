@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
@@ -59,6 +60,9 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	}
 	if res, done, err := a.repeatedDelivery(s, p); done {
 		return res, err
+	}
+	if s.attached {
+		return a.deliverAttached(ctx, s, p)
 	}
 	preset, ok := a.presetOf(s.preset)
 	if !ok {
@@ -191,6 +195,17 @@ func (a *App) Reconcile(ctx context.Context, p adapterproto.ReconcileParams) (ad
 		in.Unreachable = true
 		return reconcile.Judge(in), nil
 	}
+	queueUnread := false
+	if s.attached {
+		// A prompt of an attached session waits in the thread's queue until its
+		// owner takes it, and is in no record before.
+		queued, err := a.attachedQueueHolds(ctx, c, s, string(p.Attempt))
+		if errors.Is(err, appserver.ErrClosed) {
+			in.Unreachable = true
+			return reconcile.Judge(in), nil
+		}
+		in.Queued, queueUnread = queued, err != nil
+	}
 	a.mu.Lock()
 	in.ThreadActive = s.status == appserver.ThreadActive
 	// The adapter's books count a turn from the answer to its start, before the
@@ -207,9 +222,20 @@ func (a *App) Reconcile(ctx context.Context, p adapterproto.ReconcileParams) (ad
 		a.log.Warn("cannot read the record of a session", "endpoint", p.Endpoint, "error", err)
 		complete = false
 	}
-	in.Complete = complete
+	in.Complete = complete && !queueUnread
+	now := time.Now()
+	a.mu.Lock()
 	for _, t := range turns {
-		in.Turns = append(in.Turns, reconcile.Turn{Ref: t.ID, State: turnState(t.Status), Attempts: t.UserMessageIDs()})
+		state := turnState(t.Status)
+		if s.attached && t.Unfinished() && !a.stale(t, s.seenAt(t.ID, now), now) {
+			// A turn another process runs shows "interrupted" with no completion
+			// time until it ends; it is still running, and may be about to record
+			// the prompt. A created session's server, which does run its turns, never
+			// leaves one so: there it means the server died.
+			state = adapterproto.TurnStateRunning
+		}
+		in.Turns = append(in.Turns, reconcile.Turn{Ref: t.ID, State: state, Attempts: t.UserMessageIDs()})
 	}
+	a.mu.Unlock()
 	return reconcile.Judge(in), nil
 }

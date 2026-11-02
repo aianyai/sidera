@@ -55,6 +55,13 @@ type Options struct {
 	// PollEvery is how often a creation looks into the thread's record while it
 	// waits for the first prompt.
 	PollEvery time.Duration
+	// AttachPollEvery is how often the turns of an attached session are read while
+	// one of this adapter's prompts is awaited or a turn is open, and AttachIdlePollEvery
+	// how often otherwise; see watchAttached.
+	AttachPollEvery, AttachIdlePollEvery time.Duration
+	// TurnStaleAfter is how long a turn of an attached session that shows no end is
+	// taken for running; after it the turn is taken for abandoned.
+	TurnStaleAfter time.Duration
 	// ReconnectMin and ReconnectMax bound the wait between attempts to reach the
 	// App Server again.
 	ReconnectMin, ReconnectMax time.Duration
@@ -85,6 +92,15 @@ func (o *Options) defaults() {
 	if o.PollEvery == 0 {
 		o.PollEvery = 2 * time.Second
 	}
+	if o.AttachPollEvery == 0 {
+		o.AttachPollEvery = time.Second
+	}
+	if o.AttachIdlePollEvery == 0 {
+		o.AttachIdlePollEvery = 10 * time.Second
+	}
+	if o.TurnStaleAfter == 0 {
+		o.TurnStaleAfter = 2 * time.Hour
+	}
 	if o.ReconnectMin == 0 {
 		o.ReconnectMin = time.Second
 	}
@@ -109,6 +125,9 @@ type App struct {
 
 	// connMu serializes dialling, so that two callers never open two connections.
 	connMu sync.Mutex
+	// attachMu serializes the attaching of sessions, so that a repeated attachment
+	// never starts two readings of one thread.
+	attachMu sync.Mutex
 
 	mu          sync.Mutex // guards everything below
 	started     bool

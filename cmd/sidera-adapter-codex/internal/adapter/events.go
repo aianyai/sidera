@@ -132,19 +132,32 @@ func (a *App) itemCompleted(p appserver.ItemNotification) {
 		a.mu.Unlock()
 		return
 	}
-	attempt := adapterproto.AttemptID(*p.Item.ClientID)
-	s.persisted.add(*p.Item.ClientID)
-	var notify bool
-	if rec := s.prompts[attempt]; rec != nil && rec.result.Stage == adapterproto.PromptAccepted && !rec.persistedSent {
-		rec.persistedSent, notify = true, true
-	}
+	notify := s.notePersisted(*p.Item.ClientID)
 	a.mu.Unlock()
 	s.signal()
 	if notify {
-		a.send("prompt.persisted", func(ctx context.Context) error {
-			return a.conn.PromptPersisted(ctx, adapterproto.PromptPersistedParams{Endpoint: s.endpoint, Attempt: attempt})
-		})
+		a.reportPersisted(s, adapterproto.AttemptID(*p.Item.ClientID))
 	}
+}
+
+// notePersisted notes that the record holds the prompt with the client id given and
+// says whether its persisting is to be reported: a delivery accepted that prompt
+// and the report was not made. The caller holds App.mu.
+func (s *session) notePersisted(clientID string) bool {
+	s.persisted.add(clientID)
+	delete(s.queued, adapterproto.AttemptID(clientID)) // taken from the queue
+	rec := s.prompts[adapterproto.AttemptID(clientID)]
+	if rec == nil || rec.result.Stage != adapterproto.PromptAccepted || rec.persistedSent {
+		return false
+	}
+	rec.persistedSent = true
+	return true
+}
+
+func (a *App) reportPersisted(s *session, attempt adapterproto.AttemptID) {
+	a.send("prompt.persisted", func(ctx context.Context) error {
+		return a.conn.PromptPersisted(ctx, adapterproto.PromptPersistedParams{Endpoint: s.endpoint, Attempt: attempt})
+	})
 }
 
 // send makes a notification to the daemon; one that cannot be queued is logged,

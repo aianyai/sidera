@@ -190,6 +190,10 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 			_, err := client.ThreadResume(ctx, appserver.ThreadResumeParams{ThreadID: missing, ExcludeTurns: true})
 			return err
 		},
+		"thread/read": func() error {
+			_, err := client.ThreadRead(ctx, missing)
+			return err
+		},
 		"thread/archive":     func() error { return client.ThreadArchive(ctx, missing) },
 		"thread/unsubscribe": func() error { return client.ThreadUnsubscribe(ctx, missing) },
 	} {

@@ -25,6 +25,10 @@ const (
 	MethodThreadArchive     = "thread/archive"
 	MethodThreadUnsubscribe = "thread/unsubscribe"
 	MethodThreadTurnsList   = "thread/turns/list"
+	MethodThreadRead        = "thread/read"
+	MethodThreadQueueAdd    = "thread/queue/add"
+	MethodThreadQueueList   = "thread/queue/list"
+	MethodThreadQueueDelete = "thread/queue/delete"
 	MethodThreadShell       = "thread/shellCommand"
 	MethodTurnStart         = "turn/start"
 	MethodCommandExec       = "command/exec"
@@ -114,6 +118,10 @@ type InitializeParams struct {
 // InitializeCapabilities is what the client asks of the connection.
 type InitializeCapabilities struct {
 	OptOutNotificationMethods []string `json:"optOutNotificationMethods,omitempty"`
+	// ExperimentalAPI opts the connection into the methods the server marks
+	// experimental, which a request to one of them is refused without. The queue of
+	// a thread's pending prompts (thread/queue/*) is one of them.
+	ExperimentalAPI bool `json:"experimentalApi,omitempty"`
 }
 
 // InitializeResult identifies the server.
@@ -165,6 +173,25 @@ type Thread struct {
 	ID     string       `json:"id"`
 	Name   *string      `json:"name"`
 	Status ThreadStatus `json:"status"`
+	// Ephemeral is set for a thread that is never written to disk.
+	Ephemeral bool `json:"ephemeral"`
+	// ParentThreadID is set for a thread a sub-agent runs in.
+	ParentThreadID *string `json:"parentThreadId"`
+	// Source says where the thread came from: a word, or an object for a
+	// sub-agent's.
+	Source json.RawMessage `json:"source"`
+}
+
+// IsSubAgent reports whether the thread belongs to a sub-agent, which takes no
+// input from outside.
+func (t Thread) IsSubAgent() bool {
+	if t.ParentThreadID != nil && *t.ParentThreadID != "" {
+		return true
+	}
+	var src struct {
+		SubAgent json.RawMessage `json:"subAgent"`
+	}
+	return json.Unmarshal(t.Source, &src) == nil && len(src.SubAgent) > 0
 }
 
 // ThreadStartParams starts a thread. Config and DeveloperInstructions are the
@@ -248,12 +275,15 @@ type Item struct {
 	ClientID *string `json:"clientId"`
 }
 
-// Turn is one run of the agent on a prompt.
+// Turn is one run of the agent on a prompt. StartedAt and CompletedAt are Unix
+// seconds; CompletedAt is null until the turn has ended.
 type Turn struct {
-	ID     string     `json:"id"`
-	Status string     `json:"status"`
-	Items  []Item     `json:"items"`
-	Error  *TurnError `json:"error"`
+	ID          string     `json:"id"`
+	Status      string     `json:"status"`
+	Items       []Item     `json:"items"`
+	Error       *TurnError `json:"error"`
+	StartedAt   *int64     `json:"startedAt"`
+	CompletedAt *int64     `json:"completedAt"`
 }
 
 // TurnError is why a turn failed. The message is for the log only.
@@ -263,6 +293,15 @@ type TurnError struct {
 
 // Running reports whether the turn has not ended.
 func (t Turn) Running() bool { return t.Status == TurnInProgress }
+
+// Unfinished reports whether a turn that another process runs has not ended, as it
+// reads from outside that process: the record has no completion time. The status
+// of such a turn is "interrupted", not "inProgress" (the record holds no end for it
+// and the reader does not run it), so the completion time is what tells it from a
+// turn the person interrupted, which has one.
+func (t Turn) Unfinished() bool {
+	return t.Running() || (t.Status == TurnInterrupted && t.CompletedAt == nil)
+}
 
 // UserMessageIDs returns the client ids of the prompts the turn records.
 func (t Turn) UserMessageIDs() []string {
@@ -466,12 +505,84 @@ func DecodeParams[T any](n Notification) (T, error) {
 // server: it was never written, or it was removed. The server says so in words, not
 // in a code, so the words are matched here and nowhere else; any other failure
 // leaves the thread's existence unknown. The words are held to the installed
-// server by the real-Codex test.
+// server by the real-Codex test. ("thread not loaded" is what thread/read and
+// thread/turns/list say of an id nothing stored carries.)
 func IsThreadGone(err error) bool {
 	var rpc *RPCError
 	if !errors.As(err, &rpc) {
 		return false
 	}
 	m := strings.ToLower(rpc.Message)
-	return strings.Contains(m, "no rollout found") || strings.Contains(m, "not found") || strings.Contains(m, "does not exist")
+	return strings.Contains(m, "no rollout found") || strings.Contains(m, "not found") || strings.Contains(m, "does not exist") ||
+		strings.Contains(m, "thread not loaded")
+}
+
+// CodeInvalidRequest is the code of an answer that refuses a request for what it
+// asks: the server did nothing.
+const CodeInvalidRequest = -32600
+
+// IsInvalidRequest reports whether the server refused a request as invalid, which
+// it does before it acts on it.
+func IsInvalidRequest(err error) bool {
+	var rpc *RPCError
+	return errors.As(err, &rpc) && rpc.Code == CodeInvalidRequest
+}
+
+// ThreadRead reads a thread's metadata, without its turns. It works for a thread
+// another process has loaded.
+func (c *Client) ThreadRead(ctx context.Context, threadID string) (Thread, error) {
+	var r struct {
+		Thread Thread `json:"thread"`
+	}
+	err := c.Call(ctx, MethodThreadRead, map[string]any{"threadId": threadID, "includeTurns": false}, &r)
+	return r.Thread, err
+}
+
+// QueuedSubmission is a prompt waiting in a thread's queue. ClientUserMessageID is
+// the id the prompt's record keeps once its turn starts.
+type QueuedSubmission struct {
+	ID                  string      `json:"id"`
+	ClientUserMessageID string      `json:"clientUserMessageId"`
+	Input               []UserInput `json:"input"`
+}
+
+// ThreadQueueAdd puts a prompt into a thread's queue. The queue is shared by every
+// process that uses the same Codex home: the one that has the thread loaded takes
+// the prompt when the thread is idle, which for a process other than this server
+// can take several seconds, and none takes it while no process has the thread
+// loaded. The server refuses a thread that is archived, ephemeral or a
+// sub-agent's, or that it does not know. The method is experimental (see
+// InitializeCapabilities.ExperimentalAPI).
+func (c *Client) ThreadQueueAdd(ctx context.Context, threadID, clientUserMessageID string, input []UserInput) (QueuedSubmission, error) {
+	var r struct {
+		QueuedSubmission QueuedSubmission `json:"queuedSubmission"`
+	}
+	err := c.Call(ctx, MethodThreadQueueAdd, map[string]any{
+		"threadId": threadID, "clientUserMessageId": clientUserMessageID, "input": input,
+	}, &r)
+	return r.QueuedSubmission, err
+}
+
+// ThreadQueueList reads one page of the prompts waiting in a thread's queue; more
+// says there are further pages.
+func (c *Client) ThreadQueueList(ctx context.Context, threadID string, limit int) (queued []QueuedSubmission, more bool, err error) {
+	var r struct {
+		Data       []QueuedSubmission `json:"data"`
+		NextCursor *string            `json:"nextCursor"`
+	}
+	if err := c.Call(ctx, MethodThreadQueueList, map[string]any{"threadId": threadID, "limit": limit}, &r); err != nil {
+		return nil, false, err
+	}
+	return r.Data, r.NextCursor != nil && *r.NextCursor != "", nil
+}
+
+// ThreadQueueDelete takes a prompt out of a thread's queue by the id the queue gave
+// it, and says whether it was still there: a prompt the thread's owner took in the
+// meantime is not, and that is no error.
+func (c *Client) ThreadQueueDelete(ctx context.Context, threadID, queuedSubmissionID string) (deleted bool, err error) {
+	var r struct {
+		Deleted bool `json:"deleted"`
+	}
+	err = c.Call(ctx, MethodThreadQueueDelete, map[string]any{"threadId": threadID, "queuedSubmissionId": queuedSubmissionID}, &r)
+	return r.Deleted, err
 }
