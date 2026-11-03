@@ -129,12 +129,16 @@ It refuses, changing nothing and saying what to do, when:
 - `sidera` or its directory is a symbolic link, or (not checked on Windows) is not owned by
   you: do not run it with `sudo`; run it as the user who owns the programs;
 - the directory of the programs cannot be written;
+- the release's program does not report that it is from a release archive, as no release
+  before 0.12.0 does: it could not update itself in turn, so the first release `sidera
+  update` can install is 0.12.0 (install older ones by hand, below);
 - the release's signature, version, checksum or archive does not check out. This is never
   worked around: download nothing by hand to "get past" it;
 - another `sidera update` is running.
 
 The download goes through the proxy named by `HTTPS_PROXY`/`NO_PROXY` and is kept in
-the user cache directory (`sidera-update/`), removed when the run ends. Nothing else
+`sidera-update/<version>` in the user cache directory, removed when the run ends (the lock
+file `sidera-update/update.lock` stays, for the next run). Nothing else
 contacts GitHub or any release server: the daemon never does. The rules, with their reasons, are in
 [the update reference](../references/update/README.md).
 

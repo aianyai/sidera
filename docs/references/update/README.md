@@ -89,6 +89,7 @@ Every refusal is made before anything is changed, with the way forward in the me
 | The cache directory belongs to another user, or others can enter it (Unix) | What is downloaded there is checked once and used later; a directory someone else can write, such as one in a cache directory shared between users, proves nothing |
 | The directory cannot be written | Found by creating and removing a file before the download |
 | The release cannot be believed | See the trust chain |
+| The unpacked program does not report the distribution `archive` (a release built before the stamp existed, 0.11.0 and earlier, does not) | Found by running it, after the download and the checks and before anything changes. Installing a program without the stamp would leave an installation that can no longer update itself, so such a release is never a target |
 | Another `update` is running | See Cache and lock |
 
 The same version is not a downgrade: a run at the target version replaces no program and
@@ -209,11 +210,12 @@ system: on Windows `UserCacheDir` is `%LocalAppData%`, which holds the default d
 version directory is created owner-only (`fsx.MakeRoot`), because the archive is checked once
 and unpacked after: if someone else could replace it in between, the check would prove
 nothing. It is wiped before every download, trusting nothing an earlier run left, and removed
-when the run ends, whether it succeeded or not; the adapters are installed from it while it
+when the run ends, whether it succeeded or not (the lock file beside it stays); the adapters are installed from it while it
 exists (the daemon copies the package itself).
 
 A run holds `sidera-update/update.lock` (an `fsx` lock, released by the system if the process
-dies) from before it writes anything to the end. A second run fails at once, naming the lock.
+dies) from before it writes anything to the end. The file stays after the run and the next run
+locks it again. A second run fails at once, naming the lock.
 Everything before the lock only reads: the release is found, the downgrade and the place of
 the programs are checked. A run that is refused there, such as one under `sudo` (which on
 macOS keeps the user's home), creates neither the cache directory nor the lock, so it leaves

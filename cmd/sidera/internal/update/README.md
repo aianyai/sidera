@@ -57,8 +57,8 @@ this is the map.
 - Each step is skipped when its result is already there, so a run that was cut short is
   finished by running again.
 - The archive is written to a file, that file is checked against the signed digest and
-  that same file is unpacked. The cache directory is owner-only and is wiped before every
-  download and removed when the run ends.
+  that same file is unpacked. The release's directory in the cache is owner-only and is wiped
+  before every download and removed when the run ends; the lock file beside it stays.
 - Tests: `harness_test.go` serves signed releases from a local TLS server, with a
   throwaway key and small archives, and `update_test.go` runs the whole run against a
   temporary program directory and a fake node. The real binary on the three systems is
