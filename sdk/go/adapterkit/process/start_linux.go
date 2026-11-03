@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -49,9 +50,11 @@ func hostDetachment() Detachment {
 	return host.detachment
 }
 
+// sessionOnly says what a process started in a session without a scope is left to.
+const sessionOnly = "started in a session of its own but not moved out of the daemon's control group, " +
+	"so a service manager that stops the daemon's unit, or the end of the login session, ends it"
+
 func probeHost() (systemdRun string, d Detachment) {
-	const sessionOnly = "started in a session of its own but not moved out of the daemon's control group, " +
-		"so a service manager that stops the daemon's unit, or the end of the login session, ends it"
 	path, err := exec.LookPath("systemd-run")
 	if err != nil {
 		return "", Detachment{OutlivesDaemon: true, Caveat: "systemd-run is not installed: " + sessionOnly}
@@ -109,8 +112,11 @@ func underUserManager(cgroup string, uid int) bool {
 	return false
 }
 
+// lingerEnabled asks logind whether the user's manager outlives the last logout.
+// Without a user, show-user shows the properties of the manager itself, which has
+// no Linger, so the user is named.
 func lingerEnabled() bool {
-	out, err := runProbe("loginctl", "show-user", "--property=Linger", "--value")
+	out, err := runProbe("loginctl", "show-user", strconv.Itoa(os.Getuid()), "--property=Linger", "--value")
 	return err == nil && strings.TrimSpace(out) == "yes"
 }
 
@@ -131,28 +137,85 @@ func firstLine(s string) string {
 	return strings.TrimSpace(line)
 }
 
+// busVariables are what systemd-run needs to reach the user manager.
+var busVariables = []string{"XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"}
+
+// missingBusVariable returns the first of the variables systemd-run needs that the
+// adapter has and a start with the environment env lacks; empty when env is nil
+// (the adapter's own) or keeps them all. The host probe ran with the adapter's
+// environment, so a start with fewer would fail inside systemd-run after the start
+// had succeeded.
+func missingBusVariable(adapterEnv, env []string) string {
+	if env == nil {
+		return ""
+	}
+	for _, name := range busVariables {
+		if hasVariable(adapterEnv, name) && !hasVariable(env, name) {
+			return name
+		}
+	}
+	return ""
+}
+
+func hasVariable(env []string, name string) bool {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, name+"="); ok && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // place says how the process is started here: wrapped in systemd-run when the
 // host puts processes in a scope, as asked otherwise. systemd-run executes the
-// command in place, so the PID the start returns is the process's.
+// command in place, so the PID the start returns is the process's. Until it has,
+// the process is systemd-run itself: List shows its arguments and an Interrupt
+// reaches it.
 //
 // A wrapped command that cannot be executed would fail inside systemd-run, after
 // the start succeeded, and show as an exit status. The executable is checked
 // beforehand, so that a start fails the same way with a scope and without.
 func place(spec Spec) ([]string, adapterproto.Container, Detachment, error) {
 	hostProbe()
-	if host.systemdRun == "" {
-		return spec.Argv, adapterproto.Container{Kind: adapterproto.ContainerProcessGroup}, host.detachment, nil
+	return placeWith(host.systemdRun, host.detachment, os.Environ(), spec)
+}
+
+// placeWith is place for a host that puts processes in a scope with systemdRun
+// (empty: it does not), which says it achieves detachment, and adapterEnv as the
+// adapter's environment.
+func placeWith(systemdRun string, detachment Detachment, adapterEnv []string, spec Spec) ([]string, adapterproto.Container, Detachment, error) {
+	if systemdRun != "" {
+		if name := missingBusVariable(adapterEnv, spec.Env); name != "" {
+			systemdRun = ""
+			detachment = Detachment{OutlivesDaemon: true, Caveat: "the environment of the start lacks " + name +
+				", which systemd-run needs to reach the user manager, so it was not put in a scope: " + sessionOnly}
+		}
 	}
-	path := spec.Argv[0]
-	if !filepath.IsAbs(path) && spec.Dir != "" {
-		path = filepath.Join(spec.Dir, path)
+	if systemdRun == "" {
+		return spec.Argv, adapterproto.Container{Kind: adapterproto.ContainerProcessGroup}, detachment, nil
 	}
-	if err := unix.Access(path, unix.X_OK); err != nil {
-		return nil, adapterproto.Container{}, Detachment{}, &os.PathError{Op: "fork/exec", Path: spec.Argv[0], Err: err}
+	if err := checkExecutable(spec.Argv[0]); err != nil {
+		return nil, adapterproto.Container{}, Detachment{}, err
 	}
 	unit := unitName(spec.Argv[0])
-	wrapped := append([]string{host.systemdRun, "--user", "--scope", "--quiet", "--unit=" + unit, "--"}, spec.Argv...)
-	return wrapped, adapterproto.Container{Kind: adapterproto.ContainerSystemdUnit, Name: unit}, host.detachment, nil
+	wrapped := append([]string{systemdRun, "--user", "--scope", "--quiet", "--unit=" + unit, "--"}, spec.Argv...)
+	return wrapped, adapterproto.Container{Kind: adapterproto.ContainerSystemdUnit, Name: unit}, detachment, nil
+}
+
+// checkExecutable fails as the start itself would for a path that is not a
+// regular file or not executable. unix.Access alone passes a directory.
+func checkExecutable(path string) error {
+	var st unix.Stat_t
+	if err := unix.Stat(path, &st); err != nil {
+		return &os.PathError{Op: "fork/exec", Path: path, Err: err}
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return &os.PathError{Op: "fork/exec", Path: path, Err: syscall.EACCES}
+	}
+	if err := unix.Access(path, unix.X_OK); err != nil {
+		return &os.PathError{Op: "fork/exec", Path: path, Err: err}
+	}
+	return nil
 }
 
 // unitName makes the name of the scope: the executable's base name with every

@@ -86,11 +86,22 @@ func hostDetachment() Detachment {
 // the adapter's job.
 func stayingDetachment() Detachment {
 	inJob, flags, err := currentJob()
+	return afterRefusedBreakaway(inJob, flags, err)
+}
+
+// afterRefusedBreakaway says what a start that was refused breakaway achieved,
+// from the innermost job of the adapter as currentJob read it. If that job allows
+// breakaway the refusal came from an outer job of a nest, whose limits are not
+// read, so nothing is promised, as for a job that could not be read.
+func afterRefusedBreakaway(inJob bool, flags uint32, err error) Detachment {
 	switch {
 	case err != nil:
 		return unreadableJob(err)
 	case !inJob:
 		return Detachment{OutlivesDaemon: true}
+	case flags&(windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK|windows.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK) != 0:
+		return Detachment{Caveat: "stays in the adapter's job: breakaway was refused by an outer job of a nest, " +
+			"whose limits could not be read, so whether it ends its processes is not known"}
 	}
 	return staysInJob(flags)
 }

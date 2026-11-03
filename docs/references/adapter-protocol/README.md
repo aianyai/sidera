@@ -1205,7 +1205,9 @@ reading platform-specific process tables, which stay in the adapter.
 
 Package `sdk/go/adapterkit/process` is what an adapter uses to run a native agent
 runtime as a process of its own on macOS, Linux and Windows. On any other
-platform the process table fails with `ErrUnsupported`.
+platform the package compiles and `Start`, `Interrupt` and the process table fail
+with `ErrUnsupported`, `Start` before anything is started; a process that cannot be
+named is never started.
 
 **Start keys.** The `StartKey` of a process, with its PID, is the
 `ProcessIdentity.start_key` of the protocol. The formats are fixed; a key written
@@ -1249,7 +1251,11 @@ included, is an error. A PID of zero or below is never found.
 the daemon, and says in `Started.Detachment` how far that succeeded; falling back
 never fails the start. An error that wraps `ErrStartedUnidentified` means the
 process runs and only its identity could not be read (`Started` is still filled);
-any other error means nothing started.
+any other error means nothing started. `Spec.Argv[0]` must be an absolute path (an
+error before anything starts) and is run as written, never looked up in `PATH`: a
+start in a systemd scope would otherwise resolve a bare name through `PATH` and
+make a relative path absolute, and the two ways of starting would run different
+programs.
 
 - **Unix.** A session and a process group of their own: the PID is the group's ID,
   there is no controlling terminal and a hang-up of the adapter's terminal does not
@@ -1265,13 +1271,19 @@ any other error means nothing started.
   linger. A daemon that was started from a login session (SSH, a terminal
   multiplexer) is not under the user manager and a process in a session of its own
   survives that logout, so the scope is used only when `Linger=yes` (`loginctl
-  show-user`) or the adapter's own cgroup in `/proc/self/cgroup` is under
+  show-user <uid> --property=Linger --value`; without a user the command shows the
+  manager's properties, which have no `Linger`) or the adapter's own cgroup in `/proc/self/cgroup` is under
   `user@<uid>.service/`. Otherwise, and when `systemd-run` is missing or the user
-  manager cannot be reached, the process gets the session only. The environment of
-  a start must keep `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`, which
-  `systemd-run` needs to reach the user manager. The executable is checked for
-  being executable before a scope start, so a missing program fails the start as it
-  does without a scope. `HostDetachment().Caveat` says which was chosen and why,
+  manager cannot be reached, the process gets the session only. `systemd-run`
+  reaches the user manager through `XDG_RUNTIME_DIR` and
+  `DBUS_SESSION_BUS_ADDRESS`, which the probe found in the adapter's environment; a
+  start whose `Spec.Env` leaves out either one the adapter has would exit 1 inside
+  `systemd-run` after `Start` returned, so that start is made in a session only and
+  `Started.Detachment.Caveat` says which variable was missing. The executable is
+  checked for being a regular executable file before a scope start, so a missing
+  program or a directory fails the start as it does without a scope. Until
+  `systemd-run` has executed the command the process is `systemd-run` itself: `List`
+  shows its arguments and an `Interrupt` reaches it. `HostDetachment().Caveat` says which was chosen and why,
   and, for a scope without linger, that the process ends at the last logout.
 - **Windows.** Started with `CREATE_BREAKAWAY_FROM_JOB` and the window hidden, so
   that it leaves the job the daemon may have put the adapter in. A process that is
@@ -1283,15 +1295,22 @@ any other error means nothing started.
   process: with `KILL_ON_JOB_CLOSE` the process does not outlive the daemon and
   the caveat says so; otherwise it does and the caveat says it stays in the job.
   The query reads only the job the adapter is directly in; a limit set by an outer
-  job of a nest is not seen. `Container` is `none`. Before the first interruptible
+  job of a nest is not seen. When the start was refused although that job allows
+  breakaway, an outer job forbade it and its kill-on-close is unknown, so the
+  `Detachment` promises nothing (`OutlivesDaemon` false), as for a job that could
+  not be read. `Container` is `none`. Before the first interruptible
   start the "ignore Ctrl-C" setting a process inherits (set for a process started
   over SSH or by a service, and silent: the interrupt then has no effect) is
-  cleared with `SetConsoleCtrlHandler(NULL, FALSE)`.
-- **macOS and other Unix.** The session only; no caveat.
+  cleared with `SetConsoleCtrlHandler(NULL, FALSE)`, which changes the adapter's own
+  setting too, for the rest of its life.
+- **macOS.** The session only; no caveat.
 
 `HostDetachment` reports what a start achieves on this host before anything has
-started. On Windows it is read from the adapter's job, and the `Detachment` of each
-`Started` is the authority.
+started, and the `Detachment` of each `Started` is the authority. On Linux it is
+decided once per process, on the first call to it or to `Start`, and that call runs
+two commands with a 5 s limit each, so it can take up to about ten seconds. On
+Windows it is read from the adapter's job on every call, the innermost job only.
+Elsewhere it is constant.
 
 **Interrupt.** On Unix, `SIGINT` to the process alone after checking its identity.
 On Windows there is no way to send Ctrl-C to a process without attaching to its

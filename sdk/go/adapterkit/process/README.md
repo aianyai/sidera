@@ -33,7 +33,9 @@ process is detached on each platform are specified in
   reboot) by the start the system reports. `List` is a listing, not a proof of
   absence: it leaves out what is denied (on Windows whoever owns it), so a process
   missing from it may still run.
-- **Argv[0] is a path.** It is started as written and not looked up in `PATH`.
+- **Argv[0] is an absolute path.** It is started as written and not looked up in
+  `PATH`; anything else is an error before anything starts. A start in a systemd
+  scope would otherwise resolve a bare name and make a relative path absolute.
 - **`Start` has two kinds of error.** One that wraps `ErrStartedUnidentified` means
   the process runs and only its identity could not be read: the returned `Started`
   has `PID`, `Done` and `Kill`, and the caller must not act as if nothing
@@ -41,11 +43,11 @@ process is detached on each platform are specified in
 - **Falling back never fails a start.** Read `Started.Detachment`: when
   `OutlivesDaemon` is false the process will end with the adapter's job (Windows),
   and `Caveat` says in words what can still end it.
-- **On Linux the environment of a start must keep `XDG_RUNTIME_DIR` and
-  `DBUS_SESSION_BUS_ADDRESS`.** `systemd-run` reaches the user manager through them
-  and a start in a scope fails (as an exit status of `Done`) without them. A
-  process started with `environ.Compose` from the adapter's own environment has
-  them.
+- **On Linux a start in a scope needs `XDG_RUNTIME_DIR` and
+  `DBUS_SESSION_BUS_ADDRESS` in its environment.** `systemd-run` reaches the user
+  manager through them. A `Spec.Env` that leaves out one the adapter has is started
+  in a session only, and `Detachment.Caveat` says so; an environment from
+  `environ.Compose` of the adapter's own has them.
 - **Stdio are files.** A pipe would tie the process to the adapter. The caller
   closes its copies after `Start` returns.
 - **An adapter that calls `Interrupt` calls `HandleHelperInvocation` first in
@@ -63,7 +65,7 @@ process is detached on each platform are specified in
 | File | Holds |
 | ---- | ----- |
 | `identity.go`, `identity_{darwin,linux,windows,other}.go` | The types and errors, and the process table of each platform |
-| `start.go`, `start_unix.go`, `start_linux.go`, `start_unixother.go`, `start_windows.go` | `Spec`, `Start` and its shared flow; the session on Unix; the systemd scope probe and rule on Linux; creation flags, breakaway fallback and the job query on Windows |
+| `start.go`, `start_unix.go`, `start_linux.go`, `start_darwin.go`, `start_windows.go`, `start_other.go` | `Spec`, `Start` and its shared flow; the session on macOS and Linux; the systemd scope probe and rule on Linux; creation flags, breakaway fallback and the job query on Windows; the `ErrUnsupported` stubs of every other platform |
 | `interrupt.go`, `interrupt_unix.go`, `interrupt_windows.go` | `Interrupt`: the identity check, `SIGINT`, the helper's sender |
 | `helper.go`, `helper_windows.go`, `helper_other.go` | `HandleHelperInvocation` and the Windows helper that attaches to the console |
 | `kernel32_windows.go` | The console and job calls `x/sys/windows` has no wrapper for |

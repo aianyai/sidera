@@ -1,5 +1,3 @@
-//go:build unix && !linux
-
 package process
 
 import "github.com/aianyai/sidera/sdk/go/adapterproto"

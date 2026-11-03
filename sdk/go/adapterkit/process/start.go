@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -12,11 +13,16 @@ import (
 
 // Spec describes a process to start detached from the adapter.
 type Spec struct {
-	// Argv[0] is the executable, started as written: it is not looked up in PATH.
+	// Argv[0] is the executable, an absolute path, started as written: it is not
+	// looked up in PATH, and a relative path is refused because a start in a
+	// systemd scope would make it absolute against the working directory or look a
+	// bare name up, and the two ways of starting would then run different programs.
 	Argv []string
 	// Env is the whole environment (see package environ); nil inherits the
-	// adapter's. On Linux it must keep XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS,
-	// which systemd-run needs to reach the user manager.
+	// adapter's. On Linux a start in a systemd scope needs the XDG_RUNTIME_DIR and
+	// DBUS_SESSION_BUS_ADDRESS the adapter itself has, to reach the user manager:
+	// when Env leaves either out, that start is made in a session of its own without
+	// a scope, and Started.Detachment says so.
 	Env []string
 	Dir string // working directory; empty is the adapter's
 	// Stdin, Stdout, Stderr: nil is the null device. A regular file is expected; a
@@ -25,7 +31,10 @@ type Spec struct {
 	Stdin, Stdout, Stderr *os.File
 	// Interruptible: the process can be stopped with Interrupt. Only Windows
 	// distinguishes: such a process gets a hidden console of its own, any other gets
-	// none.
+	// none. Before the first such start the adapter itself stops ignoring Ctrl-C
+	// (SetConsoleCtrlHandler(NULL, FALSE)), because a process inherits that setting
+	// and an ignored Ctrl-C would make the interrupt of a child silently do nothing;
+	// the adapter's own setting stays changed for the rest of its life.
 	Interruptible bool
 }
 
@@ -68,10 +77,14 @@ func (s Started) Kill() error {
 // manager is usable; on Windows outside the adapter's job when the job allows it.
 // Falling back never fails the start; the fallback shows in Detachment. An error
 // that wraps ErrStartedUnidentified means the process runs; any other error means
-// nothing started. Safe for concurrent use.
+// nothing started, which is also the case on a platform without a process table
+// (ErrUnsupported). Safe for concurrent use.
 func Start(spec Spec) (Started, error) {
 	if len(spec.Argv) == 0 {
 		return Started{}, errors.New("process: nothing to start")
+	}
+	if !filepath.IsAbs(spec.Argv[0]) {
+		return Started{}, fmt.Errorf("process: the executable %q is not an absolute path", spec.Argv[0])
 	}
 	stdio, closeStdio, err := openStdio(spec)
 	if err != nil {
@@ -106,9 +119,14 @@ func Start(spec Spec) (Started, error) {
 }
 
 // HostDetachment is what Start achieves on this host, for a probe to report before
-// anything has started. It is decided once per process, on the first call to it or
-// to Start. On Windows it is read from the adapter's job, and Started.Detachment is
-// authoritative for each start.
+// anything has started; Started.Detachment is authoritative for each start. On Linux
+// it is decided once per process, on the first call to it or to Start, and that
+// call runs two commands with a limit of 5 s each, so it can take up to about ten
+// seconds; a start whose Env lacks the variables of the user manager is made
+// without a scope whatever this says. On Windows it is read from the adapter's job
+// on every call, and only the job the adapter is directly in is read: an outer job
+// of a nest that forbids breakaway is not seen here and shows in the Detachment of
+// a start that was refused. Elsewhere it is constant.
 func HostDetachment() Detachment { return hostDetachment() }
 
 // stdio is the three standard streams a start gives its process.

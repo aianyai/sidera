@@ -4,8 +4,8 @@
 // the processes of the adapter's user and interrupting it the way Ctrl-C in its
 // terminal would.
 //
-// It covers macOS, Linux and Windows; on another platform every operation of the
-// process table fails with ErrUnsupported. The reference in
+// It covers macOS, Linux and Windows; on another platform the package compiles and
+// Start, Interrupt and the process table fail with ErrUnsupported. The reference in
 // docs/references/adapter-protocol ("Native processes") is the specification of
 // the identities and of how far Start detaches on each platform.
 package process

@@ -275,6 +275,27 @@ func TestStartOfAMissingExecutableFailsWithoutStarting(t *testing.T) {
 	}
 }
 
+// The executable is a path as written: a name that PATH would resolve, or a path
+// relative to the working directory, would be run as another program by a start in
+// a systemd scope than by one without.
+func TestStartRefusesARelativeExecutable(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(filepath.Dir(exe), exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, argv0 := range []string{filepath.Base(exe), rel, "." + string(filepath.Separator) + rel, ""} {
+		started, err := process.Start(process.Spec{Argv: []string{argv0}, Dir: filepath.Dir(exe)})
+		if err == nil || errors.Is(err, process.ErrStartedUnidentified) {
+			t.Errorf("Start(%q) = %v, want an error that is not ErrStartedUnidentified", argv0, err)
+			_ = started.Kill()
+		}
+	}
+}
+
 func TestHostDetachmentIsStable(t *testing.T) {
 	d := process.HostDetachment()
 	t.Logf("host detachment: %+v", d)
