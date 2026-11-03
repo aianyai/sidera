@@ -300,7 +300,10 @@ are not secret, but are not logged at the information level either.
 
 **Formats this relies on.** The registry file, the transcript's `turn_duration` record and the
 socket line are not documented by Claude Code. They were checked against Claude Code 2.1.316 on
-macOS and are read in two places only: package `attached` (registry, socket line, the turns) and
+macOS, 2.1.317 on Linux (`procStart` as field 22 of `/proc/<pid>/stat`, the Unix socket inbox and
+the `turn_duration` record) and 2.1.316 and 2.1.317 on Windows (`procStart` as the creation
+FILETIME, the named-pipe inbox with the authentication line enforced, a wake delivered), and are
+read in two places only: package `attached` (registry, socket line, the turns) and
 `record.Index` (the lines of the transcript). A form that stops matching shows, never silently: an
 unreadable registry entry is `native_error` at attachment and, if it stays so for a second, an
 error in the log and `native_unavailable` for the endpoint; a transcript whose user lines lack a
