@@ -10,11 +10,11 @@ requests and notifications. "D to A" below means the daemon calls the adapter an
 
 The SDK lives in its own Go module, `github.com/aianyai/sidera/sdk/go`, which
 is imported by the daemon and by third-party adapters alike. The packages the
-daemon imports use the standard library only; the subpackages of `adapterkit` for
-adapters that need the operating system may use `golang.org/x/sys`. The frames
-are handled by `sdk/go/peer`; the messages, enums, application error codes and
-manifest are defined in the packages `adapterproto` and `manifest` and, for other
-languages, by the JSON Schema under `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
+daemon imports use the standard library only; `adapterkit/process` and
+`adapterkit/realpath` also use `golang.org/x/sys`. The frames are handled by
+`sdk/go/peer`; the messages, enums, application error codes and manifest are
+defined in the packages `adapterproto` and `manifest` and, for other languages, by
+the JSON Schema under `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
 supervises adapters and carries this protocol between them and the engine is in
 [adapter-host](../adapter-host/README.md).
 This document has one part per layer: the peer layer, then the messages and
@@ -1184,7 +1184,7 @@ fields and hands them back to an adapter that reconnects.
 | Field | What it is for |
 | ----- | -------------- |
 | `pid` (1 to 2^32-1) | Find the process: to tell whether it is busy, to signal it, to take it over after a restart |
-| `start_key` (opaque, at most 64 characters, compared only for equality) | With `pid`, one process instance, so a reused PID is not mistaken for it. Built from the platform's raw start value and the boot identity (Linux: the start time from `/proc/<pid>/stat` and the boot id; macOS: the start seconds and microseconds from `proc_pidinfo`; Windows: the creation time), and in the same format across adapter versions |
+| `start_key` (opaque, at most 64 characters, compared only for equality) | With `pid`, one process instance, so a reused PID is not mistaken for it. Built from the platform's raw start value and, on Linux, the boot identity; its exact formats are under "Native processes" below, and they stay the same across adapter versions |
 | `started_at_ms` | An approximate start time for people; never used in a decision |
 | `container.kind` | `systemd_unit`, `process_group`, `launchd_job`, `windows_job`, `scheduled_task` or `none`: how the process was isolated so it outlives the adapter |
 | `container.name` (at most 256 characters; absent for `none`) | The unit, group, job or task name: the daemon checks it differs from its own unit or group and warns the owner when it does not; orphan cleanup takes the whole group; it also serves diagnosis |
@@ -1198,6 +1198,131 @@ reading platform-specific process tables, which stay in the adapter.
 
 - `sdk/go/adapterproto/lifecycle.go` (`ProcessIdentity`, `Container`); test
   `TestProcessIdentityRules`.
+
+## Native processes (`sdk/go/adapterkit/process`)
+
+### What
+
+Package `sdk/go/adapterkit/process` is what an adapter uses to run a native agent
+runtime as a process of its own on macOS, Linux and Windows. On any other
+platform the process table fails with `ErrUnsupported`.
+
+**Start keys.** The `StartKey` of a process, with its PID, is the
+`ProcessIdentity.start_key` of the protocol. The formats are fixed; a key written
+by one version is read by every later one.
+
+| Platform | `StartKey` | Read from |
+| -------- | ---------- | --------- |
+| macOS | `<sec>.<usec, 6 digits>` | `kern.proc.pid` and `kern.proc.all`, `P_starttime`; a zombie is not running; arguments from `kern.procargs2` |
+| Linux | `<ticks>@<boot_id>`, at most 57 bytes | field 22 of `/proc/<pid>/stat`, counted from the last `)` because the command name is free text, and `/proc/sys/kernel/random/boot_id`; state `Z` or `X` is not running; arguments from `/proc/<pid>/cmdline` |
+| Windows | the creation FILETIME as a decimal `uint64` | `OpenProcess(QUERY_LIMITED_INFORMATION | SYNCHRONIZE)` and `GetProcessTimes`; a process whose handle is signalled has ended; arguments from `NtQueryInformationProcess(ProcessCommandLineInformation)` |
+
+`Process.NativeStart` is the same value as plain decimal text (macOS keeps
+`<sec>.<usec>`) for comparing with a start another program recorded in that form;
+`Process.StartTime` is the wall-clock start for display. On Linux it is the boot
+time plus the ticks, so it moves when the clock is set and is never a decision.
+
+**Lookup and List.** `Lookup` answers "found" only for a running process. An error
+means the platform did not answer (access denied included), never that the process
+is gone: a caller that took it for gone could start a second writer beside one
+that runs. `List` returns the running processes of the adapter's effective user
+(the token's user SID on Windows) with their arguments, and leaves out those whose
+details are denied and those that end during the pass; any other failure is an
+error. A PID of zero or below is never found.
+
+**Detachment.** `Start` always asks for a process that outlives the adapter and
+the daemon, and says in `Started.Detachment` how far that succeeded; falling back
+never fails the start. An error that wraps `ErrStartedUnidentified` means the
+process runs and only its identity could not be read (`Started` is still filled);
+any other error means nothing started.
+
+- **Unix.** A session and a process group of their own: the PID is the group's ID,
+  there is no controlling terminal and a hang-up of the adapter's terminal does not
+  reach the process. `Container` is `process_group` named by the PID.
+- **Linux, systemd user scope.** When `systemd-run --user --scope --quiet -- true`
+  succeeds (checked once per process, with a 5 s limit), the process is also moved
+  out of the adapter's control group: `systemd-run --user --scope --quiet
+  --unit=<unit> -- <argv>` is started in the session, and `systemd-run` executes
+  the command in place, so the PID is the process's. The unit is
+  `sidera-<base name of argv[0], characters outside [A-Za-z0-9_.-] replaced by _>-<16
+  hex digits>.scope` and `Container` is `systemd_unit` with that name. A scope
+  belongs to the user manager, which ends at the last logout of a user without
+  linger. A daemon that was started from a login session (SSH, a terminal
+  multiplexer) is not under the user manager and a process in a session of its own
+  survives that logout, so the scope is used only when `Linger=yes` (`loginctl
+  show-user`) or the adapter's own cgroup in `/proc/self/cgroup` is under
+  `user@<uid>.service/`. Otherwise, and when `systemd-run` is missing or the user
+  manager cannot be reached, the process gets the session only. The environment of
+  a start must keep `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`, which
+  `systemd-run` needs to reach the user manager. The executable is checked for
+  being executable before a scope start, so a missing program fails the start as it
+  does without a scope. `HostDetachment().Caveat` says which was chosen and why,
+  and, for a scope without linger, that the process ends at the last logout.
+- **Windows.** Started with `CREATE_BREAKAWAY_FROM_JOB` and the window hidden, so
+  that it leaves the job the daemon may have put the adapter in. A process that is
+  not interruptible gets `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`; an
+  interruptible one gets `CREATE_NEW_CONSOLE`, a console of its own that
+  `Interrupt` attaches to. When the job forbids breakaway (start fails with access
+  denied) the start is retried once without the flag and the process stays in the
+  job. The job is then read with `QueryInformationJobObject` on the calling
+  process: with `KILL_ON_JOB_CLOSE` the process does not outlive the daemon and
+  the caveat says so; otherwise it does and the caveat says it stays in the job.
+  The query reads only the job the adapter is directly in; a limit set by an outer
+  job of a nest is not seen. `Container` is `none`. Before the first interruptible
+  start the "ignore Ctrl-C" setting a process inherits (set for a process started
+  over SSH or by a service, and silent: the interrupt then has no effect) is
+  cleared with `SetConsoleCtrlHandler(NULL, FALSE)`.
+- **macOS and other Unix.** The session only; no caveat.
+
+`HostDetachment` reports what a start achieves on this host before anything has
+started. On Windows it is read from the adapter's job, and the `Detachment` of each
+`Started` is the authority.
+
+**Interrupt.** On Unix, `SIGINT` to the process alone after checking its identity.
+On Windows there is no way to send Ctrl-C to a process without attaching to its
+console, and attaching would take the adapter's own console away, so
+`Interrupt` runs the adapter's own executable as a short-lived helper:
+`<exe> --sidera-adapterkit-helper interrupt <pid> <start key>`, detached from any
+console, hidden, and in the adapter's session (`AttachConsole` is refused across
+sessions). The helper checks the identity (exit 3, mapped to `ErrNotRunning`),
+frees its console, attaches to the target's, ignores Ctrl-C itself, sends
+`CTRL_C_EVENT` to the console, stays attached for 300 ms and prints `ok`. A
+failure exits 1 with the Win32 error on stderr. A reply without `ok` is an error
+saying that the adapter's `main` does not call `process.HandleHelperInvocation`,
+which an adapter that calls `Interrupt` must do as its first statement. The event
+reaches every process on the console, which is why an interruptible process has a
+console of its own, and a process started without one has none to attach to and
+the helper fails.
+
+### Why
+
+- A PID alone is reused. The key is the platform's own start record, so that no
+  clock adjustment can change it: Linux's is in ticks after boot and the boot id
+  makes a key from before a reboot differ from every key after it.
+- The Linux scope rule exists because a scope is not strictly better than a
+  session: a daemon in a login session without linger has children that survive
+  the logout today, and a scope would end them with the user manager. When the
+  daemon is already under the user manager it ends with it, so the scope risks
+  nothing and escapes the daemon's cgroup when it later runs as a user service.
+- A helper executable and not a call in the adapter, because `AttachConsole` and
+  `FreeConsole` change the console of the whole calling process. The adapter's
+  own executable is used so that no second file has to be shipped.
+- Rejected: `pidfd` (the window between check and signal is microseconds);
+  killing a whole process tree (Windows has none without a job of our own, which
+  conflicts with breakaway); a stateful launcher object (the facts are per
+  process).
+
+### Where
+
+- `sdk/go/adapterkit/process/` (`identity*.go`, `start*.go`, `interrupt*.go`,
+  `helper*.go`); its README lists the entry points.
+- Tests: `process_test.go` (the contract on every platform: identity, `Start`,
+  `Interrupt`), `start_linux_test.go` (the scope rule, unit names),
+  `identity_linux_test.go` (the stat parser), `start_windows_test.go` (the
+  adapter in jobs with the limits breakaway forbidden, breakaway forbidden with
+  kill-on-close, and breakaway allowed with and without kill-on-close). CI
+  runners have no systemd user manager and no desktop session, so the scope and
+  the console interrupt in an interactive session are run by hand on those hosts.
 
 ## Manifest
 

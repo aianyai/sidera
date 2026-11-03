@@ -6,18 +6,17 @@ protocol's lifecycle. Read
 [the adapter-protocol reference](../../../docs/references/adapter-protocol/README.md)
 for the rules; the kit adds none, it only applies them once.
 
-It imports the standard library, `peer` and `adapterproto`, and nothing else, so
-the instance lock is `flock` on Unix and a file opened without sharing on Windows,
-through `syscall`. The SDK module depends on `golang.org/x/sys` only for the
-subpackages below that need it, so an adapter that imports only this package does
-not build it.
-
-Capabilities that only some adapters need are subpackages, so that an adapter that
-imports only this package carries nothing of them:
+This package imports the standard library, `peer` and `adapterproto`, and nothing
+else, so the instance lock is `flock` on Unix and a file opened without sharing on
+Windows, through `syscall`. What an adapter needs beyond the serve loop lives in
+subpackages that an adapter imports only when it needs them; `process` and
+`realpath` alone bring in `golang.org/x/sys`, so an adapter that imports only this
+package does not build it:
 
 | Package | Holds |
 | ------- | ----- |
 | [`environ`](environ/README.md) | Composes the environment of a child process |
+| [`process`](process/README.md) | Starting a process detached from the adapter, its identity, listing, interrupting |
 | [`realpath`](realpath/README.md) | The path the platform reports for an existing path |
 
 ## Entry points
