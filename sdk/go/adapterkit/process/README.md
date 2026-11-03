@@ -28,8 +28,11 @@ process is detached on each platform are specified in
 - **"Not found" and "could not ask" are different answers.** `Lookup` returns an
   error when the platform did not answer, access denied included. Never treat an
   error as "the process is gone": that starts a second writer beside one that runs.
-  `List` is the exception by design: it leaves out what is denied, which the
-  adapter cannot have started.
+  `Running` is the one to ask about a known identity; on Windows it tells a
+  process that cannot be opened and holds the PID now (a SYSTEM process after a
+  reboot) by the start the system reports. `List` is a listing, not a proof of
+  absence: it leaves out what is denied (on Windows whoever owns it), so a process
+  missing from it may still run.
 - **Argv[0] is a path.** It is started as written and not looked up in `PATH`.
 - **`Start` has two kinds of error.** One that wraps `ErrStartedUnidentified` means
   the process runs and only its identity could not be read: the returned `Started`

@@ -1225,10 +1225,25 @@ time plus the ticks, so it moves when the clock is set and is never a decision.
 **Lookup and List.** `Lookup` answers "found" only for a running process. An error
 means the platform did not answer (access denied included), never that the process
 is gone: a caller that took it for gone could start a second writer beside one
-that runs. `List` returns the running processes of the adapter's effective user
-(the token's user SID on Windows) with their arguments, and leaves out those whose
-details are denied and those that end during the pass; any other failure is an
-error. A PID of zero or below is never found.
+that runs. `Running(identity)` is `Lookup` compared with the start key, with one
+addition on Windows: a process whose handle `OpenProcess` refuses (a SYSTEM or
+protected process that took over the PID, as happens after a reboot) has its
+creation time read from `NtQuerySystemInformation(SystemProcessInformation)`,
+which needs no handle. A different start is another process, so `Running` is false
+without an error; the same start stays an error, because without a handle the
+process cannot be shown to be running (its handle cannot be waited on); a process
+the table does not list has ended. `List` returns the running processes of the
+adapter's effective user with their arguments and is a listing to recognise
+processes by their arguments, not a proof that a process is not running: a process
+absent from it may still run, and whether a known identity runs is `Running`'s
+answer. On Linux the user is the effective UID of the `Uid:` line of
+`/proc/<pid>/status`, not the owner of `/proc/<pid>`, which the kernel makes root
+for a process that is not dumpable (`PR_SET_DUMPABLE 0`, as agent runtimes set).
+On Windows the token's user SID is compared, and the processes `OpenProcess` or
+the token refuses (higher integrity levels, protected processes) are left out
+whoever owns them, because their owner cannot be read without opening them. Those
+that end during the pass are left out too; any other failure, token errors
+included, is an error. A PID of zero or below is never found.
 
 **Detachment.** `Start` always asks for a process that outlives the adapter and
 the daemon, and says in `Started.Detachment` how far that succeeded; falling back

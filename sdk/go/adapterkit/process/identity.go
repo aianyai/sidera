@@ -2,6 +2,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -58,18 +59,51 @@ func Lookup(pid int) (p Process, found bool, err error) {
 }
 
 // Running reports whether id still names a running process: a Lookup of its PID
-// finds one with the same StartKey. Errors are Lookup's.
+// finds one with the same StartKey. Errors are Lookup's, with one exception on
+// Windows: a process that cannot be opened (a SYSTEM or protected process that
+// holds a PID the identity once had, after a reboot for instance) but whose start
+// the system reports without opening it is told apart by that start. A different
+// start is not this identity, so the answer is false; the same start leaves the
+// error, because the process cannot be shown to be running.
 func Running(id Identity) (bool, error) {
 	p, found, err := Lookup(id.PID)
+	return named(id, p, found, err)
+}
+
+// named decides, from the answer of Lookup, whether the process it found is the
+// one id names.
+func named(id Identity, p Process, found bool, err error) (bool, error) {
+	var d *deniedError
+	if errors.As(err, &d) && d.startKey != id.StartKey {
+		return false, nil
+	}
 	if err != nil || !found {
 		return false, err
 	}
 	return p.StartKey == id.StartKey, nil
 }
 
+// deniedError is the error of a lookup of a process that exists but may not be
+// opened and whose StartKey the platform reports without opening it (Windows). A
+// refused process whose start cannot be read that way is a plain error.
+type deniedError struct {
+	pid      int
+	startKey string // of the refused process
+	err      error
+}
+
+func (e *deniedError) Error() string {
+	return fmt.Sprintf("process: look up process %d: %v", e.pid, e.err)
+}
+func (e *deniedError) Unwrap() error { return e.err }
+
 // List returns the running processes of the adapter's user (the effective uid on
-// Unix, the token's user SID on Windows) with their arguments, in one pass. Left
-// out: a process whose details are denied (another integrity level, or protected),
-// which the adapter cannot have started, and one that ends during the pass. Any
-// other failure is an error.
+// Unix, the token's user SID on Windows) with their arguments, in one pass. It is a
+// listing for finding what the adapter can recognise by its arguments, not a proof
+// of what is not running: a process that is not in it may still run. Left out are
+// a process of another user, one whose details are denied and one that ends during
+// the pass; on Windows the denied ones are the processes of a higher integrity
+// level and protected processes, whose owner cannot be read without opening them,
+// and they are left out whoever owns them. To know whether a process the adapter
+// knows by identity still runs, ask Running. Any other failure is an error.
 func List() ([]Process, error) { return list() }

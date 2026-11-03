@@ -98,9 +98,14 @@ func denied(err error) bool {
 
 // read describes the process of a /proc/<pid> directory. found is false for a
 // process that does not exist and, unless includeEnded, for one that has ended
-// (state Z or X).
+// (state Z or X). A process that may not be read is an error, never "not found".
 func read(pid int, includeEnded bool) (p Process, found bool, err error) {
-	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	return readWith(os.ReadFile, pid, includeEnded)
+}
+
+// readWith is read with the file reader that stands in for the kernel.
+func readWith(readFile func(string) ([]byte, error), pid int, includeEnded bool) (p Process, found bool, err error) {
+	raw, err := readFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if gone(err) {
 		return Process{}, false, nil
 	}
@@ -143,14 +148,22 @@ func list() ([]Process, error) {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		fi, err := os.Stat("/proc/" + e.Name())
+		// The owner of /proc/<pid> is not the process's user: the kernel makes it
+		// root for a process that is not dumpable, as an agent runtime makes
+		// itself. The user is the effective uid in the status file, which anyone
+		// may read.
+		status, err := os.ReadFile("/proc/" + e.Name() + "/status")
 		if err != nil {
 			if gone(err) || denied(err) {
 				continue
 			}
 			return nil, fmt.Errorf("process: list processes: %w", err)
 		}
-		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || st.Uid != uid {
+		euid, err := effectiveUID(status)
+		if err != nil {
+			return nil, fmt.Errorf("process: read the user of process %d: %w", pid, err)
+		}
+		if euid != uid {
 			continue
 		}
 		p, found, err := read(pid, false)
@@ -174,6 +187,27 @@ func list() ([]Process, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// effectiveUID reads the effective user id, the second of the four on the "Uid:"
+// line, from the contents of /proc/<pid>/status.
+func effectiveUID(status []byte) (uint32, error) {
+	for _, line := range strings.Split(string(status), "\n") {
+		rest, ok := strings.CutPrefix(line, "Uid:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 2 {
+			return 0, errors.New("the Uid line of status has too few fields")
+		}
+		uid, err := strconv.ParseUint(fields[1], 10, 32)
+		if err != nil {
+			return 0, fmt.Errorf("the Uid line of status: %w", err)
+		}
+		return uint32(uid), nil
+	}
+	return 0, errors.New("status has no Uid line")
 }
 
 // splitCmdline splits the contents of /proc/<pid>/cmdline, whose arguments are
