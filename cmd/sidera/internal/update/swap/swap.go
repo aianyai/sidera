@@ -216,7 +216,7 @@ type Cleaned struct {
 // fsx.TempPrefix; Clean does not remove it, because it cannot tell it from the
 // temporary file of another program in the same directory.
 func Clean(fsys fsx.FS, targets []string) (Cleaned, error) {
-	return clean(fsys, targets, isHeld)
+	return clean(fsys, targets, fsx.IsHeld)
 }
 
 // clean is Clean with the judgment of which removal failures mean "a process

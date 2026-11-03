@@ -54,9 +54,10 @@ are read through an `fsx.Reader` of their own, because they are unpacked elsewhe
   for as long as the process lives. So `Clean` renames it to the first free
   `<target>.old-<n>` and returns the new name in `Cleaned.Left`. Every `Clean`
   also lists `<target>.old-<n>` next to each target and tries to remove them,
-  returning those still held. Only a sharing violation or access denied on Windows
-  counts as held; any other failure to remove a `.old` (an immutable flag, an I/O
-  error) is returned in `err` with its cause, because renaming would not help.
+  returning those still held. Only what `fsx.IsHeld` reports (a sharing violation
+  or access denied on Windows) counts as held; any other failure to remove a
+  `.old` (an immutable flag, an I/O error) is returned in `err` with its cause,
+  because renaming would not help.
 - **`<target>.old-<n>` is Clean's name, not Commit's.** `n` counts from 1 and a
   name is reused once its file is gone. Only names that are the target's name,
   `.old-` and decimal digits are touched.
