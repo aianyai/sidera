@@ -828,6 +828,7 @@ at another path.
   `TestTheEndOfATurnWrittenJustBeforeAClearIsNotLost`, `TestAReachableSessionIsNotReportedUnavailableAnyLonger`,
   `TestADroppedEndpointGetsNoConditionBack`, `TestPromptsNeverSeenAreForgottenWithTheMemoryOfThem`). `real_test.go`
   (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) probes the installed Claude Code, finds and
-  interrupts a real turn process given no input, and has `session.interrupt` stop one, so it
+  interrupts a real turn process given no input, and has `session.interrupt` stop one as a started
+  turn, so it
   costs no model turn. How a real turn that runs a model ends under the interrupt was measured by
   hand on each platform and is not tested, as it would cost turns.

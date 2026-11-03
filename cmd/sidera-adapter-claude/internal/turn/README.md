@@ -16,9 +16,10 @@ picks the turn up from it.
   never when the process starts: it carries the attempt as proof of delivery.
 - A process that ends before that reports nothing (`Abandoned`).
 - `turn.ended` is sent once, when the process is gone and the turn had started;
-  its final is `interrupted` if the adapter interrupted it, otherwise by the last
-  result of the output stream (`completed` for a success, `failed` for an error or
-  no result).
+  its final is `completed` if the last result of the output stream is a success
+  (even when the adapter interrupted the process: the turn finished first),
+  otherwise `interrupted` if the adapter interrupted it, otherwise `failed` (an
+  error or no result).
 - Observe the process before the record: a process seen as gone has written
   everything it will.
 - Found again after a restart, a turn begun but not ended and gone is ended, and a

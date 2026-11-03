@@ -80,9 +80,11 @@ type Observations struct {
 	// carries the PID and start the process table reports, and none is a
 	// zombie.
 	//
-	// The caller must be able to read the argument vector of every process of
-	// the same user. When it cannot, that is an observation error the caller
-	// reports as an error result; it is never reported as "not running".
+	// The listing leaves out a process whose argument vector the system denies
+	// the caller; that is not an observation error, and a process that is
+	// not listed may run. Only a listing that fails is an observation error,
+	// which the caller reports as an error result; it is never reported as
+	// "not running".
 	Running []Process
 	// Registry are the entries of the runtime's session registry, all
 	// sessions; Decide keeps those of this session. A confirmed entry whose

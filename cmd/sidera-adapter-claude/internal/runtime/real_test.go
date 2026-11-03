@@ -190,7 +190,10 @@ func TestRealClaudeInterruptStopsTheTurnProcess(t *testing.T) {
 	app := realApp(t)
 	sessionID, started, _ := startIdleTurn(t, app)
 	const endpoint = adapterproto.EndpointRef("session-1")
-	app.sessions[endpoint] = &session{endpoint: endpoint, id: sessionID, turn: &turn.State{Process: startedProcess(started)}}
+	// A started turn: Interrupt answers not_running for one whose prompt is not in
+	// the record yet. The process was given no prompt, so there is no attempt to wait
+	// for, and the turn is marked started as a look at it would mark it.
+	app.sessions[endpoint] = &session{endpoint: endpoint, id: sessionID, turn: &turn.State{Process: startedProcess(started), StartedReported: true}}
 	for _, want := range []adapterproto.InterruptStage{adapterproto.InterruptStopped, adapterproto.InterruptNotRunning} {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		res, err := app.Interrupt(ctx, adapterproto.InterruptParams{Endpoint: endpoint})
