@@ -8,6 +8,16 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
+Releases are now signed, and an upgrade of an adapter no longer ends the sessions of the node:
+from this release on, once the new daemon runs, upgrading an adapter is one
+`sidera adapter install` per adapter, with no `disable` and `enable`, and its sessions are
+kept. The daemon decides this, so it already applies when you upgrade from 0.10.x. State
+written by 0.10.0 needs no migration: no stored format changed. The adapter protocol stays at
+version 1 without a change on the wire; the reference gains an obligation for adapter authors,
+which is listed under Changed. The Go SDK has no change.
+
 ### Added
 
 - **Signed releases.** `checksums.txt` of a release is signed with minisign, and the
@@ -29,6 +39,13 @@ protocol has a version of its own.
   sessions of the node. Replacing the package of an adapter that runs stays a request of the
   local owner. An instance you disabled whose process is still ending no longer makes
   `install` wait: the old files stay on the disk until the next start of the daemon.
+  `install` no longer answers `conflict/adapter_in_use`; the code stays in the vocabulary.
+- **An adapter reads the checkpoints of the versions it replaces.** Because the daemon now
+  upgrades an adapter in place and hands the new process what the old one stored, the
+  adapter protocol reference states that a new version of an adapter reads the checkpoint
+  formats and state files of every earlier version it can be upgraded from. Both adapters
+  of this release still write and read the one format they had, so nothing changes for
+  them; the rule is for the adapters that follow.
 
 ## [0.10.0] - 2026-11-03
 
@@ -359,7 +376,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/aianyai/sidera/releases/tag/v0.11.0
 [0.10.0]: https://github.com/aianyai/sidera/releases/tag/v0.10.0
 [0.9.0]: https://github.com/aianyai/sidera/releases/tag/v0.9.0
 [0.8.0]: https://github.com/aianyai/sidera/releases/tag/v0.8.0
