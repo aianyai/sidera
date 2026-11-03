@@ -247,7 +247,8 @@ does not report the version it was given. The release holds one more file, which
 tell they are the release's, offline, without trusting the place they were downloaded
 from: the archives are covered by the SHA-256 lines, and the lines by the signature.
 A program that updates itself from a release is meant to verify it the
-same way with an embedded key, and a person can check it by hand with `minisign`.
+same way with an embedded key, and a person can check it by hand with `minisign`
+(see the install guide).
 
 - **Format**: minisign's default, prehashed signature (the signature is over the
   BLAKE2b-512 of the file, so there is no size limit and the legacy format is not
@@ -278,7 +279,8 @@ same way with an embedded key, and a person can check it by hand with `minisign`
   `scripts/release.sh`.
 - **The public key** is committed once, as the two-line `.pub` file
   [`internal/release/minisign.pub`](../../../internal/release/minisign.pub) (key id
-  `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it.
+  `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it,
+  the install guides quote its second line.
   No code reads the file yet; the program
   that will verify updates is to embed it with `go:embed`, so that the key has one source.
 - **Secrets**: `MINISIGN_SECRET_KEY`, the whole content of the minisign

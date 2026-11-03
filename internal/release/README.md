@@ -40,7 +40,7 @@ own version (v1) and does not follow this one.
   version.
 - `minisign.pub` is the public key the releases are signed with, a minisign
   `.pub` file, kept here as the one copy: `scripts/release-sign.sh` verifies
-  its signature against it, and the code that
+  its signature against it, the install guides quote it, and the code that
   will verify an update is to embed this file with `go:embed`. No Go code
   reads it yet. The signature and how it is made are in
   `docs/references/ci/README.md`, "Signature".

@@ -8,6 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **Signed releases.** `checksums.txt` of a release is signed with minisign, and the
+  signature is the new release asset `checksums.txt.minisig`. Its trusted comment is
+  `sidera <version> update-from <oldest version that may update to it>`; the oldest
+  version is `0.8.0` and is raised only by a release that needs a manual migration.
+  The public key is `internal/release/minisign.pub`, quoted in the install guides, which
+  now show how to verify a download (`minisign -Vm checksums.txt -P <key>`). The archives
+  and `checksums.txt` also carry a GitHub artifact attestation, checked with
+  `gh attestation verify <file> -R aianyai/sidera`. Releases up to 0.10.0 carry neither.
+
 ## [0.10.0] - 2026-11-03
 
 The Claude Code adapter now runs on Linux and Windows, as the Codex adapter already did, and

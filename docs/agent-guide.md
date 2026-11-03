@@ -173,6 +173,21 @@ Choose A (release archive) or B (source).
    Expected: `OK` for the archive. If not, delete it and download again. Never
    install an archive whose checksum fails.
 
+   Optional, when `minisign` is installed: releases from 0.11.0 also have
+   `checksums.txt.minisig` (download it with `--pattern checksums.txt.minisig`;
+   releases up to 0.10.0 carry no signature). Verify that file with the release key:
+
+   ```sh
+   minisign -Vm checksums.txt -P RWR7j5o6zjWTutDvAgBfSyNd7aQXb7k9lN1L4iMavn6zZUtYxLJT+T1L
+   ```
+
+   Expected: exit status 0 and the lines `Signature and comment signature verified`
+   and `Trusted comment: sidera <version> update-from <floor>`, the floor being this
+   version or an older one. Anything else
+   means the checksums are not the release's: delete them and do not install. With
+   `gh`, `gh attestation verify <archive> -R aianyai/sidera` checks where the archive
+   was built.
+
 3. Extract and install.
 
    macOS and Linux:

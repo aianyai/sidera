@@ -48,7 +48,8 @@ and log in once as yourself:
 Releases are at <https://github.com/aianyai/sidera/releases>. Each release has
 one archive per platform, named `sidera_0.10.0_<os>_<arch>.tar.gz`
 (`.zip` on Windows), where `<os>` is `darwin`, `linux` or `windows` and
-`<arch>` is `arm64` or `amd64`, and a `checksums.txt` for all of them.
+`<arch>` is `arm64` or `amd64`, a `checksums.txt` for all of them and, from
+version 0.11.0, its signature `checksums.txt.minisig`.
 
 An archive holds:
 
@@ -91,6 +92,32 @@ Windows (PowerShell): print the digest and compare it by eye with the line in
 
 Each command must report `OK` or an equal digest. If it does not, delete the
 file and download it again.
+
+### Verify the signature (optional)
+
+A checksum shows that the archive is the one listed in `checksums.txt`; the
+signature shows that the list is the release's. Releases from 0.11.0 sign
+`checksums.txt` with [minisign](https://jedisct1.github.io/minisign/); releases up
+to 0.10.0 carry no signature. Download `checksums.txt.minisig` beside
+`checksums.txt` and run, with the public key below:
+
+```sh
+minisign -Vm checksums.txt -P RWR7j5o6zjWTutDvAgBfSyNd7aQXb7k9lN1L4iMavn6zZUtYxLJT+T1L
+```
+
+Success prints `Signature and comment signature verified` and a trusted comment
+`sidera <version> update-from <oldest version that may update to it>`, and the
+exit status is 0. Anything else (`Signature verification failed`, a different key
+id) means the file is not the release's: delete it. The key is also the file
+[`internal/release/minisign.pub`](../../internal/release/minisign.pub) (key id
+`BA9335CE3A9A8F7B`) of this repository.
+
+With the GitHub CLI you can also check where an archive was built; this needs no
+key:
+
+```sh
+gh attestation verify sidera_<version>_<os>_<arch>.tar.gz -R aianyai/sidera
+```
 
 ### Put the programs on your PATH
 
