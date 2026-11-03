@@ -284,14 +284,17 @@ same way with an embedded key, and a person can check it by hand with `minisign`
   floor `0.8.0`, but `0.8.0-rc.1` may not, because a pre-release precedes its release.
   It also refuses a `checksums.txt` with a line that is not an archive of the version,
   as `scripts/release.sh` names them, which is what keeps a string that is not a version
-  out of the signed comment: the grammar of a version is defined once, in
-  `scripts/release.sh`.
+  out of the signed comment. The verifier in
+  [`cmd/sidera/internal/update/verify`](../../../cmd/sidera/internal/update/verify) reads the
+  comment and `checksums.txt` by the same grammar, which it restates rather than shares with
+  the scripts; its rules are described in that package's `README.md` until the `update`
+  reference topic lands.
 - **The public key** is committed once, as the two-line `.pub` file
   [`internal/release/minisign.pub`](../../../internal/release/minisign.pub) (key id
   `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it,
   the install guides quote its second line, which `scripts/release.sh` checks.
-  No code reads the file yet; the program
-  that will verify updates is to embed it with `go:embed`, so that the key has one source.
+  The program embeds the file with `go:embed` (`internal/release`), and the verifier takes
+  its keys from there alone, so the key has one source.
 - **Secrets**: `MINISIGN_SECRET_KEY`, the whole content of the minisign
   secret key file (itself encrypted with the password), and `MINISIGN_PASSWORD`, both
   secrets of the environment `release` (see the jobs above). The

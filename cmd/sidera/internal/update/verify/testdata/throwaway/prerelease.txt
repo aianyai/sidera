@@ -1,0 +1,6 @@
+94f41be41865be0d7021eee6bfae54d08dafdd31e755d874687121025a7e12ea  sidera_0.12.0-rc.1_darwin_amd64.tar.gz
+cecf2bea719d41506fa3de949511dbaa6f374855e484f2ef8ded1640a98a300c  sidera_0.12.0-rc.1_darwin_arm64.tar.gz
+da216afbf6e55938f77e07e4068e32ffd97a14ffe4449f7e817a49e893ac1774  sidera_0.12.0-rc.1_linux_amd64.tar.gz
+aa89b039807069dc41aea4fc29ab8829f7e00e37b886ecbd63118cdbc19d5476  sidera_0.12.0-rc.1_linux_arm64.tar.gz
+d3148895e6cd2ccd900eb9b9dd2b5884ee60111a1239b5a3e3863c2067d51356  sidera_0.12.0-rc.1_windows_amd64.zip
+e9e3eef6f941655a0a2a2fbd23cfcb487a41ce8a630e5e7220c2e43a2a242403  sidera_0.12.0-rc.1_windows_arm64.zip

@@ -1,0 +1,2 @@
+# Signed bytes: git must not touch their line ends (one fixture is CRLF on purpose).
+* -text
