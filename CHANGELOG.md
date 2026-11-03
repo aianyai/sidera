@@ -8,6 +8,114 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-03
+
+The Claude Code adapter now runs on Linux and Windows, as the Codex adapter already did, and
+both adapters can stop a turn that is running. State written by 0.9.0 needs no migration. The
+adapter protocol stays at version 1 without a change, and the daemon sends an adapter nothing
+it did not send before: `session.interrupt` is an existing request that the two adapters now
+declare. The Go SDK has no source-incompatible change: it gains three packages and the module
+a dependency, listed under Added.
+
+### Added
+
+- **Claude Code on Linux and Windows.** The Claude Code adapter is built and packaged for
+  linux/amd64, linux/arm64, windows/amd64 and windows/arm64 beside macOS, and every release
+  archive now carries `adapters/claude/` (the archives of 0.9.0 carried it for macOS only).
+  A Claude Code controller session is woken on all three systems. On Windows the daemon needs the native
+  installer's `claude.exe`: the npm wrapper `claude.cmd` runs through `cmd.exe`, so the adapter
+  could not recognise its turns, and the probe reports `claude` as missing when it is not an
+  `.exe`, a session cannot be created with it and a prompt is refused with the reason. The
+  guide's source-build commands no longer mark the Claude adapter as macOS only.
+- **Claude Code turns outlive the daemon's restart on every system.** A turn is a process that
+  the adapter starts detached. On Linux it is started in a session of its own and, when that
+  keeps it alive, in a systemd user scope: the user manager has to answer and either lingering
+  has to be on or the daemon has to run under the user manager already. A node that must run
+  with nobody logged in needs `loginctl enable-linger`; without it a scope ends at the last
+  logout, as a daemon under the user manager does. On Windows the turn leaves the job object of
+  the daemon (breakaway); when the daemon runs in a job that forbids breakaway and kills its
+  processes when it closes (some service wrappers and launchers do), the turn ends with the
+  daemon and the adapter logs a warning that says so.
+- **Claude Code on Windows: the inbox and the environment.** A controller session is woken
+  through its inbox, which is a named pipe on Windows. The adapter writes to it as Claude Code
+  requires, with an authentication line before the message. Claude Code drops a message that no
+  authentication line precedes, without answering, so a wake without its token is refused at
+  attachment (`wake_unavailable`) and a delivery to it as `native_unavailable`, before anything
+  is written. A Git Bash that Claude Code cannot
+  find in a standard place is found by setting `CLAUDE_CODE_GIT_BASH_PATH` in the daemon's
+  environment: it is the one `CLAUDE_CODE_*` variable passed on to the turns. The session
+  registry's start forms of each system (`ps` text on macOS, clock ticks on Linux, the creation
+  time on Windows) are told apart, so a registry entry of a reused process number is not taken
+  for a live session on any of them.
+- **Interrupting a turn.** Both the Claude Code and the Codex adapter declare
+  `session.interrupt`, so `sidera control <session-address> session.interrupt` stops the turn
+  that is running. The answer is `stopped` once the turn has ended, `requested` when it is still
+  running after about ten seconds (its end is still reported when it comes), and `not_running`
+  when no turn runs. What the turn already did stays done. An attached session, whose turns are
+  the person's, cannot be interrupted.
+  - Claude Code: the adapter sends the interrupt that Ctrl-C does (`SIGINT`; on Windows
+    `CTRL_C_EVENT`, sent by a short-lived helper run from the adapter's own program, because
+    attaching to the console would take the adapter's own away). The turn process ends within
+    about two seconds and the turn is reported `interrupted`, unless the process finished it
+    with a success anyway, which is reported `completed`. The process is never killed: a turn
+    that ignores the interrupt stays `requested`.
+  - Codex: the adapter stops the turn with `turn/interrupt` and also ends the commands that
+    turn started, which the App Server leaves running (a `sleep` outlived its interrupted
+    turn). `stopped` and the end of the turn mean those commands ended too; commands that
+    earlier turns left running on purpose are not touched. A turn the adapter did not see
+    start has every background terminal of its thread ended. If a command cannot be ended the
+    answer is `failed` and the turn is reported ended all the same.
+- **Go SDK: `adapterkit/process`, `adapterkit/environ` and `adapterkit/realpath`.** Three new
+  packages for adapters that drive a native agent runtime, on macOS, Linux and Windows:
+  - `process` starts a process detached from the adapter (and says in `Started.Detachment`
+    how far that succeeded), names it by PID and start key, finds it again after a restart
+    (`Lookup`, `Running`, `List`), and interrupts it as Ctrl-C would. An adapter that calls
+    `Interrupt` calls `process.HandleHelperInvocation` first in `main`. The start keys have
+    fixed formats, and the macOS key is the one the Claude adapter already wrote.
+  - `environ` composes the environment of a child process, comparing names as the platform
+    does (without case on Windows).
+  - `realpath` gives the path the platform itself reports for an existing path, following
+    symbolic links, and on Windows also junctions and 8.3 names, in the on-disk case.
+
+  The SDK module now requires `golang.org/x/sys` and states `go 1.26.0`. Only `process` and
+  `realpath` import `golang.org/x/sys`; the packages the daemon imports (`peer`,
+  `adapterproto`, `manifest`, `strictjson`) and `adapterkit` itself still use the standard
+  library only, so an adapter that imports only those does not build it.
+
+### Changed
+
+- **Codex adapter: the App Server is started through the SDK.** On Linux the server is put in a
+  systemd user scope of its own under the rule stated above for Claude Code turns, so that
+  stopping the unit the daemon runs in does not take it along; otherwise it keeps a session of
+  its own, as before. On Windows the warning that the server's life ends with the daemon's job
+  is logged only when the job really kills its processes on close, or when the limits cannot be
+  read; a job that merely forbids breakaway no longer produces it. A node that must run with
+  nobody logged in needs `loginctl enable-linger` here as well.
+- **Claude Code adapter: turns and records.** The environment of a turn is composed with
+  `environ`, so on Windows a variable is replaced or dropped whatever case it is spelled in
+  (`Path`), and a turn's working directory is the resolved path of the preset's directory (on
+  Windows with junctions followed and 8.3 names in their long form), so that Claude Code creates
+  the one session record the adapter looks for even when the directory is given through either.
+  The turn checkpoint gained two optional fields
+  that say where the turn process runs; checkpoints without them load as before.
+- **A turn's final after an interrupt.** A turn that an interrupt or a close signalled but that
+  finished with a successful result anyway is reported `completed`, not `interrupted`.
+
+### Fixed
+
+- **A controller session in a recent Claude Code is woken.** Claude Code 2.1.317 no longer
+  gives its MCP servers `CLAUDE_PID`, so a session that attached through `sidera mcp` had no
+  process the adapter could wake. The adapter now finds the session's process in Claude Code's
+  registry by the session id, and refuses rather than guesses when it finds none or more than
+  one. `CLAUDE_PID`, when present, is still the first choice.
+- **The Codex sandbox's deny path matches the directory it protects, on Windows.** The data
+  directory was resolved without following junctions or 8.3 names, so the path denied to a
+  sandboxed command could differ from the one the sandbox compares a command's paths with. It
+  is now resolved as the platform does, and a relative path is refused.
+- **Codex adapter: variable names are compared without case on Windows.** A variable the
+  adapter drops from the App Server's environment (such as `CODEX_THREAD_ID`) is now dropped
+  whatever case it is spelled in.
+
 ## [0.9.0] - 2026-11-02
 
 A Claude Code or Codex session you opened yourself can now take part as a controller:
@@ -229,6 +337,7 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/aianyai/sidera/releases/tag/v0.10.0
 [0.9.0]: https://github.com/aianyai/sidera/releases/tag/v0.9.0
 [0.8.0]: https://github.com/aianyai/sidera/releases/tag/v0.8.0
