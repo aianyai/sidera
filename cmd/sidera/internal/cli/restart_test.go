@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -109,7 +110,7 @@ func TestWaitingForARestartedDaemon(t *testing.T) {
 		if !errors.As(err, &f) {
 			t.Fatalf("error %v, want a failure", err)
 		}
-		for _, word := range []string{"/home/x", "daemon.log", "started"} {
+		for _, word := range []string{filepath.Join("/home/x", "logs", "daemon.log"), "started"} {
 			if !strings.Contains(f.message, word) {
 				t.Errorf("the failure %q does not say %q", f.message, word)
 			}
