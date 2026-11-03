@@ -222,12 +222,19 @@ func TestDownloadMissing(t *testing.T) {
 	}
 }
 
+// The server must not end the response when the client gives up: closing a TLS
+// connection sends close_notify before the socket closes, and a handler that returns
+// on the cancelled request context then answers with the end of the body, which a
+// client still reading can take for a complete download. The handler stays blocked
+// until the test is over, so the only way the body ends is the deadline.
 func TestDownloadTimesOut(t *testing.T) {
+	release := make(chan struct{})
 	client, _ := repo(t, assetHandler(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "first")
 		w.(http.Flusher).Flush()
-		<-r.Context().Done() // released when the client gives up
+		<-release
 	}))
+	t.Cleanup(func() { close(release) }) // registered after the server's, so it runs first: closing the server waits for the handler
 	client.smallTimeout = 100 * time.Millisecond
 	err := client.Download(context.Background(), "1.0.0", "a.tar.gz", io.Discard, 1000)
 	if !errors.Is(err, context.DeadlineExceeded) {
