@@ -100,6 +100,10 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		res.ToolProbes = append(res.ToolProbes, a.probeTool(ctx, req, sidera))
 	}
 
+	// The protocol has no place in a probe result for how far a turn escapes the
+	// daemon (a dependency is ok, missing or the wrong version), so it is logged.
+	a.logDetachment("a turn process", a.o.Launcher.Host(), "when", "probe")
+
 	a.setProbe(ctx, conditions)
 	return res, nil
 }

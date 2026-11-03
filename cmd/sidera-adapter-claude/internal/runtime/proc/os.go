@@ -63,8 +63,10 @@ func (osLauncher) Start(l Launch) (Started, error) {
 	if err != nil {
 		return Started{}, err
 	}
-	return Started{Info: infoOf(s.Process), Container: s.Container, Done: s.Done}, nil
+	return Started{Info: infoOf(s.Process), Container: s.Container, Detachment: s.Detachment, Done: s.Done}, nil
 }
+
+func (osLauncher) Host() Detachment { return process.HostDetachment() }
 
 type osSignaller struct{}
 

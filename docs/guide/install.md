@@ -12,11 +12,18 @@ with [Getting started](getting-started.md).
 | Linux | amd64, arm64 | Claude Code, Codex |
 | Windows | amd64, arm64 | Claude Code, Codex |
 
-A Claude Code turn outlives the daemon's restart on all three platforms. On Linux
-it is started in a systemd user scope when that keeps it alive (the user manager
-is usable and lingering is on, or the daemon already runs under the user
-manager), and otherwise in a session of its own; a node that must run with
-nobody logged in needs `loginctl enable-linger`. On Windows, if Claude Code
+A Claude Code turn outlives the daemon's restart on all three platforms, unless the
+host forbids it, which the adapter logs. On Linux it is started in a systemd user
+scope when that keeps it alive (the user manager is usable and lingering is on,
+or the daemon already runs under the user manager), and otherwise in a session
+of its own; without a usable user bus it is only in a session of its own, and a
+node that must run with nobody logged in needs `loginctl enable-linger`. On
+Windows the turn leaves the daemon's job object; if the daemon runs in a job
+that forbids breakaway and kills its processes when it closes (some service
+wrappers and launchers do), the turn ends with the daemon and the adapter logs a
+warning saying so.
+
+On Windows, if Claude Code
 cannot find Git Bash in a standard place, set `CLAUDE_CODE_GIT_BASH_PATH` in the
 daemon's environment: it is the one `CLAUDE_CODE_*` variable passed on to the
 turns. A Windows on Arm machine

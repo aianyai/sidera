@@ -523,6 +523,15 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   seconds and microseconds; Linux: start ticks and the boot id; Windows: the creation FILETIME),
   which is the protocol's start key. The container the start reports (`systemd_unit`,
   `process_group` or `none`) is stored with the turn and reported with the process identity.
+- How far a start escaped the adapter is the `Detachment` the process package returns with it
+  (`proc.Started.Detachment`). A start that does not outlive the daemon is made all the same and
+  logged at Warn with the reason; a caveat of one that does is logged at Info. The probe logs the
+  same for what the host would achieve (`proc.Launcher.Host`), because the probe result has no place
+  for it: a dependency is only ok, missing or the wrong version, and adding one would change the
+  protocol. So the one place an operator reads that a turn would end with a daemon restart is the
+  adapter's log. On Windows that is a daemon in a job that forbids breakaway and kills its
+  processes when it closes; on Linux a start without a usable user bus is in a session of its own,
+  and without linger a scope ends with the user manager at the last logout.
 
 ### Turn events
 

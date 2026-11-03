@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -80,6 +82,35 @@ func TestDeliverAPromptToAnIdleSession(t *testing.T) {
 	done, err := app.DeliverPrompt(ctxT(t), p)
 	if err != nil || done.Stage != adapterproto.PromptPersisted || w.launchCount() != 2 {
 		t.Fatalf("after the turn: %+v %v", done, err)
+	}
+}
+
+// A start that cannot outlive the daemon is a warning where an operator reads it,
+// at the start and in the probe; a caveat alone is only information. The turn is
+// started all the same.
+func TestATurnThatEndsWithTheDaemonIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	app.log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	w.locked(func() { w.detachment = proc.Detachment{Caveat: "stays in the adapter's job"} })
+
+	openSession(t, w, app)
+	if _, err := app.Probe(ctxT(t), adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{}}); err != nil {
+		t.Fatal(err)
+	}
+	warns := strings.Count(logs.String(), "level=WARN msg=\"a turn process ends with the adapter and the daemon\"")
+	if warns != 2 || !strings.Contains(logs.String(), "stays in the adapter's job") {
+		t.Fatalf("want a warning at the start and in the probe, with the caveat:\n%s", logs.String())
+	}
+
+	logs.Reset()
+	w.locked(func() { w.detachment = proc.Detachment{OutlivesDaemon: true, Caveat: "no linger"} })
+	if _, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "level=INFO msg=\"how a turn process is detached\"") {
+		t.Fatalf("a caveat of a start that outlives the daemon is information:\n%s", logs.String())
 	}
 }
 

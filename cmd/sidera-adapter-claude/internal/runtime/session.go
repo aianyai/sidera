@@ -137,10 +137,25 @@ func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	if err := a.o.Files.WriteFile(in, line); err != nil {
 		return proc.Started{}, fmt.Errorf("write the prompt of the turn: %w", err)
 	}
-	return a.o.Launcher.Start(proc.Launch{
+	started, err := a.o.Launcher.Start(proc.Launch{
 		Argv: argv, Env: claudeargs.Environ(a.o.Environ, env, filepath.Dir(sidera)), Dir: l.preset.Cwd,
 		Stdin: in, Stdout: a.turnFile(l.session, l.attempt, "out"), Stderr: a.turnFile(l.session, l.attempt, "err"),
 	})
+	if err == nil {
+		a.logDetachment("a turn process", started.Detachment, "session", l.session)
+	}
+	return started, err
+}
+
+// logDetachment says where an operator can read it when a start did not escape the
+// adapter: a turn that ends with the daemon is lost by a restart, which the
+// session's owner would otherwise only learn from the turn failing.
+func (a *App) logDetachment(what string, d proc.Detachment, attrs ...any) {
+	if !d.OutlivesDaemon {
+		a.log.Warn(what+" ends with the adapter and the daemon", append(attrs, "detail", d.Caveat)...)
+	} else if d.Caveat != "" {
+		a.log.Info("how "+what+" is detached", append(attrs, "detail", d.Caveat)...)
+	}
 }
 
 // turnProcesses picks the turn processes of a session out of a listing. The

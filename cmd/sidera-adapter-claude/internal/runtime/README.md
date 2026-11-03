@@ -41,6 +41,7 @@ for the rules and their reasons.
   acts on the last reading, so that the status is never older than the markers; the session's `dropped`
   flag, set under the same lock when its endpoint goes, keeps a look or a delivery that was in progress
   from reporting anything for it afterwards.
+- A start that cannot outlive the daemon is logged (`logDetachment`, from the start and from the probe), never silently accepted.
 - Every condition the adapter reports goes through `availability.go`, never straight to the daemon:
   a snapshot replaces the last, so a lone report would drop the others.
 

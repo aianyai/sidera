@@ -76,11 +76,18 @@ type Launch struct {
 	Stdin, Stdout, Stderr string
 }
 
+// Detachment says how far a started process escapes the adapter: whether it
+// outlives the daemon and what can still end it.
+type Detachment = process.Detachment
+
 // Started is a process that was started.
 type Started struct {
 	Info
 	// Container is where the process runs, as the protocol reports it.
 	Container adapterproto.Container
+	// Detachment is how far this start escaped the adapter. A start that could
+	// not escape it is still a start; the caller says so where an operator can read it.
+	Detachment Detachment
 	// Done receives the error of waiting for the process, nil for a clean exit,
 	// once, when it has ended and been reaped.
 	Done <-chan error
@@ -94,6 +101,9 @@ type Launcher interface {
 	// ErrStartedUnidentified means a process was started; any other error means
 	// none was.
 	Start(Launch) (Started, error)
+	// Host is what a start achieves on this host, for a probe to report before
+	// anything has started; Started.Detachment is authoritative for each start.
+	Host() Detachment
 }
 
 // Signaller interrupts processes.

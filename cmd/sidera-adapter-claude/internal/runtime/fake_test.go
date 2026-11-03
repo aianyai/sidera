@@ -58,6 +58,8 @@ type world struct {
 	// interruptErr is what Interrupt answers; the signal is counted all the same.
 	interruptErr error
 	loggedIn     bool
+	// detachment is what Start and Host report.
+	detachment proc.Detachment
 
 	// inbox: what was written to inbox sockets, and what the next write does.
 	inbox     []inboxWrite
@@ -225,7 +227,7 @@ type fakeProc struct {
 }
 
 func newWorld(t *testing.T) *world {
-	return &world{t: t, files: map[string][]byte{}, procs: map[int]*fakeProc{}, next: 1000, checkpts: map[string]json.RawMessage{}, loggedIn: true}
+	return &world{t: t, files: map[string][]byte{}, procs: map[int]*fakeProc{}, next: 1000, checkpts: map[string]json.RawMessage{}, loggedIn: true, detachment: proc.Detachment{OutlivesDaemon: true}}
 }
 
 // --- proc.Table, proc.Launcher, proc.Signaller ---
@@ -289,7 +291,7 @@ func (w *world) Start(l proc.Launch) (proc.Started, error) {
 	w.launches = append(w.launches, l)
 	hook := w.onLaunch
 	info := w.info(p)
-	unidentified := w.unidentified
+	unidentified, detachment := w.unidentified, w.detachment
 	w.mu.Unlock()
 	if hook != nil {
 		go hook(w, p, l)
@@ -297,7 +299,13 @@ func (w *world) Start(l proc.Launch) (proc.Started, error) {
 	if unidentified {
 		return proc.Started{}, fmt.Errorf("%w: process %d", proc.ErrStartedUnidentified, p.pid)
 	}
-	return proc.Started{Info: info, Container: adapterproto.Container{Kind: adapterproto.ContainerProcessGroup, Name: strconv.Itoa(p.pid)}, Done: make(chan error)}, nil
+	return proc.Started{Info: info, Container: adapterproto.Container{Kind: adapterproto.ContainerProcessGroup, Name: strconv.Itoa(p.pid)}, Detachment: detachment, Done: make(chan error)}, nil
+}
+
+func (w *world) Host() proc.Detachment {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.detachment
 }
 
 func (w *world) Interrupt(_ context.Context, id proc.Identity) error {

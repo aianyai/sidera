@@ -14,7 +14,7 @@ process is detached on each platform are specified in the adapter-protocol refer
 | Name | Does |
 | ---- | ---- |
 | `Table` (`NewTable`) | `Lookup(pid)`, `Running(identity)` and `List()` of the caller's user's processes with their argument vectors. |
-| `Launcher` (`NewLauncher`) | Starts a process detached, reading its input from a file and writing its output to files, with a console of its own on Windows so that it can be interrupted. Returns its identity, its `Container` and `Done`. An error that wraps `ErrStartedUnidentified` means the process started and its identity could not be read; any other error means nothing started. |
+| `Launcher` (`NewLauncher`) | Starts a process detached, reading its input from a file and writing its output to files, with a console of its own on Windows so that it can be interrupted. Returns its identity, its `Container`, its `Detachment` (whether it outlives the daemon, and what can still end it) and `Done`; `Host()` is the same for what a start achieves on this host, before any start. An error that wraps `ErrStartedUnidentified` means the process started and its identity could not be read; any other error means nothing started. |
 | `Signaller` (`NewSignaller`) | `Interrupt(ctx, identity)`: Ctrl-C (SIGINT, or `CTRL_C_EVENT` on Windows). An error that wraps `ErrNotRunning` means the identity names no running process. |
 | `Info` | The identity (PID and start key), the start in Unix seconds, and the start in the platform's native form (what a registry file holds on Linux and Windows). |
 
