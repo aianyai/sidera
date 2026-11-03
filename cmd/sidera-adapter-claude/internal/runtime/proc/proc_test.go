@@ -6,18 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 )
 
-// childEnv makes the test binary a child that only waits, for the launcher to start.
+// childEnv makes the test binary a child that says it is ready and then only
+// waits, for the launcher to start.
 const childEnv = "SIDERA_PROC_TEST_CHILD"
 
 func TestMain(m *testing.M) {
 	process.HandleHelperInvocation()
 	if os.Getenv(childEnv) != "" {
+		println("ready") // to the standard error file
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
@@ -38,6 +41,18 @@ func launch(t *testing.T) Launch {
 	return Launch{
 		Argv: []string{exe, "-test.run=^$"}, Env: append(os.Environ(), childEnv+"=1"), Dir: dir,
 		Stdin: in, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err"),
+	}
+}
+
+func waitForReady(t *testing.T, file string) {
+	t.Helper()
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if raw, _ := os.ReadFile(file); strings.Contains(string(raw), "ready") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the child did not say it is ready")
+		}
 	}
 }
 
@@ -81,6 +96,9 @@ func TestLauncherStartsAProcessTheTableFindsAndInterruptEnds(t *testing.T) {
 		t.Fatalf("List describes the process as %+v, started as %+v", entry.Info, started.Info)
 	}
 
+	// The interrupt is for a child that is up: a Go program on windows/arm64 that
+	// receives Ctrl-C while it is still starting can stay deaf to it for good.
+	waitForReady(t, l.Stderr)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := NewSignaller().Interrupt(ctx, started.Identity); err != nil {
