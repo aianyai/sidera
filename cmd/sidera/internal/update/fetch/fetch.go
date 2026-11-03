@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/aianyai/sidera/sdk/go/semver"
 )
 
 // The most a download of each kind may deliver. A longer body is refused.
@@ -45,9 +47,16 @@ var ErrNotFound = errors.New("no such release or asset")
 // ErrTooLarge is the answer for a body longer than the limit of its download.
 var ErrTooLarge = errors.New("larger than the limit")
 
-// A release version is written as scripts/release.sh accepts it, without the
-// leading v. It is also the only text that reaches a URL path from a response.
-var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+// isReleaseVersion reports whether s is a release version: a semantic version
+// without the leading v and without build metadata, which a release tag never
+// carries. It is also the only text that reaches a URL path from a response.
+func isReleaseVersion(s string) bool {
+	if strings.Contains(s, "+") {
+		return false
+	}
+	_, err := semver.Parse(s)
+	return err == nil
+}
 
 // An asset is a file name of the release: no separator, no way up the path.
 var assetPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]*$`)
@@ -139,7 +148,7 @@ func (c *Client) Latest(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("find the latest release: the redirect of %s has no usable Location: %w", u.Host+u.Path, err)
 	}
 	version, ok := strings.CutPrefix(location.Path, c.base.JoinPath("releases", "tag").Path+"/v")
-	if !ok || !versionPattern.MatchString(version) || location.String() != c.tagURL(version) {
+	if !ok || !isReleaseVersion(version) || location.String() != c.tagURL(version) {
 		return "", fmt.Errorf("find the latest release: the redirect of %s leads to %q, not to a release tag of this repository", u.Host+u.Path, location.Redacted())
 	}
 	return version, nil
@@ -150,7 +159,7 @@ func (c *Client) Latest(ctx context.Context) (string, error) {
 // body is untrusted: nothing here has checked it.
 func (c *Client) Download(ctx context.Context, version, asset string, w io.Writer, limit int64) error {
 	what := fmt.Sprintf("download %s of v%s", asset, version)
-	if !versionPattern.MatchString(version) {
+	if !isReleaseVersion(version) {
 		return fmt.Errorf("%s: %q is not a release version", what, version)
 	}
 	if !assetPattern.MatchString(asset) {

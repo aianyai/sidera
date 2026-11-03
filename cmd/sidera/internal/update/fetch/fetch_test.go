@@ -59,6 +59,7 @@ func TestLatest(t *testing.T) {
 		{name: "not a tag page", status: 302, location: func(h string) string { return "https://" + h + repoPath + "/releases" }, wantErr: "not to a release tag"},
 		{name: "no leading v", status: 302, location: func(h string) string { return "https://" + h + repoPath + "/releases/tag/1.2.3" }, wantErr: "not to a release tag"},
 		{name: "two components", status: 302, location: func(h string) string { return "https://" + h + tag + "1.2" }, wantErr: "not to a release tag"},
+		{name: "build metadata", status: 302, location: func(h string) string { return "https://" + h + tag + "1.2.3+build.5" }, wantErr: "not to a release tag"},
 		{name: "extra path", status: 302, location: func(h string) string { return "https://" + h + tag + "1.2.3/x" }, wantErr: "not to a release tag"},
 		{name: "query", status: 302, location: func(h string) string { return "https://" + h + tag + "1.2.3?x=1" }, wantErr: "not to a release tag"},
 		{name: "user info", status: 302, location: func(h string) string { return "https://u:p@" + h + tag + "1.2.3" }, wantErr: "not to a release tag"},

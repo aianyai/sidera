@@ -20,7 +20,8 @@ is untrusted until the caller has verified it, which is why it does not pin a ho
 
 - `Latest` does not follow the redirect: the `Location` is the answer. Only a 302
   counts, and the `Location` must be exactly `<repository>/releases/tag/v<version>`
-  with `<version>` in the release version syntax (`1.2.3` or `1.2.3-rc.1`).
+  with `<version>` in the release version syntax: a `sdk/go/semver` version without
+  build metadata (`1.2.3` or `1.2.3-rc.1`).
   Anything else is an error that shows the `Location`.
 - `Download` follows at most 5 redirects and refuses a hop that is not HTTPS. It
   accepts any host: GitHub serves assets from a storage host that has changed
