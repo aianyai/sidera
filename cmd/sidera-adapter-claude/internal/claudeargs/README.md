@@ -15,7 +15,7 @@ What a Claude Code turn process is started with, as pure functions. Read
 | `SessionFlag(resume)` | `--resume` or `--session-id`: the flag that, with the uuid, marks a process as a turn process of the session. |
 | `IsTurnOf(args, claude, session)` | Whether a process's arguments make it a turn process of the session: argv[0] is the Claude executable as started and the arguments name the session with `--session-id` or `--resume`. |
 | `SystemPrompt(preset)` | The adapter's system prompt followed by the preset's. |
-| `SanitizeEnv(base)`, `Environ(base, extra, siderDir)` | The environment of a turn process: what is stripped from the adapter's, what is added, and the `PATH` entry for the `sidera` executable. |
+| `SanitizeEnv(base)`, `Environ(base, extra, siderDir)`, `ConfigDir(env)` | The environment of a turn process: what is stripped from the adapter's, what is added, and the `PATH` entry for the `sidera` executable; and the runtime's configuration directory an environment names. |
 | `UserLine(uuid, text)` | The one line of stream-json input, carrying the prompt's uuid. |
 | `MCPConfig(siderPath)` | The MCP configuration file's content; it holds no token. |
 
@@ -37,6 +37,11 @@ What a Claude Code turn process is started with, as pure functions. Read
 - `permission_mode` has no default: the owner states it in the preset.
 - The environment loses the runtime's credentials (`ANTHROPIC_API_KEY`,
   `ANTHROPIC_AUTH_TOKEN`), the markers of an enclosing session (`CLAUDECODE`,
-  `CLAUDE_PROJECT_DIR`, every `CLAUDE_CODE_*`), the channel's tokens and entries
-  that are not valid UTF-8; `CLAUDE_CONFIG_DIR` stays because it decides where
-  the login is. What the daemon and the preset add comes after the strip.
+  `CLAUDE_PROJECT_DIR`, every `CLAUDE_CODE_*` but `CLAUDE_CODE_GIT_BASH_PATH`), the
+  channel's tokens and entries that are not valid UTF-8; `CLAUDE_CONFIG_DIR` stays
+  because it decides where the login is, and `CLAUDE_CODE_GIT_BASH_PATH` because it
+  tells Claude Code on Windows where Git Bash is, which describes the machine and
+  not a session. What the daemon and the preset add comes after the strip.
+- The environment is composed with `sdk/go/adapterkit/environ`, so names are compared
+  as the platform does (without case on Windows, where `Path` is the `PATH` the sidera
+  directory goes in front of). `ConfigDir(env)` finds `CLAUDE_CONFIG_DIR` the same way.

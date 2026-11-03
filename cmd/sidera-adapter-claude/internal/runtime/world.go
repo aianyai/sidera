@@ -26,8 +26,11 @@ type Files interface {
 	// WriteFile writes a file, creating its directories, private to the user.
 	// A reader never sees half of it.
 	WriteFile(path string, data []byte) error
-	// RealDir returns the real path of a directory, symbolic links resolved,
-	// and fails if it is not a directory.
+	// RealDir returns the real path of a directory as Claude Code resolves its
+	// working directory (symbolic links resolved; on Windows also the on-disk
+	// case and the long form of each name), and fails if it is not a directory.
+	// The turn process is started with this path as its working directory, so
+	// that the record directory Claude Code derives is the one the adapter does.
 	RealDir(path string) (string, error)
 }
 

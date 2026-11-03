@@ -377,7 +377,10 @@ and sandbox settings. The turn files in the state directory are not cleaned up.
 
 The record directory is the base the runtime reports as its projects directory
 (`projectsDirectory` of `claude auth status`, which follows `CLAUDE_CONFIG_DIR`) plus
-the name of the working directory: its real path, with symbolic links resolved, in
+the name of the working directory: its real path, with symbolic links resolved (on Windows also
+every name in its on-disk case and long form, never the 8.3 short name, and junctions followed:
+`sdk/go/adapterkit/realpath`; Claude Code does not expand a short name, so the turn process is
+started with the resolved path as its working directory), in
 Unicode normal form C, every character that is not an ASCII letter or digit replaced
 by `-` (a character outside the basic plane is two, as the runtime replaces each
 UTF-16 code unit). The runtime shortens a name longer than 200 characters and adds
@@ -451,11 +454,13 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   executable that differs from the link's present target.
 - The environment is the adapter's own without the runtime's credentials, the
   markers of an enclosing Claude Code session (`CLAUDECODE`, `CLAUDE_PROJECT_DIR`, every
-  `CLAUDE_CODE_*`), the channel's tokens and entries that are not valid UTF-8, then the
+  `CLAUDE_CODE_*` but `CLAUDE_CODE_GIT_BASH_PATH`, which describes the machine and tells Claude
+  Code on Windows where Git Bash is), the channel's tokens and entries that are not valid UTF-8, then the
   `tool_access.env` of the session (`SIDERA_TOKEN`, `SIDERA_HOME`) and what the preset
   derives (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`), with the directory of the
-  `sidera` executable first in `PATH` for the command-line front end.
-  `CLAUDE_CONFIG_DIR` is kept: it decides where the login is. The token is never
+  `sidera` executable first in `PATH` for the command-line front end. Names are compared as the
+  platform does, without case on Windows, so a `Path` is the `PATH` the directory goes in front of
+  and a variable is stripped whatever its spelling. `CLAUDE_CONFIG_DIR` is kept: it decides where the login is. The token is never
   written to a file or to argv.
 - The MCP configuration of an instance is one file, `{"mcpServers":{"sidera":{"command":
   "<sidera>","args":["mcp"]}}}`, without a token: the MCP server inherits the

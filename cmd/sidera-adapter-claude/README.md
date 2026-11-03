@@ -13,7 +13,8 @@ world.
 goroutine and never look at the clock. They follow the purity conventions of
 [`internal/README.md`](../../internal/README.md) and import the standard library,
 `golang.org/x/text` (Unicode normalisation of paths), other pure packages of the
-adapter and the protocol types of `sdk/go/adapterproto`.
+adapter, the protocol types of `sdk/go/adapterproto` and `sdk/go/adapterkit/environ`
+(the environment of a child process; pure itself).
 
 | Path | Holds |
 | ---- | ----- |

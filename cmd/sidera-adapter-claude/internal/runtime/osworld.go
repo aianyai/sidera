@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/aianyai/sidera/sdk/go/adapterkit/realpath"
 )
 
 // osFiles is Files on the operating system's file system.
@@ -53,7 +55,7 @@ func (osFiles) WriteFile(path string, data []byte) error {
 }
 
 func (osFiles) RealDir(path string) (string, error) {
-	real, err := filepath.EvalSymlinks(path)
+	real, err := realpath.Resolve(path)
 	if err != nil {
 		return "", err
 	}

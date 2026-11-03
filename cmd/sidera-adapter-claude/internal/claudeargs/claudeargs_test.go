@@ -150,10 +150,12 @@ func TestSanitizeEnv(t *testing.T) {
 		"HOME=/home/u", "PATH=/bin", "CLAUDE_CONFIG_DIR=/cfg",
 		"ANTHROPIC_API_KEY=k", "ANTHROPIC_AUTH_TOKEN=t", "ANTHROPIC_BASE_URL=https://x",
 		"CLAUDECODE=1", "CLAUDE_CODE_ENTRYPOINT=cli", "CLAUDE_CODE_SSE_PORT=1", "CLAUDE_PROJECT_DIR=/p",
+		"CLAUDE_CODE_GIT_BASH_PATH=/opt/git/bash",
 		"SIDERA_TOKEN=s", "SIDERA_PROBE_TOKEN=p", "SIDERA_HOME=/h",
 		"BAD=\xff", "NOEQUALS", "=x", "EMPTY=",
 	}
-	want := []string{"HOME=/home/u", "PATH=/bin", "CLAUDE_CONFIG_DIR=/cfg", "ANTHROPIC_BASE_URL=https://x", "SIDERA_HOME=/h", "EMPTY="}
+	// CLAUDE_CODE_GIT_BASH_PATH describes the machine and not a session, so it passes.
+	want := []string{"HOME=/home/u", "PATH=/bin", "CLAUDE_CONFIG_DIR=/cfg", "ANTHROPIC_BASE_URL=https://x", "CLAUDE_CODE_GIT_BASH_PATH=/opt/git/bash", "SIDERA_HOME=/h", "EMPTY="}
 	if got := SanitizeEnv(in); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}

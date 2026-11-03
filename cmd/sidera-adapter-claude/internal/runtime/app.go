@@ -16,10 +16,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/create"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
@@ -168,10 +168,8 @@ func (a *App) Initialize(_ context.Context, conn *adapterkit.Conn, instance adap
 // environment finds it; "" when neither CLAUDE_CONFIG_DIR nor the home
 // directory is known.
 func claudeDir(environ []string) string {
-	for _, kv := range environ {
-		if v, ok := strings.CutPrefix(kv, "CLAUDE_CONFIG_DIR="); ok && v != "" {
-			return v
-		}
+	if dir := claudeargs.ConfigDir(environ); dir != "" {
+		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
