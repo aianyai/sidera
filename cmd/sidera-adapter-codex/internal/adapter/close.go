@@ -6,7 +6,6 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
-	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 func closed() adapterproto.CloseResult {
@@ -19,7 +18,7 @@ func unconfirmed(reason adapterproto.CloseReason) adapterproto.CloseResult {
 
 // CloseSession releases a session's thread: it is unloaded, which ends the MCP
 // server it started, and archived, which keeps its record. A turn that is running
-// is not interrupted yet, so it is left to end first.
+// is left to end: the close is unconfirmed, and the sender interrupts first.
 func (a *App) CloseSession(ctx context.Context, p adapterproto.CloseParams) (adapterproto.CloseResult, error) {
 	s := a.sessionOf(p.Endpoint)
 	if s != nil && s.attached {
@@ -51,7 +50,7 @@ func (a *App) closeHeld(ctx context.Context, s *session) (adapterproto.CloseResu
 	a.mu.Unlock()
 	if creating {
 		// The creation still owns the thread; it ends with its own answer.
-		return adapterproto.CloseResult{}, peer.NewError(adapterproto.CodeUnknownEndpoint, "the session is still being created")
+		return adapterproto.CloseResult{}, errStillCreating
 	}
 	if busy {
 		return unconfirmed(adapterproto.CloseTurnStillRunning), nil
@@ -85,13 +84,4 @@ func (a *App) archive(ctx context.Context, c *appserver.Client, threadID string)
 	}
 	a.log.Warn("cannot archive a thread", "error", err)
 	return unconfirmed(adapterproto.CloseNativeUnreachable)
-}
-
-// Interrupt is not declared, and for an attached session it is also the wrong kind
-// of endpoint: the turn is the person's.
-func (a *App) Interrupt(ctx context.Context, p adapterproto.InterruptParams) (adapterproto.InterruptResult, error) {
-	if s := a.sessionOf(p.Endpoint); s != nil && s.attached {
-		return adapterproto.InterruptResult{}, wrongKind("interrupting")
-	}
-	return a.Base.Interrupt(ctx, p)
 }

@@ -13,7 +13,7 @@ are in [`docs/references/adapter-codex/`](../../docs/references/adapter-codex/RE
 | `main.go` | Serves the protocol through `sdk/go/adapterkit`; the subcommand `package` writes the adapter package for one platform and `version` prints the version. |
 | `internal/appserver/` | The App Server client: WebSocket over a Unix socket or TCP, lenient JSON-RPC, the hand-written subset of its types and methods, the read loop, and the queue that hands notifications on in order. `appservertest/` is a fake server for tests. |
 | `internal/server/` | The App Server's life: connect to the one that is up or start one detached (through `sdk/go/adapterkit/process`), the empty directory of its own it runs in (never the state directory, which a sandbox would then be given), the environment it is given, the state file, the version of the program, waiting for a recorded server that does not answer instead of starting a second, and ending only a server this process started. Its `realcodex_*_test.go` files are the opt-in tests against the installed Codex (`-tags realcodex`). |
-| `internal/adapter/` | The protocol methods, the session table, the events, the reconnect loop, the availability snapshot, the probes, and the one place threads are started and resumed (`thread.go`), which checks that a sandboxed thread took its permission profile. `attached.go` holds attached sessions, which are never resumed: the watch that reads a person's thread, and queued prompts. |
+| `internal/adapter/` | The protocol methods, the session table, the events, the reconnect loop, the availability snapshot, the probes, and the one place threads are started and resumed (`thread.go`), which checks that a sandboxed thread took its permission profile. `interrupt.go` stops a turn and ends the commands it leaves running before the turn's end is reported. `attached.go` holds attached sessions, which are never resumed: the watch that reads a person's thread, and queued prompts. |
 | `internal/codexcfg/` | Pure. Instance and preset configuration, the thread-level configuration that carries a session's credentials and, for a sandboxed preset, the permission profile that denies the data directory, the developer instructions every thread is given (the adapter's statement of the channel, then the preset's own text), the sandbox policy of a preset without a sandbox, the front ends of a preset. |
 | `internal/create/` | Pure. The next step of creating one session, and the checkpoint format. |
 | `internal/reconcile/` | Pure. The verdict of `prompt.reconcile` from the thread's record and, for an attached session, its queue. |
@@ -51,7 +51,8 @@ cannot disagree. Its version is the release version (`internal/release`).
 
 `go test ./cmd/sidera-adapter-codex/...` runs table tests of the pure packages, the
 client and the adapter against the fake App Server, with no Codex installed. The
-tests against the installed Codex start a real App Server and run no model turn:
+tests against the installed Codex start a real App Server and run no model turn, except
+`TestRealCodexInterruptEndsTheRunningCommand` in `internal/adapter`, which spends quota:
 
 ```
 SIDERA_REALCODEX=1 go test -tags realcodex -count=1 ./cmd/sidera-adapter-codex/...

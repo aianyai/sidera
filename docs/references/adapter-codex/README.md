@@ -190,7 +190,8 @@ taken from a library:
   arrival order**, so the read loop never waits for the adapter, and a notification
   is never dropped. `Done` closes after the last queued notification was handled.
 - **The adapter opts out of** streamed output and reasoning
-  (`optOutNotificationMethods`): they are most of the traffic and nothing reads them.
+  (`optOutNotificationMethods`): they are most of the traffic and nothing reads them. It does
+  not opt out of `item/started`, which tells the commands a turn runs (see `session.interrupt`).
 - **A connection only receives the events of the threads it started or resumed.**
   The adapter keeps one connection for all its sessions and resumes each thread in it.
   When the last connection that holds a thread ends, the server unloads the thread.
@@ -332,12 +333,12 @@ a second one. This was not run on Windows.
 
 | Protocol | What the adapter does |
 | -------- | --------------------- |
-| `initialize` | Declares a runtime with `interrupt: false`, `ack_on_behalf: false`, `server_requests: true`, `attach: true` and front ends `mcp` and `cli`. It does not touch the server. |
+| `initialize` | Declares a runtime with `interrupt: true`, `ack_on_behalf: false`, `server_requests: true`, `attach: true` and front ends `mcp` and `cli`. It does not touch the server. |
 | `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, connects or starts the server, `initialize` and `account/read`, then resumes every session listed: `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), `unreachable` otherwise or when the preset is unusable. Attached entries are taken back as described in "Attached sessions". It ends with a full availability snapshot. A server that cannot be reached is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
 | `adapter.probe` | The runtime version; `auth` from `account/read` (`valid` with an account, `invalid` without, `unknown` when the server is unreachable); the dependencies `codex`, `sidera` and `app-server`; each preset's problems and whether its directory exists; the tool probes. |
 | `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.close` | Below. |
 | `session.attach`, `session.detached` | "Attached sessions". |
-| `session.interrupt` | Not declared. The id of the running turn is kept, so that `turn/interrupt` can be added without a change of format. For an attached endpoint it is `1002`, whatever the declaration. |
+| `session.interrupt` | Below. For an attached endpoint it is `1002`: the turn is the person's. |
 | `checkpoint.put` | `scope: attempt` while creating, and only there. |
 
 **Availability.** A full snapshot at `adapter.start`, and again whenever it changes:
@@ -485,13 +486,52 @@ busy state comes from `turn_active` in the result of `adapter.start`, the runnin
 is taken from the server's list silently and its end is reported when it comes.
 
 **`session.close`.** A held session that runs a turn is `close_unconfirmed` with
-`turn_still_running` (interrupt is not declared). Otherwise the thread is unsubscribed
+`turn_still_running` (the sender interrupts first). Otherwise the thread is unsubscribed
 and archived, which unloads it (the `sidera mcp` it started ends when its input does)
 and keeps its record, and the answer is `closed`. An endpoint the adapter does not hold
 but that comes with a `native_ref`: a thread held under another open endpoint is left
 alone and answered `closed`; otherwise it is archived, and a thread the server does not
 have is as closed as an archived one. No server connection is `close_unconfirmed` with
 `native_unreachable`; an endpoint not held and without a reference is `1001`.
+
+**`session.interrupt`.** `turn/interrupt` stops a turn, but the server leaves running the
+processes of the commands the turn had started: a `sleep` the turn waited for was alive twenty
+seconds after the turn reported `interrupted`, and went on until it ended or the server did.
+The server lists those processes as the thread's background terminals
+(`thread/backgroundTerminals/list`, `terminate` and `clean`, experimental), whichever turn
+started them. So an interrupt that reports `stopped` has to end them, or it would say a turn's
+work stopped while its commands run on. The adapter keeps, for each turn it sees start, the
+items of its commands that have a process (`item/started`, a `commandExecution` item with a
+`processId`), and:
+
+1. Asks the server to stop the turn with `turn/interrupt` (thread and turn it keeps as running).
+   The server refuses a thread that runs no turn (`no active turn to interrupt`, `-32600`) at
+   once; that is `not_running`. A thread the server unloaded is resumed first. Any other failure
+   is `failed` (`native_unreachable` when the connection is gone, `native_error` otherwise).
+2. Waits for the end of the turn (`turn/completed`, about ten milliseconds later).
+3. When the turn ended `interrupted`, lists the thread's background terminals and terminates
+   those whose item is one of the turn's commands, **before `turn.ended` is reported**. Commands
+   that earlier turns left running on purpose are not touched, and a turn that ran no command
+   with a process costs no further request.
+4. Answers `stopped` once `turn.ended` has been reported. The end of the turn and the answer
+   therefore both mean the commands ended too.
+
+`requested` is the answer when the turn is still running after the adapter's wait (ten
+seconds); the daemon then waits for `turn.ended` itself, and the commands are ended just before it
+is reported, so its `stopped` holds as well. Asking again while the turn runs does not ask the
+server again. `not_running` is a session with no turn running, answered without asking the
+server. If a command cannot be ended the answer is `failed` with `native_error`, and `turn.ended`
+is reported all the same: the turn did end.
+
+A turn the adapter did not see start (it was found running after a restart, or the connection
+that was telling its events ended meanwhile) has commands the adapter was not told of, and none
+can be told from the thread's others; for it every background terminal of the thread is ended
+(`thread/backgroundTerminals/clean`).
+
+Each request of an interrupt is bounded to ten seconds. On Codex 0.166.0 (Linux) a second
+`turn/interrupt` sent to a thread whose first one had left a command running was once not
+answered at all, where one sent to a thread without such a command is refused at once; so a turn
+is asked to stop once, and interrupts of one session are served one at a time.
 
 ### Attached sessions
 
@@ -715,8 +755,10 @@ about ten seconds to the background.
 
 ### Known limitations
 
-- **No interrupt, and no acknowledgement on the agent's behalf**; `ack_markers` is
-  absent for the same reason.
+- **No acknowledgement on the agent's behalf**; `ack_markers` is absent for the same reason.
+- **Interrupting ends the processes the server lists for the turn's commands, and looks no
+  further.** What a command started on its own (a process it detached) ends only as far as
+  Codex's own termination takes it; that was not measured.
 - **An attached session is reached through the shared queue** (see "Attached sessions"):
   seconds of latency, a prompt held behind the person's turn, after Esc and behind an active
   `/goal`, and none delivered while no process has the thread loaded. That a prompt taken by the
@@ -827,7 +869,9 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 (the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
 `TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
-`TestCloseSession`, `TestThreadsTurnsAndCommandsNameThePresetDirectory`,
+`TestCloseSession`, `TestInterruptEndsTheCommandsOfTheTurn`,
+`TestInterruptRequestedEndsTheCommandsWhenTheTurnEnds`, `TestInterruptOfAFoundTurnEndsEveryCommandOfTheThread`,
+`TestInterruptWithoutATurn`, `TestThreadsTurnsAndCommandsNameThePresetDirectory`,
 `TestSandboxIsAPermissionProfileThatDeniesTheDataDirectory`, `TestThreadWithoutTheProfileIsNotUsed`,
 `TestAttachSessionOutcomes`, `TestAttachSessionBeforeStartIsAnError`, `TestAttachedHumanTurns`,
 `TestAttachedTurnWithoutStartIsStaleFromFirstSight`, `TestAttachedReconcileWhileTheOwnerRunsTheTurn`,
@@ -863,3 +907,11 @@ when resumed, that a command in a `workspace-write` or `read-only` thread cannot
 in a throwaway data directory, that a command in a `danger-full-access` thread can, and that the
 profile still lets a `workspace-write` command write to its project and keeps a `read-only` one
 from writing.
+
+`TestRealCodexInterruptEndsTheRunningCommand`, in `internal/adapter/realcodex_test.go`, is
+the one test that runs a real model turn (the model the server lists as affordable, in a
+`workspace-write` thread; it spends quota). It runs the adapter against a server of its own
+(a state directory of the test, so another adapter's server is never reached), has a turn run
+a `sleep` of forty seconds, interrupts, and checks that the answer is `stopped`, that the
+process is gone when it comes, that the turn is reported `interrupted`, and that the next prompt
+runs. Its thread stays in the Codex home.

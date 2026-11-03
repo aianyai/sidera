@@ -29,6 +29,10 @@ func (a *App) onNotification(n appserver.Notification) {
 		if p, err := appserver.DecodeParams[appserver.ThreadNotification](n); err == nil {
 			a.turnCompleted(p)
 		}
+	case appserver.NotifyItemStarted:
+		if p, err := appserver.DecodeParams[appserver.ItemNotification](n); err == nil {
+			a.itemStarted(p)
+		}
 	case appserver.NotifyItemCompleted:
 		if p, err := appserver.DecodeParams[appserver.ItemNotification](n); err == nil {
 			a.itemCompleted(p)
@@ -117,7 +121,27 @@ func (a *App) turnCompleted(p appserver.ThreadNotification) {
 	if late {
 		a.reportStarted(s, p.Turn.ID, attempt)
 	}
-	a.reportEnded(s, p.Turn.ID, p.Turn.Status)
+	a.finishTurn(s, p.Turn.ID, p.Turn.Status)
+}
+
+// itemStarted notes a command of a turn that runs as a process the server can end,
+// so that an interrupt of the turn can end it.
+func (a *App) itemStarted(p appserver.ItemNotification) {
+	if p.Item.Type != appserver.ItemCommandExecution || p.Item.ProcessID == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.byThread[p.ThreadID]
+	if s == nil {
+		return
+	}
+	if rec := s.turn(p.TurnID); !rec.ended {
+		if rec.commands == nil {
+			rec.commands = map[string]struct{}{}
+		}
+		rec.commands[p.Item.ID] = struct{}{}
+	}
 }
 
 // itemCompleted notes that a prompt reached the record. The prompt a delivery
@@ -214,6 +238,8 @@ func (a *App) catchUp(ctx context.Context, c *appserver.Client, s *session, repo
 
 	a.mu.Lock()
 	if s.activeTurn != "" {
+		// The events of the turn may have been missed while there was no connection.
+		s.turn(s.activeTurn).partial = true
 		found := false
 		for _, t := range res.Data {
 			if t.ID != s.activeTurn {
@@ -236,7 +262,7 @@ func (a *App) catchUp(ctx context.Context, c *appserver.Client, s *session, repo
 	}
 	if len(res.Data) > 0 && res.Data[0].Running() && s.turn(res.Data[0].ID).started == false {
 		adopt = res.Data[0].ID
-		s.turn(adopt).started = true
+		s.turn(adopt).started, s.turn(adopt).partial = true, true
 		s.activeTurn, s.status = adopt, appserver.ThreadActive
 	}
 	a.mu.Unlock()
@@ -246,7 +272,7 @@ func (a *App) catchUp(ctx context.Context, c *appserver.Client, s *session, repo
 		return
 	}
 	for _, e := range ended {
-		a.reportEnded(s, e.id, e.status)
+		a.finishTurn(s, e.id, e.status)
 	}
 	if adopt != "" {
 		a.reportStarted(s, adopt, "")

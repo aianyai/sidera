@@ -204,6 +204,11 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 		}
 	}
 
+	// The words that say a thread runs no turn to interrupt.
+	if err := client.TurnInterrupt(ctx, started.Thread.ID, "no-such-turn"); !appserver.IsNoActiveTurn(err) {
+		t.Errorf("turn/interrupt of a thread that runs no turn is not recognised as such: %v", err)
+	}
+
 	_ = client.Close()
 	if err := srv.Stop(); err != nil {
 		t.Fatal(err)

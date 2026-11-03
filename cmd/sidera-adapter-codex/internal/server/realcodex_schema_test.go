@@ -63,7 +63,7 @@ func TestSchemaGuard(t *testing.T) {
 	for _, m := range []string{
 		appserver.MethodInitialize, appserver.MethodAccountRead, appserver.MethodThreadStart, appserver.MethodThreadResume,
 		appserver.MethodThreadSetName, appserver.MethodThreadArchive, appserver.MethodThreadUnsubscribe,
-		appserver.MethodThreadTurnsList, appserver.MethodThreadShell, appserver.MethodTurnStart, appserver.MethodCommandExec,
+		appserver.MethodThreadTurnsList, appserver.MethodThreadShell, appserver.MethodTurnStart, appserver.MethodTurnInterrupt, appserver.MethodCommandExec,
 	} {
 		if !slices.Contains(requests, m) {
 			t.Errorf("the server has no request %s", m)
@@ -71,7 +71,7 @@ func TestSchemaGuard(t *testing.T) {
 	}
 	notifications := methodsOf(t, filepath.Join(dir, "ServerNotification.json"))
 	for _, m := range []string{
-		appserver.NotifyTurnStarted, appserver.NotifyTurnCompleted, appserver.NotifyItemCompleted,
+		appserver.NotifyTurnStarted, appserver.NotifyTurnCompleted, appserver.NotifyItemStarted, appserver.NotifyItemCompleted,
 		appserver.NotifyThreadStatus, appserver.NotifyMCPStatus,
 	} {
 		if !slices.Contains(notifications, m) {
@@ -89,6 +89,7 @@ func TestSchemaGuard(t *testing.T) {
 		"ThreadStartParams":        {"config", "ephemeral", "cwd", "approvalPolicy", "sandbox", "model", "developerInstructions"},
 		"ThreadResumeParams":       {"config", "excludeTurns", "threadId", "cwd", "approvalPolicy", "sandbox", "model", "developerInstructions"},
 		"ThreadTurnsListParams":    {"threadId", "itemsView", "sortDirection", "limit", "cursor"},
+		"TurnInterruptParams":      {"threadId", "turnId"},
 		"CommandExecParams":        {"command", "cwd", "env", "sandboxPolicy", "timeoutMs"},
 		"ThreadShellCommandParams": {"threadId", "command", "timeoutMs"},
 		"InitializeParams":         {"clientInfo", "capabilities"},
@@ -118,6 +119,35 @@ func TestSchemaGuard(t *testing.T) {
 		if !slices.Contains(queueRequests, m) {
 			t.Errorf("the server has no request %s", m)
 		}
+	}
+	// The processes of a thread's commands are listed and ended by the background
+	// terminals methods, also experimental.
+	for _, m := range []string{appserver.MethodTerminalsList, appserver.MethodTerminalsTerminate, appserver.MethodTerminalsClean} {
+		if !slices.Contains(queueRequests, m) {
+			t.Errorf("the server has no request %s", m)
+		}
+	}
+	for file, members := range map[string][]string{
+		"ThreadBackgroundTerminalsListParams":        {"threadId", "limit", "cursor"},
+		"ThreadBackgroundTerminalsTerminateParams":   {"threadId", "processId"},
+		"ThreadBackgroundTerminalsCleanParams":       {"threadId"},
+		"ThreadBackgroundTerminalsListResponse":      {"data", "nextCursor"},
+		"ThreadBackgroundTerminalsTerminateResponse": {"terminated"},
+	} {
+		props, _ := readJSON(t, filepath.Join(experimental, "v2", file+".json"))["properties"].(map[string]any)
+		for _, m := range members {
+			if _, ok := props[m]; !ok {
+				t.Errorf("%s has no member %s", file, m)
+			}
+		}
+	}
+	// A terminal is matched to the command item that started it.
+	if raw, err := os.ReadFile(filepath.Join(experimental, "v2", "ThreadBackgroundTerminalsListResponse.json")); err != nil ||
+		!strings.Contains(string(raw), `"itemId"`) || !strings.Contains(string(raw), `"processId"`) {
+		t.Errorf("a background terminal no longer carries itemId and processId (%v)", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "v2", "ItemStartedNotification.json")); err != nil || !strings.Contains(string(raw), `"processId"`) {
+		t.Errorf("a commandExecution item no longer carries processId, which an interrupt ends its process by (%v)", err)
 	}
 	for file, members := range map[string][]string{
 		"ThreadQueueAddParams":    {"threadId", "clientUserMessageId", "input"},

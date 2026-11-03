@@ -59,6 +59,9 @@ type Options struct {
 	// one of this adapter's prompts is awaited or a turn is open, and AttachIdlePollEvery
 	// how often otherwise; see watchAttached.
 	AttachPollEvery, AttachIdlePollEvery time.Duration
+	// InterruptWait is how long an interrupt waits for the turn to end before it
+	// answers that the stop was requested.
+	InterruptWait time.Duration
 	// TurnStaleAfter is how long a turn of an attached session that shows no end is
 	// taken for running; after it the turn is taken for abandoned.
 	TurnStaleAfter time.Duration
@@ -97,6 +100,9 @@ func (o *Options) defaults() {
 	}
 	if o.AttachIdlePollEvery == 0 {
 		o.AttachIdlePollEvery = 10 * time.Second
+	}
+	if o.InterruptWait == 0 {
+		o.InterruptWait = 10 * time.Second
 	}
 	if o.TurnStaleAfter == 0 {
 		o.TurnStaleAfter = 2 * time.Hour

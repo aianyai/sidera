@@ -31,13 +31,22 @@ const (
 	MethodThreadQueueDelete = "thread/queue/delete"
 	MethodThreadShell       = "thread/shellCommand"
 	MethodTurnStart         = "turn/start"
+	MethodTurnInterrupt     = "turn/interrupt"
 	MethodCommandExec       = "command/exec"
+
+	// The background terminals of a thread are the processes of its commands that
+	// the server keeps running, whatever turn started them. The methods are
+	// experimental (see InitializeCapabilities.ExperimentalAPI).
+	MethodTerminalsList      = "thread/backgroundTerminals/list"
+	MethodTerminalsTerminate = "thread/backgroundTerminals/terminate"
+	MethodTerminalsClean     = "thread/backgroundTerminals/clean"
 )
 
 // Notification methods the adapter handles.
 const (
 	NotifyTurnStarted   = "turn/started"
 	NotifyTurnCompleted = "turn/completed"
+	NotifyItemStarted   = "item/started"
 	NotifyItemCompleted = "item/completed"
 	NotifyThreadStatus  = "thread/status/changed"
 	NotifyMCPStatus     = "mcpServer/startupStatus/updated"
@@ -69,11 +78,13 @@ const (
 // ItemUserMessage is the type of the item that records a prompt.
 const ItemUserMessage = "userMessage"
 
+// ItemCommandExecution is the type of the item that records a command the agent ran.
+const ItemCommandExecution = "commandExecution"
+
 // QuietNotifications are the notification methods the adapter has no use for and
 // opts out of when it initializes: streamed output and reasoning are the bulk of
 // the traffic and nothing here reads them.
 var QuietNotifications = []string{
-	"item/started",
 	"item/agentMessage/delta",
 	"item/plan/delta",
 	"item/commandExecution/outputDelta",
@@ -273,6 +284,9 @@ type Item struct {
 	Type     string  `json:"type"`
 	ID       string  `json:"id"`
 	ClientID *string `json:"clientId"`
+	// ProcessID names the process of a command item that has one, which is how the
+	// server lists and ends it as a background terminal.
+	ProcessID *string `json:"processId"`
 }
 
 // Turn is one run of the agent on a prompt. StartedAt and CompletedAt are Unix
@@ -517,6 +531,14 @@ func IsThreadGone(err error) bool {
 		strings.Contains(m, "thread not loaded")
 }
 
+// IsNoActiveTurn reports whether the server refused turn/interrupt because the
+// thread runs no turn. The server says so in words, which the real-Codex test holds
+// to the installed server.
+func IsNoActiveTurn(err error) bool {
+	var rpc *RPCError
+	return errors.As(err, &rpc) && strings.Contains(strings.ToLower(rpc.Message), "no active turn")
+}
+
 // CodeInvalidRequest is the code of an answer that refuses a request for what it
 // asks: the server did nothing.
 const CodeInvalidRequest = -32600
@@ -585,4 +607,63 @@ func (c *Client) ThreadQueueDelete(ctx context.Context, threadID, queuedSubmissi
 	}
 	err = c.Call(ctx, MethodThreadQueueDelete, map[string]any{"threadId": threadID, "queuedSubmissionId": queuedSubmissionID}, &r)
 	return r.Deleted, err
+}
+
+// TurnInterrupt asks the server to stop a turn. The answer only says the request
+// was taken: the turn ends with its own turn/completed notification, with the
+// status "interrupted". The server refuses a thread that runs no turn, and one that
+// runs another than the turn named.
+func (c *Client) TurnInterrupt(ctx context.Context, threadID, turnID string) error {
+	return c.Call(ctx, MethodTurnInterrupt, map[string]string{"threadId": threadID, "turnId": turnID}, nil)
+}
+
+// Terminal is a process of a thread's command that the server keeps running. ItemID
+// is the command item that started it.
+type Terminal struct {
+	ItemID    string `json:"itemId"`
+	ProcessID string `json:"processId"`
+}
+
+// terminalsPage is the size of the pages the terminals of a thread are read in.
+const terminalsPage = 100
+
+// ThreadTerminals lists the processes of a thread's commands that are still
+// running, all pages. A command that ended is not listed.
+func (c *Client) ThreadTerminals(ctx context.Context, threadID string) ([]Terminal, error) {
+	var out []Terminal
+	cursor := ""
+	for {
+		params := map[string]any{"threadId": threadID, "limit": terminalsPage}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		var r struct {
+			Data       []Terminal `json:"data"`
+			NextCursor *string    `json:"nextCursor"`
+		}
+		if err := c.Call(ctx, MethodTerminalsList, params, &r); err != nil {
+			return nil, err
+		}
+		out = append(out, r.Data...)
+		if r.NextCursor == nil || *r.NextCursor == "" || len(r.Data) == 0 {
+			return out, nil
+		}
+		cursor = *r.NextCursor
+	}
+}
+
+// ThreadTerminalTerminate ends one process of a thread's commands and says whether
+// the server knew it: one that had already ended is not an error.
+func (c *Client) ThreadTerminalTerminate(ctx context.Context, threadID, processID string) (terminated bool, err error) {
+	var r struct {
+		Terminated bool `json:"terminated"`
+	}
+	err = c.Call(ctx, MethodTerminalsTerminate, map[string]string{"threadId": threadID, "processId": processID}, &r)
+	return r.Terminated, err
+}
+
+// ThreadTerminalsClean ends every process of a thread's commands, whichever turn
+// started it.
+func (c *Client) ThreadTerminalsClean(ctx context.Context, threadID string) error {
+	return c.Call(ctx, MethodTerminalsClean, map[string]string{"threadId": threadID}, nil)
 }

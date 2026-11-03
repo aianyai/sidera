@@ -7,6 +7,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // session is a thread this adapter holds as a session endpoint. Its fields are
@@ -63,8 +64,11 @@ type session struct {
 	// turn can be given the attempt that caused it.
 	pending *pendingStart
 
-	startMu sync.Mutex    // one turn start at a time
-	wake    chan struct{} // signalled by every event of the thread; capacity one
+	startMu sync.Mutex // one turn start at a time
+	// interruptMu serializes the interrupts of the session, so that one turn is
+	// asked to stop once and every caller waits for the same end.
+	interruptMu sync.Mutex
+	wake        chan struct{} // signalled by every event of the thread; capacity one
 }
 
 // turnRec is what is known of a turn that was reported.
@@ -77,6 +81,18 @@ type turnRec struct {
 	// looks counts the readings of an attached session's turn that found it open
 	// without a prompt in it, while one of the adapter's own prompts was awaited.
 	looks int
+	// commands holds the items of the turn's commands that run as a process the
+	// server can end, as the item/started events told, and partial says the list
+	// may be incomplete: the turn was found running rather than seen starting, or
+	// the connection that was telling it ended meanwhile. A turn that is over holds
+	// none.
+	commands map[string]struct{}
+	partial  bool
+	// over is set when an interrupt of the turn was sent and is closed when the turn's
+	// end has been reported, after the commands it left running were ended; endErr
+	// then says why they could not be, or is nil.
+	over   chan struct{}
+	endErr error
 }
 
 // promptRec is the answer given to a prompt.deliver, kept so that a repeat of the
@@ -87,6 +103,10 @@ type promptRec struct {
 	turnID        string
 	persistedSent bool
 }
+
+// errStillCreating answers a signal for a session whose creation has not
+// answered: the creation owns the session until it does.
+var errStillCreating = peer.NewError(adapterproto.CodeUnknownEndpoint, "the session is still being created")
 
 type pendingStart struct {
 	resolved chan struct{} // closed when the answer to the turn start was processed
