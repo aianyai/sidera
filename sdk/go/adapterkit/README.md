@@ -17,7 +17,7 @@ package does not build it:
 | ------- | ----- |
 | [`environ`](environ/README.md) | Composes the environment of a child process |
 | [`process`](process/README.md) | Starting a process detached from the adapter, its identity, listing, interrupting |
-| [`realpath`](realpath/README.md) | The path the platform reports for an existing path |
+| [`realpath`](realpath/README.md) | The absolute path of an existing path with its symbolic links resolved (and, on Windows, the platform's case and long form) |
 
 ## Entry points
 
