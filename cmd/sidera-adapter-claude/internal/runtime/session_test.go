@@ -578,3 +578,25 @@ func outFile(session, attempt string) string {
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+// On Windows only the native claude.exe can be used; the npm wrapper claude.cmd,
+// found through PATHEXT, would be started through cmd.exe.
+func TestOnlyANativeClaudeIsUsableOnWindows(t *testing.T) {
+	tests := []struct {
+		path, goos string
+		usable     bool
+	}{
+		{`C:\Users\a\.local\bin\claude.exe`, "windows", true},
+		{`C:\Users\a\.local\bin\CLAUDE.EXE`, "windows", true},
+		{`C:\Users\a\AppData\Roaming\npm\claude.cmd`, "windows", false},
+		{`C:\tools\claude.bat`, "windows", false},
+		{`C:\tools\claude`, "windows", false},
+		{"/usr/local/bin/claude", "linux", true},
+		{"/opt/homebrew/bin/claude.cmd", "darwin", true},
+	}
+	for _, tc := range tests {
+		if got := claudeProblem(tc.path, tc.goos); (got == "") != tc.usable {
+			t.Errorf("claudeProblem(%q, %q) = %q, usable want %v", tc.path, tc.goos, got, tc.usable)
+		}
+	}
+}

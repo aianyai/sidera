@@ -120,7 +120,11 @@ read from the manifest built into the executable.
 
 - **`adapter.start`** carries the instance configuration, the presets and the sessions to take
   back. The adapter finds `claude` and `sidera` (the instance's `claude_path` and `sidera_path`,
-  else the program on `PATH`, as an absolute path: a process is started with it as written), writes the MCP configuration file into the state directory and
+  else the program on `PATH`, as an absolute path: a process is started with it as written; on Windows a
+  `claude` that is not an `.exe`, such as the npm `claude.cmd`, is not usable: it would start through
+  `cmd.exe`, so the turn process would not be the executable the adapter recognises and a multi-line
+  argument would be cut, and the probe reports it as `dependency_missing` with the reason, a creation
+  fails the same way and a prompt is refused as `native_unavailable`), writes the MCP configuration file into the state directory and
   keeps the presets, which are fixed for the life of the process because the host restarts the
   instance when they change. A session is `lost` when its session file is gone (Claude Code
   removes records of sessions idle longer than its cleanup period, 30 days by default),

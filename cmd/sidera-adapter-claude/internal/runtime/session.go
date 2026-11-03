@@ -67,9 +67,15 @@ func (a *App) executables() (claude, sidera, mcpConfig string) {
 
 // errDependencyMissing is a launch that cannot be made because a program the
 // turn needs was not found.
-type errDependencyMissing struct{ program string }
+// A program that was found and cannot be used says why in detail.
+type errDependencyMissing struct{ program, detail string }
 
-func (e errDependencyMissing) Error() string { return e.program + " was not found" }
+func (e errDependencyMissing) Error() string {
+	if e.detail != "" {
+		return e.detail
+	}
+	return e.program + " was not found"
+}
 
 // turnLaunch is one start of a turn process.
 type turnLaunch struct {
@@ -110,9 +116,11 @@ func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	claude, sidera, mcpConfig := a.executables()
 	switch {
 	case claude == "":
-		return proc.Started{}, errDependencyMissing{"claude"}
+		return proc.Started{}, errDependencyMissing{program: "claude"}
+	case claudeProblem(claude, hostOS) != "":
+		return proc.Started{}, errDependencyMissing{program: "claude", detail: claudeProblem(claude, hostOS)}
 	case sidera == "":
-		return proc.Started{}, errDependencyMissing{"sidera"}
+		return proc.Started{}, errDependencyMissing{program: "sidera"}
 	}
 	line, err := claudeargs.UserLine(l.attempt, l.text)
 	if err != nil {

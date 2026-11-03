@@ -496,6 +496,14 @@ func absPath(elem ...string) string {
 	return filepath.Join(append([]string{filepath.VolumeName(os.TempDir()) + string(filepath.Separator)}, elem...)...)
 }
 
+// exeSuffix is the extension of a native executable: Windows uses only those.
+var exeSuffix = func() string {
+	if hostOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}()
+
 var (
 	claudeHome  = absPath("claude")
 	projectsDir = filepath.Join(claudeHome, "projects")
@@ -503,7 +511,7 @@ var (
 	recordDir   = func() string { d, _ := record.Dir(projectsDir, workDir); return d }()
 	stateDir    = absPath("state")
 	siderPath   = absPath("bin", "sidera")
-	claudePath  = absPath("bin", "claude")
+	claudePath  = absPath("bin", "claude"+exeSuffix)
 )
 
 // newApp builds the adapter on the world and takes it through initialize and

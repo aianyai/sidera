@@ -35,7 +35,9 @@ Sidera does not install the agents themselves. To drive one, install it first
 and log in once as yourself:
 
 - **Claude Code**: the `claude` command must be on the `PATH` of the daemon and
-  signed in.
+  signed in. On Windows the daemon needs the native installer's `claude.exe`, not
+  the npm `claude.cmd` wrapper, which runs through `cmd.exe`: the probe reports
+  `claude` as missing and no session can be created with it.
 - **Codex**: the `codex` command must be on the `PATH` of the daemon and signed
   in. On Windows the daemon needs `codex.exe`, not a `.cmd` wrapper. Sidera runs
   Codex through its App Server, an experimental interface; the adapter was

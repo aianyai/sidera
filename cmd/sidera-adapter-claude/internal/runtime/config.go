@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
@@ -49,6 +50,23 @@ func (a *App) findExecutable(configured, name string) string {
 		return ""
 	}
 	return abs
+}
+
+// hostOS is the operating system the adapter runs on, for the rules that differ by it.
+const hostOS = goruntime.GOOS
+
+// claudeProblem says why the Claude executable at path cannot be used on the
+// operating system goos, empty when it can. On Windows only the native claude.exe
+// can: the npm wrapper claude.cmd, which a PATH lookup finds through PATHEXT, is
+// started through cmd.exe, so the turn process the adapter must recognise by its
+// executable is cmd.exe's child and a multi-line argument is cut at the first
+// line break.
+func claudeProblem(path, goos string) string {
+	if goos == "windows" && !strings.EqualFold(filepath.Ext(path), ".exe") {
+		return "claude is " + path + ", which is not a native claude.exe: a wrapper (claude.cmd) starts through cmd.exe, " +
+			"which Sidera cannot recognise as a turn or give a multi-line prompt; install Claude Code with its native installer"
+	}
+	return ""
 }
 
 // resolvedPreset is a preset ready to start a turn with: its values, the
