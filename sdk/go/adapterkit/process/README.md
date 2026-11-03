@@ -10,6 +10,11 @@ process is detached on each platform are specified in
 [the adapter-protocol reference](../../../../docs/references/adapter-protocol/README.md)
 ("Native processes"); this file is the guide to the code.
 
+The daemon uses `Start` and `HostDetachment` too: on Windows a program cannot replace
+itself in place, so the `sidera` program restarts the daemon by starting itself
+detached with them and exiting. The same rules apply to that start; "adapter" in this
+file and in `Detachment.Caveat` then means the process that calls `Start`.
+
 ## Entry points
 
 | Name | Purpose |
