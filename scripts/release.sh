@@ -10,15 +10,15 @@
 # An archive holds, at its top level, sidera, sidera-adapter-console (which is also
 # the owner's command-line client), LICENSE, THIRD_PARTY_NOTICES and README.txt. The adapters' programs
 # are only inside their packages, adapters/<name>/, ready for `sidera adapter
-# install`; the Claude adapter is built for darwin only.
+# install`.
 # The workflow .github/workflows/release.yml runs this script, and so can anyone
 # who wants to check what a release would contain.
 set -euo pipefail
 
 module=github.com/aianyai/sidera
 platforms="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
-# The adapters, each shipped as a package. The Claude adapter's manifest lists the
-# darwin platforms only (cmd/sidera-adapter-claude), so it is built for those.
+# The adapters, each shipped as a package for every platform above: an adapter
+# whose manifest lists fewer makes its `package` subcommand refuse and the script stop.
 adapters="claude codex console"
 
 if [ "$#" -ne 2 ]; then
@@ -117,7 +117,6 @@ for platform in $platforms; do
   files=("sidera$exe" "sidera-adapter-console$exe")
   mkdir -p "$work/$name-bin"
   for adapter in $adapters; do
-    if [ "$adapter" = claude ] && [ "$goos" != darwin ]; then continue; fi
     binary=$work/$name-bin/sidera-adapter-$adapter$exe
     [ "$adapter" = console ] && binary=$stage/sidera-adapter-console$exe
     build "$goos" "$goarch" "sidera-adapter-$adapter" "$binary"

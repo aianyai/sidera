@@ -189,17 +189,16 @@ on `main`.
 version stamped into every program (see
 [`internal/release`](../../../internal/release/README.md)), for darwin/arm64,
 darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64: `sidera`,
-`sidera-adapter-codex` and `sidera-adapter-console`, and `sidera-adapter-claude` on
-darwin only, since its manifest lists darwin only. Each adapter's `package`
-subcommand then writes its package, which is where a package gets the release
-version in its manifest. An adapter's program is shipped inside its package and
+`sidera-adapter-claude`, `sidera-adapter-codex` and `sidera-adapter-console`. Each adapter's
+`package` subcommand then writes its package (and refuses a platform its manifest does not list),
+which is where a package gets the release version in its manifest. An adapter's program is shipped inside its package and
 nowhere else, except the console's, which is also the top-level
 `sidera-adapter-console` because the same program is the owner's command-line
 client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 
 | File | Holds |
 | ---- | ----- |
-| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and, in the darwin archives only, `adapters/claude/`) |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and `adapters/claude/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
