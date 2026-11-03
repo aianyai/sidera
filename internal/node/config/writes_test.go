@@ -26,7 +26,6 @@ func TestExportedWriteListsAreTheDocumentedOnes(t *testing.T) {
 		"backup":       {[]txn.Write{config.BackupWrite()}, []txn.Write{{Role: "backup", Op: txn.OpReplace}}},
 		"revocation":   {[]txn.Write{config.RevocationWrite()}, []txn.Write{{Role: "revocation", Op: txn.OpReplace}}},
 		"install": {config.InstallWrites(), []txn.Write{
-			{Role: "stale", Op: txn.OpDiscard, Optional: true, Prepare: true},
 			{Role: "version", Op: txn.OpRenameDir, Prepare: true},
 			{Role: "current", Op: txn.OpReplace},
 		}},

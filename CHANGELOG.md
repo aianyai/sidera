@@ -19,6 +19,17 @@ protocol has a version of its own.
   and `checksums.txt` also carry a GitHub artifact attestation, checked with
   `gh attestation verify <file> -R aianyai/sidera`. Releases up to 0.10.0 carry neither.
 
+### Changed
+
+- **Installing another version of an adapter no longer needs its instances disabled.**
+  `sidera adapter install` replaces the package of an adapter that runs as it already did
+  for a rebuild of the same version: the enabled instances restart on the new files and keep
+  their session endpoints, and the new adapter takes the sessions back. An upgrade is now
+  one `install` per adapter, with no `disable` and `enable`, so it no longer closes the
+  sessions of the node. Replacing the package of an adapter that runs stays a request of the
+  local owner. An instance you disabled whose process is still ending no longer makes
+  `install` wait: the old files stay on the disk until the next start of the daemon.
+
 ## [0.10.0] - 2026-11-03
 
 The Claude Code adapter now runs on Linux and Windows, as the Codex adapter already did, and

@@ -39,22 +39,23 @@ type AdapterInstalled struct {
 }
 
 // InstallAdapterOp is the operation that installs the adapter package in the
-// directory the owner names, or upgrades the adapter to its version, or replaces the
-// package of the same version when its contents differ (a rebuilt package that kept
+// directory the owner names, or replaces the installed one with it: another version
+// (an upgrade), or the same version with other contents (a rebuilt package that kept
 // its version). The package is copied outside the loop into a directory next to the
 // versions of its adapter, and
 // the copy is what is parsed and checked (the manifest, and that the package runs
 // on this platform), so that what is installed is what was checked and not what the
 // source may have become; the loop only renames the copy into place and makes it
 // current. A request that was done before is answered without reading the package.
-// An adapter that has an enabled instance, or a disabled one whose process is
-// still ending, is not upgraded to another version: the process runs the version that
-// is current and keeps its files. The same version with other contents is installed
-// under a directory of its own and the instances that run are restarted after the
-// commit, as a change of the presets restarts them, to run the new files. Contents
-// that are the same (by the digest staging computed) are installed already and only
-// the result is stored. encode makes the result; it runs in the loop and must not
-// wait.
+// A package that replaces one that enabled instances run is installed under a
+// directory of its own and the instances are restarted after the commit, as a change
+// of the presets restarts them, to run the new files; their session endpoints stay
+// open, and the new adapter takes the sessions back as any restarted adapter does.
+// The files they ran from, and those the process of a disabled instance that is still
+// ending runs from, are held and not discarded until the repair at the next start, so
+// nothing is refused for an instance. Contents that are the same (by the digest staging
+// computed) are installed already and only the result is stored. encode makes the
+// result; it runs in the loop and must not wait.
 func InstallAdapterOp(source string, encode func(AdapterInstalled) ([]byte, error)) Operation {
 	return &installAdapterOp{source: source, encode: encode}
 }
@@ -159,9 +160,6 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	}
 	tx := e.d.Writer.Begin(&declAdapterInstall)
 	defer tx.Close()
-	if err := plan.DiscardStale(tx); err != nil {
-		return nil, err
-	}
 	if err := plan.Promote(tx); err != nil {
 		return nil, err
 	}

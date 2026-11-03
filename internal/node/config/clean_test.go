@@ -82,13 +82,13 @@ func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 			done()
 			return nil
 		}},
-		{"an installation refused for an adapter in use", func() error {
+		{"an installation planned and dropped without being carried out", func() error {
 			staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
 			if err != nil {
 				return err
 			}
-			if _, err := c.PlanInstall(staged, nil); err == nil {
-				t.Error("an adapter with enabled instances was planned for an upgrade")
+			if _, err := c.PlanInstall(staged, nil); err != nil {
+				t.Errorf("an adapter with enabled instances was not planned for an upgrade: %v", err)
 			}
 			return c.Unstage(staged)
 		}},

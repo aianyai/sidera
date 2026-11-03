@@ -52,10 +52,11 @@ func AdapterVersionsDir(id string) string { return AdapterDir(id) + "/" + versio
 func AdapterVersionDir(id, version string) string { return AdapterVersionsDir(id) + "/" + version }
 
 // AdapterRevisionDir is the immutable package directory of one version at one
-// revision. Revision 0 is the directory of the version itself; installing the
-// same version again with other contents needs a directory of another name, so
-// that the pointer's replacement is what switches packages and no directory is
-// ever replaced in place. The "~" cannot be part of a version.
+// revision. Revision 0 is the directory of the version itself; a package that is
+// installed when that name is taken (the same version again with other contents, or a
+// version that was replaced earlier and may still be run from) needs a directory of
+// another name, so that the pointer's replacement is what switches packages and no
+// directory is ever replaced in place. The "~" cannot be part of a version.
 func AdapterRevisionDir(id, version string, revision uint32) string {
 	if revision == 0 {
 		return AdapterVersionDir(id, version)

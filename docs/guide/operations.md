@@ -74,7 +74,8 @@ Do one machine at a time and check it is healthy before the next. The node's
 identity, trust and presets stay where they are; you do not run `init` again.
 Read the release notes on the release page first: if a release needs a one-time
 manual step on existing nodes, they say so. Let the work that agents are doing on
-the node finish first: the upgrade ends their sessions, as step 4 explains.
+the node finish first: the node is out of reach while its daemon is stopped, and the
+adapters restart.
 
 1. Stop the daemon and wait until it has exited. `sidera daemon stop` returns as
    soon as the daemon has accepted the request, before the process is gone, so
@@ -140,49 +141,25 @@ the node finish first: the upgrade ends their sessions, as step 4 explains.
 3. Start the daemon again, the way you started it before, from your home directory
    (not from one that may be deleted, such as a git worktree).
 
-4. Move each adapter instance to the new release. When the new release has the same
-   adapter version as the installed one (a rebuild, which `sidera adapter list`
-   shows by the version it prints), plain `sidera adapter install` is enough:
+4. Install the new release's package of each adapter:
 
    ```sh
    sidera adapter install ~/sidera-release/adapters/<adapter>
    ```
 
-   It replaces the package and restarts the enabled instances of that adapter, which
-   then run the new files and keep their sessions. Nothing is disabled.
-
-   A new adapter version needs more, because `install` refuses another version of
-   an adapter while an instance of it is enabled (`conflict/adapter_in_use`). If
-   `install` answers that, do the following for each instance in `sidera adapter list`
-   (for example `console`, `codex`, `claude`):
-
-   ```sh
-   sidera adapter disable <instance>
-   sidera adapter install ~/sidera-release/adapters/<adapter>
-   sidera adapter enable <adapter-id> --instance <instance>
-   ```
-
-   **Disabling ends that instance's sessions.** Their endpoints in Sidera are
-   closed, so no message reaches them or comes from them any more. The sessions of
-   the agent itself are kept as history: when the instance runs again, the node asks
-   the adapter to release them. A Codex thread is archived and unloaded, and its
-   record stays; the running turn of a Claude Code session is interrupted and its
-   transcript stays. A Codex session in the middle of a turn is released only after
-   the turn ends. Start new sessions afterwards: a closed endpoint stays closed. If
-   `install` still answers `adapter_in_use` right after `disable`, the old adapter
-   process is still ending: wait a few seconds and run it again.
-
-   **Do not send to a node while its instances are disabled.** A message for an
-   endpoint that was closed is rejected with `endpoint_closed`; the sender is told
-   and Sidera does not retry it. Wait until the instances are enabled again and the
-   new sessions exist.
+   It replaces the installed package, whether the new release carries another version
+   of the adapter or the same version rebuilt, and restarts the enabled instances of
+   that adapter, which then run the new files. Nothing is disabled: the instances keep
+   their session endpoints, and the new adapter takes the sessions back as it does
+   after any restart. Run it for every adapter you use (`console`, `codex`, `claude`).
+   Replacing the package of an adapter that runs is a request the owner makes on the
+   node itself.
 
    What `install` prints says what it did to the adapter:
 
    - `replaced true`: an installed package of this adapter was replaced, either by
-     another version (for example 0.1.0 to 0.8.0, with the instances disabled) or by
-     the same version with other contents (a rebuild). A rebuild is not refused
-     while instances run: they restart and keep their sessions, as above.
+     another version (for example 0.1.0 to 0.8.0) or by the same version with other
+     contents (a rebuild). The instances that run restart.
    - `already_current true`: the package is the one installed, same version and
      same contents; nothing was changed.
    - neither: the adapter was not installed before.

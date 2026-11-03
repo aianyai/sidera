@@ -12,8 +12,12 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// checkpointVersion is the version of the checkpoints this adapter writes. A
-// checkpoint of another version is refused rather than guessed at.
+// checkpointVersion is the format version of the checkpoints this adapter writes.
+// The daemon keeps a checkpoint across an upgrade of the adapter in place, and a
+// session survives it only if the new version reads what the earlier ones wrote:
+// when a format changes, the decoders below keep reading every older format. A
+// checkpoint of a version newer than this adapter knows, which only a later adapter
+// wrote, is refused rather than guessed at.
 const checkpointVersion = 1
 
 // attemptCheckpoint is what a creation attempt stores with the daemon: the state
@@ -77,7 +81,7 @@ func decodeAttemptCheckpoint(raw json.RawMessage) (attemptCheckpoint, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return c, fmt.Errorf("attempt checkpoint: %w", err)
 	}
-	if c.V != checkpointVersion {
+	if c.V != checkpointVersion { // the one format so far; see checkpointVersion
 		return c, fmt.Errorf("attempt checkpoint: version %d is not %d", c.V, checkpointVersion)
 	}
 	return c, nil
@@ -106,7 +110,7 @@ func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return c, fmt.Errorf("session checkpoint: %w", err)
 	}
-	if c.V != checkpointVersion {
+	if c.V != checkpointVersion { // the one format so far; see checkpointVersion
 		return c, fmt.Errorf("session checkpoint: version %d is not %d", c.V, checkpointVersion)
 	}
 	if c.Session == "" || c.RecordDir == "" || c.Cwd == "" {

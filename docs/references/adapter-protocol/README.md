@@ -651,6 +651,16 @@ adapter stops, nor when the owner removes the instance from the configuration, b
 process the adapter started (a detached server, a turn) may outlive the adapter and still use it. It is a path the adapter is given, not a place it chooses, because the layout of
 the data directory is the daemon's.
 
+**Checkpoints and state across versions.** The daemon installs another version of an
+adapter while its instances are enabled: it restarts them on the new program, keeps their
+session endpoints open and hands the new process what the old one stored, the checkpoints of
+`checkpoint.put` and the state directory. A session therefore survives the upgrade only if the
+new version reads the checkpoint formats and the state files of every earlier version it can be
+upgraded from; an adapter that changes one of them keeps reading the old form, as the formats of
+the native processes below are kept. It may refuse a format newer than any it knows, which is an
+adapter that was replaced by an older version, and it refuses it rather than guessing at it. The
+daemon does not check this: it cannot read what it stores for the adapter.
+
 **Attached sessions.** A session endpoint comes from one of two origins: it is created by
 `session.create`, or it is attached, at the request of a session that a person opened and
 that asked to be attached, through the local owner's management interface. The runtime

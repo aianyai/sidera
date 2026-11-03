@@ -333,9 +333,6 @@ func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Tim
 	}
 	tx := w.Begin(installDecl)
 	defer tx.Close()
-	if err := plan.DiscardStale(tx); err != nil {
-		t.Fatal(err)
-	}
 	if err := plan.Promote(tx); err != nil {
 		t.Fatal(err)
 	}

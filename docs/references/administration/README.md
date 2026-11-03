@@ -45,8 +45,8 @@ remote management exists: a level that cannot yet be exercised
 remotely cannot be validated, setting it now would be a guess, and loosening it
 later is a one-line change of the catalogue guarded by tests, while tightening
 it after remote people depend on it would take their capability away.
-Installing a package that replaces the one an enabled instance runs (the same version with
-other contents) is judged as enabling it: the instance restarts on the new program, so it is
+Installing a package that replaces the one an enabled instance runs (another version, or the
+same version with other contents) is judged as enabling it: the instance restarts on the new program, so it is
 no weaker than letting the machine run that code. Only the installation knows it is one, so
 the interface authorizes the request as an installation and the installation authorizes it
 again as the replacing one (`Operation.ReplacesEnabled`), refusing a request whose actor is

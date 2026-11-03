@@ -29,7 +29,7 @@ config/
   revocations/<digest>.rec   revocation records the node keeps (record wire bytes)
   adapters/<id>/current                 {"format": 1, "version": "1.2.3", "digest"?, "revision"?}
   adapters/<id>/versions/<version>/     one installed package, never changed
-  adapters/<id>/versions/<version>~<n>/ the same version installed again with other contents, revision n
+  adapters/<id>/versions/<version>~<n>/ a package of a version whose directory was taken, revision n
   adapters/<id>/versions/.stage-<hex>/  a package being installed
 ```
 
@@ -372,7 +372,7 @@ because deleting `state/` must not make a retired identity usable again.
 ```
 adapters/example/current                 {"format": 1, "version": "1.2.3", "digest": "<64 hex>", "revision": 1}
 adapters/example/versions/1.2.3/         sidera-adapter.json, bin/…, any files
-adapters/example/versions/1.2.3~1/       the same version installed again, other contents
+adapters/example/versions/1.2.3~1/       a package of the version when versions/1.2.3 was taken
 adapters/example/versions/.stage-<hex>/  a copy being installed
 ```
 
@@ -385,10 +385,12 @@ of the directory. A package never changes after it is installed.
 copied them: every directory by its relative path and every file by its path, length
 and bytes, in sorted order. A file's mode is not part of it (the program's follows from
 the manifest, which is). It is how an installation tells the same package from a
-rebuilt one of the same version. `revision` is the number of times the version was
-installed again with other contents: the directory of revision 0 is `versions/<version>`
-and of revision n `versions/<version>~n` (a `~` is not part of a version, so the
-names never meet). Both are absent in a pointer written before they existed: the
+rebuilt one of the same version. `revision` numbers the directories of one version: the
+directory of revision 0 is `versions/<version>` and of revision n `versions/<version>~n` (a
+`~` is not part of a version, so the names never meet). An installation takes the first
+revision whose directory does not exist, counting on from the current one when the version
+is the one installed, because a directory of the version that exists may be the package
+that was replaced, which a process may still run from, or one a failed installation left. Both are absent in a pointer written before they existed: the
 digest is then unknown, so the first installation of the version replaces that package,
 and the revision is 0. A pointer that carries `"digest": ""` or `"revision": 0` is
 invalid, like any optional field written empty.
@@ -411,26 +413,25 @@ invalid, like any optional field written empty.
    never wait for it.
 2. In the loop, `PlanInstall` and the transaction it plans in the same command,
    so that nothing changes between the plan and its writes. The transaction:
-   discard a leftover directory of the version if
-   there is one; rename the staging directory to its directory (`versions/<version>`,
-   or `versions/<version>~n` with n one more than the revision installed when the
-   version is the one that is installed); replace
-   `current` (the commit point); the caller's own result write; discard the
-   previous package. An adapter that has an enabled instance is not upgraded to
-   another version (`adapter_in_use`): it runs the version that is current, and the
-   owner disables it first. Nor is one whose disabled instance still has a process
-   ending, which the caller that runs the adapters says through the `StillEnding`
-   it passes to `PlanInstall`: the process may hold the files of the version the
-   installation discards. The same version with the same digest as the one that is
-   current is "already installed" and writes nothing. The same version with another
-   digest (a rebuilt package that kept its version) replaces the package under the next
-   revision, and the instances that run are not refused: they keep running the files they
-   were started from, the pointer names the new directory, and the caller restarts them.
-   While an instance of the adapter is enabled, or its process is ending, the
-   directory of the package that was replaced is not discarded, since a running
-   executable does not allow that on every platform; the repair at the next start
-   removes it. The result says whether the package is new, replaced or already
-   installed.
+   rename the staging directory to a directory that does not exist yet
+   (`versions/<version>`, or `versions/<version>~n` for the first n that is free);
+   replace `current` (the commit point); the caller's own result write; discard the
+   previous package. The same version with the same digest as the one that is
+   current is "already installed" and writes nothing. Any other package of the adapter
+   replaces the installed one, and the instances that run are not refused: they keep
+   running the files they were started from, the pointer names the new directory, and
+   the caller restarts them. That holds for the same version with another digest (a
+   rebuilt package that kept its version), and for another version. Nothing is refused
+   for an instance, enabled or not.
+   While an instance of the adapter is enabled, or a disabled one's process is still
+   ending (which the caller that runs the adapters says through the `StillEnding` it
+   passes to `PlanInstall`), the directory of the package that was replaced is not
+   discarded, since a running executable does not allow that on every platform; the
+   repair at the next start removes it. No other directory of the adapter is discarded
+   by an installation: a version that was replaced earlier and is installed again goes
+   to a directory of its own (`A`, then `B`, then `A` is `versions/A~1`), because the
+   earlier directory may still be run from. The result says whether the package is new,
+   replaced or already installed.
 3. An installation that did not install is unstaged by the install worker: when
    the result is "already installed", when it is refused, and when it failed
    with an error that is not fatal. Only the worker's own staging directory is dropped,
@@ -440,8 +441,8 @@ invalid, like any optional field written empty.
    current is not dropped here: the unstaging runs outside the loop and cannot tell
    it from one an installation committed in the meantime, and a directory removed
    under a pointer that names it would stop the next start. It is garbage like any
-   other directory the pointer does not name: the next installation of that name
-   discards it first, and the repair removes it at the next start. After a fatal
+   other directory the pointer does not name: the next installation takes another
+   name, and the repair removes it at the next start. After a fatal
    error the next start removes what is left.
 
 **The repair.** An adapter directory without `current`, a staging directory, and
@@ -468,7 +469,8 @@ change writes nothing and builds no result.
 | `peer_unknown` | removing a node that has no address in the book |
 | `instance_enabled`, `instance_in_use` | removing an instance that is enabled; removing one that has session endpoints open |
 | `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config` and `adapter remove`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
-| `adapter_not_installed`, `adapter_in_use` | enabling an adapter with no package; installing another version of an adapter with an enabled instance |
+| `adapter_not_installed` | enabling an adapter with no package |
+| `adapter_in_use` | none: no change returns it now (a package is installed whatever the instances of its adapter do), and the code stays in the vocabulary, which never loses a code |
 | `endpoint_unknown` | a setting for an endpoint that is neither stable nor open |
 
 The management layer owns the shape of a result. Because the version it
@@ -535,7 +537,7 @@ Transactions that span owners are declared by the package that composes them,
 with the roles `config` exports, and the write functions of `config` write only
 under those roles: `direct-register` and `runtime-admit` (`ids`, then the
 endpoint record), `backup-confirm` (`backup`, then the result), `identity-retire`
-(`revocation`, then the result), `adapter-install` (`stale`, `version`,
+(`revocation`, then the result), `adapter-install` (`version`,
 `current`, the result, `old`) and `init` (`dir`, `node`, `policy`, `presets`,
 `instances`, `network-config`, then the rest of `init`). The role of `network.json`
 is `network-config` because `network` is the network key in the same transaction.
@@ -634,9 +636,10 @@ preparation, so a crash leaves nothing that needs a rule other than "remove what
 the pointer does not name". The alternative, two renames (old out, new in),
 leaves a state with the package missing and needs a rule for it, and for a while
 there is no usable version. The same holds when the same version is installed again with
-other contents: the new package takes a directory of another name (the revision) so that
+other contents, or another version whose directory a package that was replaced still
+holds: the new package takes a directory that does not exist yet (the revision) so that
 the pointer, which then differs, is still the commit point, and no directory is ever
-replaced in place.
+replaced in place or discarded because its name was wanted.
 
 **The digest is kept in the pointer, not recomputed.** Telling a rebuilt package from
 the installed one by reading the installed directory again would read up to

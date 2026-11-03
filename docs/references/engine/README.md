@@ -321,24 +321,29 @@ or file of the package that cannot be read is refused as `invalid_argument` with
 detail `source_unreadable` and, in `Refusal.Path`, the place inside the package (empty
 when the directory the owner named is the fault). It then has
 the loop run the operation as any other, which looks the request up again (an identical
-resend may have arrived meanwhile), refuses an upgrade of an adapter that has an
-enabled instance, or a disabled one whose process the host still reports as ending
-(`Adapters.Stopping`), as `adapter_in_use` (the instance runs the version that is
-current, and a process that is ending may still hold its files, which a running
-executable does not allow to be removed on Windows),
-and commits one transaction, `adapter-install`: discard a leftover directory of the
-package, rename the copy to its directory, replace the pointer (the commit point), store
-the result, discard the package that was replaced. A package that is the installed one,
+resend may have arrived meanwhile), and commits one transaction, `adapter-install`:
+rename the copy to a directory that did not exist, replace the pointer (the commit point),
+store the result, discard the package that was replaced. That package is not discarded
+while a process may still run from it: an enabled instance does, and so does a disabled
+instance whose process the host still reports as ending (`Adapters.Stopping`), since a
+running executable cannot be removed on Windows. Nothing is refused for it, and a disabled
+instance is not started; its files are left to the repair at the next start. A package that is the installed one,
 the same version with the same contents (the digest staging computed), stores only its
 result (`adapter-install-current`), and `AdapterInstalled.AlreadyCurrent` lets the
-interface say so in that result. The same version with other contents is not refused for
-the instances that run, but it is for an actor who is not the local owner when an instance is
+interface say so in that result. A package that replaces the installed one, another
+version or the same version with other contents, is not refused for the instances that run,
+but it is for an actor who is not the local owner when an instance is
 enabled (`ReasonNotPermitted`, `refused/not_permitted`, checked before anything is replaced
 with `admin.Authorize` of `Operation.ReplacesEnabled`): it runs new code where the owner
 enabled the old, as enabling does. After the commit every enabled instance of the adapter is stopped
 and started again (`restartInstancesOf`, the restart a change of the presets uses), so
-that it runs the new files, and `AdapterInstalled.Replaced` says so; the directory of the
-package that was replaced is left to the repair while a process may still hold it. Last, the worker drops
+that it runs the new files, and `AdapterInstalled.Replaced` says so. The restart marks the
+instance offline and ends its connection only: its endpoints, session endpoints included,
+stay open, and `adapter.start` of the new process lists the open sessions for the adapter to
+take back; whether it can is the adapter's own obligation to read what earlier versions
+stored ([adapter-protocol](../adapter-protocol/README.md), "Checkpoints and state across
+versions"). Nothing the engine keeps is keyed on the adapter's version. The directory of the package that was replaced is left to the repair while a process
+may still hold it. Last, the worker drops
 what the commit did not take over (a refusal, a version found current, a resend that was
 answered) and only then is the request answered, so that a refused package leaves
 nothing and the answer never comes with staging still on the disk. After a fatal failure of the disk the worker
@@ -2046,12 +2051,13 @@ reproducible).
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |
 | The copy is what is judged | `operations_adapters.go` (`stagePackage`) | `TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource`, `TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree` |
-| The version that is current is installed again by storing its result; an upgrade needs no enabled instance | `operations_adapters.go`, `transactions.go` | `TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult`, `TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersion` |
+| The version that is current is installed again by storing its result; an adapter that does not run is upgraded and the old version discarded | `operations_adapters.go`, `transactions.go` | `TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult`, `TestUpgradingAnAdapterThatDoesNotRunReplacesTheVersion` |
+| A package that replaces the installed one, another version or the same version with other contents, is installed alike: the local owner only for an enabled instance, the instances restarted, the old files left | `operations_adapters.go` (`installAdapterOp.run`, `restartInstancesOf`) | `TestReplacingThePackageOfAnAdapterThatRunsRestartsTheInstance` |
 | After a fatal failure of the disk an installation writes nothing more | `manage.go` (`runPrepared`, `diskFailed`) | `TestAnInstallationWritesNothingMoreAfterAFatalFailureOfTheDisk` |
 | One installation at a time, counted by `Quiesce` | `manage.go` (`cmdPrepare`) | `TestOnlyOneInstallationRunsAtATime` |
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
-| An upgrade is refused while the process of a disabled instance is still ending | `operations_adapters.go` (`instanceStopping`), `config` (`PlanInstall`) | `TestUpgradingWhileTheProcessOfADisabledInstanceIsStillEndingIsRefused` |
+| A replacement is installed while the process of a disabled instance is still ending, which is not started, and the files it may hold are left | `operations_adapters.go` (`instanceStopping`), `config` (`PlanInstall`) | `TestReplacingThePackageWhileTheProcessOfADisabledInstanceIsStillEndingHoldsItsFiles` |
 | Disabling stops the instance, marks it offline, closes its endpoints | `operations_adapters.go` (`instanceDisabled`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints` |
 | A request of the adapter after the disabling is refused, and enabling again completes | `operations_adapters.go` (`instanceDisabled`) | `TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes` |
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |

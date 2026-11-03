@@ -358,7 +358,7 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) (string, erro
 // and, when the adapter was never installed and nothing else is staged beside it,
 // the directory of the adapter that the staging made. It touches nothing else: a
 // version directory that was renamed in and did not become current, like one a
-// crash left, is the repair's and the next installation's (DiscardStale), because
+// crash left, is the repair's, because
 // Unstage runs outside the writer loop and cannot tell such a directory from one
 // that an installation committed meanwhile. What is not there is not an error,
 // and with nothing to drop it writes nothing.
@@ -426,7 +426,7 @@ func stagedAlone(r fsx.Reader, s Staged) (bool, error) {
 // Install is the plan of the writes that make a staged package the current
 // version of its adapter. The composing package runs them in its own
 // transaction, in this order, with its own write between Point and DiscardOld:
-// DiscardStale, Promote, Point, DiscardOld. The commit point is the replacement
+// Promote, Point, DiscardOld. The commit point is the replacement
 // of the current pointer. PlanInstall, before the transaction begins, does every
 // check and encoding the writes need, so none of them can fail for a reason of
 // its own.
@@ -442,8 +442,7 @@ type Install struct {
 
 	c      *Config
 	staged Staged
-	dir    string // the directory the staged package is renamed to
-	stale  bool   // a directory of that name exists and is not current
+	dir    string // the directory the staged package is renamed to; no directory of that name exists
 	// previousDir is the directory of the package that is replaced, which the
 	// installation discards; empty for a first installation, and when a process
 	// of the adapter may still hold its files, in which case the repair of the
@@ -455,14 +454,27 @@ type Install struct {
 
 var errAlreadyCurrent = errors.New("config: the staged package is already current")
 
-// nextRevision is the revision the package of the given version takes when it is
-// installed over the one the pointer names: the next one when that is the same
-// version, whose directory has to differ from the one in use, and 0 otherwise.
-func nextRevision(cur AdapterCurrent, version string) uint32 {
+// freeRevision is the revision the package of the given version takes when it is
+// installed over the one the pointer names (cur, empty for a first installation):
+// the first whose directory does not exist, so that an installation never writes
+// into or discards a directory it did not make. A directory of that version that
+// exists is the package the pointer names, one that was replaced while a process
+// may still run from it, or one a failed installation left; the repair removes
+// those that the pointer does not name. Revisions of the version that is current
+// count on from the current one, so a package that is installed again is never
+// given the name of a directory that was discarded a moment ago.
+func freeRevision(r fsx.Reader, id, version string, cur AdapterCurrent) (uint32, error) {
+	revision := uint32(0)
 	if cur.Version == version {
-		return cur.Revision + 1
+		revision = cur.Revision + 1
 	}
-	return 0
+	for {
+		there, err := fsx.Exists(r, AdapterRevisionDir(id, version, revision))
+		if err != nil || !there {
+			return revision, err
+		}
+		revision++
+	}
 }
 
 // StillEnding says whether a process of the instance is still being ended. Config
@@ -472,20 +484,16 @@ type StillEnding func(instance string) bool
 // PlanInstall plans the installation of a staged package.
 //
 // The same version with the same contents (the digest the staging computed) is
-// already installed and writes nothing. The same version with other contents
-// replaces the package under a new directory, the pointer's replacement being what
-// switches to it; the processes of the adapter keep running the files they were
-// started from, so the instances that run are not refused, and the caller restarts
-// them. The directory they run from is not discarded while one may still hold it
-// (an enabled instance, or a disabled one whose process is ending): a running
-// executable does not allow that on every platform, and the repair of the adapter
-// directory removes it at the next start.
-//
-// Another version is not installed over an adapter that has an enabled instance: the
-// instance runs the version that is current, so the change is refused with
-// ChangeAdapterInUse until the owner has disabled it. Neither is one whose disabled
-// instance still has a process ending (ending says so; nil says none does). A
-// first installation has no such instance to disturb.
+// already installed and writes nothing. Any other package of the adapter, another
+// version or the same version with other contents, replaces the installed one under
+// a directory of its own, one that does not exist yet, the pointer's replacement
+// being what switches to it; the processes of the adapter keep running the files
+// they were started from, so no instance is refused, and the caller restarts the
+// enabled ones. The directory they run from is not discarded while one may still
+// hold it (an enabled instance, or a disabled one whose process is still ending;
+// ending says so, and nil says none is): a running executable does not allow that on
+// every platform, and the repair of the adapter directory removes it at the next
+// start. No other directory of the adapter is discarded either, for the same reason.
 func (c *Config) PlanInstall(s Staged, ending StillEnding) (Install, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
@@ -498,22 +506,17 @@ func (c *Config) PlanInstall(s Staged, ending StillEnding) (Install, error) {
 			plan.AlreadyCurrent = true
 			return plan, nil
 		}
-		held, err := holdsFiles(st, s.ID, ending, cur.Version == s.Version)
-		if err != nil {
-			return Install{}, err
-		}
 		plan.Replaced = true
-		if !held {
+		if !holdsFiles(st, s.ID, ending) {
 			plan.previousDir = installed.Dir()
 		}
 	}
-	plan.next = AdapterCurrent{Version: s.Version, Digest: s.Digest, Revision: nextRevision(cur, s.Version)}
-	plan.dir = AdapterRevisionDir(s.ID, s.Version, plan.next.Revision)
-	stale, err := fsx.Exists(c.w.Reader(), plan.dir)
+	revision, err := freeRevision(c.w.Reader(), s.ID, s.Version, cur)
 	if err != nil {
 		return Install{}, err
 	}
-	plan.stale = stale
+	plan.next = AdapterCurrent{Version: s.Version, Digest: s.Digest, Revision: revision}
+	plan.dir = AdapterRevisionDir(s.ID, s.Version, revision)
 	if plan.current, err = EncodeAdapterCurrent(plan.next); err != nil {
 		return Install{}, err
 	}
@@ -521,45 +524,19 @@ func (c *Config) PlanInstall(s Staged, ending StillEnding) (Install, error) {
 }
 
 // holdsFiles says whether a process of an instance of the adapter may hold the files
-// of the installed package. A package of another version is refused while that is
-// so (sameVersion false); the same version with other contents is not refused, and
-// the answer tells the caller to leave the old files alone.
-func holdsFiles(st state, adapter string, ending StillEnding, sameVersion bool) (bool, error) {
-	held := false
-	version := st.adapters[adapter].Version
+// of the installed package, which the caller must then leave alone: an enabled
+// instance runs them, and a disabled one may still have a process that is ending.
+func holdsFiles(st state, adapter string, ending StillEnding) bool {
 	for _, name := range sortedKeys(st.instances.Items) {
 		in := st.instances.Items[name]
 		if in.Adapter != adapter {
 			continue
 		}
-		var why string
-		switch {
-		case in.Enabled:
-			why = fmt.Sprintf("the instance %q is enabled and runs version %s", name, version)
-		case ending != nil && ending(name):
-			why = fmt.Sprintf("the process of the disabled instance %q, which runs version %s, is still ending", name, version)
-		default:
-			continue
+		if in.Enabled || (ending != nil && ending(name)) {
+			return true
 		}
-		if !sameVersion {
-			return false, &ChangeError{Reason: ChangeAdapterInUse, Field: "instances." + name, Err: errors.New(why)}
-		}
-		held = true
 	}
-	return held, nil
-}
-
-// DiscardStale discards a leftover directory of the version, under RoleStale:
-// the staging directory is renamed to that name next, and the rename needs the
-// name to be free. It writes nothing when there is none.
-func (i Install) DiscardStale(tx *txn.Tx) error {
-	if i.AlreadyCurrent {
-		return errAlreadyCurrent
-	}
-	if !i.stale {
-		return nil
-	}
-	return tx.Discard(RoleStale, i.dir)
+	return false
 }
 
 // Promote renames the staging directory to the version, under RoleVersion.

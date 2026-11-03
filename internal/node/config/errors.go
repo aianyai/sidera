@@ -156,8 +156,9 @@ const (
 	ChangeEndpointUnknown
 	// ChangeAdapterNotInstalled: the adapter has no installed package.
 	ChangeAdapterNotInstalled
-	// ChangeAdapterInUse: an upgrade of an adapter that still has an enabled
-	// instance.
+	// ChangeAdapterInUse: an adapter that an instance is using. No change returns
+	// it now (a package is installed over an adapter whatever its instances do);
+	// the reason stays because its wire code is part of the stable vocabulary.
 	ChangeAdapterInUse
 	// ChangeNothingToChange: a patch that names no setting.
 	ChangeNothingToChange

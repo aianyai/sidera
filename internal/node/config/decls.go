@@ -23,11 +23,9 @@ const (
 	RoleBackup = "backup"
 	// RoleRevocation writes one revocation record.
 	RoleRevocation = "revocation"
-	// RoleStale, RoleVersion, RoleCurrent and RoleOld are the writes of an
-	// adapter installation: discard a leftover directory of the version,
-	// rename the staging directory to the version, replace the current pointer,
-	// discard the previous version.
-	RoleStale   = "stale"
+	// RoleVersion, RoleCurrent and RoleOld are the writes of an adapter
+	// installation: rename the staging directory to the version, replace the
+	// current pointer, discard the previous version.
 	RoleVersion = "version"
 	RoleCurrent = "current"
 	RoleOld     = "old"
@@ -66,13 +64,12 @@ func BackupWrite() txn.Write { return txn.Write{Role: RoleBackup, Op: txn.OpRepl
 func RevocationWrite() txn.Write { return txn.Write{Role: RoleRevocation, Op: txn.OpReplace} }
 
 // InstallWrites are the writes of adapter-install up to and including the
-// current pointer, in the order of Install's methods: DiscardStale and Promote
-// are preparation (a crash before the pointer changes leaves a directory
-// adapter-gc discards), and Point is the commit point. The composer's own write
+// current pointer, in the order of Install's methods: Promote is preparation (a
+// crash before the pointer changes leaves a directory adapter-gc discards), and
+// Point is the commit point. The composer's own write
 // follows, then InstallOldWrite.
 func InstallWrites() []txn.Write {
 	return []txn.Write{
-		{Role: RoleStale, Op: txn.OpDiscard, Optional: true, Prepare: true},
 		{Role: RoleVersion, Op: txn.OpRenameDir, Prepare: true},
 		{Role: RoleCurrent, Op: txn.OpReplace},
 	}

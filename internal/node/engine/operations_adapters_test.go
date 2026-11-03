@@ -303,13 +303,18 @@ func changeReason(t testing.TB, err error) config.ChangeReason {
 	return ce.Reason
 }
 
-func installedVersion(cfg *config.Config, id string) (string, bool) {
+func installedAdapter(cfg *config.Config, id string) (config.Adapter, bool) {
 	for _, a := range cfg.Adapters() {
 		if a.ID == id {
-			return a.Version, true
+			return a, true
 		}
 	}
-	return "", false
+	return config.Adapter{}, false
+}
+
+func installedVersion(cfg *config.Config, id string) (string, bool) {
+	a, ok := installedAdapter(cfg, id)
+	return a.Version, ok
 }
 
 // ---------------------------------------------------------------------------
@@ -595,9 +600,8 @@ func TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult(t *testing.T) {
 }
 
 // A new version replaces the old one, which is then gone, while no instance runs
-// the old one; while an instance of the adapter is enabled the upgrade is refused
-// and nothing is left of the copy.
-func TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersion(t *testing.T) {
+// the old one.
+func TestUpgradingAnAdapterThatDoesNotRunReplacesTheVersion(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10, withPackage("/src/relay1", relayPackage(t, "1.0.0")), withPackage("/src/relay2", relayPackage(t, "2.0.0")))
 	e := r.start()
@@ -607,23 +611,11 @@ func TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersio
 	if _, err := e.Execute(ctx, enableCommand(8, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
 		t.Fatal(err)
 	}
-	before := r.snapshot()
-	_, err := e.Execute(ctx, installCommand(9, "install 2", "/src/relay2"))
-	if got := changeReason(t, err); got != config.ChangeAdapterInUse {
-		t.Fatalf("the upgrade of an adapter that runs: %v, want it in use", err)
-	}
-	if !reflect.DeepEqual(before, r.snapshot()) {
-		t.Error("the refused upgrade left something on the disk")
-	}
-	if v, _ := installedVersion(r.cfg, "relay"); v != "1.0.0" {
-		t.Errorf("version %s is installed after the refusal", v)
-	}
-
 	if _, err := e.Execute(ctx, disableCommand(10, "disable", r.cfg.Instances().Version, "relay")); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, e)
-	if _, err := e.Execute(ctx, installCommand(11, "install 2 again", "/src/relay2")); err != nil {
+	if _, err := e.Execute(ctx, installCommand(11, "install 2", "/src/relay2")); err != nil {
 		t.Fatalf("the upgrade of an adapter that does not run: %v", err)
 	}
 	if v, _ := installedVersion(r.cfg, "relay"); v != "2.0.0" {
@@ -640,88 +632,107 @@ func TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersio
 	}
 }
 
-// A package of the version that is installed whose contents differ replaces it, with
-// the instances that run restarted to run the new files; the same contents again are
-// installed already and restart nothing; and the result says which of the three it was.
-func TestInstallingTheSameVersionWithOtherContentsReplacesItAndRestartsTheInstance(t *testing.T) {
-	noLeaks(t)
-	host := newHostDouble()
-	rebuilt := relayPackage(t, "1.0.0")
-	if err := fsx.Replace(rebuilt, setupTag, "lib/data.txt", []byte("rebuilt\n"), fsx.ModePrivate); err != nil {
-		t.Fatal(err)
-	}
-	r := newRig(t, 10, withAdapters(host), withPackage("/src/relay", relayPackage(t, "1.0.0")), withPackage("/src/rebuilt", rebuilt))
-	e := r.start()
-	var did engine.AdapterInstalled
-	if _, err := e.Execute(ctx, installCommandSeeing(90, "install", "/src/relay", &did)); err != nil || did.AlreadyCurrent || did.Replaced {
-		t.Fatalf("the first installation: %+v, %v, want a new adapter", did, err)
-	}
-	if _, err := e.Execute(ctx, enableCommand(91, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
-		t.Fatal(err)
-	}
-	adm, info := relayAdmission(t)
-	if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.AdapterStarted(ctx, "relay", adapterproto.StartResult{}); err != nil {
-		t.Fatal(err)
-	}
-	asked := len(host.asks())
-
-	// The management interface made the actor of every request: a person with full
-	// control may install, but not replace what an enabled instance runs.
-	remote := installCommandSeeing(94, "install rebuilt remotely", "/src/rebuilt", &did)
-	remote.Actor = admin.RemotePerson(ident.PersonID{}, admin.DeviceCert{})
-	if _, err := e.Execute(ctx, remote); err == nil || !reasonIs(err, engine.ReasonNotPermitted) {
-		t.Fatalf("a remote actor replacing the package of an enabled instance: %v, want ReasonNotPermitted", err)
-	}
-	if got := host.asks()[asked:]; len(got) != 0 {
-		t.Errorf("the host was asked for %v although the replacement was refused", got)
-	}
-	owner := installCommandSeeing(92, "install rebuilt", "/src/rebuilt", &did)
-	owner.Actor = admin.LocalOwner()
-	if _, err := e.Execute(ctx, owner); err != nil {
-		t.Fatalf("installing the rebuilt package: %v", err)
-	}
-	if !did.Replaced || did.AlreadyCurrent {
-		t.Errorf("the installation did %+v, want the package replaced", did)
-	}
-	if got := host.asks()[asked:]; !reflect.DeepEqual(got, []string{"stop:relay", "run:relay"}) {
-		t.Errorf("the host was asked for %v, want the instance stopped and started again", got)
-	}
-	if v, err := e.Adapter(ctx, "relay"); err != nil || v.Online {
-		t.Errorf("the instance after: %+v, %v; want it offline until the new process is taken on", v, err)
-	}
-	var relay config.Adapter
-	for _, a := range r.cfg.Adapters() {
-		if a.ID == "relay" {
-			relay = a
+// A package that replaces the one installed, another version or the same version
+// with other contents, is installed under a directory of its own whatever the
+// version: only the local owner may replace what an enabled instance runs, the
+// instance is restarted to run the new files, and the files it ran from stay for the
+// repair. The same package again is installed already and restarts nothing; the
+// result says which of the three it was.
+func TestReplacingThePackageOfAnAdapterThatRunsRestartsTheInstance(t *testing.T) {
+	rebuilt := func(t *testing.T) fsx.FS {
+		p := relayPackage(t, "1.0.0")
+		if err := fsx.Replace(p, setupTag, "lib/data.txt", []byte("rebuilt\n"), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
 		}
+		return p
 	}
-	if relay.Version != "1.0.0" || relay.Revision == 0 {
-		t.Fatalf("relay = %+v, want 1.0.0 installed again under a revision", relay)
-	}
-	if got, err := r.mem.ReadFile(path.Join(relay.Dir(), "lib/data.txt")); err != nil || string(got) != "rebuilt\n" {
-		t.Errorf("the file of the installed package = %q, %v", got, err)
-	}
+	for _, c := range []struct {
+		name         string
+		replacement  func(*testing.T) fsx.FS
+		version      string
+		wantRevision bool
+	}{
+		{"another version", func(t *testing.T) fsx.FS { return relayPackage(t, "2.0.0") }, "2.0.0", false},
+		{"the same version with other contents", rebuilt, "1.0.0", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			noLeaks(t)
+			host := newHostDouble()
+			r := newRig(t, 10, withAdapters(host), withPackage("/src/relay", relayPackage(t, "1.0.0")), withPackage("/src/other", c.replacement(t)))
+			e := r.start()
+			var did engine.AdapterInstalled
+			if _, err := e.Execute(ctx, installCommandSeeing(90, "install", "/src/relay", &did)); err != nil || did.AlreadyCurrent || did.Replaced {
+				t.Fatalf("the first installation: %+v, %v, want a new adapter", did, err)
+			}
+			if _, err := e.Execute(ctx, enableCommand(91, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+				t.Fatal(err)
+			}
+			adm, info := relayAdmission(t)
+			if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.AdapterStarted(ctx, "relay", adapterproto.StartResult{}); err != nil {
+				t.Fatal(err)
+			}
+			asked := len(host.asks())
 
-	asked = len(host.asks())
-	if _, err := e.Execute(ctx, installCommandSeeing(93, "install rebuilt again", "/src/rebuilt", &did)); err != nil {
-		t.Fatal(err)
-	}
-	if !did.AlreadyCurrent || did.Replaced {
-		t.Errorf("the same contents again did %+v, want them found installed", did)
-	}
-	if got := host.asks()[asked:]; len(got) != 0 {
-		t.Errorf("the host was asked for %v although nothing was replaced", got)
+			// The management interface made the actor of every request: a person with
+			// full control may install, but not replace what an enabled instance runs.
+			before := r.snapshot()
+			remote := installCommandSeeing(92, "install remotely", "/src/other", &did)
+			remote.Actor = admin.RemotePerson(ident.PersonID{}, admin.DeviceCert{})
+			if _, err := e.Execute(ctx, remote); err == nil || !reasonIs(err, engine.ReasonNotPermitted) {
+				t.Fatalf("a remote actor replacing the package of an enabled instance: %v, want ReasonNotPermitted", err)
+			}
+			if !reflect.DeepEqual(before, r.snapshot()) {
+				t.Error("the refused replacement left something on the disk")
+			}
+			if got := host.asks()[asked:]; len(got) != 0 {
+				t.Errorf("the host was asked for %v although the replacement was refused", got)
+			}
+
+			owner := installCommandSeeing(93, "install", "/src/other", &did)
+			owner.Actor = admin.LocalOwner()
+			if _, err := e.Execute(ctx, owner); err != nil {
+				t.Fatalf("replacing the package of an enabled instance: %v", err)
+			}
+			if !did.Replaced || did.AlreadyCurrent || did.Version != c.version {
+				t.Errorf("the installation did %+v, want %s to replace the package", did, c.version)
+			}
+			if got := host.asks()[asked:]; !reflect.DeepEqual(got, []string{"stop:relay", "run:relay"}) {
+				t.Errorf("the host was asked for %v, want the instance stopped and started again", got)
+			}
+			if v, err := e.Adapter(ctx, "relay"); err != nil || v.Online {
+				t.Errorf("the instance after: %+v, %v; want it offline until the new process is taken on", v, err)
+			}
+			installed, ok := installedAdapter(r.cfg, "relay")
+			if !ok || installed.Version != c.version || (installed.Revision != 0) != c.wantRevision {
+				t.Fatalf("relay = %+v, want %s (installed again under a revision: %v)", installed, c.version, c.wantRevision)
+			}
+			if ok, _ := fsx.Exists(r.mem, config.AdapterVersionDir("relay", "1.0.0")); !ok {
+				t.Error("the package the instance ran from was discarded")
+			}
+
+			asked = len(host.asks())
+			if _, err := e.Execute(ctx, installCommandSeeing(94, "install again", "/src/other", &did)); err != nil {
+				t.Fatal(err)
+			}
+			if !did.AlreadyCurrent || did.Replaced {
+				t.Errorf("the same package again did %+v, want it found installed", did)
+			}
+			if got := host.asks()[asked:]; len(got) != 0 {
+				t.Errorf("the host was asked for %v although nothing was replaced", got)
+			}
+		})
 	}
 }
 
 // Stopping an instance returns before its process has ended, and the process may
-// hold the files of the version that an upgrade discards: while the host says that
-// a process of a disabled instance is still ending the upgrade is refused as in use,
-// and once it has ended the same request is carried out.
-func TestUpgradingWhileTheProcessOfADisabledInstanceIsStillEndingIsRefused(t *testing.T) {
+// hold the files of the package it runs: while the host says that a process of a
+// disabled instance is still ending, a replacement is installed and those files stay
+// for the repair, as they do for an enabled instance, and the disabled instance is
+// not started.
+func TestReplacingThePackageWhileTheProcessOfADisabledInstanceIsStillEndingHoldsItsFiles(t *testing.T) {
 	noLeaks(t)
 	host := newHostDouble()
 	r := newRig(t, 10, withAdapters(host), withPackage("/src/relay1", relayPackage(t, "1.0.0")), withPackage("/src/relay2", relayPackage(t, "2.0.0")))
@@ -737,25 +748,19 @@ func TestUpgradingWhileTheProcessOfADisabledInstanceIsStillEndingIsRefused(t *te
 	}
 	settle(t, e)
 	host.setStopping("relay", true)
+	asked := len(host.asks())
 
-	before := r.snapshot()
-	_, err := e.Execute(ctx, installCommand(43, "install 2", "/src/relay2"))
-	if got := changeReason(t, err); got != config.ChangeAdapterInUse {
-		t.Fatalf("the upgrade while the process ends: %v, want it in use", err)
-	}
-	if !reflect.DeepEqual(before, r.snapshot()) {
-		t.Error("the refused upgrade left something on the disk")
-	}
-	if ok, _ := fsx.Exists(r.mem, config.AdapterVersionDir("relay", "1.0.0")); !ok {
-		t.Error("the version the process may hold was discarded")
-	}
-
-	host.setStopping("relay", false)
 	if _, err := e.Execute(ctx, installCommand(43, "install 2", "/src/relay2")); err != nil {
-		t.Fatalf("the upgrade once the process has ended: %v", err)
+		t.Fatalf("installing while the process of a disabled instance ends: %v", err)
 	}
 	if v, _ := installedVersion(r.cfg, "relay"); v != "2.0.0" {
 		t.Errorf("version %s is installed, want 2.0.0", v)
+	}
+	if ok, _ := fsx.Exists(r.mem, config.AdapterVersionDir("relay", "1.0.0")); !ok {
+		t.Error("the package the process may hold was discarded")
+	}
+	if got := host.asks()[asked:]; len(got) != 0 {
+		t.Errorf("the host was asked for %v although the instance is disabled", got)
 	}
 }
 

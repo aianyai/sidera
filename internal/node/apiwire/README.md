@@ -68,8 +68,8 @@ not import it: the words of the wire never enter the engine.
   stable code means try again later; it is never renamed, removed or reused for
   another meaning. It is not an uncertain message outcome, nor an inbox timeout.
 - **`not_permitted` is `refused`**: the actor may make the request but not have it do
-  what it would do here (an installation that replaces the package of an enabled instance
-  is the local owner's). It is `-32603` for an adapter, which makes no such request.
+  what it would do here (an installation that replaces the package of an enabled instance,
+  another version or the same one with other contents, is the local owner's). It is `-32603` for an adapter, which makes no such request.
 - **The refusals of an attached session are `refused`.** `attach_unsupported` (the
   adapter of the instance did not declare that it takes attached sessions) and
   `native_session_created` (the native session is one this node created and controls) say

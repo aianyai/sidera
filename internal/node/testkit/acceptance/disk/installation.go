@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 
@@ -32,7 +33,7 @@ func InspectInstalledPackage(r fsx.Reader, id string) (recipes.InstalledPackage,
 	if err != nil {
 		return recipes.InstalledPackage{}, err
 	}
-	out := recipes.InstalledPackage{Current: current.Version}
+	out := recipes.InstalledPackage{Current: current.Version, Dir: path.Base(config.AdapterRevisionDir(id, current.Version, current.Revision))}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name, ".") {
 			return recipes.InstalledPackage{}, fmt.Errorf("%w: unfinished package directory %s", recipes.ErrInstallationEffect, entry.Name)

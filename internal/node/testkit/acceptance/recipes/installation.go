@@ -24,7 +24,10 @@ type InstallOutcome struct {
 }
 
 type InstalledPackage struct {
+	// Current is the version the pointer names, and Dir the name of the directory
+	// that holds it among Versions, which lists every directory of the adapter.
 	Current  string
+	Dir      string
 	Versions []string
 }
 
@@ -46,7 +49,7 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 	const id = "acceptance-package"
 	v1 := PackageSpec{ID: id, Version: "1.0.0"}
 	v2 := PackageSpec{ID: id, Version: "2.0.0", NestedFile: true}
-	install := func(e scenario.Env, request byte, spec PackageSpec, current bool) error {
+	install := func(e scenario.Env, request byte, spec PackageSpec, current bool, versions ...string) error {
 		out, err := b.Installation.Install(e, admin.OperationID{request}, spec)
 		if err != nil {
 			return err
@@ -54,11 +57,14 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 		if out.Code != "" || out.ID != spec.ID || out.Version != spec.Version || out.AlreadyCurrent != current {
 			return fmt.Errorf("%w: install %s returned %+v", ErrInstallationEffect, spec.Version, out)
 		}
-		return checkInstalled(e, b.Installation, id, spec.Version, []string{spec.Version})
+		if versions == nil {
+			versions = []string{spec.Version}
+		}
+		return checkInstalled(e, b.Installation, id, spec.Version, versions)
 	}
 	// A failed pointer leaves the version directory that was renamed in: nothing
-	// outside the loop may remove it, so it stays for the next installation of that
-	// version to discard, or for the repair at the next start.
+	// outside the loop may remove it, so it stays for the repair at the next start,
+	// and the next installation of that version goes to a directory of its own.
 	failed := func(request byte) func(scenario.Env) error {
 		return func(e scenario.Env) error {
 			if err := b.Installation.FailPointer(e); err != nil {
@@ -85,7 +91,11 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 		cases = nil
 		steps = append(steps, scenario.Step{Name: "leave-failed-pointer", Do: failed(32)})
 	}
-	steps = append(steps, scenario.Step{Name: "upgrade", Do: func(e scenario.Env) error { return install(e, 34, v2, false) }})
+	upgraded := []string{v2.Version}
+	if rollback {
+		upgraded = []string{v2.Version, v2.Version + "~1"}
+	}
+	steps = append(steps, scenario.Step{Name: "upgrade", Do: func(e scenario.Env) error { return install(e, 34, v2, false, upgraded...) }})
 	if !rollback {
 		steps = append(steps, scenario.Step{Name: "install-current-version", Do: func(e scenario.Env) error { return install(e, 35, v2, true) }}, scenario.Step{Name: "reject-unsupported-package", Do: func(e scenario.Env) error {
 			spec := PackageSpec{ID: "acceptance-foreign", Version: "1.0.0", Unsupported: true}
@@ -111,9 +121,33 @@ func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 			return nil
 		},
 		Check: func(e scenario.Env) error {
+			if rollback {
+				// A restart may or may not have removed the directory the failed
+				// pointer left, and the installation that followed it may have been
+				// the retry or the first attempt.
+				return checkInstalledWithin(e, b.Installation, id, v2.Version, upgraded)
+			}
 			return checkInstalled(e, b.Installation, id, v2.Version, []string{v2.Version})
 		},
 	}
+}
+
+// checkInstalledWithin checks that the package the pointer names is there and that
+// no directory is there beyond the ones allowed.
+func checkInstalledWithin(e scenario.Env, ops InstallOps, id, current string, allowed []string) error {
+	got, err := ops.Inspect(e, id)
+	if err != nil {
+		return err
+	}
+	if got.Current != current || !slices.Contains(got.Versions, got.Dir) {
+		return fmt.Errorf("%w: package %s current=%s in %q, versions=%v", ErrInstallationEffect, id, got.Current, got.Dir, got.Versions)
+	}
+	for _, v := range got.Versions {
+		if !slices.Contains(allowed, v) {
+			return fmt.Errorf("%w: package %s has the directory %s, want only %v", ErrInstallationEffect, id, v, allowed)
+		}
+	}
+	return nil
 }
 
 func checkInstalled(e scenario.Env, ops InstallOps, id, current string, versions []string) error {

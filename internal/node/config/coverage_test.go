@@ -45,7 +45,7 @@ func TestTransactionsAreValid(t *testing.T) {
 		}
 	}
 	for _, role := range []string{config.RoleDir, config.RoleNode, config.RolePolicy, config.RolePresets, config.RoleInstances, config.RoleNetworkConfig,
-		config.RoleEndpointIDs, config.RoleBackup, config.RoleRevocation, config.RoleStale, config.RoleVersion, config.RoleCurrent, config.RoleOld} {
+		config.RoleEndpointIDs, config.RoleBackup, config.RoleRevocation, config.RoleVersion, config.RoleCurrent, config.RoleOld} {
 		if !fsx.ValidName(role) {
 			t.Errorf("role %q is not a valid name", role)
 		}

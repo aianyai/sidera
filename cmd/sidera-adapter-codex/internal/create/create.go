@@ -17,7 +17,12 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// CheckpointVersion is the format version of the checkpoint.
+// CheckpointVersion is the format version of the checkpoint this adapter writes.
+// The daemon keeps a checkpoint across an upgrade of the adapter in place, and a
+// session survives it only if the new version reads what the earlier ones wrote:
+// when the format changes, ParseCheckpoint keeps reading every older format. A
+// checkpoint of a version newer than this adapter knows, which only a later adapter
+// wrote, is refused rather than guessed at.
 const CheckpointVersion = 1
 
 // State is what is stored for an attempt.
@@ -51,7 +56,7 @@ func ParseCheckpoint(raw json.RawMessage) (State, error) {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return State{}, fmt.Errorf("create: unreadable checkpoint: %w", err)
 	}
-	if c.V != CheckpointVersion {
+	if c.V != CheckpointVersion { // the one format so far; see CheckpointVersion
 		return State{}, fmt.Errorf("create: checkpoint version %d is not %d", c.V, CheckpointVersion)
 	}
 	return State{ThreadID: c.ThreadID, Failed: c.Failed}, nil

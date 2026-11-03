@@ -162,7 +162,7 @@ The prompt turns and the endpoint defaults are not here: they are
   roles exported here, and writes config's files only through the functions here:
   `direct-register` and `runtime-admit` (`RoleEndpointIDs`), `backup-confirm`
   (`RoleBackup`), `identity-retire` (`RoleRevocation`), `adapter-install`
-  (`RoleStale`, `RoleVersion`, `RoleCurrent`, `RoleOld` in this order, the
+  (`RoleVersion`, `RoleCurrent`, `RoleOld` in this order, the
   current pointer being the commit point), `init` (`RoleDir`, `RoleNode`,
   `RolePolicy`, `RolePresets`, `RoleInstances`, `RoleNetworkConfig`).
 - Do every check and encoding a cross-owner transaction needs before `Begin`:
@@ -191,15 +191,19 @@ The prompt turns and the endpoint defaults are not here: they are
   only staging directories that no change reads. `Unstage` therefore drops only
   the staging directory it is given, and the adapter directory when that held nothing
   else and the adapter is not installed; a version directory that was renamed in and
-  never became current is left to `DiscardStale` and the repair, since `Unstage`
+  never became current is left to the repair, since `Unstage`
   cannot tell it from one an installation committed meanwhile.
 - Run `PlanInstall` and the transaction it plans in the same loop command, so
   that nothing changes between the plan and its writes. Pass it the `StillEnding`
   that asks the adapter host whether a process of an instance is still ending
-  (nil when nothing runs adapters), so that an adapter is not upgraded under it. The
-  plan's `Replaced` tells the caller to restart the instances that run: the same version
-  with other contents is installed under the next revision without refusing them. A
-  package is found at `Adapter.Dir()`, never at a path built from the version alone. Call `Unstage` when the
+  (nil when nothing runs adapters), so that the files a disabled instance's process may
+  still hold are not discarded; nothing is refused for it. The plan's `Replaced` tells the
+  caller to restart the instances that run: another version, or the same version with
+  other contents, is installed without refusing them. The package goes to a directory
+  that does not exist yet (the first free revision of its version), so no installation
+  discards a directory but the one of the package it replaces, and that one only when no
+  process may hold it. A package is found at `Adapter.Dir()`, never at a path built from
+  the version alone. Call `Unstage` when the
   result is `AlreadyCurrent`, when the installation is refused and when it
   failed with an error that is not fatal; after a fatal error the next start
   removes what is left.

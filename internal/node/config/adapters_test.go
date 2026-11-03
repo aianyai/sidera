@@ -59,16 +59,20 @@ func ensureState(t testing.TB, mem *fsxtest.Mem) { mkdirAll(t, mem, "state") }
 // install runs the installation of a staged package as the engine composes it.
 func install(t testing.TB, rg *rig, c *config.Config, staged config.Staged) error {
 	t.Helper()
+	return installAsking(t, rg, c, staged, nil)
+}
+
+// installAsking is install with the answer to whether the process of a disabled
+// instance is still ending.
+func installAsking(t testing.TB, rg *rig, c *config.Config, staged config.Staged, ending config.StillEnding) error {
+	t.Helper()
 	ensureState(t, rg.mem)
-	plan, err := c.PlanInstall(staged, nil)
+	plan, err := c.PlanInstall(staged, ending)
 	if err != nil || plan.AlreadyCurrent {
 		return err
 	}
 	tx := rg.w.Begin(testAdapterInstall)
 	defer tx.Close()
-	if err := plan.DiscardStale(tx); err != nil {
-		return err
-	}
 	if err := plan.Promote(tx); err != nil {
 		return err
 	}
@@ -519,8 +523,8 @@ func TestUnstage(t *testing.T) {
 func TestInstallBecomesCurrent(t *testing.T) {
 	t.Run("an upgrade", func(t *testing.T) {
 		rg, c := loaded(t)
-		// The instance is disabled first: an adapter with an enabled instance is
-		// not upgraded.
+		// The instance is disabled first: no process holds the files of the version
+		// that is replaced, so the installation discards it.
 		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(new([]config.Instances), `{}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -566,13 +570,14 @@ func TestInstallBecomesCurrent(t *testing.T) {
 			t.Errorf("gc work after a first installation = %+v", work)
 		}
 	})
-	t.Run("a leftover directory of the version is replaced", func(t *testing.T) {
+	t.Run("a leftover directory of the version is left for the repair and the package goes to a directory of its own", func(t *testing.T) {
 		rg, c := loaded(t)
 		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(new([]config.Instances), `{}`)); err != nil {
 			t.Fatal(err)
 		}
+		leftover := path.Join(config.AdapterVersionDir("example", "2.0.0"), "old-leftover")
 		mkdirAll(t, rg.mem, config.AdapterVersionDir("example", "2.0.0"))
-		if err := fsx.Replace(rg.mem, setupTag, path.Join(config.AdapterVersionDir("example", "2.0.0"), "old-leftover"), []byte("x"), fsx.ModePrivate); err != nil {
+		if err := fsx.Replace(rg.mem, setupTag, leftover, []byte("x"), fsx.ModePrivate); err != nil {
 			t.Fatal(err)
 		}
 		staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
@@ -582,11 +587,71 @@ func TestInstallBecomesCurrent(t *testing.T) {
 		if err := install(t, rg, c, staged); err != nil {
 			t.Fatalf("install: %v", err)
 		}
-		if exists(rg.mem, path.Join(config.AdapterVersionDir("example", "2.0.0"), "old-leftover")) {
-			t.Error("the leftover directory's content is part of the new version")
+		dir := c.Adapters()[0].Dir()
+		if dir == config.AdapterVersionDir("example", "2.0.0") {
+			t.Errorf("the package was installed over the leftover, in %s", dir)
 		}
-		if got, err := rg.mem.ReadFile(path.Join(config.AdapterVersionDir("example", "2.0.0"), "README")); err != nil || string(got) != "read me\n" {
+		if got, err := rg.mem.ReadFile(path.Join(dir, "README")); err != nil || string(got) != "read me\n" {
 			t.Errorf("the new version's README = %q, %v", got, err)
+		}
+		if !exists(rg.mem, leftover) {
+			t.Error("the installation discarded a directory that is not the package it replaces")
+		}
+		rg.load()
+		if exists(rg.mem, leftover) {
+			t.Error("the repair at the next start left the leftover directory")
+		}
+	})
+	t.Run("a version that an earlier installation replaced is installed under a directory of its own", func(t *testing.T) {
+		// The enabled instance may run any package that was replaced, so none of
+		// them is discarded, and installing a version again must not discard the
+		// directory a replaced package of that version is still in.
+		rg, c := loaded(t)
+		mark := func(dir string) string {
+			p := path.Join(dir, "marker")
+			if err := fsx.Replace(rg.mem, setupTag, p, []byte("held"), fsx.ModePrivate); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+		held := []string{mark(config.AdapterVersionDir("example", "1.0.0"))}
+		for i, step := range []struct{ version, dir string }{
+			{"2.0.0", config.AdapterVersionDir("example", "2.0.0")},
+			{"1.0.0", config.AdapterRevisionDir("example", "1.0.0", 1)},
+			{"2.0.0", config.AdapterRevisionDir("example", "2.0.0", 1)},
+			{"1.0.0", config.AdapterRevisionDir("example", "1.0.0", 2)},
+		} {
+			staged, err := c.StageAdapter(srcPackage(t, "example", step.version, nil), bytes.NewReader([]byte{byte(i + 1), 2, 3, 4, 5, 6, 7, 8}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := install(t, rg, c, staged); err != nil {
+				t.Fatalf("install %s: %v", step.version, err)
+			}
+			if got := c.Adapters()[0]; got.Version != step.version || got.Dir() != step.dir {
+				t.Fatalf("after installing %s the adapter is %s in %s, want %s", step.version, got.Version, got.Dir(), step.dir)
+			}
+			if got, err := rg.mem.ReadFile(path.Join(step.dir, "README")); err != nil || string(got) != "read me\n" {
+				t.Fatalf("the README of the package in %s = %q, %v", step.dir, got, err)
+			}
+			for _, m := range held {
+				if !exists(rg.mem, m) {
+					t.Errorf("installing %s discarded %s", step.version, path.Dir(m))
+				}
+			}
+			held = append(held, mark(step.dir))
+		}
+		restarted := rg.load()
+		if got := restarted.Adapters()[0]; got.Version != "1.0.0" || got.Revision != 2 {
+			t.Errorf("after a restart the adapter is %+v, want 1.0.0 at revision 2", got)
+		}
+		if work, _ := config.AdapterGCWork(rg.mem); len(work) != 0 {
+			t.Errorf("gc work after the repair = %+v", work)
+		}
+		for _, m := range held[:len(held)-1] {
+			if exists(rg.mem, m) {
+				t.Errorf("the repair left %s", path.Dir(m))
+			}
 		}
 	})
 	t.Run("a package of unknown contents is replaced by the same version", func(t *testing.T) {
@@ -677,43 +742,71 @@ func TestInstallBecomesCurrent(t *testing.T) {
 			t.Error("the new package is not in its directory")
 		}
 	})
-	t.Run("an adapter with an enabled instance is not upgraded", func(t *testing.T) {
-		_, c := loaded(t)
+	t.Run("an adapter with an enabled instance is upgraded and the version it runs is left for the repair", func(t *testing.T) {
+		rg, c := loaded(t)
 		staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = c.PlanInstall(staged, nil)
-		if ce := changeReason(t, err); ce.Reason != config.ChangeAdapterInUse {
-			t.Errorf("reason = %v, want adapter_in_use", ce.Reason)
+		plan, err := c.PlanInstall(staged, nil)
+		if err != nil || plan.AlreadyCurrent || !plan.Replaced {
+			t.Fatalf("PlanInstall = %+v, %v, want the package replaced", plan, err)
+		}
+		if err := install(t, rg, c, staged); err != nil {
+			t.Fatalf("install: %v", err)
+		}
+		if ads := c.Adapters(); len(ads) != 1 || ads[0].Version != "2.0.0" {
+			t.Errorf("adapters = %+v, want example 2.0.0", ads)
+		}
+		if !exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+			t.Error("the directory an enabled instance may run from was discarded")
+		}
+		rg.load()
+		if exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+			t.Error("the repair at the next start left a package the pointer does not name")
 		}
 	})
-	t.Run("an adapter whose disabled instance still has a process ending is not upgraded", func(t *testing.T) {
-		rg, c := loaded(t)
-		doc := strings.Replace(goldenInstances, `"enabled": true`, `"enabled": false`, 1)
-		if err := fsx.Replace(rg.mem, setupTag, config.InstancesPath, []byte(doc), fsx.ModePrivate); err != nil {
-			t.Fatal(err)
-		}
-		c = rg.load()
-		staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
-		if err != nil {
-			t.Fatal(err)
-		}
-		ending := true
-		var asked []string
-		_, err = c.PlanInstall(staged, func(instance string) bool { asked = append(asked, instance); return ending })
-		if ce := changeReason(t, err); ce.Reason != config.ChangeAdapterInUse || ce.Field != "instances.example" {
-			t.Errorf("PlanInstall = %+v, want adapter_in_use for instances.example", ce)
-		}
-		ending = false
-		if _, err := c.PlanInstall(staged, func(string) bool { return ending }); err != nil {
-			t.Errorf("PlanInstall once the process has ended: %v", err)
-		}
-		if _, err := c.PlanInstall(staged, nil); err != nil {
-			t.Errorf("PlanInstall of a disabled instance with no way to ask: %v", err)
-		}
-		if !reflect.DeepEqual(asked, []string{"example"}) {
-			t.Errorf("asked about %v, want the one instance of the adapter", asked)
+	t.Run("a disabled instance whose process is still ending holds the files it ran from, whatever the package", func(t *testing.T) {
+		for _, p := range []struct {
+			name    string
+			version string
+			files   map[string]string
+		}{
+			{"another version", "2.0.0", nil},
+			{"the same version with other contents", "1.0.0", map[string]string{"README": "changed\n"}},
+		} {
+			for _, e := range []struct {
+				name   string
+				ending config.StillEnding
+				held   bool
+			}{
+				{"the process is ending", func(string) bool { return true }, true},
+				{"the process has ended", func(string) bool { return false }, false},
+				{"nothing can say", nil, false},
+			} {
+				t.Run(p.name+", "+e.name, func(t *testing.T) {
+					rg, c := loaded(t)
+					doc := strings.Replace(goldenInstances, `"enabled": true`, `"enabled": false`, 1)
+					if err := fsx.Replace(rg.mem, setupTag, config.InstancesPath, []byte(doc), fsx.ModePrivate); err != nil {
+						t.Fatal(err)
+					}
+					c = rg.load()
+					staged, err := c.StageAdapter(srcPackage(t, "example", p.version, p.files), suffixReader())
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := installAsking(t, rg, c, staged, e.ending); err != nil {
+						t.Fatalf("install: %v", err)
+					}
+					if got := exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")); got != e.held {
+						t.Errorf("the package that was replaced is there: %v, want %v", got, e.held)
+					}
+					rg.load()
+					if exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+						t.Error("the repair at the next start left a package the pointer does not name")
+					}
+				})
+			}
 		}
 	})
 	t.Run("a first installation is not an upgrade whatever instances exist", func(t *testing.T) {

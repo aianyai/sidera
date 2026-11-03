@@ -183,8 +183,9 @@ type AdapterCurrent struct {
 	// hex; empty for a package installed before the contents were told apart,
 	// whose contents are then unknown.
 	Digest string
-	// Revision counts the times the same version was installed again with other
-	// contents; 0 for the first package of a version.
+	// Revision numbers the directories of one version: 0 is the directory named by
+	// the version itself, and an installation takes the first revision whose
+	// directory does not exist (see AdapterRevisionDir).
 	Revision uint32
 }
 
