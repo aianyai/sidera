@@ -10,6 +10,13 @@ It imports the standard library, `peer` and `adapterproto`, and nothing else: th
 SDK module has no other dependency, so the instance lock is `flock` on Unix and a
 file opened without sharing on Windows, through `syscall`.
 
+Capabilities that only some adapters need are subpackages, so that an adapter that
+imports only this package carries nothing of them:
+
+| Package | Holds |
+| ------- | ----- |
+| [`environ`](environ/README.md) | Composes the environment of a child process |
+
 ## Entry points
 
 | Name | Purpose |
