@@ -125,6 +125,9 @@ const (
 	OpAttachSession
 	// OpStopDaemon asks the running daemon to shut down normally.
 	OpStopDaemon
+	// OpRestartDaemon asks the running daemon to shut down normally and start the
+	// program again in its place.
+	OpRestartDaemon
 
 	// opEnd is the end sentinel: it is one past the last operation in the
 	// catalogue and is itself in none. Tests iterate every kind below it and
@@ -239,7 +242,7 @@ func RequirementOf(op Operation) (Requirement, bool) {
 		OpEnableAdapter, OpDisableAdapter, OpChangeEndpointSettings,
 		OpChangeNodeSettings, OpAcknowledgeAlert, OpClearClockRollback,
 		OpConfirmRevocationBackup, OpRetireIdentity, OpExportRevocation,
-		OpAttachSession, OpStopDaemon:
+		OpAttachSession, OpStopDaemon, OpRestartDaemon:
 		return RequireLocalOwner, true
 	default:
 		return 0, false

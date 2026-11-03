@@ -67,6 +67,7 @@ var catalogue = []struct {
 	{"exporting the revocation statement is for the local owner only, not a read level", Operation{Kind: OpExportRevocation}, RequireLocalOwner},
 	{"attaching a session hands out its token, so it is for the local owner only", Operation{Kind: OpAttachSession}, RequireLocalOwner},
 	{"stopping the daemon is for the local owner only", Operation{Kind: OpStopDaemon}, RequireLocalOwner},
+	{"restarting the daemon is for the local owner only", Operation{Kind: OpRestartDaemon}, RequireLocalOwner},
 }
 
 func TestRequirementOf(t *testing.T) {
@@ -112,6 +113,7 @@ var singleNodeManagementOperations = []struct {
 	{"export revocation", OpExportRevocation},
 	{"attach session", OpAttachSession},
 	{"stop daemon", OpStopDaemon},
+	{"restart daemon", OpRestartDaemon},
 }
 
 // TestSingleNodeManagementOperationsNeedTheLocalOwner checks, per operation,
@@ -136,8 +138,8 @@ func TestSingleNodeManagementOperationsNeedTheLocalOwner(t *testing.T) {
 			}
 		})
 	}
-	if len(singleNodeManagementOperations) != 11 {
-		t.Fatalf("%d single-node management operations listed, want 11", len(singleNodeManagementOperations))
+	if len(singleNodeManagementOperations) != 12 {
+		t.Fatalf("%d single-node management operations listed, want 12", len(singleNodeManagementOperations))
 	}
 }
 
