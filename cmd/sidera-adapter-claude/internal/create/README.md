@@ -95,18 +95,26 @@ stored state (`Done`).
 
 ## What the caller must guarantee
 
-- Observe the processes (`Recorded`, `Running`, `Registry`, all from one
-  process-table snapshot) before the session record. A process seen as gone has
-  written everything it will, so "no process and no file" cannot hide a file
-  written in between.
+- Observe the processes (`Recorded`, `Running`, `Registry`) before the session
+  record. `Running` comes from a listing and `Recorded` from a lookup of the
+  recorded identity, taken in that order and before the record is read: a
+  process seen as gone has written everything it will, so "no process and no
+  file" cannot hide a file written in between. The listing and the lookup are
+  two reads, not one snapshot.
 - `Running` lists a process only if its argument vector contains the pair
   `--session-id <uuid>` or `--resume <uuid>` and its executable is the preset's
   Claude. Each launch counts once: the caller removes wrapper and ancestor
   processes of the same launch (a shell, a node launcher) and its own observer
   processes. Zombies are not alive.
-- The argument vector of every process of the same user must be readable. When
-  it is not, that is an observation error the caller reports as an error
-  result; it is never reported as "not running", and `Decide` is not called.
+- The listing is not proof of absence. It leaves out a process whose details
+  the system denies, so a process that is not in it may run: whether the
+  recorded process runs is asked of its identity (`Recorded`), never read from
+  the listing. A listing that fails for any other reason is an observation
+  error the caller reports as an error result; it is never reported as "not
+  running", and `Decide` is not called. An unrecorded process of the session
+  that denies the caller its details (an elevated terminal resuming the uuid by
+  hand) is not seen, which is the writer outside the adapter that is not
+  noticed.
 - Start times are Unix seconds from the process table (Linux: boot time plus
   start ticks, which moves when the clock is set; macOS: the process start
   seconds; Windows: the creation time truncated to seconds), the same source for

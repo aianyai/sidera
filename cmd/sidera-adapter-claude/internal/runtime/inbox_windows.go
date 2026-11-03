@@ -23,9 +23,11 @@ const pipeRetry = 10 * time.Millisecond
 // valid authentication line without delivering anything, and one that has not sent
 // a complete line within 30 seconds, so the pipe is opened only now, when the
 // message is ready, and the authentication line (which Wake.Lines puts first) goes
-// before the message in a write of its own: a pipe that the other end closed after a
-// wrong token fails the write of the message, and the failure is returned, never
-// reported as a delivery.
+// before the message in a write of its own: a pipe that the other end has already closed
+// by the time the message is written (it closes on a wrong token, but answers nothing,
+// so it may not have yet) fails that write and the failure is returned, never reported
+// as a delivery; one it has not closed yet takes the write, and a message dropped that
+// way is found missing by the reconciliation.
 //
 // The handle is synchronous and has no deadline, so the wait for a server that does
 // not read is given up on after inboxTimeout and leaves the writing goroutine

@@ -60,8 +60,9 @@ type SessionRecord struct {
 // before it reads the session record. The record then can only be newer than
 // the processes: a turn process seen as gone has written everything it ever
 // will, so "no process and no file" cannot be a file written in between.
-// Recorded, Running and the Current lookups of Registry come from one
-// process-table snapshot.
+// Running comes from a listing of the process table and Recorded from a lookup of
+// the recorded identity, in that order; the recorded process is never judged by
+// the listing, which leaves out what the system denies.
 //
 // Absent facts are zero: a nil Running or Registry means none, and Recorded is
 // the zero Lookup while the state records no process.

@@ -97,9 +97,13 @@ executable is the preset's Claude, each launch once (wrapper and ancestor
 processes and the caller's own observers removed); live processes only; start
 times in Unix seconds from the process table, and whether the recorded process runs
 from `Running` of its identity, never from its absence in the listing; the record looked up in the
-attempt's record directory (`Decide` refuses another one). The argument
-vector of every process of the same user must be readable, and an unreadable
-one is an observation error reported as an error result, never "not running".
+attempt's record directory (`Decide` refuses another one). The listing leaves out a process whose
+details the system denies (on Windows an elevated or protected one), so a process missing from it
+may still run: that is why the recorded process is judged by `Running` of its identity and never
+by the listing, and why a listing that fails for any other reason is an observation error reported
+as an error result, never "not running". The one process this cannot show is an unrecorded one that
+also denies the adapter its details, such as a terminal run elevated that resumes the session id by
+hand; it belongs with the writer outside the adapter that is not noticed (see below).
 Transitions are committed atomically; `Ready` and `Failed` are persisted before
 `session.create` is answered, never after. `Started` is committed immediately
 after spawning.
@@ -407,7 +411,8 @@ Claude's operating-system sandbox, which would make the denial of the data direc
 Bash (see the turn process), `recv.observed` (it needs the
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
-accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed),
+accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed, nor is
+one the listing denies the adapter),
 and sandbox settings. The turn files in the state directory are not cleaned up.
 
 ### The record directory
@@ -417,7 +422,10 @@ The record directory is the base the runtime reports as its projects directory
 the name of the working directory: its real path, with symbolic links resolved (on Windows also
 every name in its on-disk case and long form, never the 8.3 short name, and junctions followed:
 `sdk/go/adapterkit/realpath`; Claude Code does not expand a short name, so the turn process is
-started with the resolved path as its working directory), in
+started with the resolved path as its working directory; an attached session is looked for in the
+record directory of the working directory its registry entry gives, expanded the same way, so one
+opened in a literal 8.3 path on Windows is looked for in a directory Claude Code did not use and its
+prompts are never reported persisted), in
 Unicode normal form C, every character that is not an ASCII letter or digit replaced
 by `-` (a character outside the basic plane is two, as the runtime replaces each
 UTF-16 code unit). The runtime shortens a name longer than 200 characters and adds
