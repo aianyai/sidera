@@ -35,3 +35,13 @@ func TestOSFilesRealDir(t *testing.T) {
 		t.Fatal("a file is not a directory")
 	}
 }
+
+// A program found by a relative path is started by the absolute one, which is also
+// the text a turn process is recognised by.
+func TestFindExecutableIsAbsolute(t *testing.T) {
+	a := New(Options{LookPath: func(file string) (string, error) { return filepath.Join("bin", file), nil }})
+	got := a.findExecutable("", "claude")
+	if !filepath.IsAbs(got) || filepath.Base(got) != "claude" {
+		t.Fatalf("findExecutable = %q", got)
+	}
+}

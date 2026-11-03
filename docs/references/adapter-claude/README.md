@@ -116,7 +116,7 @@ read from the manifest built into the executable.
 
 - **`adapter.start`** carries the instance configuration, the presets and the sessions to take
   back. The adapter finds `claude` and `sidera` (the instance's `claude_path` and `sidera_path`,
-  else the program on `PATH`), writes the MCP configuration file into the state directory and
+  else the program on `PATH`, as an absolute path: a process is started with it as written), writes the MCP configuration file into the state directory and
   keeps the presets, which are fixed for the life of the process because the host restarts the
   instance when they change. A session is `lost` when its session file is gone (Claude Code
   removes records of sessions idle longer than its cleanup period, 30 days by default),

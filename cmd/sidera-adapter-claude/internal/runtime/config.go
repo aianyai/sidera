@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
@@ -30,7 +31,10 @@ func parseInstanceConfig(values adapterproto.ConfigValues) instanceConfig {
 }
 
 // findExecutable returns the configured executable or, without one, the program
-// on PATH, as the path to start it by; "" when it cannot be found.
+// on PATH, as the absolute path to start it by; "" when it cannot be found. The
+// path is absolute because a process is started with it as written and its
+// working directory is not the adapter's, and the same text is what a turn process
+// is recognised by.
 func (a *App) findExecutable(configured, name string) string {
 	file := configured
 	if file == "" {
@@ -40,7 +44,11 @@ func (a *App) findExecutable(configured, name string) string {
 	if err != nil {
 		return ""
 	}
-	return path
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	return abs
 }
 
 // resolvedPreset is a preset ready to start a turn with: its values, the
