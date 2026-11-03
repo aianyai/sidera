@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -22,6 +23,11 @@ import (
 // it succeeded. Bash being absent skips the test: it is part of the Windows toolchain
 // only through Git for Windows, and a machine without it cannot run the release scripts
 // either.
+//
+// The arguments travel in environment variables, not on the command line: Windows hands a
+// program one command-line string, Go does not quote a newline in it, and the MSYS runtime
+// of Git Bash splits that string at the newline, so bash would receive "0.12.0\n" as
+// "0.12.0". An environment block carries any byte but NUL as it is.
 func shellAccepts(t *testing.T, function string, args ...string) bool {
 	t.Helper()
 	bash, err := exec.LookPath("bash")
@@ -32,7 +38,12 @@ func shellAccepts(t *testing.T, function string, args ...string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(bash, append([]string{"-c", `. "$1"; shift; "$@"`, "bash", filepath.ToSlash(lib), function}, args...)...)
+	const script = `. "$1"; shift; call=("$@"); for ((i = 0; i < ARG_COUNT; i++)); do name=ARG_$i; call+=("${!name}"); done; "${call[@]}"`
+	cmd := exec.Command(bash, "-c", script, "bash", filepath.ToSlash(lib), function)
+	cmd.Env = append(os.Environ(), "ARG_COUNT="+strconv.Itoa(len(args)))
+	for i, arg := range args {
+		cmd.Env = append(cmd.Env, "ARG_"+strconv.Itoa(i)+"="+arg)
+	}
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
 	switch {
