@@ -9,7 +9,7 @@ library and performs no I/O or lifecycle work. See the
 
 | Name | Purpose |
 | ---- | ------- |
-| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped` | The existing sentinel identities for initialization, startup and shutdown failures. |
+| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `ErrRestartUnavailable` | The existing sentinel identities for initialization, startup and shutdown failures. |
 | `FatalError` | Wrap a fatal storage cause with the daemon's original explanation and expose it through `Unwrap`. |
 
 `daemon` re-exports the sentinel values and aliases `FatalError`, so existing

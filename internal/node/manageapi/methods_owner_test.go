@@ -210,7 +210,7 @@ func TestTheCommandsOfTheOwnersChangesAndTheFingerprintOfAPatch(t *testing.T) {
 func TestTheRetirementStopsTheDaemonAfterTheAnswer(t *testing.T) {
 	r := newRig(t)
 	r.svc.execute = func(_ context.Context, c engine.ManagementCommand) (engine.StoredResult, error) {
-		return engine.StoredResult{Result: []byte(`{"retired":true}`), Ending: stopIf(c.Name == "identity.retire")}, nil
+		return engine.StoredResult{Result: []byte(`{"retired":true}`), Ending: endingOf(c.Name)}, nil
 	}
 	if status, out := r.post("clock.clear_rollback", `{"operation_id":"`+opID(1)+`","params":{}}`); status != 200 {
 		t.Fatalf("%d %s", status, out)

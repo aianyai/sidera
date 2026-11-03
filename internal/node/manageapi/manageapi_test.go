@@ -412,7 +412,7 @@ func TestAReadAnswersItsResult(t *testing.T) {
 func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t *testing.T) {
 	r := newRig(t)
 	r.svc.execute = func(_ context.Context, c engine.ManagementCommand) (engine.StoredResult, error) {
-		return engine.StoredResult{Result: []byte(`{"stopping":true}`), Ending: stopIf(c.Name == "daemon.stop")}, nil
+		return engine.StoredResult{Result: []byte(`{"stopping":true}`), Ending: endingOf(c.Name)}, nil
 	}
 	status, out := r.post("endpoints.close", `{"operation_id":"`+opID(1)+`","params":{"endpoint":"`+addressOf(1)+`"}}`)
 	if status != 200 {

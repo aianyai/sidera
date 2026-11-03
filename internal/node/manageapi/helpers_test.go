@@ -216,9 +216,11 @@ type rig struct {
 	home string
 	svc  *fakeService
 	stop *stops
-	srv  *Server
-	log  *captured
-	done chan error
+	// restart records the restarts asked for, as stop records the stops
+	restart *stops
+	srv     *Server
+	log     *captured
+	done    chan error
 }
 
 // captured is a log that keeps what is written to it.
@@ -236,13 +238,13 @@ func (c *captured) String() string { c.mu.Lock(); defer c.mu.Unlock(); return c.
 
 func newRig(t testing.TB, mutate ...func(*Server)) *rig {
 	t.Helper()
-	r := &rig{t: t, home: newHome(t), svc: &fakeService{}, stop: newStops(), log: &captured{}, done: make(chan error, 1)}
+	r := &rig{t: t, home: newHome(t), svc: &fakeService{}, stop: newStops(), restart: newStops(), log: &captured{}, done: make(chan error, 1)}
 	node, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{7}, ident.NodeIDLen))
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.srv, err = New(Config{
-		Service: r.svc, Node: node, Clock: clocktest.NewFake(t0), Stop: r.stop.stop,
+		Service: r.svc, Node: node, Clock: clocktest.NewFake(t0), Stop: r.stop.stop, Restart: r.restart.stop,
 		Log: slog.New(slog.NewTextHandler(r.log, nil)),
 	})
 	if err != nil {
@@ -347,10 +349,13 @@ func opID(b byte) string {
 
 var _ = admin.OpRead
 
-// stopIf is the ending of a method that stops the daemon, or none.
-func stopIf(stops bool) engine.Ending {
-	if stops {
+// endingOf is how the engine would end the daemon for the method that was asked.
+func endingOf(method string) engine.Ending {
+	switch method {
+	case "daemon.stop", "identity.retire":
 		return engine.EndingStop
+	case "daemon.restart":
+		return engine.EndingRestart
 	}
 	return engine.EndingNone
 }

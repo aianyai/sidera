@@ -213,6 +213,7 @@ can therefore recognize them without importing the composition root.
 | `ErrNotInitialized` | `unavailable` | `data_directory_not_initialized` | Run `sidera init` for the selected directory. |
 | `ErrPermissions` | `refused` | `data_directory_unusable` | Check ownership, permissions and path; the root must be a real directory private to its owner, and symbolic links are refused. |
 | `ErrEngineNotStopped` | `internal` | `engine_not_stopped` | The instance lock stays held until this process exits. |
+| `ErrRestartUnavailable` | `refused` | `restart_unavailable` | Stop the daemon and start it the way it was started, or let whatever supervises it restart it; the reason is in the daemon log, not on the wire. |
 | `*FatalError` | `unavailable` | `daemon_storage_fatal` | Check storage and restart the daemon to recover the data directory. |
 | `ipc.ErrLockNotHeld` | `internal` | `instance_lock_not_held` | The listener was opened without the instance lock: an internal startup error. |
 
@@ -413,8 +414,9 @@ decimal expected version)`; the canonical params are the decoded params encoded 
 with the fields of their type in declared order, so a resend written with another
 order or spacing is still a resend. The answer to a replay-protected request is
 `{"operation_id","replayed","result"}`, the result being the one stored; any other
-answers `{"result"}`. When an operation stops the daemon the answer is flushed and
-then the stop is requested, once: the client has its answer before the daemon goes.
+answers `{"result"}`. When an operation stops or restarts the daemon the answer is
+flushed and then the stop or the restart is requested, once: the client has its
+answer before the daemon goes.
 The [shared local HTTP boundary](../local-http/README.md) owns exact method and
 POST routing, the body limit, response encoding, diagnostic logging and shutdown.
 The server has no write timeout, because a request is the client's connection and
@@ -428,6 +430,7 @@ The methods the daemon has:
 | `sessions.attach` | `OpAttachSession`; a request with the envelope of a read (no operation identifier, no expected version: they are `malformed_request`); params `{"adapter","instance"?,"native_ref","display_name"?,"wake"?,"create"?}`, `adapter` an adapter identifier, `native_ref` 1 to 256 characters, `display_name` 1 to 128, `wake` at most 16 entries of an environment-variable name and a value of at most 4096 characters, opaque to the node, `create` a boolean that is true when absent | `{"endpoint","instance","token","wake":{"state","reason"?,"detail"?}}`. Attaches a session a person opened, or finds the endpoint it has: the same instance and native session, while the endpoint is open, answer with the same endpoint and token, and a repeat replaces the wake information (an absent one clears it) and the display name when one is given. `token` is the token of the endpoint as `SIDERA_TOKEN` carries it: **this is the one management method whose answer carries a token**, which is why the owner alone may ask and why a sandbox must deny the management socket (see the [local IPC](../local-ipc/README.md) reference). `wake.state` is what the adapter answered to `session.attach` within ten seconds: `ready`; `unavailable` with `reason` `native_not_found`, or the adapter's `wake_unavailable`, `native_unreachable` or `native_error` and its `detail`; `unknown` with `reason` `adapter_offline` or `no_answer`. The endpoint and the token are returned whatever the state. With `create` false the request only finds: when the session has an open attached endpoint it is answered as above (the wake information is replaced and the adapter asked as for any repeat), and when it has none nothing is made and the request is `not_found/session_not_attached`; a caller that wants to know whether its session is attached already, without attaching it, asks so. Refused as `refused/attach_unsupported` (the adapter of the instance did not declare `attach`), `refused/native_session_created` (the node created the native session), `invalid_argument/instance_required` (several instances, none named; `details.field` `instance`), `invalid_argument/malformed_request` with `details.field` `instance` (an instance of another adapter), `not_found/instance_unknown`, `not_found/session_not_attached` (`create` false and no open endpoint), `refused/endpoint_limit` (`details.limit` `node`; not for `create` false), and while the node starts or stops as for every request that changes state. The wake information is never logged or stored, and no refusal names a value of it |
 | `endpoints.close` | `OpManageEndpointSession`; params `{"endpoint": "<node>/<endpoint>"}` | `{"endpoint","outcome"}`, outcome `closed`, `closing` (a session the node created, whose native session is still to be released) or `already_closed`; a runtime endpoint is refused `endpoint_kind`, an address of another node is `endpoint_unknown` |
 | `daemon.stop` | `OpStopDaemon`; no params | `{"stopping":true}`; the daemon then shuts down; a resend, even to a daemon that was started again, asks for the stop again |
+| `daemon.restart` | `OpRestartDaemon`; params `{"expect_version"?}` | `{"restarting":true,"program","version","start_id"}`: the program that will be started, the version it reported, and the `start_id` of the daemon that is going away, which the client waits to see change; the daemon then shuts down as for a stop and the program is started again. Before it accepts, the daemon finds out what the restart would start (`Config.CheckRestart` of the interface) and refuses, shutting nothing down and storing nothing, as `refused/restart_unavailable` (the daemon cannot restart, or what is started would not outlive it; the wire says only that, and the reason is in the daemon log), `refused/restart_check_failed` (the program was run and did not answer as expected; the message carries the error of the check, which only the local owner can read) or `conflict/restart_version_mismatch` (the version it reports is not `expect_version`). A resend returns the stored result without checking anything, and asks for the restart again only of the daemon that stored it |
 | `status` | `OpRead`; no params | `{"node":{id,version},"daemon":{state,started_at,start_id},"reminders":[{kind,message}],"alerts":{open},"clock":{rollback_paused,rollback_paused_since?,high_water?},"certificate":{not_after,remaining_s},"capacity":{open_deliveries,node_queue_limit,outbound_backlog,disk_free_bytes,disk_reserve_bytes},"deliveries":{<every state>:n},"endpoints":[{address,kind,instance,state}]}`. `start_id` is 16 lower-case hexadecimal digits drawn from the node's randomness when the management interface opens, so it differs between two starts of one node; `started_at` runs to the second only, and a process that replaces itself keeps its process number, so neither tells a client that a restarted daemon is the new one. The reminders come first for a reader and stay until done: `revocation_backup_unconfirmed` is true while the confirmation on disk is not of the statement this node holds. `deliveries` counts the deliveries the node holds as a target, the control signals among them, and lists every state, with zero where there is none. The endpoints that are blocked and the turns started by prompts are the figures of the features that do not exist yet |
 | `alerts.list` | `OpRead`; params `{"include_acknowledged"?}` | `{"alerts":[{id,kind,since,subject?,detail,acknowledged}]}`, oldest first, the acknowledged ones only on request. While the clock is paused the list ends with the alert of the pause, `id` `clock_rollback`, which is no record and is lifted by clearing the pause; `status` counts it in `alerts.open`, so the number agrees with the entries the list shows as not acknowledged, and `alerts.ack` of it answers `not_found/alert_unknown` with the words that it is cleared by `sidera clock clear-rollback` |
 | `alerts.ack` | `OpAcknowledgeAlert`; params `{"alert": "<32 hex digits>"}` | `{"alert","acknowledged":true}`; `not_found/alert_unknown` for an alert the node does not hold; an identifier that is not 32 hex digits is `malformed_request` |
@@ -534,6 +537,24 @@ reach the socket can obtain the credential of an endpoint of this node.
   validates, the engine does the rest. Rejected: a replay check in `manageapi`
   before the call, which would be a second copy and would not see the results that
   the versioned files keep.
+- **A resend of a restart restarts only the daemon that stored it, where a resend of a
+  stop stops either.** A stop asks for a state (no daemon), so a resend asks again and
+  a daemon that died between storing the result and stopping is stopped by it. A
+  restart asks for a process that started after the request. The daemon that stored
+  the result has not yet been replaced, and the answer may not have reached the client
+  (a request whose connection was lost after the engine stored its result never asked
+  for the restart), so its resend asks again, which is harmless: the shutdown runs
+  once. A daemon that loaded the result from the disk is the process the restart
+  produced, and restarting it again would loop with a client that resends after an
+  unknown outcome. The rule is the engine's (`Ending.replayed`), for every operation
+  that ends the daemon.
+- **A restart is checked before it is accepted, and not for a resend.** Once the
+  daemon has shut down nobody is left to report that the program would not start, so
+  what would be started is found out first, and a client that has just replaced the
+  program names the version it expects, so that a daemon started from another path is
+  not restarted into the wrong program. The check is the engine's to make, after its
+  own lookup of the request: a resend is answered with the stored result whatever the
+  program is by then, so a restart that happened is never hidden by a refusal.
 - **The permissions are refused, never narrowed, and before the lock.** Only the
   owner knows who should read the keys; a daemon that narrowed a mode would hide a
   breach. Checking before the lock keeps a refused start from changing the directory

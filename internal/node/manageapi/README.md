@@ -23,7 +23,7 @@ reading a body.
 | `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Call one node as its local owner; return the complete management response without retrying. |
 | `RevocationExportResult` | The shared online and offline export result: the armored statement and its backup digest. |
 | `Request` | The caller's operation identifier, optional expected version and params; zero identifier and nil members are omitted. |
-| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the start identifier and the version of the program for the status, and the log. |
+| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop and restart entries of the composition root and the check of what a restart would start, the start identifier and the version of the program for the status, and the log. |
 
 The methods are a table in `methods.go`, one row each: the name on the wire, the
 catalogue entry of the operation, and how the params are read. The owner of an
@@ -35,7 +35,7 @@ envelope is a read's, and its answer is the only one of the interface that carri
 which is why the interface is the local owner's alone and a sandbox must deny it to an agent.
 
 The rows are in `methods.go` (`endpoints.list`, `endpoints.close`, `sessions.attach`,
-`daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
+`daemon.stop`, `daemon.restart`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
 `alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
 `identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and
 `methods_settings.go` (`node.show`, `node.set`, `endpoints.set`),

@@ -55,6 +55,10 @@ var (
 	// so it may still be writing, and the instance lock stays held until the
 	// process exits. Whoever gets this ends the process.
 	ErrEngineNotStopped = daemonerr.ErrEngineNotStopped
+	// ErrRestartUnavailable: the process cannot be started again in a way that
+	// outlives the daemon; what a Relauncher returns, wrapped with why, to refuse a
+	// restart.
+	ErrRestartUnavailable = daemonerr.ErrRestartUnavailable
 )
 
 // FatalError is how a daemon that ended because of a fatal failure of the disk

@@ -22,6 +22,10 @@ var (
 	// so it may still be writing, and the instance lock stays held until the
 	// process exits. Whoever gets this ends the process.
 	ErrEngineNotStopped = errors.New("daemon: the engine did not stop in time; the instance lock is held until the process exits")
+	// ErrRestartUnavailable: the process cannot be started again in a way that
+	// outlives the daemon, so a restart is refused and nothing is shut down. Wrapped
+	// with why.
+	ErrRestartUnavailable = errors.New("daemon: the program cannot be started again from here")
 )
 
 // FatalError is how a daemon that ended because of a fatal failure of the disk

@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/apiwire"
+	"github.com/aianyai/sidera/internal/node/daemonerr"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -124,7 +125,7 @@ func defaultMethods() (map[string]*method, error) {
 		adaptersInstall, adaptersList, adaptersEnable, adaptersConfig, adaptersDisable, adaptersRemove,
 		presetsList, presetsAdd, presetsRemove,
 		trustExpect, trustForget, trustReject, trustRequest, trustList, trustRemove, trustClear,
-		endpointsList, endpointsClose, endpointsSet, sessionsAttach, daemonStop, operationResult,
+		endpointsList, endpointsClose, endpointsSet, sessionsAttach, daemonStop, daemonRestart, operationResult,
 	}
 	for _, m := range append(rows, testMethods()...) {
 		if err := checkRow(m); err != nil {
@@ -308,6 +309,63 @@ var daemonStop = &method{
 		op := engine.StopDaemonOp(func() ([]byte, error) { return []byte(`{"stopping":true}`), nil })
 		return &plan{canonical: canonical(p), operation: op}, nil
 	},
+}
+
+// daemon.restart: shut the daemon down normally, once the answer has been written,
+// and start the program again in its place. A restart that does not come back
+// leaves nobody to start the program, so before one is accepted the program is
+// run to see what it is (the check of the composition root), and a request that
+// names the version it expects (expect_version, for a client that has just
+// replaced the program) is refused when the program reports another; a refused
+// request shuts nothing down and stores nothing. The result names the program,
+// the version it reported and the start_id of the daemon that is going away, which
+// the client waits to see change.
+//
+// The check is the engine's to run, because the engine knows whether the request
+// is a resend: a resend is answered with the stored result and checks nothing, and
+// is asked for the restart again only by the daemon that stored the result
+// (engine.Ending).
+var daemonRestart = &method{
+	name: "daemon.restart", op: admin.Operation{Kind: admin.OpRestartDaemon},
+	plan: func(s *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			ExpectVersion string `json:"expect_version,omitempty"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		return &plan{canonical: canonical(p), operation: engine.RestartDaemonOp(s.restartCheck(p.ExpectVersion),
+			func(program, version string) ([]byte, error) {
+				return json.Marshal(struct {
+					Restarting bool   `json:"restarting"`
+					Program    string `json:"program"`
+					Version    string `json:"version"`
+					StartID    string `json:"start_id,omitempty"`
+				}{true, program, version, s.cfg.StartID})
+			})}, nil
+	},
+}
+
+// restartCheck is the check of a restart that expects the version given, or any
+// when it is empty: what Config.CheckRestart found, or the refusal in the words of
+// the wire. The reason a restart cannot be started again is the log's (the daemon
+// logs it where it wires the check); the error text of a program that did not
+// answer as expected is the local owner's to read, and goes on the wire.
+func (s *Server) restartCheck(expect string) func(ctx context.Context) (string, string, error) {
+	return func(ctx context.Context) (string, string, error) {
+		program, version, err := s.cfg.CheckRestart(ctx)
+		switch {
+		case errors.Is(err, daemonerr.ErrRestartUnavailable):
+			return "", "", err
+		case err != nil:
+			return "", "", apiwire.New(apiwire.CategoryRefused, "restart_check_failed",
+				"the program a restart would start did not answer as expected: "+err.Error())
+		case expect != "" && version != expect:
+			return "", "", apiwire.New(apiwire.CategoryConflict, "restart_version_mismatch",
+				"the program a restart would start ("+program+") reports version "+version+", not the expected "+expect)
+		}
+		return program, version, nil
+	}
 }
 
 // operation.result: the result stored for an operation identifier of the requester,

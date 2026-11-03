@@ -48,9 +48,19 @@ type Config struct {
 	// Stop asks the daemon to shut down. It is called without waiting, once the
 	// answer to a request whose operation stops the daemon has been written.
 	Stop func(reason string)
+	// Restart asks the daemon to shut down and the program to start again in its
+	// place. It is called without waiting, as Stop is.
+	Restart func(reason string)
+	// CheckRestart tells what a restart would start: the program and the version it
+	// reports, after running it. daemon.restart needs it and the server does not
+	// answer that method without it. It is called, outside the loop of the engine,
+	// before a restart is accepted and not for a resend, and may wait. An error that
+	// wraps daemonerr.ErrRestartUnavailable says the program cannot be started again;
+	// any other, that it was run and did not answer as expected.
+	CheckRestart func(ctx context.Context) (program, version string, err error)
 	// StartID names this start of the daemon, so that a client can tell the process
-	// it asked about from the one that took its place; the status shows it. Empty
-	// shows none.
+	// it asked about from the one that took its place; the status shows it and the
+	// result of a restart names the one that is going away. Empty shows none.
 	StartID string
 	// Version is the version of the program, for the status to show; empty shows
 	// none.
@@ -203,13 +213,20 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string, m *m
 		Replayed    bool            `json:"replayed"`
 		Result      json.RawMessage `json:"result"`
 	}{hex.EncodeToString(d.id[:]), res.Replayed, res.Result})
-	if res.Ending == engine.EndingStop && s.cfg.Stop != nil {
+	var end func(reason string)
+	switch res.Ending {
+	case engine.EndingStop:
+		end = s.cfg.Stop
+	case engine.EndingRestart:
+		end = s.cfg.Restart
+	}
+	if end != nil {
 		// The answer is on its way: flush it, so that the client has it before the
 		// daemon starts to go away.
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		s.cfg.Stop(name)
+		end(name)
 	}
 }
 

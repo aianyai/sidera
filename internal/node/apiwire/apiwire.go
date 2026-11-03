@@ -247,6 +247,8 @@ func FromError(err error) *Error {
 		return New(CategoryUnavailable, "data_directory_not_initialized", "this data directory is not initialized; run `sidera init` for the selected data directory")
 	case errors.Is(err, daemonerr.ErrPermissions):
 		return New(CategoryRefused, "data_directory_unusable", "the data directory cannot be verified as a real directory private to its owner; check its ownership, permissions and path; symbolic links are not accepted")
+	case errors.Is(err, daemonerr.ErrRestartUnavailable):
+		return New(CategoryRefused, "restart_unavailable", "this daemon cannot restart itself here: nothing started again would outlive it, or it does not know how it was started; stop it with `sidera daemon stop` and start it the way it was started, or let whatever supervises it restart it (the daemon log says which)")
 	case errors.Is(err, daemonerr.ErrEngineNotStopped):
 		return New(CategoryInternal, "engine_not_stopped", "the engine did not stop in time; the instance lock remains held until this process exits")
 	case errors.Is(err, ipc.ErrLockNotHeld):
