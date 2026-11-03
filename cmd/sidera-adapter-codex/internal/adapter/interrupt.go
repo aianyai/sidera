@@ -123,9 +123,13 @@ func (a *App) Interrupt(ctx context.Context, p adapterproto.InterruptParams) (ad
 	return adapterproto.InterruptResult{Stage: adapterproto.InterruptStopped}, nil
 }
 
-// finishTurn reports the end of a turn. When an interrupt of the turn was sent and
-// the turn ended interrupted, the commands it left running are ended first, so that
-// the report, and the answer to the interrupt, say the turn's work has stopped.
+// finishTurn settles the end of a turn: it ends the commands the turn left running
+// when an interrupt of the turn was sent and the turn did not complete, then makes
+// the session idle if the turn was its running one, then reports the end. So the
+// report, and the answer to the interrupt, say the turn's work has stopped, and the
+// session takes no new turn while the commands of the old one are being ended. A
+// turn that failed, or that the server no longer lists, is ended like an interrupted
+// one: it is not known that it stopped what it started.
 func (a *App) finishTurn(s *session, turnID, status string) {
 	a.mu.Lock()
 	rec := s.turn(turnID)
@@ -134,11 +138,17 @@ func (a *App) finishTurn(s *session, turnID, status string) {
 	a.mu.Unlock()
 
 	var endErr error
-	if over != nil && status == appserver.TurnInterrupted {
+	if over != nil && status != appserver.TurnCompleted {
 		if endErr = a.endCommands(s, ran, partial); endErr != nil {
 			a.log.Warn("cannot end the commands of an interrupted turn", "endpoint", s.endpoint, "error", endErr)
 		}
 	}
+	a.mu.Lock()
+	if s.activeTurn == turnID {
+		s.activeTurn, s.status = "", appserver.ThreadIdle
+	}
+	a.mu.Unlock()
+	s.signal()
 	a.reportEnded(s, turnID, status)
 	if over != nil {
 		a.mu.Lock()

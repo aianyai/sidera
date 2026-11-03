@@ -113,14 +113,13 @@ func (a *App) turnCompleted(p appserver.ThreadNotification) {
 	late := !rec.started
 	rec.started, rec.ended = true, true
 	attempt := rec.attempt
-	if s.activeTurn == p.Turn.ID {
-		s.activeTurn, s.status = "", appserver.ThreadIdle
-	}
 	a.mu.Unlock()
-	s.signal()
 	if late {
 		a.reportStarted(s, p.Turn.ID, attempt)
 	}
+	// The session stays busy until finishTurn has ended the commands the turn left
+	// running: a turn started meanwhile would otherwise have its own commands ended
+	// along with them.
 	a.finishTurn(s, p.Turn.ID, p.Turn.Status)
 }
 

@@ -509,10 +509,14 @@ items of its commands that have a process (`item/started`, a `commandExecution` 
    once; that is `not_running`. A thread the server unloaded is resumed first. Any other failure
    is `failed` (`native_unreachable` when the connection is gone, `native_error` otherwise).
 2. Waits for the end of the turn (`turn/completed`, about ten milliseconds later).
-3. When the turn ended `interrupted`, lists the thread's background terminals and terminates
-   those whose item is one of the turn's commands, **before `turn.ended` is reported**. Commands
-   that earlier turns left running on purpose are not touched, and a turn that ran no command
-   with a process costs no further request.
+3. When the turn, which an interrupt asked to stop, ended without completing (`interrupted`, or `failed`, which includes a turn the
+   server no longer lists once the connection is back), lists the thread's background terminals
+   and terminates those whose item is one of the turn's commands, **before `turn.ended` is
+   reported**. Commands that earlier turns left running on purpose are not touched, and a turn
+   that ran no command with a process costs no further request. The session is still busy while
+   this goes on: it is made idle only after the commands are ended, so a prompt delivered at the
+   end of the turn is refused as busy, and the turn it would start never has its own commands
+   ended along with the old one's.
 4. Answers `stopped` once `turn.ended` has been reported. The end of the turn and the answer
    therefore both mean the commands ended too.
 
@@ -520,8 +524,8 @@ items of its commands that have a process (`item/started`, a `commandExecution` 
 seconds); the daemon then waits for `turn.ended` itself, and the commands are ended just before it
 is reported, so its `stopped` holds as well. Asking again while the turn runs does not ask the
 server again. `not_running` is a session with no turn running, answered without asking the
-server. If a command cannot be ended the answer is `failed` with `native_error`, and `turn.ended`
-is reported all the same: the turn did end.
+server. If a command cannot be ended the answer is `failed` with `native_error`, or with
+`native_unreachable` when the connection to the server is gone (the server cannot be asked to end them), and `turn.ended` is reported all the same: the turn did end.
 
 A turn the adapter did not see start (it was found running after a restart, or the connection
 that was telling its events ended meanwhile) has commands the adapter was not told of, and none

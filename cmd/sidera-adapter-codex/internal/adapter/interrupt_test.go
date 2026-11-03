@@ -28,12 +28,24 @@ type terminalsFake struct {
 	// termination, how many turn.ended reports the daemon had by then.
 	calls       []string
 	endedBefore []int
+	// whileEnding, when set, runs with the request that lists or cleans the
+	// processes of a thread, which is the adapter ending the commands of a turn.
+	whileEnding func()
 }
 
 func (f *terminalsFake) log(s string) {
 	f.mu.Lock()
 	f.calls = append(f.calls, s)
 	f.mu.Unlock()
+}
+
+func (f *terminalsFake) endingNow() {
+	f.mu.Lock()
+	hook := f.whileEnding
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 }
 
 func (f *terminalsFake) logged() []string {
@@ -59,6 +71,7 @@ func installTerminals(codex *fakeCodex, h *harness, f *terminalsFake) {
 	})
 	codex.srv.Handle("thread/backgroundTerminals/list", func(json.RawMessage) (any, *appserver.RPCError) {
 		f.log("list")
+		f.endingNow()
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		return map[string]any{"data": f.terminals, "nextCursor": nil}, nil
@@ -76,6 +89,7 @@ func installTerminals(codex *fakeCodex, h *harness, f *terminalsFake) {
 	})
 	codex.srv.Handle("thread/backgroundTerminals/clean", func(json.RawMessage) (any, *appserver.RPCError) {
 		f.log("clean")
+		f.endingNow()
 		return map[string]any{}, nil
 	})
 }
@@ -233,4 +247,78 @@ func TestInterruptWithoutATurn(t *testing.T) {
 	if code := codeOf(t, h.call(adapterproto.MethodSessionInterrupt, adapterproto.InterruptParams{Endpoint: otherEP}, &res)); code != adapterproto.CodeUnknownEndpoint {
 		t.Fatalf("unknown endpoint: code %d", code)
 	}
+}
+
+// The session stays busy until the commands of an interrupted turn are ended: a
+// prompt delivered in between would start a turn whose commands the cleaning of
+// the old one could end.
+func TestASessionIsBusyWhileTheCommandsOfItsInterruptedTurnAreEnded(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarnessWith(t, codex, func(o *adapter.Options) { o.InterruptWait = 5 * time.Second })
+	h.start()
+	h.create(attempt1, sessionEP, "dev")
+	started := decode[adapterproto.TurnStartedParams](h.waitNote(adapterproto.MethodTurnStarted, nil))
+	f := &terminalsFake{endTurn: true, terminals: []appserver.Terminal{{ItemID: "c1", ProcessID: "p-c1"}}}
+	delivered := make(chan adapterproto.PromptDeliverResult, 1)
+	f.whileEnding = func() {
+		var res adapterproto.PromptDeliverResult
+		_ = h.call(adapterproto.MethodPromptDeliver, adapterproto.PromptDeliverParams{Endpoint: sessionEP, Attempt: attempt2, Text: "next"}, &res)
+		select {
+		case delivered <- res:
+		default:
+		}
+	}
+	installTerminals(codex, h, f)
+	commandStarted(codex, started.Turn, "c1")
+
+	if got := h.interrupt(); got.Stage != adapterproto.InterruptStopped {
+		t.Fatalf("interrupt = %+v", got)
+	}
+	select {
+	case res := <-delivered:
+		if res.Stage != adapterproto.PromptRefused || res.Reason != adapterproto.RefusalBusy {
+			t.Fatalf("a prompt while the commands were ended: %+v, want refused as busy", res)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the commands were never ended")
+	}
+}
+
+// A turn the server no longer lists, found so when the connection is back, is
+// ended as failed; an interrupt that was waiting for it answers stopped, so the
+// commands of the thread are ended first.
+func TestInterruptOfATurnTheServerNoLongerListsEndsTheCommands(t *testing.T) {
+	codex := newFakeCodex(t)
+	h := newHarnessWith(t, codex, func(o *adapter.Options) { o.InterruptWait = 20 * time.Second; o.ReconnectMin = 20 * time.Millisecond })
+	h.start()
+	h.create(attempt1, sessionEP, "dev")
+	started := decode[adapterproto.TurnStartedParams](h.waitNote(adapterproto.MethodTurnStarted, nil))
+	f := &terminalsFake{}
+	installTerminals(codex, h, f)
+
+	answer := make(chan adapterproto.InterruptResult, 1)
+	go func() { answer <- h.interrupt() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(f.logged(), "interrupt") {
+		if time.Now().After(deadline) {
+			t.Fatal("the turn was never asked to stop")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The turn is gone from the server's record, and the connection drops.
+	codex.forget("th-1", string(started.Turn))
+	codex.srv.DropConnections()
+
+	select {
+	case got := <-answer:
+		if got.Stage != adapterproto.InterruptStopped {
+			t.Fatalf("interrupt = %+v", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the interrupt was never answered")
+	}
+	if !slices.Contains(f.logged(), "clean") {
+		t.Errorf("requests = %v: stopped was answered with the commands of the thread running", f.logged())
+	}
+	h.waitNote(adapterproto.MethodTurnEnded, func(r json.RawMessage) bool { return ended(r, adapterproto.TurnFailed) })
 }

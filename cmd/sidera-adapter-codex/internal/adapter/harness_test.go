@@ -288,6 +288,17 @@ func (f *fakeCodex) seed(id string, turns ...*fakeTurn) {
 	f.threads[id] = &fakeThread{id: id, named: "seeded", turns: turns}
 }
 
+// forget removes a turn from the server's record, as a server that lost it would.
+func (f *fakeCodex) forget(threadID, turnID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.threads[threadID].turns {
+		if t.id == turnID {
+			t.unrecorded = true
+		}
+	}
+}
+
 // endQuietly changes the record of a turn without any event, as happens while the
 // adapter is not connected.
 func (f *fakeCodex) endQuietly(threadID, turnID, status string) {
