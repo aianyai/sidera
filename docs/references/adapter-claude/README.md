@@ -147,7 +147,7 @@ The manifest declares two instance keys, `claude_path` and `sidera_path`, and th
 before it ends, 10 minutes if unset). The output budgets are 27000 characters for the command
 line and 22500 for MCP, in characters because an MCP result over 50000 characters is moved into a
 file and the default limit is 25000 tokens, about one token per character for CJK text; `recv` may
-wait 100 seconds on either front end. The manifest lists only macOS for now. The per-turn files live
+wait 100 seconds on either front end. The manifest lists macOS, Linux and Windows on amd64 and arm64. The per-turn files live
 under the instance's `state_dir`, which the daemon provides, so the adapter has no setting for
 them.
 
@@ -163,7 +163,7 @@ writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-claude` through
 `manifest.WritePackage`, which every adapter's `package` shares. The manifest is the one
 built into the executable, with `platforms` narrowed to the platform asked for, since the
 package holds one binary and the installation checks the list. A platform the manifest does
-not list (today anything but `darwin/arm64` and `darwin/amd64`) is refused and nothing is
+not list (today anything but `darwin`, `linux` and `windows` on `amd64` and `arm64`) is refused and nothing is
 written; adding a platform is adding it to the manifest. The `version` in the embedded
 `sidera-adapter.json` is the placeholder `@version@`: the executable replaces it with the
 release version (`internal/release`) when it reads the manifest, for `initialize` and for the
@@ -368,7 +368,7 @@ on the session's behalf.
 ### What is not built yet
 
 Claude's operating-system sandbox, which would make the denial of the data directory hold against
-Bash (see the turn process), `session.interrupt` of a created session (SIGINT of the turn process on Unix, with the process's end as the confirmation;
+Bash (see the turn process), `session.interrupt` of a created session (Ctrl-C of the turn process, SIGINT on Unix and CTRL_C_EVENT on Windows, with the process's end as the confirmation;
 the runtime's messaging socket is another way worth testing), `recv.observed` (it needs the
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`

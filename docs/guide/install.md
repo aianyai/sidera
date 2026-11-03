@@ -9,11 +9,17 @@ with [Getting started](getting-started.md).
 | Platform | Architectures | Agents Sidera can drive |
 | -------- | ------------- | ----------------------- |
 | macOS | arm64, amd64 | Claude Code, Codex |
-| Linux | amd64, arm64 | Codex |
-| Windows | amd64, arm64 | Codex |
+| Linux | amd64, arm64 | Claude Code, Codex |
+| Windows | amd64, arm64 | Claude Code, Codex |
 
-The adapter for Claude Code is built for macOS only. On Linux and Windows a
-node can still carry messages and run Codex sessions. A Windows on Arm machine
+A Claude Code turn outlives the daemon's restart on all three platforms. On Linux
+it is started in a systemd user scope when that keeps it alive (the user manager
+is usable and lingering is on, or the daemon already runs under the user
+manager), and otherwise in a session of its own; a node that must run with
+nobody logged in needs `loginctl enable-linger`. On Windows, if Claude Code
+cannot find Git Bash in a standard place, set `CLAUDE_CODE_GIT_BASH_PATH` in the
+daemon's environment: it is the one `CLAUDE_CODE_*` variable passed on to the
+turns. A Windows on Arm machine
 takes the arm64 archive (the commands below name the amd64 one); Settings >
 System > About shows it as "System type", or in PowerShell
 `(Get-CimInstance Win32_Processor).Architecture` is 12 for ARM64.
@@ -42,7 +48,7 @@ An archive holds:
 | `sidera` | The node program: the daemon and every command. |
 | `sidera-adapter-console` | The console bridge, and the owner's command-line client: the way to start a first session and read replies. Keep it on your `PATH`. |
 | `adapters/codex/` | The ready-to-install package of the Codex adapter. |
-| `adapters/claude/` | The package of the Claude Code adapter (darwin archives only). |
+| `adapters/claude/` | The package of the Claude Code adapter. |
 | `adapters/console/` | The package of the console bridge. |
 | `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt` | The license, the notices of bundled software and a short note. |
 
@@ -157,13 +163,10 @@ Then make the adapter packages that `sidera adapter install` reads. Each adapter
 program has a `package` command for this:
 
 ```sh
-for a in console codex; do
+for a in console codex claude; do
   bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" \
     --binary bin/sidera-adapter-$a --out packages/$a
 done
-# macOS only:
-bin/sidera-adapter-claude package --goos darwin --goarch "$(go env GOARCH)" \
-  --binary bin/sidera-adapter-claude --out packages/claude
 ```
 
 `--out` must name a directory that does not exist or is empty. Copy `sidera` and

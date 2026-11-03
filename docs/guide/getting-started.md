@@ -1,7 +1,7 @@
 # Getting started
 
 This guide takes two machines from nothing to a first message between agents on
-them. Call them **A** and **B**. Each can run Claude Code (macOS only), Codex or
+them. Call them **A** and **B**. Each can run Claude Code, Codex or
 both; the steps are the same. You need a terminal on each machine and a network
 path between them: both on one local network is the simplest.
 
@@ -105,7 +105,7 @@ back. Then add the adapter for the agent on this machine, once:
 ```sh
 sidera adapter install ~/sidera-release/adapters/codex
 sidera adapter enable codex
-# or, on macOS, for Claude Code:
+# or, for Claude Code:
 sidera adapter install ~/sidera-release/adapters/claude
 sidera adapter enable claude
 ```

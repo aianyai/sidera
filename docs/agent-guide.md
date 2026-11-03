@@ -97,10 +97,10 @@ be ended too (step 4).
 
    ```sh
    command -v codex claude      # macOS and Linux
-   Get-Command codex.exe        # Windows (needs codex.exe, not a .cmd wrapper)
+   Get-Command codex.exe, claude.exe   # Windows (needs the .exe, not a .cmd wrapper)
    ```
 
-   Codex works on all three platforms; Claude Code only on macOS. At least one of
+   Codex and Claude Code work on all three platforms. At least one of
    them must be installed and signed in as the owner. Check: the command prints a
    path. If neither is found, try an interactive shell, which reads the profile
    that a shell over `ssh` or a tool's shell may skip:
@@ -203,7 +203,7 @@ Choose A (release archive) or B (source).
 
    Changing the user `PATH` is a persistent change (see "Ask your owner before").
    If the archive extracted into a subdirectory, copy from there. The adapter
-   packages (Codex, Claude Code on macOS, console) are in the extracted
+   packages (Codex, Claude Code, console) are in the extracted
    `adapters/<name>/` directories, `~/sidera-release/adapters/<name>` on macOS and
    Linux and `%USERPROFILE%\sidera-release\adapters\<name>` on Windows; the adapter
    programs for Codex and Claude Code are inside them and are not copied by hand.
@@ -216,10 +216,8 @@ You need Go 1.26 or newer.
 git clone https://github.com/aianyai/sidera.git && cd sidera
 mkdir -p bin packages ~/.local/bin
 CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex
-CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude      # macOS only
-for a in console codex; do bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-$a --out packages/$a; done
-# macOS only:
-bin/sidera-adapter-claude package --goos darwin --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-claude --out packages/claude
+CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude
+for a in console codex claude; do bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-$a --out packages/$a; done
 cp bin/sidera bin/sidera-adapter-console ~/.local/bin/
 ```
 
@@ -382,7 +380,7 @@ sidera adapter install <packages>/console
 sidera adapter enable console
 sidera adapter install <packages>/codex      # if this machine has Codex
 sidera adapter enable codex
-sidera adapter install <packages>/claude     # macOS, if this machine has Claude Code
+sidera adapter install <packages>/claude     # if this machine has Claude Code
 sidera adapter enable claude
 ```
 
@@ -394,7 +392,7 @@ Check, after a few seconds:
 sidera adapter list
 ```
 
-Expected: the console instance (and Claude, on macOS) shows a probe state of
+Expected: the console instance (and Claude) shows a probe state of
 `passed`. The Codex instance shows `pending` first, and once a `workspace-write`
 preset exists (step 6) it may show `failed`: the probe needs the command-line front
 end, which that sandbox does not offer. This is a known limit of the display, not a
@@ -450,8 +448,7 @@ delete the other object and the comma that separates them. On Windows (PowerShel
 write the same text with a single-quoted here-string, which does not expand anything,
 and `[IO.File]::WriteAllText("$PWD\light.json", $json)` (no byte order mark), where
 `$json = @'` starts the text and `'@` on a line of its own ends it; double the
-backslashes in `cwd`. Claude Code is macOS only, so on Linux and Windows the file
-holds the `codex` object alone.
+backslashes in `cwd`.
 
 What the `light` preset gives:
 

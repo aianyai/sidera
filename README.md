@@ -32,13 +32,12 @@ Sidera 0.9.0 is the current release; 0.8.0 was the first public release.
 
 - Direct connection between nodes on a local network, over TCP and QUIC.
 - Pairing: two nodes trust each other after both owners confirm.
-- Claude Code on macOS.
+- Claude Code on macOS, Linux and Windows.
 - Codex on macOS, Linux and Windows.
 - Creating a session on another machine and exchanging messages with it.
 - The console bridge: the owner starts sessions and reads replies from a terminal.
 - A Claude Code or Codex session you opened yourself becomes a controller with an
-  endpoint of its own, and is woken when a reply arrives (a Claude Code controller is
-  woken on macOS only, because the Claude adapter is macOS only).
+  endpoint of its own, and is woken when a reply arrives.
 - Dynamic adapter install, replace, configuration and removal, while Sidera runs.
 
 **Planned**

@@ -84,11 +84,14 @@ func TestPackageIsWrittenOnlyForAListedPlatform(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range [][2]string{{"darwin", "arm64"}, {"darwin", "amd64"}, {"linux", "amd64"}, {"windows", "amd64"}} {
+	for _, p := range [][2]string{
+		{"darwin", "arm64"}, {"darwin", "amd64"}, {"linux", "amd64"}, {"linux", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"}, {"linux", "386"}, {"freebsd", "amd64"},
+	} {
 		t.Run(p[0]+"/"+p[1], func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "pkg")
 			err := writePackage(out, bin, p[0], p[1])
-			if p[0] != "darwin" {
+			if p[1] == "386" || p[0] == "freebsd" {
 				if err == nil {
 					t.Fatal("a package was written for a platform the manifest does not list")
 				}
@@ -111,7 +114,11 @@ func TestPackageIsWrittenOnlyForAListedPlatform(t *testing.T) {
 			if m.ID != "claude" || len(m.Platforms) != 1 || m.Platforms[0] != (manifest.Platform{OS: p[0], Arch: p[1]}) {
 				t.Errorf("manifest %+v", m)
 			}
-			if got, err := os.ReadFile(filepath.Join(out, "bin", "sidera-adapter-claude")); err != nil || string(got) != "binary" {
+			name := "sidera-adapter-claude"
+			if p[0] == "windows" {
+				name += ".exe" // the package adds the suffix the platform runs programs by
+			}
+			if got, err := os.ReadFile(filepath.Join(out, "bin", name)); err != nil || string(got) != "binary" {
 				t.Errorf("binary %q, %v", got, err)
 			}
 		})

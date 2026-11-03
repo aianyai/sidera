@@ -6,7 +6,11 @@
   "entry": {"program": "bin/sidera-adapter-claude"},
   "platforms": [
     {"os": "darwin", "arch": "arm64"},
-    {"os": "darwin", "arch": "amd64"}
+    {"os": "darwin", "arch": "amd64"},
+    {"os": "linux", "arch": "amd64"},
+    {"os": "linux", "arch": "arm64"},
+    {"os": "windows", "arch": "amd64"},
+    {"os": "windows", "arch": "arm64"}
   ],
   "requires": [{"program": "claude"}],
   "config": {

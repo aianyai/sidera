@@ -270,8 +270,8 @@ What to know about the wake-up:
 - If the node cannot wake the session, the notice says why and tells the model to call
   `recv` with a wait (`wait_s`) inside a turn to collect replies. Without a wake-up,
   nothing interrupts the session when a reply arrives.
-- The Claude Code adapter runs on macOS only, so a Claude Code controller is woken
-  on macOS only; Windows was not tested. A controller running in Claude Code's
+- A Claude Code controller is woken through the inbox of its session: a socket on
+  macOS and Linux, a named pipe with an authentication line on Windows. A controller running in Claude Code's
   bypass-permissions mode may hold a wake-up for approval; this could not be checked.
 - Codex holds a wake-up after you press Esc in the terminal until your next turn
   completes, and an active `/goal` can delay it.
