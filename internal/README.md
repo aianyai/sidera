@@ -26,6 +26,8 @@ command line goes in `cmd/sidera/internal/`.
   definitions in the `sdk/go` module, which the daemon shares with adapters. This
   keeps the contracts usable from every process, including ones that never open
   a network socket.
+  The approved third-party dependencies: `minisign` may import
+  `golang.org/x/crypto/blake2b`.
 - **Table-driven tests.** Each table row names the rule it exercises, so a
   failure points at the rule and not only at the input. Decision functions
   return a verdict together with a machine-readable reason, so callers and

@@ -1,0 +1,2 @@
+a1b2  sidera_0.12.0_linux_amd64.tar.gz
+c3d4  sidera_0.12.0_windows_amd64.zip

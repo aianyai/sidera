@@ -13,6 +13,7 @@ require (
 	github.com/multiformats/go-multistream v0.6.1
 	github.com/quic-go/quic-go v0.64.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	golang.org/x/crypto v0.57.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.42.0
 )
@@ -60,7 +61,6 @@ require (
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260718201538-764159d718ef // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
