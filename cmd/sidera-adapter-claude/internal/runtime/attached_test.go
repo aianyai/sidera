@@ -223,10 +223,40 @@ func TestAttachOutcomes(t *testing.T) {
 	}
 }
 
+// Claude Code on Windows drops a message without an authentication line and says
+// nothing, which a delivery cannot tell from success: such a wake is refused at the
+// attachment and at every delivery. Elsewhere the token is optional.
+func TestAWakeWithoutATokenIsRefusedOnWindowsOnly(t *testing.T) {
+	w := newWorld(t)
+	w.claudeProc(claudePID)
+	w.setRegistry(claudeSess, "idle", 1000)
+	app, _ := newApp(t, w)
+	res, err := app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: wakeOf(inboxSock, "", claudePID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	del, err := deliver(app, attempt1, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if goruntime.GOOS != "windows" {
+		if res.Outcome != adapterproto.SessionAttachAttached || del.Stage != adapterproto.PromptAccepted {
+			t.Fatalf("a wake without a token delivers outside Windows: %+v, %+v", res, del)
+		}
+		return
+	}
+	if res.Outcome != adapterproto.SessionAttachFailed || res.Reason != adapterproto.AttachFailWakeUnavailable || !strings.Contains(res.Detail, "token") {
+		t.Fatalf("attach: %+v", res)
+	}
+	if del.Stage != adapterproto.PromptRefused || del.Reason != adapterproto.RefusalNativeUnavailable || len(w.inboxWrites()) != 0 {
+		t.Fatalf("delivery: %+v, %d writes: nothing may be written that Claude Code would drop", del, len(w.inboxWrites()))
+	}
+}
+
 func TestAttachingAgainReplacesTheWake(t *testing.T) {
 	w, app := attachedWorld(t)
 	other := "/run/test/other.sock"
-	res, _ := app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: wakeOf(other, "", claudePID)})
+	res, _ := app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: wakeOf(other, "other-token", claudePID)})
 	if res.Outcome != adapterproto.SessionAttachAttached {
 		t.Fatalf("repeat: %+v", res)
 	}
@@ -236,8 +266,8 @@ func TestAttachingAgainReplacesTheWake(t *testing.T) {
 	if _, err := deliver(app, attempt1, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if got := w.inboxWrites(); len(got) != 1 || got[0].socket != other || strings.Contains(got[0].data, "auth") {
-		t.Fatalf("the message went %+v: it goes to the new socket, without the dropped token", got)
+	if got := w.inboxWrites(); len(got) != 1 || got[0].socket != other || !strings.Contains(got[0].data, "other-token") || strings.Contains(got[0].data, inboxToken) {
+		t.Fatalf("the message went %+v: it goes to the new socket, with the new token", got)
 	}
 	// A repeat with no wake means none held.
 	res, _ = app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess})

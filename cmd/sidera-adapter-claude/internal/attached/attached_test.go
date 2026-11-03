@@ -131,6 +131,26 @@ func TestParseWake(t *testing.T) {
 	}
 }
 
+func TestWakeProblem(t *testing.T) {
+	tests := []struct {
+		wake Wake
+		goos string
+		want string // a part of the problem; empty for none
+	}{
+		{Wake{Socket: "/s", Token: "t"}, "windows", ""},
+		{Wake{Socket: "/s"}, "darwin", ""},
+		{Wake{Socket: "/s"}, "linux", ""},
+		{Wake{Socket: "/s"}, "windows", WakeToken},
+		{Wake{Token: "t"}, "darwin", WakeSocket},
+		{Wake{}, "windows", WakeSocket},
+	}
+	for _, tc := range tests {
+		if got := tc.wake.Problem(tc.goos); (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("Problem(%q) of %+v = %q, want %q", tc.goos, tc.wake, got, tc.want)
+		}
+	}
+}
+
 func TestWakeLines(t *testing.T) {
 	const uuid = "11111111-1111-4111-8111-111111111111"
 	got, err := Wake{Socket: "/s", Token: "tok-1"}.Lines(uuid, "line one\n\"two\"")

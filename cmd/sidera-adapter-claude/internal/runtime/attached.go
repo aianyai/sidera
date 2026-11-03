@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 	"time"
 
@@ -223,11 +224,11 @@ func (a *App) AttachSession(ctx context.Context, p adapterproto.SessionAttachPar
 		a.publishNative(s)
 	}
 
-	if wake.Socket == "" {
-		detail := "the wake carries no inbox socket (" + attached.WakeSocket + ")"
-		if !reg.Messaging {
+	if detail := wake.Problem(goruntime.GOOS); detail != "" {
+		if wake.Socket == "" && !reg.Messaging {
 			detail = "this Claude Code does not list support for messages between sessions: it is too old"
 		}
+		a.log.Warn("an attached session cannot be sent prompts", "endpoint", p.Endpoint, "detail", detail)
 		return attachFailed(adapterproto.AttachFailWakeUnavailable, detail), nil
 	}
 	return adapterproto.SessionAttachResult{Outcome: adapterproto.SessionAttachAttached}, nil
@@ -561,8 +562,8 @@ func (a *App) deliverAttached(ctx context.Context, s *attachedSession, p adapter
 	// and the next look need not wait for its slow turn to find out.
 	s.formErrors = 0
 	a.setDown(s, "")
-	if s.wake.Socket == "" {
-		s.sockDown = "the session has no inbox socket: the next attachment brings it"
+	if problem := s.wake.Problem(goruntime.GOOS); problem != "" {
+		s.sockDown = problem + ": the next attachment brings it"
 		a.publishNative(s)
 		return refused(adapterproto.RefusalNativeUnavailable)
 	}

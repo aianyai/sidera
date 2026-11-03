@@ -17,6 +17,7 @@ matching is an error here (`ErrRegistryForm`), never a guess.
 | `Registry.SameProcess(startUnix, nativeStart)` | Whether a process of the table is the one the entry was written by: a number reused by another process is not. The entry's `procStart` is kept as written; macOS compares `ps -o lstart` text within two seconds, Linux (clock ticks) and Windows (FILETIME) compare the native start for equality. |
 | `Status`, `Status.Active()` | `busy` and `waiting` are a turn running; `idle`, `shell` and a status not known are not. |
 | `ParseWake(info)`, `Wake` | The three wake keys; a key that is not valid is named by its key. `Wake` prints as redacted, whatever the verb or log handler. |
+| `Wake.Problem(goos)` | Why the wake cannot deliver on that operating system, empty when it can: no socket, or no token on Windows, where Claude Code drops an unauthenticated message without a word. |
 | `Wake.Lines(uuid, text)` | What is written to the inbox socket: the authentication line when there is a token, then the user message carrying the attempt as its uuid. |
 | `Follower` (`Expect`, `Forget`, `Step`, `End`, `Finish`, `Adopt`, `Open`, `Expected`) | The notifications (`prompt.persisted`, `turn.started`, `turn.ended`) that one look at the registry and the transcript calls for. |
 

@@ -26,7 +26,7 @@ type Wake struct {
 	// Socket is the session's inbox socket; empty when the wake has none.
 	Socket string
 	// Token is the inbox's authentication token; empty when the wake has none.
-	// Windows requires it and macOS does not check it.
+	// Windows requires it and macOS and Linux do not check it.
 	Token string
 	// PID is the Claude Code process; zero when the wake has none.
 	PID int
@@ -44,6 +44,20 @@ func ParseWake(info adapterproto.WakeInfo) (Wake, error) {
 		w.PID = pid
 	}
 	return w, nil
+}
+
+// Problem says why the wake cannot deliver a prompt on the operating system goos,
+// empty when it can. Claude Code on Windows drops a message that no
+// authentication line precedes without a word, which a delivery cannot tell from
+// success, so such a wake is refused before anything is written.
+func (w Wake) Problem(goos string) string {
+	switch {
+	case w.Socket == "":
+		return "the wake carries no inbox socket (" + WakeSocket + ")"
+	case w.Token == "" && goos == "windows":
+		return "the wake carries no token (" + WakeToken + "), which Claude Code on Windows requires: a message without it is dropped unanswered"
+	}
+	return ""
 }
 
 const redacted = "wake{redacted}"

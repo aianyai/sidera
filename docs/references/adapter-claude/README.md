@@ -387,6 +387,10 @@ on the session's behalf.
   that was dropped is found missing by the reconciliation, as for any delivery whose outcome is unknown.
   The wake carries the right token (the session's own `CLAUDE_CODE_MESSAGING_TOKEN`), so this is for a
   wake that went stale.
+  A wake with no token at all is the same case that is known in advance, so on Windows it is refused
+  (`wake_unavailable` at the attachment, `native_unavailable` at a delivery, with the reason in the status
+  and the log) before anything is written, rather than answering accepted for a message that is certain
+  to be dropped. On macOS and Linux the token is optional.
 - Only the transcript of the session now running is read: after a `/clear` the history of the old
   session is not looked at again. A record directory name over 200 characters cannot be located: such a
   session is followed from the registry alone, and its prompts are never reported persisted.
