@@ -12,6 +12,7 @@ is untrusted until the caller has verified it, which is why it does not pin a ho
 | `NewAt(base, transport, userAgent)` | The same policy against another base URL and transport; for tests that serve a repository from a local TLS server. Nothing a user can set reaches it |
 | `UserAgent(version)` | The text every request carries: `sidera/<version> (<goos>/<goarch>)` |
 | `Client.Latest(ctx)` | The latest version, without the leading `v`, read from the redirect of `<repository>/releases/latest` |
+| `Client.ReleaseURL(version)` | The page of a release, `<repository>/releases/tag/v<version>`: where the redirect of the latest release leads, and what a person is shown to read about it |
 | `Client.Download(ctx, version, asset, w, limit)` | Writes the asset `releases/download/v<version>/<asset>` to `w`, at most `limit` bytes |
 | `MaxChecksums`, `MaxSignature`, `MaxArchive` | The limits for the three kinds of object: 64 KiB, 4 KiB, 256 MiB |
 | `ErrNotFound`, `ErrTooLarge` | What `errors.Is` finds in a 404 and in a body past its limit |

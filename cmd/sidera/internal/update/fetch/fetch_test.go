@@ -102,6 +102,14 @@ func TestLatest(t *testing.T) {
 	}
 }
 
+func TestReleaseURL(t *testing.T) {
+	client, srv := repo(t, http.NotFoundHandler())
+	want := srv.URL + repoPath + "/releases/tag/v0.12.0-rc.1"
+	if got := client.ReleaseURL("0.12.0-rc.1"); got != want {
+		t.Fatalf("ReleaseURL = %q, want %q", got, want)
+	}
+}
+
 func TestLatestTimesOut(t *testing.T) {
 	client, _ := repo(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()

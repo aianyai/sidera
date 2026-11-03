@@ -144,7 +144,7 @@ func (c *Client) Latest(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("find the latest release: the redirect of %s has no usable Location: %w", u.Host+u.Path, err)
 	}
 	version, ok := strings.CutPrefix(location.Path, c.base.JoinPath("releases", "tag").Path+"/v")
-	if !ok || !isReleaseVersion(version) || location.String() != c.tagURL(version) {
+	if !ok || !isReleaseVersion(version) || location.String() != c.ReleaseURL(version) {
 		return "", fmt.Errorf("find the latest release: the redirect of %s leads to %q, not to a release tag of this repository", u.Host+u.Path, location.Redacted())
 	}
 	return version, nil
@@ -199,8 +199,9 @@ func (c *Client) Download(ctx context.Context, version, asset string, w io.Write
 	return nil
 }
 
-// tagURL is where the redirect of the latest release leads.
-func (c *Client) tagURL(version string) string {
+// ReleaseURL is the page of the release v<version>: where the redirect of the
+// latest release leads, and what a person is shown to read about a release.
+func (c *Client) ReleaseURL(version string) string {
 	return c.base.JoinPath("releases", "tag", "v"+version).String()
 }
 
