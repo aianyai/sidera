@@ -137,16 +137,16 @@ func (a *App) nativeSession(pid int) (attached.Registry, error) {
 	if reg.PID != pid {
 		return attached.Registry{}, fmt.Errorf("%w: the entry names another process", attached.ErrRegistryForm)
 	}
-	info, err := a.o.Table.Lookup(pid)
+	info, found, err := a.o.Table.Lookup(pid)
 	if err != nil {
 		return attached.Registry{}, fmt.Errorf("look at the process: %w", err)
 	}
 	switch {
-	case !info.Alive:
+	case !found:
 		return attached.Registry{}, fmt.Errorf("%w: the process has ended", errNativeGone)
-	case !reg.SameProcess(info.StartUnix):
+	case !reg.SameProcess(info.StartUnix, info.NativeStart):
 		a.log.Warn("the registry entry of a session names a process start that is not the running process's: its number was reused, or the registry's form changed",
-			"registry_start", reg.ProcStart.UTC().Format(time.RFC3339), "process_start", time.Unix(info.StartUnix, 0).UTC().Format(time.RFC3339))
+			"registry_start", reg.ProcStart, "process_start", info.NativeStart, "process_start_unix", info.StartUnix)
 		return attached.Registry{}, fmt.Errorf("%w: the process is not the one the entry was written by", errNativeGone)
 	}
 	return reg, nil

@@ -91,11 +91,12 @@ normal step and the check after a restart, so there is one set of rules.
 ### What the caller provides
 
 Observations are gathered by the runtime, not by the package: processes before
-the session record, from one process-table snapshot; a process counts only if
+the session record, from one listing of the process table; a process counts only if
 its argument vector holds `--session-id <uuid>` or `--resume <uuid>` and its
 executable is the preset's Claude, each launch once (wrapper and ancestor
 processes and the caller's own observers removed); live processes only; start
-times in Unix seconds from the process table; the record looked up in the
+times in Unix seconds from the process table, and whether the recorded process runs
+from `Running` of its identity, never from its absence in the listing; the record looked up in the
 attempt's record directory (`Decide` refuses another one). The argument
 vector of every process of the same user must be readable, and an unreadable
 one is an observation error reported as an error result, never "not running".
@@ -181,7 +182,7 @@ a digest of the first prompt's text, and then each state `create.State` goes thr
 request for the attempt with another preset, session endpoint or first prompt is `1005`; the
 checkpoint holds no token, because `tool_access` is sent with every request that needs it.
 
-The loop takes one snapshot of the process table, then reads the session file, then asks `Decide`
+The loop takes one listing of the process table, then reads the session file, then asks `Decide`
 and does what it says, storing the new state before the next round and waiting 200 ms when it says
 wait. A turn process is started with `--session-id` for a session that has no file and `--resume`
 otherwise. A start that cannot be made is answered `failed` (`native_unavailable`) without ending
@@ -212,8 +213,8 @@ a reconciliation proves that nothing was started.
 
 ### Closing a session
 
-`session.close` of a session the adapter holds interrupts its turn process with SIGINT, which ends a
-turn cleanly (SIGTERM leaves half a turn), waits up to 10 seconds, reports the turn's end as
+`session.close` of a session the adapter holds interrupts its turn process the way Ctrl-C does (SIGINT on Unix, a
+`CTRL_C_EVENT` sent by a helper on Windows), which ends a turn cleanly (SIGTERM leaves half a turn), waits up to 10 seconds, reports the turn's end as
 `interrupted` and answers `closed`; a process that does not end is answered `close_unconfirmed` with
 `turn_still_running` and is never killed. A session the adapter no longer holds is found by the
 `native_ref` in the process table and treated the same, and none found is `closed`. The uuid of a
@@ -251,9 +252,12 @@ unreadable registry entry is `native_error` at attachment and, if it stays so fo
 error in the log and `native_unavailable` for the endpoint; a transcript whose user lines lack a
 `uuid` or `sessionId` makes a prompt undecidable (`record_unreadable`); a turn that the transcript
 never ends is ended by the registry after two seconds as `interrupted` and a warning is logged.
-`procStart` is read as `ps -o lstart` in UTC and compared with the process table's start within two
-seconds; that is how a registry entry whose process number was reused by another process is told
-from a live session.
+`procStart` is kept as written, because its form depends on the platform: on macOS it is read as
+`ps -o lstart` in UTC and compared with the process table's start within two seconds; on Linux it is
+the start in clock ticks after boot (field 22 of `/proc/<pid>/stat`) and on Windows the creation time as
+a decimal FILETIME, each compared for equality with the process table's native start. A form of another
+platform is an unreadable entry (`native_error`). That is how a registry entry whose process number was
+reused by another process is told from a live session.
 
 **`session.attach`** reads the registry entry of `CLAUDE_PID` and answers:
 
@@ -473,10 +477,14 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   ties the process to the adapter; standard output and error are files too. They are
   `<attempt>.in.jsonl`, `.out.jsonl` and `.err.jsonl` in the instance's state directory,
   under `turns/<session uuid>/`.
-- The process starts in a session of its own (no controlling terminal, a process group
-  of its own that it leads), so a Ctrl-C in the daemon's terminal does not reach it
-  and it outlives the adapter. Its identity is the PID and the start seconds and
-  microseconds of the process table, the latter as the protocol's start key.
+- The process is started by `sdk/go/adapterkit/process` so that it outlives the adapter and the
+  daemon: on Unix in a session of its own (no controlling terminal, a process group it leads) and,
+  on Linux, in a systemd user scope when the user manager allows it; on Windows outside the
+  adapter's job when the job allows it, with a hidden console of its own so that it can be
+  interrupted. Its identity is the PID and the platform's start key (macOS: the kernel's start
+  seconds and microseconds; Linux: start ticks and the boot id; Windows: the creation FILETIME),
+  which is the protocol's start key. The container the start reports (`systemd_unit`,
+  `process_group` or `none`) is stored with the turn and reported with the process identity.
 
 ### Turn events
 
@@ -553,14 +561,17 @@ at another path.
   ends on an unanswered user message is not triggered by it. The file
   is looked up in one directory only, which is why the record directory is part
   of the attempt and `Decide` refuses a record looked up elsewhere.
-- **PID plus start second.** The system reuses PIDs. A PID alone would make a
+- **PID plus start.** The system reuses PIDs. A PID alone would make a
   recorded process look alive forever when an unrelated process took its number,
-  and the attempt would wait for ever. The start is an `int64` of Unix seconds,
-  the same unit as every time on the wire, and two processes are the same when
-  PID and start are equal. Each platform derives it from its finest source,
-  truncated to seconds: Linux from the boot time plus the start ticks (the boot
-  time is fixed for the boot, so the value never changes), macOS from the
-  process start seconds, Windows from the creation time. A time type with its
+  and the attempt would wait for ever. The runtime decides that a process it
+  knows still runs with the process table's `Running` of its PID and start key,
+  and an error of the table is an error, never "gone". The creation flow also
+  keeps the start as an `int64` of Unix seconds, the same unit as every time on
+  the wire, and compares it for equality. Each platform derives it from its
+  finest source, truncated to seconds: Linux from the boot time plus the start
+  ticks (the boot time moves when the clock is set, which is why the start key
+  and not the seconds decides whether a process is the recorded one), macOS from
+  the process start seconds, Windows from the creation time. A time type with its
   own precision was rejected because a value read from one source with finer
   resolution would silently differ from the same process read from another.
   More identity fields (a unit, a process group, a job) may be added later; the
@@ -710,14 +721,14 @@ at another path.
   of an output stream (`TestSanitize`, `TestDir`, `TestIndex`, `TestIndexMarkersFollowTheFile`,
   `TestIndexMarksTheUserRecordsThatBeginATurn`, `TestIndexForgetsAnUnwatchedUUID`, `TestLastResult`).
 - `.../internal/attached`: the registry entry, the wake and the socket line, and the follower of an
-  attached session's turns (`TestParseRegistry`, `TestParseRegistryRefusesAFormItDoesNotRead`,
+  attached session's turns (`TestParseRegistry`, `TestProcessStartForms`, `TestParseRegistryRefusesAFormItDoesNotRead`,
   `TestWakeLines`, `TestWakeNeverPrintsItsSecrets`, `TestTranscriptSample`, and the follower's tests
   in `follow_test.go`, among them `TestBackToBackTurnsAreToldFromTheTranscript` and
   `TestFinishTellsTheMarkersFirst`), on the synthetic samples in `testdata/`.
 - `.../internal/turn`: the event state machine, including the pickup after a restart
   (`TestStep`, `TestRestartAdoption`).
 - `.../internal/reconcile`: the verdicts (`TestDecide`).
-- `.../internal/runtime/proc`: the process table, detached start and signal (macOS; the others fail with `ErrUnsupported`).
+- `.../internal/runtime/proc`: the process table, detached start and interrupt, over `sdk/go/adapterkit/process` on every platform (`TestLauncherStartsAProcessTheTableFindsAndInterruptEnds`, and on macOS `TestStartKeyOnMacOSIsTheFormCheckpointsHold`). The inbox pipe writer on Windows is tested in `inbox_windows_test.go` against a stand-in server.
 - `cmd/sidera-adapter-claude/main.go`, `sidera-adapter.json`: the executable and its manifest
   (`TestManifestAndDeclarationAgree`); `pack.go`: the `package` subcommand
   (`TestPackageIsWrittenOnlyForAListedPlatform`).

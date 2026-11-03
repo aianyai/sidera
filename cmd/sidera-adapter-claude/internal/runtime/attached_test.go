@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -55,12 +56,22 @@ func (w *world) claudeProc(pid int) {
 
 func (w *world) killClaude(pid int) { w.setAlive(pid, false) }
 
+// procStart is the process start a registry file holds for a process that started at
+// the Unix second: the text of ps -o lstart on macOS, the native start of the
+// process table (see nativeStart) on Linux and Windows.
+func procStart(pid int, startUnix int64) string {
+	if goruntime.GOOS == "darwin" {
+		return time.Unix(startUnix, 0).UTC().Format(time.ANSIC)
+	}
+	return nativeStart(startUnix, pid)
+}
+
 // registryDoc is a registry file in the form the runtime writes it.
 func registryDoc(pid int, session, status string, statusAt int64, extra map[string]any) []byte {
 	doc := map[string]any{
 		"pid": pid, "sessionId": session, "cwd": workDir, "kind": "interactive", "version": "2.1.316",
 		"peerProtocol": 1, "messagingSocketPath": inboxSock,
-		"procStart": time.Unix(claudeStart, 0).UTC().Format(time.ANSIC),
+		"procStart": procStart(pid, claudeStart),
 		"status":    status, "statusUpdatedAt": statusAt, "updatedAt": statusAt,
 	}
 	for k, v := range extra {
@@ -175,7 +186,7 @@ func TestAttachOutcomes(t *testing.T) {
 		{"no registry entry", func(w *world) { w.removeRegistry() }, fullWake(), notFound, "", "no registry entry"},
 		{"the process has ended", func(w *world) { w.killClaude(claudePID) }, fullWake(), notFound, "", "ended"},
 		{"the number belongs to another process now", func(w *world) {
-			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"procStart": "Mon Nov  2 01:00:00 2026"})
+			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"procStart": procStart(claudePID, claudeStart-7200)})
 		}, fullWake(), notFound, "", "not the one"},
 		{"a session that is not interactive", func(w *world) {
 			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"kind": "sdk"})
@@ -761,7 +772,7 @@ func TestTheWakeNeverReachesTheLog(t *testing.T) {
 	w.setInboxErr(errors.New("broken pipe"))
 	_, _ = deliver(app, "55555555-5555-4555-8555-555555555555", "x")
 	w.setInboxErr(nil)
-	w.setRegistry(claudeSess, "idle", 1000, map[string]any{"procStart": "Mon Nov  2 01:00:00 2026"}) // a pid reuse is logged
+	w.setRegistry(claudeSess, "idle", 1000, map[string]any{"procStart": procStart(claudePID, claudeStart-7200)}) // a pid reuse is logged
 	_, _ = deliver(app, "66666666-6666-4666-8666-666666666666", "x")
 	w.setRegistry(claudeSess, "idle", 1000, map[string]any{"status": nil})
 	_, _ = app.AttachSession(ctx, adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: fullWake()})

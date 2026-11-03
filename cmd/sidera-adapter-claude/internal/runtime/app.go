@@ -107,7 +107,7 @@ func New(o Options) *App {
 		o.Table = proc.NewTable()
 	}
 	if o.Launcher == nil {
-		o.Launcher = proc.NewLauncher(o.Table)
+		o.Launcher = proc.NewLauncher()
 	}
 	if o.Signaller == nil {
 		o.Signaller = proc.NewSignaller()

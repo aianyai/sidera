@@ -31,12 +31,16 @@ type attemptCheckpoint struct {
 	Preset          string `json:"preset"`
 	SessionEndpoint string `json:"session_endpoint"`
 	// The numbers of Stage and FailReason are persisted values and never change.
-	Stage      int    `json:"stage"`
-	PID        int    `json:"pid,omitempty"`
-	StartUnix  int64  `json:"start_unix,omitempty"`
-	StartKey   string `json:"start_key,omitempty"`
-	Starts     int    `json:"starts"`
-	FailReason int    `json:"fail_reason"`
+	Stage     int    `json:"stage"`
+	PID       int    `json:"pid,omitempty"`
+	StartUnix int64  `json:"start_unix,omitempty"`
+	StartKey  string `json:"start_key,omitempty"`
+	// ContainerKind and ContainerName say where the recorded process runs; empty
+	// for one the adapter found and did not start.
+	ContainerKind string `json:"container_kind,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
+	Starts        int    `json:"starts"`
+	FailReason    int    `json:"fail_reason"`
 }
 
 // state returns the create.State the checkpoint holds.
@@ -52,12 +56,20 @@ func (c attemptCheckpoint) state() create.State {
 	return st
 }
 
-// withState returns the checkpoint with the state's fields; the start key stays
-// as it was, for the caller to set when the process changes.
+// withState returns the checkpoint with the state's fields; the start key and the
+// container stay as they were, for the caller to set when the process changes.
 func (c attemptCheckpoint) withState(st create.State) attemptCheckpoint {
 	c.Stage, c.Starts, c.FailReason = int(st.Stage), st.Starts, int(st.FailReason)
 	c.PID, c.StartUnix = st.Process.PID, st.Process.StartUnix
 	return c
+}
+
+// process is the turn process the checkpoint records.
+func (c attemptCheckpoint) process() turn.Process {
+	return turn.Process{
+		PID: c.PID, StartUnix: c.StartUnix, StartKey: c.StartKey,
+		ContainerKind: c.ContainerKind, ContainerName: c.ContainerName,
+	}
 }
 
 func decodeAttemptCheckpoint(raw json.RawMessage) (attemptCheckpoint, error) {

@@ -11,7 +11,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -227,31 +229,52 @@ func newWorld(t *testing.T) *world {
 // --- proc.Table, proc.Launcher, proc.Signaller ---
 
 func (w *world) info(p *fakeProc) proc.Info {
-	return proc.Info{PID: p.pid, Alive: p.alive, StartUnix: p.startUnix, StartMicro: int64(p.pid)}
+	return proc.Info{
+		Identity:    proc.Identity{PID: p.pid, StartKey: fmt.Sprintf("%d.%06d", p.startUnix, p.pid)},
+		StartUnix:   p.startUnix,
+		NativeStart: nativeStart(p.startUnix, p.pid),
+	}
 }
 
-func (w *world) Lookup(pid int) (proc.Info, error) {
+// nativeStart is the native start the fake table reports for a process, in the
+// form of the platform the tests run on (see procStart).
+func nativeStart(startUnix int64, pid int) string {
+	if goruntime.GOOS == "darwin" {
+		return fmt.Sprintf("%d.%06d", startUnix, pid)
+	}
+	return strconv.FormatInt(startUnix*100+int64(pid), 10)
+}
+
+func (w *world) Lookup(pid int) (proc.Info, bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.lookupErr != nil {
-		return proc.Info{}, w.lookupErr
+		return proc.Info{}, false, w.lookupErr
 	}
-	if p, ok := w.procs[pid]; ok {
-		return w.info(p), nil
+	if p, ok := w.procs[pid]; ok && p.alive {
+		return w.info(p), true, nil
 	}
-	return proc.Info{PID: pid}, nil
+	return proc.Info{}, false, nil
 }
 
-func (w *world) Snapshot() (proc.Snapshot, error) {
+func (w *world) Running(id proc.Identity) (bool, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var s proc.Snapshot
+	if w.lookupErr != nil {
+		return false, w.lookupErr
+	}
+	p, ok := w.procs[id.PID]
+	return ok && p.alive && w.info(p).StartKey == id.StartKey, nil
+}
+
+func (w *world) List() ([]proc.Entry, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var s []proc.Entry
 	for _, p := range w.procs {
-		e := proc.Entry{Info: w.info(p)}
 		if p.alive {
-			e.Args = p.args
+			s = append(s, proc.Entry{Info: w.info(p), Args: p.args})
 		}
-		s = append(s, e)
 	}
 	return s, nil
 }
@@ -272,10 +295,11 @@ func (w *world) Start(l proc.Launch) (proc.Started, error) {
 	if unidentified {
 		return proc.Started{}, fmt.Errorf("%w: process %d", proc.ErrStartedUnidentified, p.pid)
 	}
-	return proc.Started{Info: info, PGID: p.pid, Done: make(chan error)}, nil
+	return proc.Started{Info: info, Container: adapterproto.Container{Kind: adapterproto.ContainerProcessGroup, Name: strconv.Itoa(p.pid)}, Done: make(chan error)}, nil
 }
 
-func (w *world) Interrupt(pid int) error {
+func (w *world) Interrupt(_ context.Context, id proc.Identity) error {
+	pid := id.PID
 	w.mu.Lock()
 	w.signals = append(w.signals, pid)
 	p, hook := w.procs[pid], w.onInterrupt

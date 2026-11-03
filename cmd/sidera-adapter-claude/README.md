@@ -34,9 +34,9 @@ library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys
 | Path | Holds |
 | ---- | ----- |
 | `internal/runtime/` | The adapter itself, an `adapterkit.Application`: creation, delivery, reconciliation, closing, `adapter.start`, `adapter.probe`, the turn monitor, the checkpoints and attached sessions. See its README. |
-| `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and signals. Implemented for macOS; the other platforms compile and fail every call with `ErrUnsupported`. |
+| `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and interrupting one; the adapter's own interface over `sdk/go/adapterkit/process`, which implements it on macOS, Linux and Windows. |
 
-`main.go` serves the adapter protocol over the standard input and output with
+`main.go` first lets the SDK's interrupt helper (Windows) take over when the executable was started as one, then serves the adapter protocol over the standard input and output with
 `sdk/go/adapterkit`, and prints its version for the subcommand `version`.
 `sidera-adapter.json` is the package manifest, built into the
 executable so that the identity answered in `initialize` is read from it; its version is

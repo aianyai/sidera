@@ -61,7 +61,7 @@ func (a *App) Start(_ context.Context, p adapterproto.StartParams) (adapterproto
 	if len(p.Sessions) == 0 {
 		return res, nil
 	}
-	snap, snapErr := a.o.Table.Snapshot()
+	list, snapErr := a.o.Table.List()
 	if snapErr != nil {
 		a.log.Error("the process table cannot be read: the sessions cannot be attached", "error", snapErr)
 	}
@@ -72,7 +72,7 @@ func (a *App) Start(_ context.Context, p adapterproto.StartParams) (adapterproto
 			res.Sessions = append(res.Sessions, state)
 			continue
 		}
-		if s := a.attach(attach, snap, snapErr, &state); s != nil {
+		if s := a.attach(attach, list, snapErr, &state); s != nil {
 			a.mu.Lock()
 			a.sessions[s.endpoint] = s
 			a.mu.Unlock()
@@ -100,7 +100,7 @@ func (a *App) resume(s *session) {
 
 // attach reads one session of adapter.start into a session of the table, and
 // fills state with the answer. It returns nil for a session that is not attached.
-func (a *App) attach(at adapterproto.SessionAttach, snap proc.Snapshot, snapErr error, state *adapterproto.SessionState) *session {
+func (a *App) attach(at adapterproto.SessionAttach, list []proc.Entry, snapErr error, state *adapterproto.SessionState) *session {
 	if at.Checkpoint == nil {
 		a.log.Warn("a session has no checkpoint: it cannot be attached", "endpoint", at.Endpoint)
 		return nil
@@ -125,20 +125,25 @@ func (a *App) attach(at adapterproto.SessionAttach, snap proc.Snapshot, snapErr 
 		endpoint: at.Endpoint, id: cp.Session, preset: at.Preset, cwd: cp.Cwd, recordDir: cp.RecordDir,
 		toolEnv: at.ToolAccess.Env, turn: cp.Turn,
 	}
-	running := a.turnProcesses(snap, s.id)
+	running := a.turnProcesses(list, s.id)
 	if len(running) > 1 {
 		a.log.Error("several turn processes write one session: it cannot be attached", "endpoint", at.Endpoint, "count", len(running))
 		return nil
 	}
-	if len(running) == 1 && (s.turn == nil || s.turn.Process != processOf(running[0])) {
+	if len(running) == 1 && (s.turn == nil || !s.turn.Process.Same(processOf(running[0]))) {
 		// The adapter died between starting a process and recording it.
 		s.turn = adoptUnknown(processOf(running[0]))
 	}
 
 	state.State = adapterproto.AttachAttached
 	if s.turn != nil {
-		info := snap.Lookup(s.turn.Process.PID)
-		if info.Alive && info.StartKey() == s.turn.Process.StartKey {
+		alive, err := a.alive(s.turn.Process)
+		if err != nil {
+			a.log.Warn("the process of a turn cannot be looked at: the session cannot be attached", "endpoint", at.Endpoint, "error", err)
+			state.State = adapterproto.AttachUnreachable
+			return nil
+		}
+		if alive {
 			state.TurnActive = true
 			state.Process = identity(s.turn.Process)
 		}

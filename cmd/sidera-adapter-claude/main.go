@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -45,6 +46,9 @@ func loadManifest() (manifest.Manifest, error) {
 }
 
 func main() {
+	// A helper process of the SDK's interrupt (Windows) is this executable started
+	// with an argument of its own; it does its work and ends here.
+	process.HandleHelperInvocation()
 	var err error
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "package":

@@ -2,10 +2,12 @@ package attached
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,11 +18,16 @@ import (
 
 const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
 
+// read returns a recorded file. The registry samples were recorded on macOS; on
+// another platform their process start is replaced by that platform's form.
 func read(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile("testdata/" + name)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS != "darwin" {
+		b = bytes.ReplaceAll(b, []byte(`"procStart":"Mon Nov  2 05:34:31 2026"`), []byte(`"procStart":"345639"`))
 	}
 	return b
 }
@@ -42,16 +49,50 @@ func TestParseRegistry(t *testing.T) {
 	if err != nil || old.Messaging {
 		t.Fatalf("a runtime that lists no messaging: %+v, %v", old, err)
 	}
+}
 
-	// The runtime writes the process start in UTC, as `ps -o lstart` prints it.
+// The three forms of a process start (see SameProcess), each judged against what the
+// process table of its platform reports: the platform's own form is compared as the
+// platform does, and a form of another platform is not a start at all.
+func TestProcessStartForms(t *testing.T) {
+	// macOS: ps -o lstart text in UTC, within two seconds of the table's start.
 	start := time.Date(2026, 11, 2, 5, 34, 31, 0, time.UTC).Unix()
+	const lstart = "Mon Nov  2 05:34:31 2026"
 	for _, tc := range []struct {
 		name string
+		goos string
+		raw  string
 		unix int64
+		nat  string
 		want bool
-	}{{"the same second", start, true}, {"a second off", start + 1, true}, {"hours later: the number was reused", start + 7200, false}} {
-		if got := busy.SameProcess(tc.unix); got != tc.want {
-			t.Errorf("%s: SameProcess = %v", tc.name, got)
+	}{
+		{"darwin, the same second", "darwin", lstart, start, "", true},
+		{"darwin, a second off", "darwin", lstart, start + 1, "", true},
+		{"darwin, hours later: the number was reused", "darwin", lstart, start + 7200, "", false},
+		{"linux, equal ticks", "linux", "345639", 0, "345639", true},
+		{"linux, a tick off", "linux", "345639", 0, "345640", false},
+		{"windows, equal FILETIME", "windows", "134067420710000000", 0, "134067420710000000", true},
+		{"windows, another FILETIME", "windows", "134067420710000000", 0, "134067420710000001", false},
+	} {
+		if got := sameProcStart(tc.goos, tc.raw, tc.unix, tc.nat); got != tc.want {
+			t.Errorf("%s: sameProcStart = %v", tc.name, got)
+		}
+	}
+	for _, tc := range []struct {
+		goos, raw string
+		want      bool
+	}{
+		{"darwin", lstart, true},
+		{"darwin", "345639", false},
+		{"darwin", "2026-11-02T05:34:31Z", false},
+		{"linux", "345639", true},
+		{"linux", lstart, false},
+		{"linux", "", false},
+		{"windows", "134067420710000000", true},
+		{"windows", "1340674207.1", false},
+	} {
+		if got := validProcStart(tc.goos, tc.raw); got != tc.want {
+			t.Errorf("validProcStart(%s, %q) = %v", tc.goos, tc.raw, got)
 		}
 	}
 }
@@ -62,7 +103,7 @@ func TestParseRegistryRefusesAFormItDoesNotRead(t *testing.T) {
 		"not JSON":                        "pid=4242",
 		"no status":                       strings.Replace(good, `"status":"busy",`, "", 1),
 		"no session id":                   strings.Replace(good, `"sessionId"`, `"session"`, 1),
-		"a process start in another form": strings.Replace(good, "Mon Nov  2 05:34:31 2026", "2026-11-02T05:34:31Z", 1),
+		"a process start in another form": strings.Replace(good, `"procStart":"`+procStart(t, good)+`"`, `"procStart":"2026-11-02T05:34:31Z"`, 1),
 		"no time of the status":           strings.Replace(good, `"statusUpdatedAt"`, `"since"`, 1),
 	} {
 		if _, err := ParseRegistry([]byte(doc)); !errors.Is(err, ErrRegistryForm) {
@@ -143,4 +184,16 @@ func TestTranscriptSample(t *testing.T) {
 	if !ix.Recognized() {
 		t.Fatal("the sample's user lines are in the form the lookup reads")
 	}
+}
+
+// procStart is the process start the registry document holds.
+func procStart(t *testing.T, doc string) string {
+	t.Helper()
+	var raw struct {
+		ProcStart string `json:"procStart"`
+	}
+	if err := json.Unmarshal([]byte(doc), &raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw.ProcStart
 }

@@ -17,6 +17,13 @@ import (
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
+// recordedProcess is what a commit records of the attempt's turn process besides
+// its PID and start second.
+type recordedProcess struct {
+	startKey                     string
+	containerKind, containerName string
+}
+
 // attempt is a creation attempt in memory: what was last committed. The
 // checkpoint of the attempt at the daemon is the same, written first, so this is
 // a cache that also keeps two requests for one attempt from running side by side.
@@ -144,10 +151,13 @@ func (a *App) loadAttempt(ctx context.Context, at *attempt, p adapterproto.Sessi
 
 // commit stores a new state of the attempt, then keeps it in memory: the state
 // that was stored is the state that is acted on.
-func (a *App) commit(ctx context.Context, at *attempt, st create.State, startKey string) error {
+//
+// rec is the process the new state records, when it changes: its start key and
+// the container it was started in, empty for a process found and not started.
+func (a *App) commit(ctx context.Context, at *attempt, st create.State, rec *recordedProcess) error {
 	cp := at.cp.withState(st)
-	if startKey != "" {
-		cp.StartKey = startKey
+	if rec != nil {
+		cp.StartKey, cp.ContainerKind, cp.ContainerName = rec.startKey, rec.containerKind, rec.containerName
 	}
 	if err := a.putCheckpoint(ctx, adapterproto.ScopeAttempt, cp.Attempt, cp); err != nil {
 		return err
@@ -161,7 +171,7 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 		if err := ctx.Err(); err != nil {
 			return adapterproto.SessionCreateResult{}, err
 		}
-		obs, keys, err := a.observeCreate(at.st)
+		obs, keys, err := a.observeCreate(at.st, at.cp.StartKey)
 		if err != nil {
 			return adapterproto.SessionCreateResult{}, err
 		}
@@ -182,7 +192,8 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 			if err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
-			if err := a.commit(ctx, at, st, started.StartKey()); err != nil {
+			rec := &recordedProcess{startKey: started.StartKey, containerKind: string(started.Container.Kind), containerName: started.Container.Name}
+			if err := a.commit(ctx, at, st, rec); err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
 		case create.ActionRecordProcess:
@@ -190,7 +201,7 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 			if err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
-			if err := a.commit(ctx, at, st, keys[d.Process.PID]); err != nil {
+			if err := a.commit(ctx, at, st, &recordedProcess{startKey: keys[d.Process.PID]}); err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
 		case create.ActionMarkUUIDSeen:
@@ -198,7 +209,7 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 			if err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
-			if err := a.commit(ctx, at, st, ""); err != nil {
+			if err := a.commit(ctx, at, st, nil); err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
 		case create.ActionWait:
@@ -210,7 +221,7 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 			if err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
-			if err := a.commit(ctx, at, st, ""); err != nil {
+			if err := a.commit(ctx, at, st, nil); err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
 			return a.finishCreate(ctx, at, p)
@@ -219,7 +230,7 @@ func (a *App) driveCreate(ctx context.Context, at *attempt, p adapterproto.Sessi
 			if err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
-			if err := a.commit(ctx, at, st, ""); err != nil {
+			if err := a.commit(ctx, at, st, nil); err != nil {
 				return adapterproto.SessionCreateResult{}, err
 			}
 			return failedFor(d.Reason), nil
@@ -288,24 +299,35 @@ func (a *App) loadPreset(name string) (claudeargs.Preset, error) {
 }
 
 // observeCreate gathers what Decide needs: the process table first, then the
-// session file. keys are the start keys of the processes seen, by PID.
-func (a *App) observeCreate(st create.State) (create.Observations, map[int]string, error) {
-	snap, err := a.o.Table.Snapshot()
+// session file. keys are the start keys of the processes seen, by PID. startKey is
+// the start key recorded with the attempt's process.
+func (a *App) observeCreate(st create.State, startKey string) (create.Observations, map[int]string, error) {
+	list, err := a.o.Table.List()
 	if err != nil {
 		return create.Observations{}, nil, err
 	}
 	var obs create.Observations
 	if !st.Process.IsZero() {
-		info := snap.Lookup(st.Process.PID)
-		obs.Recorded = create.Lookup{PID: st.Process.PID, Alive: info.Alive}
-		if info.Alive {
-			obs.Recorded.StartUnix = info.StartUnix
+		// The recorded process runs when the table says its identity does; then it
+		// has the start the state records, whatever second a new reading of its
+		// start gives (on Linux the seconds derive from the boot time).
+		alive, err := a.alive(turn.Process{PID: st.Process.PID, StartKey: startKey})
+		if err != nil {
+			return create.Observations{}, nil, err
+		}
+		obs.Recorded = create.Lookup{PID: st.Process.PID, Alive: alive}
+		if alive {
+			obs.Recorded.StartUnix = st.Process.StartUnix
 		}
 	}
 	keys := map[int]string{}
-	for _, info := range a.turnProcesses(snap, string(st.SessionID)) {
-		obs.Running = append(obs.Running, create.Process{PID: info.PID, StartUnix: info.StartUnix})
-		keys[info.PID] = info.StartKey()
+	for _, info := range a.turnProcesses(list, string(st.SessionID)) {
+		unix := info.StartUnix
+		if info.PID == st.Process.PID && info.StartKey == startKey {
+			unix = st.Process.StartUnix
+		}
+		obs.Running = append(obs.Running, create.Process{PID: info.PID, StartUnix: unix})
+		keys[info.PID] = info.StartKey
 	}
 	ix := record.NewIndex(string(st.SessionID), string(st.FirstPromptID))
 	exists, err := a.scan(record.File(st.RecordDir, string(st.SessionID)), ix)
@@ -336,7 +358,7 @@ func (a *App) finishCreate(ctx context.Context, at *attempt, p adapterproto.Sess
 			toolEnv: p.ToolAccess.Env,
 			turn: &turn.State{
 				Attempt: cp.FirstPrompt, Digest: cp.FirstDigest,
-				Process: turn.Process{PID: cp.PID, StartUnix: cp.StartUnix, StartKey: cp.StartKey},
+				Process: cp.process(),
 			},
 		}
 		a.sessions[s.endpoint] = s
@@ -357,7 +379,7 @@ func (a *App) finishCreate(ctx context.Context, at *attempt, p adapterproto.Sess
 	over := s.turn.Attempt != cp.FirstPrompt || s.turn.Done()
 	return adapterproto.SessionCreateResult{
 		Outcome: adapterproto.CreateCreated, NativeRef: adapterproto.NativeRef(cp.Session),
-		Process:        identity(turn.Process{PID: cp.PID, StartUnix: cp.StartUnix, StartKey: cp.StartKey}),
+		Process:        identity(cp.process()),
 		Frontends:      frontends,
 		FirstTurnEnded: adapterproto.TrueOnly(over),
 	}, nil

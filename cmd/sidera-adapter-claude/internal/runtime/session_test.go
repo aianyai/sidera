@@ -379,7 +379,7 @@ func TestStartTakesSessionsBack(t *testing.T) {
 		w := newWorld(t)
 		started, _ := w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: outFile(session, prompt1)})
 		w.appendRecord(file, queueLine(session), userLine(session, prompt1))
-		cp := checkpoint(turn.State{Attempt: prompt1, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey()}})
+		cp := checkpoint(turn.State{Attempt: prompt1, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey}})
 		_, res := newApp(t, w, attach("session-1", cp))
 		mustValid(t, res)
 		if got := res.Sessions[0]; got.State != adapterproto.AttachAttached || !got.TurnActive || got.Process == nil || got.Process.PID != int64(started.PID) {
@@ -395,7 +395,7 @@ func TestStartTakesSessionsBack(t *testing.T) {
 		w.appendRecord(file, userLine(session, prompt1))
 		started, _ := w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: outFile(session, prompt1)})
 		w.exit(w.procByPID(started.PID), resultOK)
-		cp := checkpoint(turn.State{Attempt: prompt1, StartedReported: true, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey()}})
+		cp := checkpoint(turn.State{Attempt: prompt1, StartedReported: true, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey}})
 		_, res := newApp(t, w, attach("session-1", cp))
 		if got := res.Sessions[0]; got.State != adapterproto.AttachAttached || got.TurnActive || got.Process != nil {
 			t.Fatalf("session state %+v", got)
@@ -418,7 +418,7 @@ func TestStartTakesSessionsBack(t *testing.T) {
 		w.waitEvents("started ")
 		w.exit(w.lastProc(), resultOK)
 		// Such a process has no output file of its own, so its end is a failure.
-		w.waitEvents("started ", "ended process-"+itoa(started.PID)+"-"+started.StartKey()+" failed")
+		w.waitEvents("started ", "ended process-"+itoa(started.PID)+"-"+started.StartKey+" failed")
 	})
 
 	t.Run("a session without a record is lost, one without a checkpoint is unreachable", func(t *testing.T) {

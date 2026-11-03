@@ -14,7 +14,7 @@ matching is an error here (`ErrRegistryForm`), never a guess.
 | Name | Does |
 | ---- | ---- |
 | `ParseRegistry(data)`, `RegistryFile(dir, pid)` | The registry entry of a running process (`sessions/<pid>.json`): session id, working directory, kind, process start, status and when it changed. |
-| `Registry.SameProcess(startUnix)` | Whether a process of the table is the one the entry was written by, within two seconds: a number reused by another process is not. |
+| `Registry.SameProcess(startUnix, nativeStart)` | Whether a process of the table is the one the entry was written by: a number reused by another process is not. The entry's `procStart` is kept as written; macOS compares `ps -o lstart` text within two seconds, Linux (clock ticks) and Windows (FILETIME) compare the native start for equality. |
 | `Status`, `Status.Active()` | `busy` and `waiting` are a turn running; `idle`, `shell` and a status not known are not. |
 | `ParseWake(info)`, `Wake` | The three wake keys; a key that is not valid is named by its key. `Wake` prints as redacted, whatever the verb or log handler. |
 | `Wake.Lines(uuid, text)` | What is written to the inbox socket: the authentication line when there is a token, then the user message carrying the attempt as its uuid. |

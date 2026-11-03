@@ -139,12 +139,14 @@ func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	})
 }
 
-// turnProcesses lists the turn processes of a session in a snapshot.
-func (a *App) turnProcesses(snap proc.Snapshot, session string) []proc.Info {
+// turnProcesses picks the turn processes of a session out of a listing. The
+// listing only finds candidates by their arguments: that a process is not in it
+// does not show that it does not run, which only alive can say of a known one.
+func (a *App) turnProcesses(list []proc.Entry, session string) []proc.Info {
 	claude, _, _ := a.executables()
 	var out []proc.Info
-	for _, e := range snap {
-		if e.Alive && claudeargs.IsTurnOf(e.Args, claude, session) {
+	for _, e := range list {
+		if claudeargs.IsTurnOf(e.Args, claude, session) {
 			out = append(out, e.Info)
 		}
 	}
@@ -152,22 +154,27 @@ func (a *App) turnProcesses(snap proc.Snapshot, session string) []proc.Info {
 }
 
 func processOf(i proc.Info) turn.Process {
-	return turn.Process{PID: i.PID, StartUnix: i.StartUnix, StartKey: i.StartKey()}
+	return turn.Process{PID: i.PID, StartUnix: i.StartUnix, StartKey: i.StartKey}
 }
 
-// alive reports whether the process is still running: the PID held by a process
-// that started when it did.
+// startedProcess is the recorded form of a process the adapter started, with the
+// container the launch put it in.
+func startedProcess(s proc.Started) turn.Process {
+	p := processOf(s.Info)
+	p.ContainerKind, p.ContainerName = string(s.Container.Kind), s.Container.Name
+	return p
+}
+
+// alive reports whether the recorded process is still running: the PID held by a
+// process that started when it did. An error is an error and never "gone": a turn
+// process taken for gone would let a second writer start beside it.
 func (a *App) alive(p turn.Process) (bool, error) {
 	if p.PID == 0 {
 		// The process was never recorded and is gone: Decide only lets an attempt
 		// become ready without a recorded process when none runs.
 		return false, nil
 	}
-	info, err := a.o.Table.Lookup(p.PID)
-	if err != nil {
-		return false, err
-	}
-	return info.Alive && info.StartKey() == p.StartKey, nil
+	return a.o.Table.Running(proc.Identity{PID: p.PID, StartKey: p.StartKey})
 }
 
 // identity describes a recorded process; nil for a turn whose process was never
@@ -176,11 +183,11 @@ func identity(p turn.Process) *adapterproto.ProcessIdentity {
 	if p.PID == 0 {
 		return nil
 	}
-	return &adapterproto.ProcessIdentity{
-		PID: int64(p.PID), StartKey: p.StartKey, StartedAtMS: p.StartUnix * 1000,
-		// A process the adapter started leads a process group of its own.
-		Container: &adapterproto.Container{Kind: adapterproto.ContainerProcessGroup, Name: strconv.Itoa(p.PID)},
+	id := &adapterproto.ProcessIdentity{PID: int64(p.PID), StartKey: p.StartKey, StartedAtMS: p.StartUnix * 1000}
+	if p.ContainerKind != "" {
+		id.Container = &adapterproto.Container{Kind: adapterproto.ContainerKind(p.ContainerKind), Name: p.ContainerName}
 	}
+	return id
 }
 
 // turnRef names a turn: the prompt attempt that caused it or, for a process the

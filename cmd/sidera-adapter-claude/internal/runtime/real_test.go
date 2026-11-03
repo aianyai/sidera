@@ -1,4 +1,4 @@
-//go:build realclaude && !windows
+//go:build realclaude
 
 package runtime
 
@@ -6,23 +6,30 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // These tests run the installed Claude Code and cost no model turn: they probe
-// it, and start a turn process that is given no input and ended with SIGINT.
+// it, and start a turn process that is given no input and ended with an interrupt.
 // Run them with
 //
 //	SIDERA_REALCLAUDE=1 go test -tags realclaude -run RealClaude -count=1 ./cmd/sidera-adapter-claude/internal/runtime
+//
+// TestMain lets the test binary serve as the SDK's interrupt helper, which the
+// interrupt of a turn process on Windows starts from the adapter's own executable.
+func TestMain(m *testing.M) {
+	process.HandleHelperInvocation()
+	os.Exit(m.Run())
+}
+
 func realApp(t *testing.T) *App {
 	t.Helper()
 	if os.Getenv("SIDERA_REALCLAUDE") != "1" {
@@ -33,13 +40,14 @@ func realApp(t *testing.T) *App {
 	t.Cleanup(app.stop)
 	app.daemon = &world{t: t, files: map[string][]byte{}, procs: map[int]*fakeProc{}, checkpts: map[string]json.RawMessage{}}
 	app.instance = adapterproto.InstanceInfo{ID: "claude", LockPath: filepath.Join(state, "lock"), StateDir: state}
-	true_, err := exec.LookPath("true")
+	// The tests never run sidera; the MCP configuration only names it.
+	stand, err := os.Executable()
 	if err != nil {
-		t.Skip("no true(1) to stand in for sidera")
+		t.Fatal(err)
 	}
-	raw := func(s string) []byte { return []byte(`"` + s + `"`) }
+	raw := func(s string) []byte { b, _ := json.Marshal(s); return b } // a Windows path holds backslashes
 	if _, err := app.Start(context.Background(), adapterproto.StartParams{
-		Node: "n", Config: adapterproto.ConfigValues{"sidera_path": raw(true_)},
+		Node: "n", Config: adapterproto.ConfigValues{"sidera_path": raw(stand)},
 		Presets:  []adapterproto.PresetConfig{{Name: "dev", Config: adapterproto.ConfigValues{"project_dir": raw(work), "permission_mode": raw("dontAsk")}}},
 		Sessions: []adapterproto.SessionAttach{}, DirectEndpoints: []adapterproto.DirectAttach{},
 	}); err != nil {
@@ -67,55 +75,65 @@ func TestRealClaudeProbe(t *testing.T) {
 }
 
 // The process table finds a turn process of the real Claude by what the adapter
-// started it with, and SIGINT ends it.
+// started it with, and the interrupt ends it.
 func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
 	app := realApp(t)
 	claude, _, mcpConfig := app.executables()
 	if claude == "" {
 		t.Skip("no claude")
 	}
-	const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, "in")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Skip(err)
-	}
-	// Holding the FIFO open for writing keeps the process waiting for input: no
-	// prompt is ever given, so no model runs.
-	hold, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	// A uuid of its own, so that another run on the machine is not mistaken for this one.
+	session, err := newUUID(app.o.Rand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer hold.Close()
+	// The working directory is a real path, as the adapter gives a turn process.
+	dir, err := app.o.Files.RealDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing is ever written to the input, which the process waits on: no prompt
+	// is given, so no model runs.
+	input := holdInput(t, dir)
 
 	argv, err := claudeargs.Turn{Claude: claude, SessionID: session, MCPConfig: mcpConfig, DataDir: dir, Preset: claudeargs.Preset{PermissionMode: "dontAsk", Model: "haiku"}}.Argv()
 	if err != nil {
 		t.Fatal(err)
 	}
 	table := proc.NewTable()
-	started, err := proc.NewLauncher(table).Start(proc.Launch{
+	started, err := proc.NewLauncher().Start(proc.Launch{
 		Argv: argv, Env: claudeargs.Environ(os.Environ(), nil, ""), Dir: dir,
-		Stdin: fifo, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err"),
+		Stdin: input, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * time.Second)
-	snap, err := table.Snapshot()
+	t.Cleanup(func() { // a failed test must not leave the process behind
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = proc.NewSignaller().Interrupt(ctx, started.Identity)
+	})
+	list, err := table.List()
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := app.turnProcesses(snap, session)
-	if len(found) != 1 || found[0].PID != started.PID || found[0].StartKey() != started.StartKey() {
+	found := app.turnProcesses(list, session)
+	if len(found) != 1 || found[0].Identity != started.Identity {
 		stderr, _ := os.ReadFile(filepath.Join(dir, "err"))
 		t.Fatalf("found %+v, started %+v; stderr: %s", found, started.Info, stderr)
 	}
-	if err := proc.NewSignaller().Interrupt(started.PID); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := proc.NewSignaller().Interrupt(ctx, started.Identity); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-started.Done:
 	case <-time.After(15 * time.Second):
-		t.Fatal("the turn process did not end after SIGINT")
+		t.Fatal("the turn process did not end after the interrupt")
+	}
+	if running, err := table.Running(started.Identity); err != nil || running {
+		t.Fatalf("Running after the interrupt = %v, %v", running, err)
 	}
 }

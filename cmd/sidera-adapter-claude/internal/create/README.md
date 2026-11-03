@@ -108,9 +108,12 @@ stored state (`Done`).
   it is not, that is an observation error the caller reports as an error
   result; it is never reported as "not running", and `Decide` is not called.
 - Start times are Unix seconds from the process table (Linux: boot time plus
-  start ticks, fixed per boot; macOS: the process start seconds; Windows: the
-  creation time truncated to seconds), the same source for every start time
-  reported and recorded. For a process found through the registry, the start
+  start ticks, which moves when the clock is set; macOS: the process start
+  seconds; Windows: the creation time truncated to seconds), the same source for
+  every start time reported and recorded. Whether a recorded process still runs
+  is not decided from these seconds: the caller asks the process table about the
+  recorded identity (PID and start key) and reports `Recorded.StartUnix` as the
+  state records it when the identity runs. For a process found through the registry, the start
   reported is the process table's.
 - The session record is looked up in `State.RecordDir` and `SessionRecord.Dir`
   says so; `Decide` refuses any other directory. The directory is fixed for the

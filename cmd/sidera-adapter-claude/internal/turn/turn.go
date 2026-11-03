@@ -17,7 +17,18 @@ type Process struct {
 	PID       int    `json:"pid"`
 	StartUnix int64  `json:"start_unix"`
 	StartKey  string `json:"start_key"`
+	// ContainerKind and ContainerName say where the process runs, as the
+	// adapterproto.Container the launch reported; empty for a process the adapter
+	// did not start and so cannot say it for.
+	ContainerKind string `json:"container_kind,omitempty"`
+	ContainerName string `json:"container_name,omitempty"`
 }
+
+// Same reports whether p and q are one process: the same PID and the same start
+// key. StartUnix and the container are left out. On Linux the start in seconds
+// derives from the boot time, which moves when the clock is set, so two readings
+// of one process may differ; the start key is the identity.
+func (p Process) Same(q Process) bool { return p.PID == q.PID && p.StartKey == q.StartKey }
 
 // State is where one turn is: the persisted record of what was reported about
 // it. It is stored in the session's checkpoint, and a restarted adapter picks

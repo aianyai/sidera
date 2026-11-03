@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -58,8 +59,9 @@ type Registry struct {
 	Cwd string
 	// Interactive: a session a person drives in a terminal.
 	Interactive bool
-	// ProcStart is when the process started, as the runtime wrote it.
-	ProcStart time.Time
+	// ProcStart is when the process started, as the runtime wrote it. Its form
+	// depends on the platform (see SameProcess), so it is kept as written.
+	ProcStart string
 	Status    Status
 	// StatusName is the status as written, for a message about one this package
 	// does not know.
@@ -76,8 +78,9 @@ func RegistryFile(claudeDir string, pid int) string {
 	return filepath.Join(claudeDir, "sessions", strconv.Itoa(pid)+".json")
 }
 
-// ParseRegistry reads a registry file. The runtime writes the process start in
-// the form of `ps -o lstart` in UTC.
+// ParseRegistry reads a registry file. The form of the process start depends on
+// the platform the runtime runs on; one that is not the form of this platform is
+// an error (see SameProcess).
 func ParseRegistry(data []byte) (Registry, error) {
 	var raw struct {
 		PID                 int    `json:"pid"`
@@ -111,25 +114,67 @@ func ParseRegistry(data []byte) (Registry, error) {
 	if missing != "" {
 		return Registry{}, fmt.Errorf("%w: no usable %q", ErrRegistryForm, missing)
 	}
-	start, err := time.ParseInLocation(time.ANSIC, raw.ProcStart, time.UTC)
-	if err != nil {
+	if !validProcStart(runtime.GOOS, raw.ProcStart) {
 		return Registry{}, fmt.Errorf("%w: no usable %q", ErrRegistryForm, "procStart")
 	}
 	return Registry{
 		PID: raw.PID, SessionID: raw.SessionID, Cwd: raw.Cwd, Interactive: raw.Kind == "interactive",
-		ProcStart: start, Status: parseStatus(raw.Status), StatusName: raw.Status, StatusAt: raw.StatusUpdatedAt,
+		ProcStart: raw.ProcStart, Status: parseStatus(raw.Status), StatusName: raw.Status, StatusAt: raw.StatusUpdatedAt,
 		Messaging: raw.PeerProtocol > 0 || raw.MessagingSocketPath != "",
 	}, nil
 }
 
 // startTolerance is how far apart the registry's process start and the process
-// table's may be: the registry has whole seconds.
+// table's may be on macOS: the registry has whole seconds.
 const startTolerance = 2 * time.Second
 
-// SameProcess reports whether a process of the table that started at startUnix
-// (seconds since the epoch) is the one the registry file was written by. A file
-// that outlives its process names a PID that may since belong to another.
-func (r Registry) SameProcess(startUnix int64) bool {
-	d := r.ProcStart.Sub(time.Unix(startUnix, 0))
+// The runtime writes the process start in the form its platform gives it, and the
+// registry keeps it as written:
+//
+//   - macOS: the text of `ps -o lstart` in UTC (time.ANSIC), compared with the
+//     start the process table reports within startTolerance;
+//   - Linux: the start in clock ticks after boot, field 22 of /proc/<pid>/stat, as
+//     decimal text;
+//   - Windows: the creation time as a FILETIME in decimal;
+//
+// the last two are compared for equality with the process table's native start
+// (process.Process.NativeStart), which is the same number as text.
+
+// validProcStart reports whether raw is a process start in the form of the
+// platform goos. Another form is a registry this package does not read.
+func validProcStart(goos, raw string) bool {
+	if goos == "darwin" {
+		_, err := time.ParseInLocation(time.ANSIC, raw, time.UTC)
+		return err == nil
+	}
+	if raw == "" {
+		return false
+	}
+	for _, c := range raw {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// sameProcStart is SameProcess for the platform goos.
+func sameProcStart(goos, raw string, startUnix int64, nativeStart string) bool {
+	if goos != "darwin" {
+		return raw == nativeStart
+	}
+	t, err := time.ParseInLocation(time.ANSIC, raw, time.UTC)
+	if err != nil {
+		return false
+	}
+	d := t.Sub(time.Unix(startUnix, 0))
 	return d >= -startTolerance && d <= startTolerance
+}
+
+// SameProcess reports whether a process of the table is the one the registry file
+// was written by, given the process's start in seconds since the epoch and in the
+// platform's native form (see above for how each platform compares). A file that
+// outlives its process names a PID that may since belong to another.
+func (r Registry) SameProcess(startUnix int64, nativeStart string) bool {
+	return sameProcStart(runtime.GOOS, r.ProcStart, startUnix, nativeStart)
 }

@@ -72,16 +72,16 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 			return adapterproto.PromptDeliverResult{}, errors.New("the last turn of the session cannot be settled")
 		}
 	}
-	snap, err := a.o.Table.Snapshot()
+	list, err := a.o.Table.List()
 	if err != nil {
 		return adapterproto.PromptDeliverResult{}, err
 	}
 	writers := map[int]turn.Process{}
-	for _, info := range a.turnProcesses(snap, s.id) {
+	for _, info := range a.turnProcesses(list, s.id) {
 		writers[info.PID] = processOf(info)
 	}
 	if recorded != nil {
-		if w, ok := writers[recorded.PID]; ok && w != *recorded {
+		if w, ok := writers[recorded.PID]; ok && !w.Same(*recorded) {
 			return adapterproto.PromptDeliverResult{}, fmt.Errorf("process %d of the session is not the recorded one", recorded.PID)
 		}
 		writers[recorded.PID] = *recorded
@@ -91,10 +91,10 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	case 1:
 		for _, w := range writers {
 			switch {
-			case s.turn != nil && !s.turn.Done() && s.turn.Process == w && s.turn.Attempt == string(p.Attempt):
+			case s.turn != nil && !s.turn.Done() && s.turn.Process.Same(w) && s.turn.Attempt == string(p.Attempt):
 				// The same attempt, delivered and in flight.
 				return adapterproto.PromptDeliverResult{Stage: adapterproto.PromptAccepted}, nil
-			case s.turn == nil || s.turn.Done() || s.turn.Process != w:
+			case s.turn == nil || s.turn.Done() || !s.turn.Process.Same(w):
 				// A process that was started and never recorded is the session's writer
 				// all the same, and its turn is followed like any other.
 				s.turn = adoptUnknown(w)
@@ -131,7 +131,7 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 		a.log.Warn("a turn process could not be started", "endpoint", s.endpoint, "error", err)
 		return refused(adapterproto.RefusalNativeUnavailable)
 	}
-	s.turn = &turn.State{Attempt: string(p.Attempt), Process: processOf(started.Info), Digest: sum, PersistNotice: true}
+	s.turn = &turn.State{Attempt: string(p.Attempt), Process: startedProcess(started), Digest: sum, PersistNotice: true}
 	s.idx = nil
 	a.watch(s)
 	if err := a.persistSession(ctx, s); err != nil {
@@ -161,18 +161,19 @@ func (a *App) Reconcile(_ context.Context, p adapterproto.ReconcileParams) (adap
 
 	// The process table is read before the file: a process seen as gone has
 	// written everything it will, so the file read afterwards is complete.
-	snap, err := a.o.Table.Snapshot()
+	list, err := a.o.Table.List()
 	if err != nil {
 		return adapterproto.ReconcileResult{}, err
 	}
 	// The recorded turn process counts as running even when its command line is
-	// not the one the table search looks for, a claude found at another path.
+	// not the one the listing search looks for, a claude found at another path.
 	recordedAlive := false
 	if s.turn != nil && s.turn.Process.PID != 0 {
-		info := snap.Lookup(s.turn.Process.PID)
-		recordedAlive = info.Alive && info.StartKey() == s.turn.Process.StartKey
+		if recordedAlive, err = a.alive(s.turn.Process); err != nil {
+			return adapterproto.ReconcileResult{}, err
+		}
 	}
-	in.SessionBusy = recordedAlive || len(a.turnProcesses(snap, s.id)) > 0
+	in.SessionBusy = recordedAlive || len(a.turnProcesses(list, s.id)) > 0
 	if s.turn != nil && s.turn.Attempt == attempt {
 		in.TurnAlive = recordedAlive
 		in.Interrupted = s.turn.Interrupted

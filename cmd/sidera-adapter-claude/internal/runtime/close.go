@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -16,8 +18,8 @@ var (
 
 // CloseSession releases a session: no turn process of it runs any more, and the
 // adapter forgets it. The session file stays as history, and the daemon removes
-// the checkpoint. A running turn is interrupted with SIGINT, which the runtime
-// ends cleanly (SIGTERM would leave half a turn), and waited for; one that does
+// the checkpoint. A running turn is interrupted the way Ctrl-C does (SIGINT, CTRL_C_EVENT on
+// Windows), which the runtime ends cleanly (SIGTERM would leave half a turn), and waited for; one that does
 // not end is reported as such and never killed.
 //
 // A session the adapter holds is closed by its endpoint. After a restart the
@@ -48,7 +50,7 @@ func (a *App) CloseSession(ctx context.Context, p adapterproto.CloseParams) (ada
 	}
 	if s.turn != nil && !s.turn.Done() {
 		for _, w := range writers {
-			if w == s.turn.Process {
+			if w.Same(s.turn.Process) {
 				s.turn.Interrupted = true
 				if err := a.persistSession(ctx, s); err != nil {
 					a.log.Warn("the checkpoint of a session was not stored", "endpoint", s.endpoint, "error", err)
@@ -103,26 +105,29 @@ func (a *App) closeByReference(ctx context.Context, ref string) (adapterproto.Cl
 // writers lists the processes that write the session: its recorded turn process
 // if it lives and every turn process of it in the process table.
 func (a *App) writers(session string, t *turn.State) ([]turn.Process, error) {
-	snap, err := a.o.Table.Snapshot()
+	list, err := a.o.Table.List()
 	if err != nil {
 		return nil, err
 	}
 	var out []turn.Process
 	seen := map[int]bool{}
-	for _, info := range a.turnProcesses(snap, session) {
+	for _, info := range a.turnProcesses(list, session) {
 		out, seen[info.PID] = append(out, processOf(info)), true
 	}
 	if t != nil && !t.Done() && !seen[t.Process.PID] {
-		if info := snap.Lookup(t.Process.PID); info.Alive && info.StartKey() == t.Process.StartKey {
+		alive, err := a.alive(t.Process)
+		if err != nil {
+			return nil, err
+		}
+		if alive {
 			out = append(out, t.Process)
 		}
 	}
 	return out, nil
 }
 
-// interruptAndWait sends SIGINT to each process that is still the process it
-// was, and waits up to CloseWait for all of them to end. It reports whether they
-// all did.
+// interruptAndWait interrupts each process that is still the process it was, and
+// waits up to CloseWait for all of them to end. It reports whether they all did.
 func (a *App) interruptAndWait(ctx context.Context, procs []turn.Process) (bool, error) {
 	for _, p := range procs {
 		alive, err := a.alive(p)
@@ -130,7 +135,9 @@ func (a *App) interruptAndWait(ctx context.Context, procs []turn.Process) (bool,
 			return false, err
 		}
 		if alive {
-			if err := a.o.Signaller.Interrupt(p.PID); err != nil {
+			// A process that ended since the look is what the wait below is for.
+			err := a.o.Signaller.Interrupt(ctx, proc.Identity{PID: p.PID, StartKey: p.StartKey})
+			if err != nil && !errors.Is(err, proc.ErrNotRunning) {
 				return false, err
 			}
 		}

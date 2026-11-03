@@ -1,74 +1,70 @@
 package proc
 
 import (
-	"errors"
-	"fmt"
-)
+	"context"
 
-// ErrUnsupported is wrapped by every error of an operation this platform does
-// not implement yet. The adapter fails loudly with it: observing processes
-// wrongly would end in a second writer on a session.
-var ErrUnsupported = errors.New("proc: not supported on this platform")
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
 
 // ErrStartedUnidentified is wrapped by the error of a Start whose process did
 // start but whose identity could not be read. Such a start is not a failure: the
 // process runs, so what the caller does about it must not assume that nothing
 // happened.
-var ErrStartedUnidentified = errors.New("proc: the process started but its identity cannot be read")
+var ErrStartedUnidentified = process.ErrStartedUnidentified
 
-// Info is what the process table says about one process.
+// ErrNotRunning is wrapped by the error of an Interrupt whose identity no longer
+// names a running process.
+var ErrNotRunning = process.ErrNotRunning
+
+// Identity names one process instance: its PID and the platform's start key,
+// which together tell it from a later process given the same PID.
+type Identity = process.Identity
+
+// Info is a running process as the process table describes it.
 type Info struct {
-	PID int
-	// Alive: the process exists and is not a zombie, a process that has ended
-	// and not been reaped yet. A PID that no process holds is Alive false.
-	Alive bool
-	// StartUnix and StartMicro are the process start, as seconds and the
-	// microseconds past them; zero when the process does not exist. Together
-	// with the PID they name one process, since PIDs are reused.
-	StartUnix  int64
-	StartMicro int64
+	Identity
+	// StartUnix is the start in Unix seconds by the wall clock, for display and
+	// for the creation flow's records. It is not identity: on Linux it derives
+	// from the boot time, which moves when the clock is set. Identity is
+	// the PID with the StartKey.
+	StartUnix int64
+	// NativeStart is the start in the platform's own unit as decimal text (see
+	// process.Process): what the runtime's registry files hold on Linux and
+	// Windows.
+	NativeStart string
 }
 
-// StartKey is the start as the adapter protocol's opaque start key: seconds
-// and microseconds, "<sec>.<usec>", compared only for equality.
-func (i Info) StartKey() string { return fmt.Sprintf("%d.%06d", i.StartUnix, i.StartMicro) }
-
-// Entry is a process of the table with its argument vector, argv[0] included.
-// A zombie has no readable arguments and none are given.
+// Entry is a process of the listing with its argument vector, argv[0] included.
 type Entry struct {
 	Info
 	Args []string
 }
 
-// Snapshot is the processes of the caller's user, all read at one moment.
-type Snapshot []Entry
-
-// Lookup returns the entry of a PID; a PID that is not in the snapshot is not
-// alive, whoever holds it (a process of another user is not a turn process of
-// ours).
-func (s Snapshot) Lookup(pid int) Info {
-	for _, e := range s {
-		if e.PID == pid {
-			return e.Info
-		}
-	}
-	return Info{PID: pid}
+func infoOf(p process.Process) Info {
+	return Info{Identity: p.Identity, StartUnix: p.StartTime.Unix(), NativeStart: p.NativeStart}
 }
 
 // Table reads the process table.
 type Table interface {
-	// Lookup describes one process by PID.
-	Lookup(pid int) (Info, error)
-	// Snapshot lists the processes of the caller's user with their arguments. A
-	// process whose arguments cannot be read is an error and not an absent
-	// process: it could be a turn process, and "not running" would be a guess.
-	Snapshot() (Snapshot, error)
+	// Lookup describes the running process that holds a PID; found is false when
+	// none does. An error means the table did not answer, never that the process
+	// is gone.
+	Lookup(pid int) (info Info, found bool, err error)
+	// Running reports whether the identity still names a running process. It is
+	// the only way to decide that a process the adapter knows still runs: a
+	// process missing from List may still run. An error is an error, never "gone".
+	Running(id Identity) (bool, error)
+	// List lists the processes of the caller's user with their arguments, to find
+	// the ones whose arguments show them to be turn processes. It is not a proof
+	// that a process is not running.
+	List() ([]Entry, error)
 }
 
 // Launch describes a process to start detached from the adapter.
 type Launch struct {
-	// Argv is the argument vector, argv[0] the executable, which is started as
-	// it is written.
+	// Argv is the argument vector, argv[0] the executable as an absolute path,
+	// which is started as it is written.
 	Argv []string
 	Env  []string
 	// Dir is the working directory.
@@ -83,9 +79,8 @@ type Launch struct {
 // Started is a process that was started.
 type Started struct {
 	Info
-	// PGID is the process group the process leads: a process started detached
-	// leads a group of its own.
-	PGID int
+	// Container is where the process runs, as the protocol reports it.
+	Container adapterproto.Container
 	// Done receives the error of waiting for the process, nil for a clean exit,
 	// once, when it has ended and been reaped.
 	Done <-chan error
@@ -93,17 +88,18 @@ type Started struct {
 
 // Launcher starts detached processes.
 type Launcher interface {
-	// Start starts the process in a session of its own, with no controlling
-	// terminal, so that a signal to the adapter or its terminal does not reach
-	// it and it outlives the adapter. The identity it returns is read from the
-	// process table right away. Any other error means no process was started;
-	// an error that wraps ErrStartedUnidentified means one was.
+	// Start starts the process so that it outlives the adapter, with a console
+	// of its own on Windows so that it can be interrupted. The identity it
+	// returns is read right after the start. An error that wraps
+	// ErrStartedUnidentified means a process was started; any other error means
+	// none was.
 	Start(Launch) (Started, error)
 }
 
-// Signaller stops processes.
+// Signaller interrupts processes.
 type Signaller interface {
 	// Interrupt asks the process to end its turn the way an interactive Ctrl-C
-	// does (SIGINT), which the runtime ends cleanly.
-	Interrupt(pid int) error
+	// does, which the runtime ends cleanly. The error wraps ErrNotRunning when
+	// the identity names no running process.
+	Interrupt(ctx context.Context, id Identity) error
 }
