@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -83,6 +84,73 @@ func TestDeliverAPromptToAnIdleSession(t *testing.T) {
 	if err != nil || done.Stage != adapterproto.PromptPersisted || w.launchCount() != 2 {
 		t.Fatalf("after the turn: %+v %v", done, err)
 	}
+}
+
+// A process table that cannot say whether the recorded turn process runs says
+// nothing about whether it does: every path that would start a process of a
+// session answers with an error (or the session unreachable) and starts nothing,
+// because a process started beside one that runs is a second writer.
+func TestARecordedProcessThatCannotBeLookedAtNeverGetsASecondWriter(t *testing.T) {
+	lookupFailure := errors.New("the process table did not answer")
+
+	t.Run("a prompt delivered to a session", func(t *testing.T) {
+		w := newWorld(t)
+		app, _ := newApp(t, w)
+		openSession(t, w, app)
+		if res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}); err != nil || res.Stage != adapterproto.PromptAccepted {
+			t.Fatalf("deliver: %+v %v", res, err)
+		}
+		started := w.launchCount()
+		w.setLookupErr(lookupFailure)
+		res, err := app.DeliverPrompt(ctxT(t), adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: prompt2, Text: "again"})
+		if err == nil || res.Stage == adapterproto.PromptAccepted || w.launchCount() != started {
+			t.Fatalf("deliver: %+v, %v, %d processes started", res, err, w.launchCount()-started)
+		}
+	})
+
+	t.Run("a creation repeated after the process was recorded", func(t *testing.T) {
+		w := newWorld(t)
+		w.onLaunch = claudeWrites(5 * time.Millisecond)
+		app1, _ := newApp(t, w)
+		// The adapter is gone after the process was recorded: the third put fails.
+		w.failPutIf = func(scope adapterproto.CheckpointScope, _ string, n int) bool {
+			return scope == adapterproto.ScopeAttempt && n >= 3
+		}
+		if _, err := app1.CreateSession(ctxT(t), createParams(attempt1, prompt1)); err == nil {
+			t.Fatal("the creation should have failed with the put")
+		}
+		w.failPutIf = nil
+		recorded, _ := w.checkpoint("attempt/" + attempt1)
+		if recorded == nil || w.launchCount() != 1 || w.aliveCount() != 1 {
+			t.Fatalf("checkpoint %s, %d launches, %d alive", recorded, w.launchCount(), w.aliveCount())
+		}
+
+		app2, _ := newApp(t, w)
+		w.setLookupErr(lookupFailure)
+		p := createParams(attempt1, prompt1)
+		p.Checkpoint = recorded
+		res, err := app2.CreateSession(ctxT(t), p)
+		if err == nil || res.Outcome == adapterproto.CreateCreated || w.launchCount() != 1 {
+			t.Fatalf("create: %+v, %v, %d launches", res, err, w.launchCount())
+		}
+	})
+
+	t.Run("a session taken back at start", func(t *testing.T) {
+		const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
+		w := newWorld(t)
+		w.appendRecord(filepath.Join(recordDir, session+".jsonl"), userLine(session, prompt1))
+		started, _ := w.Start(proc.Launch{Argv: []string{claudePath, "-p", "--resume", session}, Stdout: outFile(session, prompt1)})
+		raw, _ := json.Marshal(sessionCheckpoint{V: checkpointVersion, Session: session, Cwd: workDir, RecordDir: recordDir, Turn: &turn.State{
+			Attempt: prompt1, StartedReported: true, Process: turn.Process{PID: started.PID, StartUnix: started.StartUnix, StartKey: started.StartKey},
+		}})
+		w.setLookupErr(lookupFailure)
+		_, res := newApp(t, w, adapterproto.SessionAttach{
+			Endpoint: "session-1", Preset: "dev", NativeRef: session, Checkpoint: raw, ToolAccess: &adapterproto.ToolAccess{Env: map[string]string{}},
+		})
+		if got := res.Sessions[0]; got.State != adapterproto.AttachUnreachable || w.launchCount() != 1 {
+			t.Fatalf("session state %+v, %d launches", got, w.launchCount())
+		}
+	})
 }
 
 // A start that cannot outlive the daemon is a warning where an operator reads it,
