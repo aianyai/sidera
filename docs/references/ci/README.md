@@ -299,13 +299,16 @@ same way with an embedded key, and a person can check it by hand with `minisign`
   `scripts/release.sh` writes for exactly this version (`.zip` for Windows only), none
   twice. A release need not list every platform. That keeps a string that is not a version
   out of the signed comment, and means the script never signs a file the verifier refuses.
-- **One grammar, two implementations**: the verifier in
-  [`cmd/sidera/internal/update/verify`](../../../cmd/sidera/internal/update/verify) reads the
-  comment and `checksums.txt` with `sdk/go/semver` and its own parser; the scripts cannot
-  call Go, so `scripts/lib/release-format.sh` (`is_release_version`, `is_release_floor`,
-  `check_checksums`) writes the same grammar in shell. The verifier's tests run those
-  functions over a table of versions and floors and over every `checksums.txt` fixture, and
-  require the answer the verifier gives (they skip where `bash` is not installed). A
+- **One grammar, two implementations**: the Go home of what a release version is is
+  `release.ParseVersion` in [`internal/release`](../../../internal/release), which the
+  verifier and the fetcher in
+  [`cmd/sidera/internal/update`](../../../cmd/sidera/internal/update) both call; the
+  verifier in `update/verify` reads the comment and `checksums.txt` with it and its own
+  parser. The scripts cannot call Go, so `scripts/lib/release-format.sh`
+  (`is_release_version`, `is_release_floor`, `check_checksums`) writes the same grammar in
+  shell. The verifier's tests run those functions over a table of versions and floors and
+  over every `checksums.txt` fixture, and require the answer `release.ParseVersion` and the
+  verifier give (they skip where `bash` is not installed). A
   change to either side that makes them differ fails there; the rules themselves are in that
   package's `README.md` until the `update` reference topic lands.
 - **The public key** is committed once, as the two-line `.pub` file

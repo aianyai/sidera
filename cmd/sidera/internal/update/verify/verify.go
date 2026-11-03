@@ -31,11 +31,12 @@ var (
 	ErrNoArchive = errors.New("release has no archive for this platform")
 	// ErrInvalidVersion means a version the caller gave is not a plain release
 	// version: MAJOR.MINOR.PATCH with an optional pre-release, no "v", no build
-	// metadata. The version asked for may come from the network (fetch.Latest), which
-	// checks the tag with the same grammar before it gets here; a caller therefore
-	// classifies this error by where the version came from: a mistake of the caller
-	// when it was typed or compiled in, a bad answer of the server when it was fetched.
-	ErrInvalidVersion = errors.New("not a release version")
+	// metadata (release.ErrInvalidVersion, which release.ParseVersion answers). The
+	// version asked for may come from the network (fetch.Latest), which checks the tag
+	// with the same grammar before it gets here; a caller therefore classifies this
+	// error by where the version came from: a mistake of the caller when it was typed
+	// or compiled in, a bad answer of the server when it was fetched.
+	ErrInvalidVersion = release.ErrInvalidVersion
 )
 
 // Release is what a verified checksums.txt says about one release. Only Verify
@@ -78,7 +79,7 @@ func EmbeddedKeys() ([]minisign.PublicKey, error) {
 // signer's. A failure is ErrNotTrusted, except that want itself must be a plain
 // release version (ErrInvalidVersion).
 func Verify(keys []minisign.PublicKey, checksums, minisig []byte, want string) (Release, error) {
-	if _, err := parseVersion(want); err != nil {
+	if _, err := release.ParseVersion(want); err != nil {
 		return Release{}, fmt.Errorf("requested version: %w", err)
 	}
 	sig, err := minisign.ParseSignature(minisig)
@@ -113,11 +114,11 @@ func (r Release) Admits(installed string) error {
 	if r.version == "" {
 		return fmt.Errorf("%w: the release was never verified", ErrNotTrusted)
 	}
-	have, err := parseVersion(installed)
+	have, err := release.ParseVersion(installed)
 	if err != nil {
 		return fmt.Errorf("installed version: %w", err)
 	}
-	floor, err := parseVersion(r.floor)
+	floor, err := release.ParseVersion(r.floor)
 	if err != nil {
 		return fmt.Errorf("floor of the release: %w", err)
 	}
@@ -155,21 +156,6 @@ func VerifyDigest(content io.Reader, want [sha256.Size]byte) error {
 	return nil
 }
 
-// parseVersion accepts a release version in canonical form. Build metadata is
-// refused here because semver.Parse would drop it silently, and a version with a
-// suffix that is ignored is not the version that was signed.
-// scripts/lib/release-format.sh makes the release scripts accept exactly these.
-func parseVersion(text string) (semver.Version, error) {
-	if strings.Contains(text, "+") {
-		return semver.Version{}, fmt.Errorf("%w: %q has build metadata", ErrInvalidVersion, text)
-	}
-	v, err := semver.Parse(text)
-	if err != nil {
-		return semver.Version{}, fmt.Errorf("%w: %q", ErrInvalidVersion, text)
-	}
-	return v, nil
-}
-
 // parseTrustedComment reads `sidera <version> update-from <floor>`: four fields
 // separated by single spaces, the version without a "v" and the floor a plain
 // MAJOR.MINOR.PATCH.
@@ -179,10 +165,10 @@ func parseTrustedComment(comment string) (version, floor string, err error) {
 		return "", "", errors.New("want `sidera <version> update-from <floor>` with single spaces")
 	}
 	version, floor = fields[1], fields[3]
-	if _, err := parseVersion(version); err != nil {
+	if _, err := release.ParseVersion(version); err != nil {
 		return "", "", err
 	}
-	f, err := parseVersion(floor)
+	f, err := release.ParseVersion(floor)
 	if err != nil {
 		return "", "", err
 	}

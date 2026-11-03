@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aianyai/sidera/sdk/go/semver"
+	"github.com/aianyai/sidera/internal/release"
 )
 
 // The most a download of each kind may deliver. A longer body is refused.
@@ -47,15 +47,10 @@ var ErrNotFound = errors.New("no such release or asset")
 // ErrTooLarge is the answer for a body longer than the limit of its download.
 var ErrTooLarge = errors.New("larger than the limit")
 
-// isReleaseVersion reports whether s is a release version: a semantic version
-// without the leading v and without build metadata, which a release tag never
-// carries. It is also the only text that reaches a URL path from a response.
-// scripts/lib/release-format.sh makes the release scripts accept exactly these.
+// isReleaseVersion reports whether s is a release version (release.ParseVersion).
+// It is also the only text that reaches a URL path from a response.
 func isReleaseVersion(s string) bool {
-	if strings.Contains(s, "+") {
-		return false
-	}
-	_, err := semver.Parse(s)
+	_, err := release.ParseVersion(s)
 	return err == nil
 }
 

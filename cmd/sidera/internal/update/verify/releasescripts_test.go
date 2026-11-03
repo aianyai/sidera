@@ -9,12 +9,14 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/update/verify"
+	"github.com/aianyai/sidera/internal/release"
 )
 
 // The release scripts decide what they build and sign with scripts/lib/release-format.sh;
 // this package decides what a node believes. They are two implementations of one grammar
 // (shell has no way to share the Go code), so these tests run the shell functions and
-// require, row by row, the answer Verify gives.
+// require, row by row, the answer Go gives: release.ParseVersion for versions, Verify for
+// floors and checksums.
 
 // shellAccepts runs function of scripts/lib/release-format.sh on args and reports whether
 // it succeeded. Bash being absent skips the test: it is part of the Windows toolchain
@@ -43,11 +45,10 @@ func shellAccepts(t *testing.T, function string, args ...string) bool {
 	return false
 }
 
-// verifierAcceptsVersion asks Verify for a release of version. It reads the version
-// before the signature or the checksums, so nothing else needs to be valid.
-func verifierAcceptsVersion(version string) bool {
-	_, err := verify.Verify(nil, nil, nil, version)
-	return !errors.Is(err, verify.ErrInvalidVersion)
+// release.ParseVersion is the one Go home of the grammar; Verify and fetch call it.
+func releaseAcceptsVersion(version string) bool {
+	_, err := release.ParseVersion(version)
+	return err == nil
 }
 
 func TestScriptsAgreeOnReleaseVersion(t *testing.T) {
@@ -64,8 +65,8 @@ func TestScriptsAgreeOnReleaseVersion(t *testing.T) {
 	}
 	for _, v := range versions {
 		t.Run(v, func(t *testing.T) {
-			if got, want := shellAccepts(t, "is_release_version", v), verifierAcceptsVersion(v); got != want {
-				t.Errorf("is_release_version(%q) = %v, Verify accepts the version: %v", v, got, want)
+			if got, want := shellAccepts(t, "is_release_version", v), releaseAcceptsVersion(v); got != want {
+				t.Errorf("is_release_version(%q) = %v, release.ParseVersion accepts the version: %v", v, got, want)
 			}
 		})
 	}

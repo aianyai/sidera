@@ -12,6 +12,7 @@ own version (v1) and does not follow this one.
 | `Read()` | `Info`: the version, the distribution, the abbreviated commit and whether the checkout was modified (from the module's build information), and the Go version |
 | `DistributionArchive` | `archive`, the distribution of the programs in the release archives |
 | `SigningKey()` | The content of `minisign.pub`, the public key the releases are signed with, as a copy the caller may change |
+| `ParseVersion(text)` | Reads a release version into a `semver.Version`, or `ErrInvalidVersion`: the one Go home of what a release version is |
 | `Info.Describe(program)` | The one line `version` prints, `sidera 0.11.0 (commit 369c94e9f1a2, go1.26.10)` |
 | `DevVersion` | `0.0.0-dev`, what a build without the release version reports |
 
@@ -33,6 +34,15 @@ own version (v1) and does not follow this one.
   better states it, `-X ...release.stampedCommit=<commit>` and
   `-X ...release.stampedModified=true` for a tree with uncommitted changes, and
   the stated commit wins; `scripts/release.sh` does so.
+- A release version is a SemVer 2.0.0 version as `sdk/go/semver` reads it, without
+  a leading `v` and without build metadata. `ParseVersion` is the only Go code that
+  says so: `sidera update` (`fetch`, `verify`) calls it, and
+  `scripts/lib/release-format.sh` writes the same rule in shell for the release
+  scripts, held to it by a test in `cmd/sidera/internal/update/verify`. Build
+  metadata is refused before `semver.Parse`, which would drop it. Adapter manifest
+  versions are not release versions and allow build metadata; they are read with
+  `semver` directly. `sdk/go/semver` is standard library only, so this adds nothing to
+  the adapters beyond what the SDK already brings.
 - A build without it reports `DevVersion`, which is valid SemVer (adapters write
   their version into a manifest and answer it in `initialize`) and sorts before
   every release, so a development build cannot be taken for one. It is

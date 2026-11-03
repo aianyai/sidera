@@ -58,8 +58,9 @@ and an empty list trusts nothing.
   other, so a replayed old release cannot stand in for the one requested. A pre-release is a
   different version from its release.
 - **Build metadata is refused** wherever a version is read (asked for, installed, in the
-  comment, as the floor), before `semver.Parse`, which would drop it: a version with a
-  suffix that is ignored is not the version that was signed.
+  comment, as the floor), by `release.ParseVersion`, before `semver.Parse`, which would
+  drop it: a version with a suffix that is ignored is not the version that was signed.
+  `ErrInvalidVersion` is `release.ErrInvalidVersion`.
 - **The floor is by SemVer precedence, pre-releases included.** `0.8.0-rc.1` is below the
   floor `0.8.0`, as are development builds (`0.0.0-dev`). `Admits` compares the installed
   version with the floor only. Whether the release is newer than what is installed
@@ -96,5 +97,5 @@ runs `is_release_version`, `is_release_floor` and `check_checksums` of
 `scripts/lib/release-format.sh` with `bash` over a table of versions (leading zeros, empty
 identifiers, nine-digit and 64-character limits, build metadata, non-ASCII), the floors of
 the comment fixtures and every `sums-*` fixture, and requires that the shell accepts
-exactly what `Verify` accepts. A new deviation the verifier refuses belongs in the table or
+exactly what `release.ParseVersion` (versions) and `Verify` (floors and checksums) accept. A new deviation the verifier refuses belongs in the table or
 in `generate.sh`. The test is skipped where `bash` is not installed.
