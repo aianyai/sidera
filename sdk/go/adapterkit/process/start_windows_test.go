@@ -39,7 +39,7 @@ func init() {
 		r.Started, r.PID = started.Detachment, started.PID
 		_ = json.NewEncoder(os.Stdout).Encode(r)
 		_, _ = io.Copy(io.Discard, in) // until the test is done
-		_ = started.Handle.Kill()
+		_ = started.Kill()
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 var (
 	// ErrStartedUnidentified is wrapped by the error of a Start whose process runs
-	// but whose identity could not be read. Started.Handle, Done and PID are still
+	// but whose identity could not be read. Started.Kill, Done and PID are still
 	// set: the caller must not act as if nothing started.
 	ErrStartedUnidentified = errors.New("process: the process started but its identity cannot be read")
 	// ErrNotRunning: the identity no longer names a running process.

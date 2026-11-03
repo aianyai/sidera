@@ -14,7 +14,7 @@ process is detached on each platform are specified in
 
 | Name | Purpose |
 | ---- | ------- |
-| `Start(Spec)` | Start a process detached, with its standard streams on files or the null device. Returns its identity (read right after the start), the `adapterproto.Container` to persist, how far it escaped (`Detachment`), `Done` (the kit always waits, so no zombie) and `Handle` (for `Kill`; never `Wait` or `Release`). |
+| `Start(Spec)` | Start a process detached, with its standard streams on files or the null device. Returns its identity (read right after the start), the `adapterproto.Container` to persist, how far it escaped (`Detachment`), `Done` (the kit always waits, so no zombie) and `Kill()`. |
 | `HostDetachment()` | What `Start` achieves on this host, before anything has started; for a probe. |
 | `Lookup(pid)`, `Running(Identity)`, `List()` | The process table: one process, "does this identity still name a running process", and the user's processes with their arguments. |
 | `Interrupt(ctx, Identity)` | Ctrl-C: `SIGINT` on Unix; on Windows a helper process sends `CTRL_C_EVENT` to the console of a process that was started interruptible. |
@@ -36,7 +36,7 @@ process is detached on each platform are specified in
 - **Argv[0] is a path.** It is started as written and not looked up in `PATH`.
 - **`Start` has two kinds of error.** One that wraps `ErrStartedUnidentified` means
   the process runs and only its identity could not be read: the returned `Started`
-  has `PID`, `Done` and `Handle`, and the caller must not act as if nothing
+  has `PID`, `Done` and `Kill`, and the caller must not act as if nothing
   started. Any other error means nothing started.
 - **Falling back never fails a start.** Read `Started.Detachment`: when
   `OutlivesDaemon` is false the process will end with the adapter's job (Windows),

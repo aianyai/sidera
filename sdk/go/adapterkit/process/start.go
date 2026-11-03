@@ -48,8 +48,19 @@ type Started struct {
 	// once, after it has ended and been reaped. The kit always waits, so no zombie
 	// is left behind.
 	Done <-chan error
-	// Handle is the started process, for Kill. Never call Wait or Release on it.
-	Handle *os.Process
+	proc *os.Process
+}
+
+// Kill ends the process by force: SIGKILL on Unix, TerminateProcess on Windows.
+// Only the process itself is ended, not what it started; on Unix a caller that
+// wants the whole group signals the negated PID (the process leads a group of its
+// own). Once the process has ended and been reaped the error wraps
+// os.ErrProcessDone.
+func (s Started) Kill() error {
+	if s.proc == nil {
+		return errors.New("process: nothing started")
+	}
+	return s.proc.Kill()
 }
 
 // Start starts spec detached: on Unix in a session and process group of its own
@@ -82,7 +93,7 @@ func Start(spec Spec) (Started, error) {
 		Container:  container,
 		Detachment: detachment,
 		Done:       done,
-		Handle:     cmd.Process,
+		proc:       cmd.Process,
 	}
 	if lookupErr != nil {
 		return started, fmt.Errorf("%w: process %d: %w", ErrStartedUnidentified, cmd.Process.Pid, lookupErr)

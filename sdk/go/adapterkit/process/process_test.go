@@ -124,7 +124,7 @@ func startChild(t *testing.T, mode string, configure func(*process.Spec)) child 
 	}()
 	started.Done = done
 	t.Cleanup(func() {
-		_ = started.Handle.Kill()
+		_ = started.Kill()
 		select {
 		case <-ended:
 		case <-time.After(wait):
@@ -252,7 +252,7 @@ func TestStartIdentifiesTheProcess(t *testing.T) {
 			}
 			checkContainer(t, c)
 
-			if err := c.Handle.Kill(); err != nil {
+			if err := c.Kill(); err != nil {
 				t.Fatal(err)
 			}
 			if err := waitDone(t, c.Done); err == nil {

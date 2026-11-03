@@ -514,11 +514,11 @@ func (s *Server) Stop() error {
 	default:
 	}
 	pid := o.started.PID
-	_ = signalGroup(o.started.Handle, false)
+	_ = signalGroup(o.started, false)
 	select {
 	case <-o.exited:
 	case <-time.After(termWait):
-		_ = signalGroup(o.started.Handle, true)
+		_ = signalGroup(o.started, true)
 		select {
 		case <-o.exited:
 		case <-time.After(killWait):
@@ -530,7 +530,7 @@ func (s *Server) Stop() error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !groupGone(pid) {
-		_ = signalGroup(o.started.Handle, true)
+		_ = signalGroup(o.started, true)
 	}
 	return nil
 }
