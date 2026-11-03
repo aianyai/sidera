@@ -17,8 +17,8 @@ process is detached on each platform are specified in
 | `Start(Spec)` | Start a process detached, with its standard streams on files or the null device. Returns its identity (read right after the start), the `adapterproto.Container` to persist, how far it escaped (`Detachment`), `Done` (the kit always waits, so no zombie) and `Kill()`. |
 | `HostDetachment()` | What `Start` achieves on this host, before anything has started; for a probe. |
 | `Lookup(pid)`, `Running(Identity)`, `List()` | The process table: one process, "does this identity still name a running process", and the user's processes with their arguments. |
-| `Interrupt(ctx, Identity)` | Ctrl-C: `SIGINT` on Unix; on Windows a helper process sends `CTRL_C_EVENT` to the console of a process that was started interruptible. |
-| `HandleHelperInvocation()` | The first statement of `main` of an adapter that calls `Interrupt`. |
+| `Interrupt(ctx, Identity)` | Ctrl-C: `SIGINT` on Unix; on Windows a helper process sends `CTRL_C_EVENT` to the console it attaches to, that of any process that has one (a process started interruptible has one of its own). |
+| `HandleHelperInvocation()` | The first statement of `main` of an adapter that calls `Interrupt`; `Interrupt` fails on every platform until it has been called. |
 | `Identity`, `Process` | PID and an opaque start key; the key is what `adapterproto.ProcessIdentity.StartKey` carries. |
 
 ## Rules
@@ -53,12 +53,15 @@ process is detached on each platform are specified in
 - **An adapter that calls `Interrupt` calls `HandleHelperInvocation` first in
   `main`.** On Windows the helper is the adapter's own executable started with
   `--sidera-adapterkit-helper`; without the call the helper would serve the adapter
-  protocol instead, and `Interrupt` reports that the call is missing. Nothing else
-  runs before it, so the helper starts fast and takes no instance lock.
+  protocol instead. The call sets a flag of the package, and `Interrupt` returns an
+  error saying the call is missing, without signalling anything, on every platform,
+  so a test on any machine shows it. Nothing else runs before it, so the helper
+  starts fast and takes no instance lock.
 - **`Interrupt` returns when the request is delivered, not when the process
   stops.** Wait for `Done` or poll `Running`. Sending twice is harmless. On Windows
-  it works only for a process started with `Spec.Interruptible` and fails for any
-  other; the interrupt reaches every process on that console.
+  it works for any process that has a console, which `Spec.Interruptible` gives a
+  started process; Ctrl-C reaches every process attached to that console, and for a
+  process without a console the helper fails.
 
 ## Files
 

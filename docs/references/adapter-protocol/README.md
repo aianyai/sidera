@@ -1320,13 +1320,17 @@ console, and attaching would take the adapter's own console away, so
 console, hidden, and in the adapter's session (`AttachConsole` is refused across
 sessions). The helper checks the identity (exit 3, mapped to `ErrNotRunning`),
 frees its console, attaches to the target's, ignores Ctrl-C itself, sends
-`CTRL_C_EVENT` to the console, stays attached for 300 ms and prints `ok`. A
-failure exits 1 with the Win32 error on stderr. A reply without `ok` is an error
-saying that the adapter's `main` does not call `process.HandleHelperInvocation`,
-which an adapter that calls `Interrupt` must do as its first statement. The event
-reaches every process on the console, which is why an interruptible process has a
-console of its own, and a process started without one has none to attach to and
-the helper fails.
+`CTRL_C_EVENT` to the console, stays attached for 300 ms and prints `ok`. It holds
+a handle to the target from the identity check until the event is sent, so that
+the PID cannot name another process in between. A
+failure exits 1 with the Win32 error on stderr. An adapter that calls
+`Interrupt` must call `process.HandleHelperInvocation` as the first statement of
+its `main`; the call sets a flag of the package and `Interrupt` fails on every
+platform, with nothing sent, until it is set. A helper reply without `ok` is an
+error too. The event reaches every process attached to the console, which is why an
+interruptible process has a console of its own. `Interrupt` works for any process
+that has a console to attach to; a process started without one (the default) has
+none and the helper fails.
 
 ### Why
 
@@ -1351,12 +1355,20 @@ the helper fails.
 - `sdk/go/adapterkit/process/` (`identity*.go`, `start*.go`, `interrupt*.go`,
   `helper*.go`); its README lists the entry points.
 - Tests: `process_test.go` (the contract on every platform: identity, `Start`,
-  `Interrupt`), `start_linux_test.go` (the scope rule, unit names),
-  `identity_linux_test.go` (the stat parser), `start_windows_test.go` (the
-  adapter in jobs with the limits breakaway forbidden, breakaway forbidden with
-  kill-on-close, and breakaway allowed with and without kill-on-close). CI
-  runners have no systemd user manager and no desktop session, so the scope and
-  the console interrupt in an interactive session are run by hand on those hosts.
+  `Interrupt`), `identity_test.go` (an error is never "not running", a refused
+  process with another start is), `interrupt_test.go` (`Interrupt` without
+  `HandleHelperInvocation`), `start_linux_test.go` (the scope rule, the fallback for
+  an environment without the user manager, unit names, the executable check),
+  `identity_linux_test.go` (the stat and status parsers, the classification of
+  what `/proc` answers), `process_linux_test.go` (a non-dumpable process is
+  listed), `identity_windows_test.go` (the classification of what `OpenProcess`
+  answers, the system process table against the handle, the System process told
+  apart by its start), `detachment_windows_test.go` (a start refused breakaway),
+  `start_windows_test.go` (the adapter in jobs with the limits breakaway
+  forbidden, breakaway forbidden with kill-on-close, and breakaway allowed with
+  and without kill-on-close). CI runners have no systemd user manager and no
+  desktop session, so the scope and the console interrupt in an interactive
+  session are run by hand on those hosts.
 
 ## Manifest
 

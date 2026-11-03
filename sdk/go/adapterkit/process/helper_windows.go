@@ -39,12 +39,32 @@ func runHelper(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "bad pid:", err)
 		return helperUsage
 	}
-	p, found, err := Lookup(pid)
+	// The handle stays open until the event is sent: while it is, the PID names this
+	// process object even if the process ends, so the console attached to cannot be
+	// that of a process that took the PID over after the check.
+	h, err := windows.OpenProcess(openAccess, false, uint32(pid))
+	switch classifyOpen(err) {
+	case absent:
+		return helperNotRunning
+	case refused, failed:
+		fmt.Fprintln(stderr, err)
+		return helperFailed
+	}
+	defer windows.CloseHandle(h)
+	alive, err := running(h)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return helperFailed
 	}
-	if !found || p.StartKey != args[2] {
+	if !alive {
+		return helperNotRunning
+	}
+	p, err := describe(h, pid)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return helperFailed
+	}
+	if p.StartKey != args[2] {
 		return helperNotRunning
 	}
 	if err := sendCtrlC(uint32(pid)); err != nil {

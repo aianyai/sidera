@@ -42,7 +42,7 @@ func interrupt(ctx context.Context, id Identity) error {
 	case err != nil:
 		return fmt.Errorf("process: interrupt process %d: start the helper: %w", id.PID, err)
 	case strings.TrimSpace(stdout.String()) != helperOK:
-		return fmt.Errorf("process: interrupt process %d: the helper did not answer ok: the adapter's main does not call process.HandleHelperInvocation", id.PID)
+		return fmt.Errorf("process: interrupt process %d: the helper did not answer ok: process.HandleHelperInvocation is not the first statement of the adapter's main", id.PID)
 	}
 	return nil
 }
