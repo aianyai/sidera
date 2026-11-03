@@ -13,7 +13,7 @@ own version (v1) and does not follow this one.
 | `DistributionArchive` | `archive`, the distribution of the programs in the release archives |
 | `SigningKey()` | The content of `minisign.pub`, the public key the releases are signed with, as a copy the caller may change |
 | `ParseVersion(text)` | Reads a release version into a `semver.Version`, or `ErrInvalidVersion`: the one Go home of what a release version is |
-| `Info.Describe(program)` | The one line `version` prints, `sidera 0.11.0 (commit 369c94e9f1a2, go1.26.10)` |
+| `Info.Describe(program)` | The one line `version` prints, `sidera 0.12.0 (commit 369c94e9f1a2, go1.26.10)` |
 | `DevVersion` | `0.0.0-dev`, what a build without the release version reports |
 
 ## Rules

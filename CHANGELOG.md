@@ -8,6 +8,21 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-03
+
+Sidera can now update itself and restart its own daemon: `sidera update` brings an
+installation from a release archive to a release, programs, daemon and adapters, and
+`sidera daemon restart` restarts the running daemon onto the program on the disk. **0.12.0
+is the first release that can update itself**: an installation of 0.11.0 or earlier is
+upgraded by hand one last time (`docs/guide/operations.md`, "Upgrade"), and from then on
+with `sidera update`. State written by 0.11.0 needs no migration: no stored format changed
+(the result of `daemon restart` is stored in the record that `daemon stop` already uses,
+so 0.11.0 reads it too, and a return to 0.11.0 by hand reads what 0.12.0 wrote). The
+adapter protocol stays at version 1 without a change on the wire, and the adapters of
+0.11.0 work with this daemon. The Go SDK gains the public package `semver`, which is
+additive: it was internal, so nothing outside the SDK could depend on the old place, and
+nothing else in the SDK changes.
+
 ### Added
 
 - **`sidera daemon restart [--expect-version <version>] [--wait <duration>]`** restarts the
@@ -19,8 +34,11 @@ protocol has a version of its own.
   It then shuts down in its orderly way and starts the program again: on macOS and Linux it
   replaces its own process, so the process number, terminal and tmux session stay; on
   Windows it starts a detached process and ends, which a scheduled task's daemon survives.
-  The command waits until `status` shows a new `daemon.start_id` and the daemon running
-  (default 2 minutes) and prints both start identifiers, the program and its version.
+  Restarting the daemon is a request of the local owner. The command waits until `status`
+  shows a new `daemon.start_id` and the daemon running (default 2 minutes) and prints both
+  start identifiers, the program and its version. A daemon older than 0.12.0 has no restart
+  method: the command says so and to stop the daemon and start it the way it was started,
+  which is the one manual step when upgrading from 0.11.0.
 - **`sidera update [--check] [--version <version>] [--yes]`** brings an installation from a
   release archive to a release: it finds the latest release (or the one asked for), checks
   `checksums.txt` against the minisign key built into the program, the version the
@@ -31,19 +49,35 @@ protocol has a version of its own.
   daemon onto the new program with `daemon restart`, and installs the new package of each
   installed adapter in place. Each run does only the missing steps, so an interrupted run
   is finished by running it again. It refuses a downgrade, a program below the floor, a
-  program that is a symbolic link or owned by another user (do not run it with `sudo`), a
-  directory that cannot be written, and builds that are not from a release archive.
+  program that is a symbolic link or owned by another user (do not run it with `sudo`;
+  the owner is not checked on Windows), a directory that cannot be written, and builds that
+  are not from a release archive, as well as a release whose program does not say that it
+  is from one: no release before 0.12.0 does, so none can be a target.
   `--check` reports `update_available` and `admitted` and exits 0 once it has read a release
   it can believe, 1 when it cannot. Only this command
   contacts GitHub or any release server; the daemon never does.
 - `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
 - `sidera version --json` reports `distribution`: `archive` for the programs of a release
-  archive, and no member for a build made any other way.
+  archive, and no member for a build made any other way. `sidera update` replaces only
+  programs that report `archive`.
 - **Go SDK: `semver` is a public package.** It was internal; it now parses a Semantic
   Versioning 2.0.0 version (`Parse`) and orders two parsed versions by the precedence rules
   of the specification (`Compare`), so that any reader of an adapter version applies the same
   syntax and the same order. It uses the standard library only; nothing else in the SDK
   changes.
+
+### Changed
+
+- **The release scripts accept exactly the versions and the `checksums.txt` that the program
+  accepts** (for maintainers). `scripts/release.sh` and `scripts/release-sign.sh` refuse a
+  version that `sidera update` would refuse, such as a number or a numeric pre-release
+  identifier with a leading zero (`01.2.3`, `0.12.0-rc.01`), an empty identifier
+  (`0.12.0-rc..1`) or more than nine digits in a number, and `release-sign.sh` refuses a `checksums.txt` that the
+  verifier of the program would refuse; before, a release could be built, signed and
+  published that no installation could install. `scripts/lib/release-format.sh` is the one
+  place where the scripts say what a release version and a `checksums.txt` are, and the
+  `sign` job of the release workflow checks it out with the script. `scripts/release.sh` also
+  checks that the `sidera` it built reports the distribution `archive`.
 
 ## [0.11.0] - 2026-11-03
 
@@ -413,7 +447,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/aianyai/sidera/releases/tag/v0.12.0
 [0.11.0]: https://github.com/aianyai/sidera/releases/tag/v0.11.0
 [0.10.0]: https://github.com/aianyai/sidera/releases/tag/v0.10.0
 [0.9.0]: https://github.com/aianyai/sidera/releases/tag/v0.9.0
