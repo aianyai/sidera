@@ -2,7 +2,8 @@
 
 `Run(context.Context, argv, Config)` is the executable's dispatcher; `argv`
 includes the executable name. The owner supplies standard streams, an environment
-lookup, the path of the running program (`Executable`) and what the program was built from (`release.Info`). The dispatcher returns an exit code and never exits the
+lookup, the path of the running program (`Executable`), what the program was built from (`release.Info`) and
+how it was started (`Launch`, recorded by `main`, or `LaunchErr`). The dispatcher returns an exit code and never exits the
 process itself. It borrows the streams, owns and closes the Agent client, and
 waits for a foreground daemon to finish before returning. For `mcp`, it passes
 stdin/stdout ownership to the MCP peer and borrows stderr for diagnostics. MCP

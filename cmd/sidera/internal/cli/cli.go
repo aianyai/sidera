@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
+	"github.com/aianyai/sidera/cmd/sidera/internal/launch"
 	"github.com/aianyai/sidera/cmd/sidera/internal/mcp"
 	"github.com/aianyai/sidera/internal/datahome"
 	"github.com/aianyai/sidera/internal/node/agentapi"
@@ -36,6 +37,11 @@ type Config struct {
 	Executable func() (string, error)
 	// Release is what the program was built from.
 	Release release.Info
+	// Launch is how the program was started, captured before anything changed the
+	// working directory. LaunchErr is why it could not be captured; Launch is then
+	// not to be used.
+	Launch    launch.Launch
+	LaunchErr error
 }
 
 type command struct {

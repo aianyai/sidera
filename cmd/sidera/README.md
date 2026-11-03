@@ -2,7 +2,9 @@
 
 The node's command-line program. `main.go` supplies the process streams and
 environment to [`internal/cli`](internal/cli/README.md), and is the only place
-that calls `os.Exit`. Build it with `go build ./cmd/sidera`.
+that calls `os.Exit`. Before anything else it records how the program was started
+([`internal/launch`](internal/launch/README.md)), because the daemon changes the
+working directory. Build it with `go build ./cmd/sidera`.
 
 [`command-line`](../../docs/references/command-line/README.md) describes the
 commands, output and exit codes. Agent commands use the checked local Agent
