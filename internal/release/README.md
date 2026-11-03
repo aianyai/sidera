@@ -9,7 +9,9 @@ own version (v1) and does not follow this one.
 | Name | What it is for |
 | ---- | -------------- |
 | `Version()` | The version of the running program: the release version, or `DevVersion` |
-| `Read()` | `Info`: the version, the abbreviated commit and whether the checkout was modified (from the module's build information), and the Go version |
+| `Read()` | `Info`: the version, the distribution, the abbreviated commit and whether the checkout was modified (from the module's build information), and the Go version |
+| `DistributionArchive` | `archive`, the distribution of the programs in the release archives |
+| `SigningKey()` | The content of `minisign.pub`, the public key the releases are signed with, as a copy the caller may change |
 | `Info.Describe(program)` | The one line `version` prints, `sidera 0.11.0 (commit 369c94e9f1a2, go1.26.10)` |
 | `DevVersion` | `0.0.0-dev`, what a build without the release version reports |
 
@@ -18,6 +20,13 @@ own version (v1) and does not follow this one.
 - The release version arrives only through the linker:
   `-ldflags "-X github.com/aianyai/sidera/internal/release.stamped=<version>"`,
   with no leading `v`. `scripts/release.sh` stamps every program it builds.
+- The distribution is stamped the same way, `-X ...release.stampedDistribution=archive`,
+  by `scripts/release.sh` for the programs in its archives, which are the ones
+  `sidera update` replaces. It is empty for every other build (a plain `go build`, a
+  package manager's build): `Info.Distribution` is then left out of `version --json`,
+  and a program that does not say it comes from an archive is never replaced by
+  an update. `scripts/release.sh` checks that the built `sidera` reports it, as it
+  checks the version.
 - The commit comes from the module's build information, which Go fills in only
   for a build made in a repository's own checkout (a build in a linked git
   worktree records the commit of the main checkout instead). A build that knows
@@ -40,7 +49,9 @@ own version (v1) and does not follow this one.
   version.
 - `minisign.pub` is the public key the releases are signed with, a minisign
   `.pub` file, kept here as the one copy: `scripts/release-sign.sh` verifies
-  its signature against it, the install guides quote it, and the code that
-  will verify an update is to embed this file with `go:embed`. No Go code
-  reads it yet. The signature and how it is made are in
+  its signature against it, the install guides quote it, and `SigningKey()`
+  returns it, embedded with `go:embed` (an embed cannot reach outside the package
+  directory, so it is made here). The bytes are not parsed in this package: the
+  adapters import it, and the minisign parser and its `golang.org/x/crypto`
+  dependency must not reach them. The signature and how it is made are in
   `docs/references/ci/README.md`, "Signature".

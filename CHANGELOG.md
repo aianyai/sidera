@@ -22,6 +22,8 @@ protocol has a version of its own.
   The command waits until `status` shows a new `daemon.start_id` and the daemon running
   (default 2 minutes) and prints both start identifiers, the program and its version.
 - `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
+- `sidera version --json` reports `distribution`: `archive` for the programs of a release
+  archive, and no member for a build made any other way.
 - **Go SDK: `semver` is a public package.** It was internal; it now parses a Semantic
   Versioning 2.0.0 version (`Parse`) and orders two parsed versions by the precedence rules
   of the specification (`Compare`), so that any reader of an adapter version applies the same

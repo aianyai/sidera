@@ -72,13 +72,14 @@ for adapter in $adapters; do
 done
 scripts/third-party-notices.sh "$work/THIRD_PARTY_NOTICES" "$platforms" "$packages"
 
-# Every program reports the release version, set by the linker, and the commit the
-# tree is at. The commit is stated here because Go records the wrong one for a build
+# Every program reports the release version, set by the linker, that it comes from a
+# release archive, and the commit the tree is at. The commit is stated here because Go records the wrong one for a build
 # made in a linked git worktree.
 commit=$(git rev-parse HEAD)
 modified=false
 [ -n "$(git status --porcelain)" ] && modified=true
 ldflags="-s -w -X $module/internal/release.stamped=$version"
+ldflags="$ldflags -X $module/internal/release.stampedDistribution=archive"
 ldflags="$ldflags -X $module/internal/release.stampedCommit=$commit -X $module/internal/release.stampedModified=$modified"
 
 # build <goos> <goarch> <program> <output>
@@ -113,12 +114,18 @@ for name in $adapters; do
   build "$hostos" "$hostarch" "sidera-adapter-$name" "$work/host/sidera-adapter-$name$hostexe"
 done
 # A release stamped at the wrong path would silently report the development
-# version, so the first program built is asked what it reports.
+# version, and one whose distribution was not stamped would not be taken for an
+# archive by `sidera update`, so the first program built is asked what it reports.
 build "$hostos" "$hostarch" sidera "$work/host/sidera$hostexe"
 reported=$("$work/host/sidera$hostexe" version)
 case $reported in
   "sidera $version ("*) ;;
   *) echo "sidera reports \"$reported\", not version $version" >&2; exit 1 ;;
+esac
+reported=$("$work/host/sidera$hostexe" version --json)
+case $reported in
+  *'"distribution":"archive"'*) ;;
+  *) echo "sidera reports $reported, not distribution archive" >&2; exit 1 ;;
 esac
 
 for platform in $platforms; do

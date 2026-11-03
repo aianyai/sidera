@@ -222,7 +222,7 @@ carries the script that signs, so who may create a tag `v*` is who may sign; pro
 `v*` tags is a setting of the repository, not of the workflow.
 
 `scripts/release.sh <version> <outdir>` builds, with `CGO_ENABLED=0` and the
-version stamped into every program (see
+version, the commit and the distribution `archive` stamped into every program (see
 [`internal/release`](../../../internal/release/README.md)), for darwin/arm64,
 darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64: `sidera`,
 `sidera-adapter-claude`, `sidera-adapter-codex` and `sidera-adapter-console`. Each adapter's
@@ -242,7 +242,8 @@ Before it builds anything the script checks that both install guides,
 `internal/release/minisign.pub`, the key the release is signed with and the one copy of
 it (see "Signature"): a key that changed in one place only would make every manual
 verification fail. It refuses a non-empty `<outdir>`, and stops if the `sidera` it just
-built does not report the version it was given. The release holds one more file, which
+built does not report the version it was given and the distribution `archive`
+(`version --json`). The release holds one more file, which
 `scripts/release-sign.sh` adds to `<outdir>` (see "Signature"):
 
 | File | Holds |
