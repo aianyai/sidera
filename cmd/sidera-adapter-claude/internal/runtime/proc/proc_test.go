@@ -76,7 +76,8 @@ func TestLauncherStartsAProcessTheTableFindsAndInterruptEnds(t *testing.T) {
 		t.Fatalf("Lookup = %+v, %v, %v; started %+v", found, ok, err, started.Info)
 	}
 	// A start in a systemd scope is still the launcher's own argument vector for an
-	// instant, until it executes the program: wait for the listing to show it.
+	// instant, until it executes the program, and while it executes Linux can list
+	// no arguments at all: wait for the listing to show the program.
 	var entry Entry
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		list, err := table.List()
@@ -84,7 +85,7 @@ func TestLauncherStartsAProcessTheTableFindsAndInterruptEnds(t *testing.T) {
 			t.Fatal(err)
 		}
 		if i := slices.IndexFunc(list, func(e Entry) bool { return e.PID == started.PID }); i >= 0 {
-			if entry = list[i]; entry.Args[0] == l.Argv[0] {
+			if entry = list[i]; len(entry.Args) > 0 && entry.Args[0] == l.Argv[0] {
 				break
 			}
 		}
