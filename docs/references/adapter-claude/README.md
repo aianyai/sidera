@@ -291,8 +291,10 @@ adapter's `CLAUDE_CONFIG_DIR`, else `~/.claude`):
 | The inbox socket | the wake's `CLAUDE_CODE_MESSAGING_SOCKET` (a Unix domain socket; on Windows the named pipe `\\.\pipe\LOCAL\cc-msg-<hex>`, opened with a plain file open when the message is ready, tried again every 10 ms within the 3 seconds while it is busy), one line `{"type":"user","message":{"role":"user","content":"<text>"},"uuid":"<attempt>"}` per prompt, preceded by `{"type":"auth","token":"<token>"}` when the wake has `CLAUDE_CODE_MESSAGING_TOKEN` (optional on macOS and Linux, required on Windows, each line a write of its own) | delivering a prompt; the runtime answers nothing |
 
 The wake is the three keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
-`CLAUDE_PID`, copied from the environment of the process that attached. The adapter holds it in
-memory only. Nothing of it is logged, stored with the daemon (the session's checkpoint holds the
+`CLAUDE_PID`, copied from the environment of the process that attached. The environment of Claude
+Code's MCP servers has the first two and not `CLAUDE_PID` (the tools run through Bash have all
+three), so a wake without `CLAUDE_PID` is valid and the process is found from the registry (below).
+The adapter holds the wake in memory only. Nothing of it is logged, stored with the daemon (the session's checkpoint holds the
 process id alone), put in an argument vector or in an error. The socket's path and the process id
 are not secret, but are not logged at the information level either.
 
@@ -311,14 +313,24 @@ a decimal FILETIME, each compared for equality with the process table's native s
 platform is an unreadable entry (`native_error`). That is how a registry entry whose process number was
 reused by another process is told from a live session.
 
-**`session.attach`** reads the registry entry of `CLAUDE_PID` and answers:
+**Which process.** The process is, in this order: the wake's `CLAUDE_PID`; the process the adapter
+already holds for the endpoint (a repeated attachment, a checkpoint); else the one live process
+whose entry in `sessions/` holds the attachment's native session id as its `sessionId`. That search
+reads the entries named `<pid>.json` (other files of the directory, such as `<pid>.<hash>.key`, and
+entries in a form that is not read are passed over) and keeps those whose process runs and is the one
+that wrote the entry, by the same check as for a `CLAUDE_PID`; it never guesses: none, or more than
+one, is a refusal. The id is the one the endpoint was attached with, so after `/clear` (the entry then
+holds a new id) the search finds nothing; an attachment that already holds the process is not affected.
+
+**`session.attach`** reads the registry entry of that process and answers:
 
 | Found | Answer |
 | ----- | ------ |
 | no entry, the process is gone, the process started at another time than the entry says, or the entry is not `kind` interactive | `not_found` |
 | an entry that is not in the form the adapter reads | `failed`, `native_error` |
 | the entry or the process table cannot be read | `failed`, `native_unreachable` |
-| the wake has no `CLAUDE_PID`, or no socket (the detail says "too old" when the entry lists no messaging support) | `failed`, `wake_unavailable` |
+| the wake has no `CLAUDE_PID` and the registry shows no live process, or more than one, holding the session id (the detail says which); or the wake has no socket (the detail says "too old" when the entry lists no messaging support) | `failed`, `wake_unavailable` |
+| the registry directory cannot be listed | `failed`, `native_unreachable` |
 | the session, and a wake with a socket | `attached` |
 
 The session is followed and its endpoint is held also when the answer is `wake_unavailable`, so a
@@ -328,7 +340,8 @@ stores the session's checkpoint (the process id), and reads the transcript once 
 history: only what is written afterwards is followed.
 
 **`adapter.start`** takes an attached entry back from the process id in the wake or, as the daemon
-holds the wake in memory only and may have none after a restart, in the checkpoint. The answer is
+holds the wake in memory only and may have none after a restart, in the checkpoint, else by the
+search of the registry above. The answer is
 `attached` with `turn_active` true when the registry shows a turn running, `lost` when the session
 is gone, and `unreachable` when nothing names its process or the registry cannot be read. A session
 without a wake is followed; it waits for the next `session.attach` to bring the wake, and until then

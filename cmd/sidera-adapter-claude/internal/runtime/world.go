@@ -23,6 +23,9 @@ type Files interface {
 	// Open opens a file for reading from the given offset. A file that is not
 	// there is an error that satisfies errors.Is(err, fs.ErrNotExist).
 	Open(path string, offset int64) (io.ReadCloser, error)
+	// ListDir returns the names of the entries of a directory. A directory that is
+	// not there is an error that satisfies errors.Is(err, fs.ErrNotExist).
+	ListDir(path string) ([]string, error)
 	// WriteFile writes a file, creating its directories, private to the user.
 	// A reader never sees half of it.
 	WriteFile(path string, data []byte) error

@@ -31,6 +31,18 @@ func (osFiles) Open(path string, offset int64) (io.ReadCloser, error) {
 	return f, nil
 }
 
+func (osFiles) ListDir(path string) ([]string, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return names, nil
+}
+
 func (osFiles) WriteFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

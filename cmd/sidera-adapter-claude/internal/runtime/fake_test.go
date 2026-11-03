@@ -370,6 +370,21 @@ func (w *world) Open(path string, offset int64) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(content)), nil
 }
 
+func (w *world) ListDir(path string) ([]string, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var names []string
+	for p := range w.files {
+		if filepath.Dir(p) == path {
+			names = append(names, filepath.Base(p))
+		}
+	}
+	if names == nil {
+		return nil, &fs.PathError{Op: "readdir", Path: path, Err: fs.ErrNotExist}
+	}
+	return names, nil
+}
+
 func (w *world) WriteFile(path string, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()

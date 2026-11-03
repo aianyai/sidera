@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -75,7 +76,28 @@ type Registry struct {
 // RegistryFile is the path of the registry file of a process in the runtime's
 // configuration directory.
 func RegistryFile(claudeDir string, pid int) string {
-	return filepath.Join(claudeDir, "sessions", strconv.Itoa(pid)+".json")
+	return filepath.Join(RegistryDir(claudeDir), strconv.Itoa(pid)+".json")
+}
+
+// RegistryDir is the directory of the registry files in the runtime's
+// configuration directory.
+func RegistryDir(claudeDir string) string { return filepath.Join(claudeDir, "sessions") }
+
+// RegistryPID returns the process a file name of the registry directory names,
+// false for any other name: the directory also holds files of another kind, such
+// as `<pid>.<hash>.key`.
+func RegistryPID(name string) (int, bool) {
+	digits, ok := strings.CutSuffix(name, ".json")
+	if !ok || digits == "" {
+		return 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	pid, err := strconv.Atoi(digits)
+	return pid, err == nil && pid > 0
 }
 
 // ParseRegistry reads a registry file. The form of the process start depends on

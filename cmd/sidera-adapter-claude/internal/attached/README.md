@@ -14,6 +14,7 @@ matching is an error here (`ErrRegistryForm`), never a guess.
 | Name | Does |
 | ---- | ---- |
 | `ParseRegistry(data)`, `RegistryFile(dir, pid)` | The registry entry of a running process (`sessions/<pid>.json`): session id, working directory, kind, process start, status and when it changed. |
+| `RegistryDir(dir)`, `RegistryPID(name)` | The registry directory, and the process a file name of it names: only `<pid>.json` does; `<pid>.<hash>.key` and the like are no entry. |
 | `Registry.SameProcess(startUnix, nativeStart)` | Whether a process of the table is the one the entry was written by: a number reused by another process is not. The entry's `procStart` is kept as written; macOS compares `ps -o lstart` text within two seconds, Linux (clock ticks) and Windows (FILETIME) compare the native start for equality. |
 | `Status`, `Status.Active()` | `busy` and `waiting` are a turn running; `idle`, `shell` and a status not known are not. |
 | `ParseWake(info)`, `Wake` | The three wake keys; a key that is not valid is named by its key. `Wake` prints as redacted, whatever the verb or log handler. |

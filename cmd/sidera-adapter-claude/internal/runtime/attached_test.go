@@ -199,7 +199,9 @@ func TestAttachOutcomes(t *testing.T) {
 		{"a wake without a socket for a runtime that lists no messaging", func(w *world) {
 			w.setRegistry(claudeSess, "idle", 1000, map[string]any{"peerProtocol": nil, "messagingSocketPath": nil})
 		}, wakeOf("", "", claudePID), failed, adapterproto.AttachFailWakeUnavailable, "too old"},
-		{"a wake that names no process", func(w *world) {}, wakeOf(inboxSock, inboxToken, 0), failed, adapterproto.AttachFailWakeUnavailable, attached.WakePID},
+		{"a wake that names no process and a registry without the session", func(w *world) {
+			w.setRegistry(clearedSes, "idle", 1000)
+		}, wakeOf(inboxSock, inboxToken, 0), failed, adapterproto.AttachFailWakeUnavailable, attached.WakePID},
 		{"a wake whose process is not a number", func(w *world) {}, adapterproto.WakeInfo{attached.WakePID: "x"}, failed, adapterproto.AttachFailWakeUnavailable, attached.WakePID},
 	}
 	for _, tc := range tests {
@@ -220,6 +222,86 @@ func TestAttachOutcomes(t *testing.T) {
 				t.Fatalf("an invalid result: %v", err)
 			}
 		})
+	}
+}
+
+// setOtherRegistry writes the registry file of another process.
+func (w *world) setOtherRegistry(pid int, session string, extra map[string]any) {
+	w.locked(func() {
+		w.files[attached.RegistryFile(claudeHome, pid)] = registryDoc(pid, session, "idle", 1000, extra)
+	})
+}
+
+// A Claude Code MCP server's environment has no CLAUDE_PID: the process is found
+// in the registry, as the one live process whose entry holds the session id.
+func TestAWakeWithoutAProcessIsCompletedFromTheRegistry(t *testing.T) {
+	noPID := wakeOf(inboxSock, inboxToken, 0)
+	tests := []struct {
+		name   string
+		setup  func(w *world)
+		want   adapterproto.SessionAttachOutcome
+		detail string
+	}{
+		{"the session is the only one with its id", func(w *world) {}, adapterproto.SessionAttachAttached, ""},
+		{"other sessions and files of the directory are passed over", func(w *world) {
+			w.claudeProc(5001)
+			w.setOtherRegistry(5001, clearedSes, nil)
+			w.setOtherRegistry(5002, claudeSess, map[string]any{"status": nil})
+			w.locked(func() {
+				w.files[filepath.Join(attached.RegistryDir(claudeHome), "4242.0123abcd.key")] = []byte("not a registry entry")
+				w.files[filepath.Join(attached.RegistryDir(claudeHome), "notes.json")] = []byte("{}")
+			})
+		}, adapterproto.SessionAttachAttached, ""},
+		{"a dead process and a reused process number with the same id are not taken", func(w *world) {
+			w.setOtherRegistry(5001, claudeSess, nil)
+			w.claudeProc(5002)
+			w.setOtherRegistry(5002, claudeSess, map[string]any{"procStart": procStart(5002, claudeStart-7200)})
+		}, adapterproto.SessionAttachAttached, ""},
+		{"no entry holds the session id", func(w *world) { w.setRegistry(clearedSes, "idle", 1000) }, adapterproto.SessionAttachFailed, "no running process holds"},
+		{"the only entry with the session id is of a dead process", func(w *world) { w.killClaude(claudePID) }, adapterproto.SessionAttachFailed, "no running process holds"},
+		{"two live processes hold the session id", func(w *world) {
+			w.claudeProc(5001)
+			w.setOtherRegistry(5001, claudeSess, nil)
+		}, adapterproto.SessionAttachFailed, "2 running processes"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.claudeProc(claudePID)
+			w.setRegistry(claudeSess, "idle", 1000)
+			tc.setup(w)
+			app, _ := newApp(t, w)
+			res, err := app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: noPID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Outcome != tc.want || !strings.Contains(res.Detail, tc.detail) {
+				t.Fatalf("result %+v, want outcome %s, detail containing %q", res, tc.want, tc.detail)
+			}
+			if tc.want != adapterproto.SessionAttachAttached {
+				if res.Reason != adapterproto.AttachFailWakeUnavailable || !strings.Contains(res.Detail, attached.WakePID) {
+					t.Fatalf("a refusal says the wake cannot name the session's process: %+v", res)
+				}
+				return
+			}
+			if del, err := deliver(app, attempt1, "wake"); err != nil || del.Stage != adapterproto.PromptAccepted || len(w.inboxWrites()) != 1 {
+				t.Fatalf("deliver: %+v, %v, %d writes", del, err, len(w.inboxWrites()))
+			}
+		})
+	}
+}
+
+// The process named by CLAUDE_PID is the first choice: the registry is not searched.
+func TestTheWakesProcessWinsOverTheRegistrySearch(t *testing.T) {
+	w := newWorld(t)
+	w.claudeProc(claudePID)
+	w.setRegistry(claudeSess, "idle", 1000)
+	w.claudeProc(5001)
+	w.setOtherRegistry(5001, claudeSess, nil)
+	app, _ := newApp(t, w)
+	res, err := app.AttachSession(context.Background(), adapterproto.SessionAttachParams{Endpoint: ep, NativeRef: claudeSess, Wake: fullWake()})
+	if err != nil || res.Outcome != adapterproto.SessionAttachAttached {
+		t.Fatalf("attach: %+v, %v", res, err)
 	}
 }
 
@@ -689,7 +771,8 @@ func TestAnAttachedSessionIsTakenBackAtStart(t *testing.T) {
 		{"a turn is running", func(w *world) { w.setRegistry(claudeSess, "busy", 2000) }, attachedEntry(nil, cp), adapterproto.AttachAttached, true, true},
 		{"the session has ended", func(w *world) { w.killClaude(claudePID) }, attachedEntry(nil, cp), adapterproto.AttachLost, false, false},
 		{"its registry entry is gone", func(w *world) { w.removeRegistry() }, attachedEntry(fullWake(), nil), adapterproto.AttachLost, false, false},
-		{"nothing names its process", func(w *world) {}, attachedEntry(nil, nil), adapterproto.AttachUnreachable, false, false},
+		{"without a wake or a checkpoint, by the session id in the registry", func(w *world) {}, attachedEntry(nil, nil), adapterproto.AttachAttached, false, true},
+		{"nothing names its process", func(w *world) { w.setRegistry(clearedSes, "idle", 1000) }, attachedEntry(nil, nil), adapterproto.AttachUnreachable, false, false},
 		{"the process table cannot be read", func(w *world) { w.setLookupErr(errors.New("sysctl failed")) }, attachedEntry(fullWake(), nil), adapterproto.AttachUnreachable, false, false},
 	}
 	for _, tc := range tests {

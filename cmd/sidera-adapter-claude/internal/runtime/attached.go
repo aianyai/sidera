@@ -110,11 +110,11 @@ func wrongEndpointKind() error {
 	return peer.NewError(adapterproto.CodeWrongEndpointKind, "the endpoint is an attached session: the person runs it")
 }
 
-// nativeSession reads the registry entry of a process and checks that the
-// process runs. The error wraps errNativeGone for a session that is not there,
-// attached.ErrRegistryForm for an entry in a form that is not read, and is any
-// other for what could not be looked at.
-func (a *App) nativeSession(pid int) (attached.Registry, error) {
+// readRegistry reads the registry entry of a process. The error wraps
+// errNativeGone for a process that has no entry, attached.ErrRegistryForm for an
+// entry in a form that is not read, and is any other for what could not be
+// looked at.
+func (a *App) readRegistry(pid int) (attached.Registry, error) {
 	if a.o.ClaudeDir == "" {
 		return attached.Registry{}, errors.New("the configuration directory of Claude Code is not known")
 	}
@@ -137,19 +137,104 @@ func (a *App) nativeSession(pid int) (attached.Registry, error) {
 	if reg.PID != pid {
 		return attached.Registry{}, fmt.Errorf("%w: the entry names another process", attached.ErrRegistryForm)
 	}
-	info, found, err := a.o.Table.Lookup(pid)
+	return reg, nil
+}
+
+// checkProcess checks that the process a registry entry names runs and is the one
+// that wrote the entry. The error wraps errNativeGone for a session that is not
+// running, and is any other for what could not be looked at.
+func (a *App) checkProcess(reg attached.Registry) error {
+	info, found, err := a.o.Table.Lookup(reg.PID)
 	if err != nil {
-		return attached.Registry{}, fmt.Errorf("look at the process: %w", err)
+		return fmt.Errorf("look at the process: %w", err)
 	}
 	switch {
 	case !found:
-		return attached.Registry{}, fmt.Errorf("%w: the process has ended", errNativeGone)
+		return fmt.Errorf("%w: the process has ended", errNativeGone)
 	case !reg.SameProcess(info.StartUnix, info.NativeStart):
 		a.log.Warn("the registry entry of a session names a process start that is not the running process's: its number was reused, or the registry's form changed",
 			"registry_start", reg.ProcStart, "process_start", info.NativeStart, "process_start_unix", info.StartUnix)
-		return attached.Registry{}, fmt.Errorf("%w: the process is not the one the entry was written by", errNativeGone)
+		return fmt.Errorf("%w: the process is not the one the entry was written by", errNativeGone)
+	}
+	return nil
+}
+
+// nativeSession reads the registry entry of a process and checks that the
+// process runs. The error wraps errNativeGone for a session that is not there,
+// attached.ErrRegistryForm for an entry in a form that is not read, and is any
+// other for what could not be looked at.
+func (a *App) nativeSession(pid int) (attached.Registry, error) {
+	reg, err := a.readRegistry(pid)
+	if err != nil {
+		return attached.Registry{}, err
+	}
+	if err := a.checkProcess(reg); err != nil {
+		return attached.Registry{}, err
 	}
 	return reg, nil
+}
+
+// errNoProcess says no process could be named for a session: the wake carries
+// none and the registry does not show one.
+var errNoProcess = errors.New("the registry does not name one process for the session")
+
+// processOf names the Claude Code process of an attached session. The wake's
+// process comes first, then known, the process the adapter already holds for the
+// session. A wake without a process (the environment of Claude Code's MCP servers
+// has none) is completed from the registry: the live process whose entry holds
+// the session's id. The error wraps errNoProcess when the registry shows none or
+// more than one, and is any other for what could not be looked at.
+func (a *App) processOf(wake attached.Wake, known int, ref adapterproto.NativeRef) (int, error) {
+	switch {
+	case wake.PID != 0:
+		return wake.PID, nil
+	case known != 0:
+		return known, nil
+	}
+	if a.o.ClaudeDir == "" {
+		return 0, errors.New("the configuration directory of Claude Code is not known")
+	}
+	names, err := a.o.Files.ListDir(attached.RegistryDir(a.o.ClaudeDir))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return 0, fmt.Errorf("list the registry: %w", err)
+	}
+	var found []int
+	unread := 0
+	for _, name := range names {
+		pid, ok := attached.RegistryPID(name)
+		if !ok {
+			continue
+		}
+		reg, err := a.readRegistry(pid)
+		switch {
+		case errors.Is(err, errNativeGone):
+			continue
+		case errors.Is(err, attached.ErrRegistryForm):
+			unread++
+			continue
+		case err != nil:
+			return 0, err
+		case reg.SessionID != string(ref):
+			continue
+		}
+		switch err := a.checkProcess(reg); {
+		case errors.Is(err, errNativeGone):
+		case err != nil:
+			return 0, err
+		default:
+			found = append(found, pid)
+		}
+	}
+	switch {
+	case len(found) == 1:
+		return found[0], nil
+	case len(found) > 1:
+		return 0, fmt.Errorf("%w: %d running processes hold the session id in their registry entries", errNoProcess, len(found))
+	}
+	if unread > 0 {
+		a.log.Warn("registry entries in a form the adapter does not read were passed over while looking for a session", "count", unread)
+	}
+	return 0, fmt.Errorf("%w: no running process holds the session id in its registry entry", errNoProcess)
 }
 
 // AttachSession takes a session a person runs: it checks that the session is
@@ -165,15 +250,20 @@ func (a *App) AttachSession(ctx context.Context, p adapterproto.SessionAttachPar
 		return attachFailed(adapterproto.AttachFailWakeUnavailable, err.Error()), nil
 	}
 	s := a.attachedSession(p.Endpoint)
-	pid := wake.PID
-	if pid == 0 && s != nil {
+	known := 0
+	if s != nil {
 		s.mu.Lock()
-		pid = s.pid
+		known = s.pid
 		s.mu.Unlock()
 	}
-	if pid == 0 {
+	pid, err := a.processOf(wake, known, p.NativeRef)
+	switch {
+	case errors.Is(err, errNoProcess):
 		return attachFailed(adapterproto.AttachFailWakeUnavailable,
-			"the wake names no process ("+attached.WakePID+"): the session registry cannot be found"), nil
+			"the wake names no process ("+attached.WakePID+"), and "+err.Error()), nil
+	case err != nil:
+		a.log.Warn("the registry cannot be searched for a session", "endpoint", p.Endpoint, "error", err)
+		return attachFailed(adapterproto.AttachFailNativeUnreachable, err.Error()), nil
 	}
 
 	reg, err := a.nativeSession(pid)
@@ -280,16 +370,17 @@ func (a *App) resumeAttached(at adapterproto.SessionAttach, state *adapterproto.
 		a.log.Warn("the wake of an attached session is not usable", "endpoint", at.Endpoint, "error", err)
 		wake = attached.Wake{}
 	}
-	pid := wake.PID
-	if pid == 0 && at.Checkpoint != nil {
+	known := 0
+	if at.Checkpoint != nil {
 		cp, err := decodeAttachedCheckpoint(at.Checkpoint)
 		if err != nil {
 			a.log.Warn("the checkpoint of an attached session is not usable", "endpoint", at.Endpoint, "error", err)
 		}
-		pid = cp.PID
+		known = cp.PID
 	}
-	if pid == 0 {
-		a.log.Warn("an attached session cannot be found again: it has neither a wake nor a checkpoint to name its process", "endpoint", at.Endpoint)
+	pid, err := a.processOf(wake, known, at.NativeRef)
+	if err != nil {
+		a.log.Warn("an attached session cannot be found again: neither its wake, its checkpoint nor the registry name its process", "endpoint", at.Endpoint, "error", err)
 		return
 	}
 	reg, err := a.nativeSession(pid)

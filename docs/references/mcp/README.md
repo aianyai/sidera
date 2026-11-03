@@ -94,7 +94,9 @@ that call's tool error (the words are in [the command line](../command-line/READ
 
 - Claude Code: the session id is `CLAUDE_CODE_SESSION_ID` of the server's environment,
   and the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
-  `CLAUDE_PID` are copied from it when present. After `/clear` the variable is stale;
+  `CLAUDE_PID` are copied from it when present. Claude Code gives its MCP servers the first
+  two and not `CLAUDE_PID`; the adapter then finds the session's process in its registry by the
+  session id ([the adapter](../adapter-claude/README.md#attached-sessions)). After `/clear` the variable is stale;
   the endpoint keeps the id it was attached with. At start-up, in the background and
   without holding up the protocol, the server calls `sessions.attach` once with `create`
   false and the same params: a session resumed after its controller was away has an open

@@ -33,7 +33,9 @@ const (
 
 // claudeWakeKeys are the variables of a Claude Code session that say how to reach
 // its inbox: the socket, its token and the process whose registration names the
-// session now. They are copied to the node as they are and are secrets.
+// session now. They are copied to the node as they are, when present, and are
+// secrets. The process is absent from the environment of Claude Code's MCP
+// servers; the adapter then finds it by the session id.
 var claudeWakeKeys = []string{"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID"}
 
 const maxDisplayName = 128
