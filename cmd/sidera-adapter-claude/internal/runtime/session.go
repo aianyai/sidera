@@ -30,6 +30,10 @@ type session struct {
 	// the daemon sends it again with every request that needs it.
 	toolEnv map[string]string
 
+	// interruptMu serves the interrupts of the session one at a time. It is taken
+	// before mu, and held across the wait for the turn to end.
+	interruptMu sync.Mutex
+
 	// mu guards everything below and orders the notifications of the session.
 	mu sync.Mutex
 	// turn is the last turn, nil before the first.

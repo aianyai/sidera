@@ -108,10 +108,10 @@ after spawning.
 
 The adapter is served by `sdk/go/adapterkit`, which answers `initialize` (taking the instance
 lock first), ping and shutdown and gates everything else. It declares one runtime with the
-front ends `cli` and `mcp` and with `attach` (see [Attached sessions](#attached-sessions)), and
-neither `interrupt`, `ack_on_behalf` nor `server_requests`: a `claude -p` process sends the
-adapter no request that needs an answer, and interrupting and acknowledging on the agent's
-behalf are not built yet. The identity answered in `initialize` is
+front ends `cli` and `mcp`, with `interrupt` (see [Interrupting a turn](#interrupting-a-turn))
+and with `attach` (see [Attached sessions](#attached-sessions)), and neither `ack_on_behalf` nor
+`server_requests`: a `claude -p` process sends the adapter no request that needs an answer, and
+acknowledging on the agent's behalf is not built yet. The identity answered in `initialize` is
 read from the manifest built into the executable.
 
 - **`adapter.start`** carries the instance configuration, the presets and the sessions to take
@@ -221,6 +221,38 @@ a reconciliation proves that nothing was started.
 session held under another open endpoint is left alone and answered `closed`. A process table that
 cannot be read is `close_unconfirmed` with `native_unreachable`. The session file stays as history;
 the daemon removes the checkpoint.
+
+### Interrupting a turn
+
+`session.interrupt` of a session the adapter holds stops the turn that runs, the way Ctrl-C does:
+SIGINT to the turn process on Unix, a `CTRL_C_EVENT` sent by a helper on Windows (the same
+interrupt as the close's; SIGTERM, `CTRL_BREAK_EVENT` and `TerminateProcess` leave half a turn and
+are never used). Claude Code ends the turn it was running: the process exits within about two
+seconds with exit code 0, its output ends with a `result` of subtype `error_during_execution`
+(`terminal_reason` `aborted_tools` or `aborted_streaming`), the session file ends with
+"[Request interrupted by user for tool use]" and no `turn_duration`, and the processes of the Bash
+tool end with it. So the process's end is the confirmation that the turn stopped, and the final
+`interrupted` is reported for it whatever the output says, as for a close.
+
+The adapter looks at the session's recorded turn process (its PID and start key; a look that fails
+is an error and never "not running"), marks the turn as interrupted in the checkpoint before it
+signals (so that the process's end, however soon, is reported as `interrupted`), signals, and waits
+up to `InterruptWait` (10 seconds) for the process to end. The answers:
+
+| Situation | Answer |
+| --------- | ------ |
+| The process ended within the wait | `turn.ended` (`interrupted`) is reported, then `stopped` |
+| The process runs after the wait | `requested`; `turn.ended` is reported when the process ends, and the daemon turns the answer into `stopped` then |
+| The session has no turn, the turn is over, or its process is gone | `not_running` |
+| The process cannot be looked at | `refused`, `native_unreachable` |
+| The signal cannot be sent | `refused`, `native_error`; the turn is no longer marked interrupted |
+| The endpoint is unknown (also while the session is still being created, as for a close) | error `1001` |
+| The endpoint is an attached session | error `1002` |
+
+A repeated request for a turn already interrupted does not signal again; it waits for the end like
+the first one. The interrupts of one session are served one at a time. The process is never killed:
+a turn that ignores the interrupt stays `requested`. A turn that was running when the adapter
+restarted is the recorded turn all the same.
 
 ### Attached sessions
 
@@ -368,8 +400,7 @@ on the session's behalf.
 ### What is not built yet
 
 Claude's operating-system sandbox, which would make the denial of the data directory hold against
-Bash (see the turn process), `session.interrupt` of a created session (Ctrl-C of the turn process, SIGINT on Unix and CTRL_C_EVENT on Windows, with the process's end as the confirmation;
-the runtime's messaging socket is another way worth testing), `recv.observed` (it needs the
+Bash (see the turn process), `recv.observed` (it needs the
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
 accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed),
@@ -741,13 +772,15 @@ at another path.
   (`TestPackageIsWrittenOnlyForAListedPlatform`).
 - `.../internal/runtime`: the adapter. `app.go` (construction, initialize), `config.go` (instance
   configuration, preset resolution), `create.go` (the creation loop), `deliver.go` (delivery and
-  reconciliation), `close.go`, `start.go`, `probe.go` and `probe_mcp.go`, `attached.go` (attached sessions), `availability.go` (the conditions
+  reconciliation), `close.go` and `interrupt.go` (the signal and the wait they share are in `close.go`), `start.go`, `probe.go` and `probe_mcp.go`, `attached.go` (attached sessions), `availability.go` (the conditions
   sent), `session.go` (turn launch,
   the turn monitor, notifications), `checkpoint.go` (the checkpoints), `world.go` (the interfaces to the
   outside) and `osworld.go` (their implementations). Tests run against an in-memory world
   (`fake_test.go`): `create_test.go` (`TestCreateAStartedSessionAndReportItsTurn`,
   `TestCreateAfterACrashBetweenStartingAndRecording`), `session_test.go` (delivery, closing,
-  reconciliation, `TestStartTakesSessionsBack`, `TestProbe`), `attached_test.go` (attached sessions:
+  reconciliation, `TestStartTakesSessionsBack`, `TestProbe`), `interrupt_test.go` (`TestInterrupt`,
+  `TestRepeatedInterruptDoesNotSignalAgain`, `TestConcurrentInterruptsAreServedOneAtATime`,
+  `TestInterruptThatCannotSignalLeavesTheTurnAsItWas`), `attached_test.go` (attached sessions:
   `TestAttachOutcomes`, `TestADeliveredPromptIsWrittenAndFollowedToTheEndOfItsTurn`,
   `TestATurnThePersonStartsIsReportedWithoutAnAttempt`, `TestClearIsFollowed`,
   `TestAGoneSessionRefusesPromptsAndIsReportedUnavailable`, `TestAnAttachedEndpointIsNotClosedOrInterrupted`,
@@ -755,5 +788,7 @@ at another path.
   `TestAStatusReadBeforeTheTranscriptOpensNoTurn`, `TestBackToBackTurnsWhileTheSessionStaysBusy`,
   `TestTheEndOfATurnWrittenJustBeforeAClearIsNotLost`, `TestAReachableSessionIsNotReportedUnavailableAnyLonger`,
   `TestADroppedEndpointGetsNoConditionBack`, `TestPromptsNeverSeenAreForgottenWithTheMemoryOfThem`). `real_test.go`
-  (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) probes the installed Claude Code and finds, then
-  interrupts, a real turn process given no input, so it costs no model turn.
+  (`-tags realclaude`, `SIDERA_REALCLAUDE=1`) probes the installed Claude Code, finds and
+  interrupts a real turn process given no input, and has `session.interrupt` stop one, so it
+  costs no model turn. How a real turn that runs a model ends under the interrupt was measured by
+  hand on each platform and is not tested, as it would cost turns.

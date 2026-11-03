@@ -270,15 +270,6 @@ func (a *App) retireLocked(s *attachedSession) {
 	s.wake = attached.Wake{}
 }
 
-// Interrupt is not declared for any session; for an attached one it is a wrong
-// endpoint kind, since only the person interrupts their session.
-func (a *App) Interrupt(ctx context.Context, p adapterproto.InterruptParams) (adapterproto.InterruptResult, error) {
-	if a.attachedSession(p.Endpoint) != nil {
-		return adapterproto.InterruptResult{}, wrongEndpointKind()
-	}
-	return a.Base.Interrupt(ctx, p)
-}
-
 // resumeAttached takes an attached session back at adapter.start and fills
 // state. The wake may be missing, as the daemon holds it in memory only; the
 // session is then followed all the same and gets its wake from the next

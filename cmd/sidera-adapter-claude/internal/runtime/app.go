@@ -58,16 +58,19 @@ type Options struct {
 	PollInterval time.Duration
 	// CloseWait is how long a close waits for an interrupted turn to end.
 	CloseWait time.Duration
+	// InterruptWait is how long an interrupt waits for the turn it stopped to end
+	// before it answers that the stop was requested.
+	InterruptWait time.Duration
 
 	Logger *slog.Logger
 }
 
-// DefaultPollInterval and DefaultCloseWait are the provisional values: a prompt
-// reaches the record within a couple of seconds of the start, and an interrupt
-// ends a turn within seconds.
+// The defaults are provisional values: a prompt reaches the record within a
+// couple of seconds of the start, and an interrupt ends a turn within seconds.
 const (
-	DefaultPollInterval = 200 * time.Millisecond
-	DefaultCloseWait    = 10 * time.Second
+	DefaultPollInterval  = 200 * time.Millisecond
+	DefaultCloseWait     = 10 * time.Second
+	DefaultInterruptWait = 10 * time.Second
 )
 
 // App is the Claude adapter: an adapterkit.Application for a runtime.
@@ -138,6 +141,9 @@ func New(o Options) *App {
 	}
 	if o.CloseWait <= 0 {
 		o.CloseWait = DefaultCloseWait
+	}
+	if o.InterruptWait <= 0 {
+		o.InterruptWait = DefaultInterruptWait
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)

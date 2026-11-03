@@ -60,7 +60,7 @@ func (a *App) CloseSession(ctx context.Context, p adapterproto.CloseParams) (ada
 	}
 	s.mu.Unlock()
 
-	gone, err := a.interruptAndWait(ctx, writers)
+	gone, err := a.interruptAndWait(ctx, writers, a.o.CloseWait)
 	if err != nil {
 		a.log.Warn("a session cannot be interrupted", "endpoint", s.endpoint, "error", err)
 		return unreachable, nil
@@ -91,7 +91,7 @@ func (a *App) closeByReference(ctx context.Context, ref string) (adapterproto.Cl
 		a.log.Warn("the processes of a session cannot be looked at", "error", err)
 		return unreachable, nil
 	}
-	gone, err := a.interruptAndWait(ctx, writers)
+	gone, err := a.interruptAndWait(ctx, writers, a.o.CloseWait)
 	switch {
 	case err != nil:
 		a.log.Warn("a session cannot be interrupted", "error", err)
@@ -127,22 +127,35 @@ func (a *App) writers(session string, t *turn.State) ([]turn.Process, error) {
 }
 
 // interruptAndWait interrupts each process that is still the process it was, and
-// waits up to CloseWait for all of them to end. It reports whether they all did.
-func (a *App) interruptAndWait(ctx context.Context, procs []turn.Process) (bool, error) {
+// waits up to wait for all of them to end. It reports whether they all did.
+func (a *App) interruptAndWait(ctx context.Context, procs []turn.Process, wait time.Duration) (bool, error) {
 	for _, p := range procs {
 		alive, err := a.alive(p)
 		if err != nil {
 			return false, err
 		}
 		if alive {
-			// A process that ended since the look is what the wait below is for.
-			err := a.o.Signaller.Interrupt(ctx, proc.Identity{PID: p.PID, StartKey: p.StartKey})
-			if err != nil && !errors.Is(err, proc.ErrNotRunning) {
+			if err := a.signal(ctx, p); err != nil {
 				return false, err
 			}
 		}
 	}
-	deadline := time.Now().Add(a.o.CloseWait)
+	return a.waitEnded(ctx, procs, wait)
+}
+
+// signal interrupts a turn process the way Ctrl-C does. A process that ended
+// since it was looked at is what waitEnded is for.
+func (a *App) signal(ctx context.Context, p turn.Process) error {
+	err := a.o.Signaller.Interrupt(ctx, proc.Identity{PID: p.PID, StartKey: p.StartKey})
+	if err != nil && !errors.Is(err, proc.ErrNotRunning) {
+		return err
+	}
+	return nil
+}
+
+// waitEnded waits up to wait for the processes to end, and reports whether they all did.
+func (a *App) waitEnded(ctx context.Context, procs []turn.Process, wait time.Duration) (bool, error) {
+	deadline := time.Now().Add(wait)
 	for {
 		running := false
 		for _, p := range procs {

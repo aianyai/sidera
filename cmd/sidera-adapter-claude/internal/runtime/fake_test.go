@@ -55,7 +55,9 @@ type world struct {
 	afterOpen func(w *world, path string)
 	// onInterrupt runs when a process is interrupted.
 	onInterrupt func(w *world, p *fakeProc)
-	loggedIn    bool
+	// interruptErr is what Interrupt answers; the signal is counted all the same.
+	interruptErr error
+	loggedIn     bool
 
 	// inbox: what was written to inbox sockets, and what the next write does.
 	inbox     []inboxWrite
@@ -302,8 +304,11 @@ func (w *world) Interrupt(_ context.Context, id proc.Identity) error {
 	pid := id.PID
 	w.mu.Lock()
 	w.signals = append(w.signals, pid)
-	p, hook := w.procs[pid], w.onInterrupt
+	p, hook, err := w.procs[pid], w.onInterrupt, w.interruptErr
 	w.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	if hook != nil && p != nil {
 		go hook(w, p)
 	}

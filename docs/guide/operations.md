@@ -541,8 +541,11 @@ node is not told.
   waiting on it.
 - A Claude Code controller is woken through its session's inbox. A Codex controller is woken within about 10 seconds, and
   not after you press Esc until your next turn completes.
-- Neither adapter can interrupt a running turn. Closing a Codex session that is in the
-  middle of a turn is not confirmed until the turn ends.
+- Both adapters stop a running turn on `sidera control <session-address>
+  session.interrupt`. The answer is `stopped` once the turn has ended, `requested`
+  when it is still running after about 10 seconds (its end is still reported), and
+  `not_running` when no turn runs. What the turn already did stays done. Closing a
+  Codex session that is in the middle of a turn is not confirmed until the turn ends.
 - A `send` from an agent session takes one recipient. The console's `send` takes a
   comma-separated list.
 - A Codex session whose sandbox is `read-only` or `workspace-write` uses the MCP

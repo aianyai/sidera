@@ -13,6 +13,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
 	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -74,10 +75,11 @@ func TestRealClaudeProbe(t *testing.T) {
 	}
 }
 
-// The process table finds a turn process of the real Claude by what the adapter
-// started it with, and the interrupt ends it.
-func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
-	app := realApp(t)
+// startIdleTurn starts a turn process of the real Claude that is given no input,
+// so that no prompt is sent and no model runs, and returns its session uuid. The
+// process is interrupted when the test ends, if it still runs.
+func startIdleTurn(t *testing.T, app *App) (session string, started proc.Started, dir string) {
+	t.Helper()
 	claude, _, mcpConfig := app.executables()
 	if claude == "" {
 		t.Skip("no claude")
@@ -88,20 +90,18 @@ func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The working directory is a real path, as the adapter gives a turn process.
-	dir, err := app.o.Files.RealDir(t.TempDir())
+	dir, err = app.o.Files.RealDir(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Nothing is ever written to the input, which the process waits on: no prompt
-	// is given, so no model runs.
+	// Nothing is ever written to the input, which the process waits on.
 	input := holdInput(t, dir)
 
 	argv, err := claudeargs.Turn{Claude: claude, SessionID: session, MCPConfig: mcpConfig, DataDir: dir, Preset: claudeargs.Preset{PermissionMode: "dontAsk", Model: "haiku"}}.Argv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	table := proc.NewTable()
-	started, err := proc.NewLauncher().Start(proc.Launch{
+	started, err = proc.NewLauncher().Start(proc.Launch{
 		Argv: argv, Env: claudeargs.Environ(os.Environ(), nil, ""), Dir: dir,
 		Stdin: input, Stdout: filepath.Join(dir, "out"), Stderr: filepath.Join(dir, "err"),
 	})
@@ -114,7 +114,15 @@ func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
 		defer cancel()
 		_ = proc.NewSignaller().Interrupt(ctx, started.Identity)
 	})
-	list, err := table.List()
+	return session, started, dir
+}
+
+// The process table finds a turn process of the real Claude by what the adapter
+// started it with, and the interrupt ends it.
+func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
+	app := realApp(t)
+	session, started, dir := startIdleTurn(t, app)
+	list, err := proc.NewTable().List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +141,27 @@ func TestRealClaudeTurnProcessIsFoundAndInterrupted(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("the turn process did not end after the interrupt")
 	}
-	if running, err := table.Running(started.Identity); err != nil || running {
+	if running, err := proc.NewTable().Running(started.Identity); err != nil || running {
+		t.Fatalf("Running after the interrupt = %v, %v", running, err)
+	}
+}
+
+// session.interrupt of a session whose turn process is the real Claude ends the
+// process and answers stopped, and a second ask finds no turn.
+func TestRealClaudeInterruptStopsTheTurnProcess(t *testing.T) {
+	app := realApp(t)
+	sessionID, started, _ := startIdleTurn(t, app)
+	const endpoint = adapterproto.EndpointRef("session-1")
+	app.sessions[endpoint] = &session{endpoint: endpoint, id: sessionID, turn: &turn.State{Process: startedProcess(started)}}
+	for _, want := range []adapterproto.InterruptStage{adapterproto.InterruptStopped, adapterproto.InterruptNotRunning} {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		res, err := app.Interrupt(ctx, adapterproto.InterruptParams{Endpoint: endpoint})
+		cancel()
+		if err != nil || res.Stage != want {
+			t.Fatalf("interrupt: %+v %v, want %s", res, err, want)
+		}
+	}
+	if running, err := proc.NewTable().Running(started.Identity); err != nil || running {
 		t.Fatalf("Running after the interrupt = %v, %v", running, err)
 	}
 }

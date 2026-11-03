@@ -85,9 +85,10 @@ func config(app adapterkit.Application, logger *slog.Logger) (adapterkit.Config,
 	return adapterkit.Config{
 		Adapter: adapterproto.AdapterInfo{ID: m.ID, Version: m.Version},
 		Capabilities: adapterproto.Capabilities{Runtime: &adapterproto.RuntimeCapabilities{
-			// Interrupt and acknowledging on the agent's behalf wait for their own work, and
-			// `claude -p` sends the adapter no requests that need an answer.
-			Interrupt: false, AckOnBehalf: false, ServerRequests: false,
+			// A turn is interrupted like Ctrl-C does it. Acknowledging on the agent's
+			// behalf waits for its own work, and `claude -p` sends the adapter no
+			// requests that need an answer.
+			Interrupt: true, AckOnBehalf: false, ServerRequests: false,
 			Frontends: []adapterproto.Frontend{adapterproto.FrontendCLI, adapterproto.FrontendMCP},
 			// A session a person opened can be attached: woken through its inbox socket and
 			// followed through its registry entry and its transcript.
