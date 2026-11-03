@@ -1330,7 +1330,13 @@ platform, with nothing sent, until it is set. A helper reply without `ok` is an
 error too. The event reaches every process attached to the console, which is why an
 interruptible process has a console of its own. `Interrupt` works for any process
 that has a console to attach to; a process started without one (the default) has
-none and the helper fails.
+none and the helper fails. A process gets its console while it starts, not when
+`CreateProcess` returns, and until then `AttachConsole` fails with
+`ERROR_INVALID_HANDLE` exactly as for a process that has none: so the helper tries
+again every 20 ms for as long as the target is younger than 5 s (by the start in
+the identity) and fails at once for an older one, and an `Interrupt` right after
+`Start` is delivered once the console is there. For a process that never had a
+console the failure therefore comes up to 5 s after its start.
 
 ### Why
 

@@ -31,3 +31,19 @@ func TestInterruptOfAProcessStartedWithoutAConsoleFails(t *testing.T) {
 		t.Fatal("the process ended")
 	}
 }
+
+// A process gets its console while it starts, so an Interrupt right after Start
+// reaches a process that has none yet. The request is delivered once the console
+// is there, not refused as it would be for a process that has none. What the
+// child does with an event that reaches it before it has finished starting is its
+// own: a Go program on windows/arm64 can be left deaf to it, so only the delivery
+// is checked here, and the end of a process that is up is checked by
+// TestInterruptStopsTheProcess.
+func TestInterruptRightAfterStartIsDelivered(t *testing.T) {
+	c := startChild(t, "hold", func(s *process.Spec) { s.Interruptible = true })
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	if err := process.Interrupt(ctx, c.Identity); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+}

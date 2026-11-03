@@ -1,6 +1,7 @@
 package process
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -24,6 +25,17 @@ const helperOK = "ok"
 // sequence that was measured to work keeps the console for this long, and a
 // console detached at once could take the event with it.
 const ctrlCSettle = 300 * time.Millisecond
+
+// consoleGrace is how long after its start a process may still be without the
+// console it was created with. A process gets its console while it starts, not at
+// the moment CreateProcess returns, and until then attaching to it fails with
+// ERROR_INVALID_HANDLE exactly as it does for a process that has none. The start of
+// a program takes milliseconds on an idle machine and seconds on a loaded one that
+// scans the file first.
+const consoleGrace = 5 * time.Second
+
+// consolePoll is how often the helper tries again within consoleGrace.
+const consolePoll = 20 * time.Millisecond
 
 // runHelper sends CTRL_C_EVENT to the console of the process named by args
 // ("interrupt", pid, start key). It has no console of its own, as Interrupt starts
@@ -67,7 +79,10 @@ func runHelper(args []string, stdout, stderr io.Writer) int {
 	if p.StartKey != args[2] {
 		return helperNotRunning
 	}
-	if err := sendCtrlC(uint32(pid)); err != nil {
+	if err := sendCtrlC(h, p); err != nil {
+		if errors.Is(err, errEnded) {
+			return helperNotRunning
+		}
 		fmt.Fprintln(stderr, err)
 		return helperFailed
 	}
@@ -75,10 +90,29 @@ func runHelper(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func sendCtrlC(pid uint32) error {
+// errEnded is sendCtrlC's answer for a process that ended while it waited for
+// the console.
+var errEnded = errors.New("the process ended")
+
+// sendCtrlC attaches to the console of the process behind the open handle h and
+// sends the event. A process younger than consoleGrace that cannot be attached to
+// is given until then to get its console; an older one has none.
+func sendCtrlC(h windows.Handle, p Process) error {
 	_ = freeConsole() // there is none unless the helper was not started detached
-	if err := attachConsole(pid); err != nil {
-		return err
+	for {
+		err := attachConsole(uint32(p.PID))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, windows.ERROR_INVALID_HANDLE) || time.Since(p.StartTime) > consoleGrace {
+			return err
+		}
+		if alive, runErr := running(h); runErr != nil {
+			return runErr
+		} else if !alive {
+			return errEnded
+		}
+		time.Sleep(consolePoll)
 	}
 	defer freeConsole()
 	if err := setConsoleCtrlHandler(true); err != nil {

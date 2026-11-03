@@ -12,7 +12,8 @@ var errMissingHelperCall = errors.New("process: Interrupt needs the adapter's ma
 // HandleHelperInvocation) sends CTRL_C_EVENT to the console it attaches to, which
 // every process attached to that console receives. That works for any process that
 // has a console, and a process started with Spec.Interruptible has one of its own;
-// for a process without a console the helper fails. It returns once the request is
+// for a process without a console the helper fails, once the process is old enough
+// that it would have its console by now. It returns once the request is
 // delivered, not when the process stops: watch Done or Running for that.
 // ErrNotRunning when id names no running process. It fails on every platform, with
 // no effect, when the adapter's main has not called HandleHelperInvocation. Sending

@@ -61,7 +61,9 @@ process is detached on each platform are specified in
   stops.** Wait for `Done` or poll `Running`. Sending twice is harmless. On Windows
   it works for any process that has a console, which `Spec.Interruptible` gives a
   started process; Ctrl-C reaches every process attached to that console, and for a
-  process without a console the helper fails.
+  process without a console the helper fails. A process is given a few seconds
+  after its start to get the console it was created with, so an `Interrupt` right
+  after `Start` is delivered; a process without one fails only that much later.
 
 ## Files
 
