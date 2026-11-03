@@ -2,9 +2,11 @@
 
 The Go module that adapters and the daemon share: the JSON-RPC peer that frames
 the adapter protocol, its message types and the adapter package manifest. It is
-a separate module, `github.com/aianyai/sidera/sdk/go`, and depends on the
-standard library only, so a third-party adapter can import it without pulling in
-the daemon's dependency graph.
+a separate module, `github.com/aianyai/sidera/sdk/go`. The packages the daemon
+imports use the standard library only, and the packages for adapters that need
+the operating system (`adapterkit/realpath`) use `golang.org/x/sys` as well, so a
+third-party adapter can import the module without pulling in the daemon's
+dependency graph.
 
 | Package | Holds |
 | ------- | ----- |
@@ -12,6 +14,7 @@ the daemon's dependency graph.
 | [`adapterproto`](adapterproto/README.md) | Protocol version and negotiation, method names, the parameter and result type of every method, enums, the application error codes, capabilities |
 | [`adapterkit`](adapterkit/README.md) | The serve loop every adapter shares: version negotiation, the instance lock before the answer to `initialize`, the gating before `initialize` and after `shutdown`, strict decoding and validated results, typed calls to the daemon; the adapter implements an `Application` for the rest |
 | [`adapterkit/environ`](adapterkit/environ/README.md) | Composes the environment of a child process of an adapter: the pairs a child cannot read left out, what the adapter drops, what it sets, a directory put in front of `PATH`, with names compared as the platform does |
+| [`adapterkit/realpath`](adapterkit/realpath/README.md) | The path the platform itself reports for an existing path: symbolic links and junctions followed, names in their on-disk case and long form on Windows |
 | [`manifest`](manifest/README.md) | The adapter package manifest: types, strict parsing and structural validation |
 | [`strictjson`](strictjson/README.md) | The strict JSON decoder the packages above share: exact key names, no repeated key, no `null`, required fields; public so that any other reader of the same kinds of documents applies the same rules |
 

@@ -9,11 +9,12 @@ requests and notifications. "D to A" below means the daemon calls the adapter an
 "A to D" the other way.
 
 The SDK lives in its own Go module, `github.com/aianyai/sidera/sdk/go`, which
-depends on the standard library only and is imported by the daemon and by
-third-party adapters alike. The frames are handled by `sdk/go/peer`; the
-messages, enums, application error codes and manifest are defined in the packages
-`adapterproto` and `manifest` and, for other languages, by the JSON Schema under
-`protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
+is imported by the daemon and by third-party adapters alike. The packages the
+daemon imports use the standard library only; the subpackages of `adapterkit` for
+adapters that need the operating system may use `golang.org/x/sys`. The frames
+are handled by `sdk/go/peer`; the messages, enums, application error codes and
+manifest are defined in the packages `adapterproto` and `manifest` and, for other
+languages, by the JSON Schema under `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
 supervises adapters and carries this protocol between them and the engine is in
 [adapter-host](../adapter-host/README.md).
 This document has one part per layer: the peer layer, then the messages and
