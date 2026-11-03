@@ -50,6 +50,7 @@ var ErrTooLarge = errors.New("larger than the limit")
 // isReleaseVersion reports whether s is a release version: a semantic version
 // without the leading v and without build metadata, which a release tag never
 // carries. It is also the only text that reaches a URL path from a response.
+// scripts/lib/release-format.sh makes the release scripts accept exactly these.
 func isReleaseVersion(s string) bool {
 	if strings.Contains(s, "+") {
 		return false

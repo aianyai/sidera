@@ -3,9 +3,11 @@
 #
 #   scripts/release.sh <version> <outdir>
 #
-# <version> is the release version without a leading "v" (0.8.0). <outdir> receives
-# one archive per platform, sidera_<version>_<os>_<arch>.tar.gz (.zip for Windows),
-# and checksums.txt, the SHA-256 of every archive. Nothing else is left in it.
+# <version> is the release version without a leading "v" (0.8.0, 0.8.0-rc.1), the
+# SemVer 2.0.0 syntax without build metadata that lib/release-format.sh defines and
+# `sidera update` reads. <outdir>
+# receives one archive per platform, sidera_<version>_<os>_<arch>.tar.gz (.zip for
+# Windows), and checksums.txt, the SHA-256 of every archive. Nothing else is left in it.
 #
 # Before anything is built it checks that both install guides quote the public key the
 # release is signed with, internal/release/minisign.pub.
@@ -30,13 +32,17 @@ if [ "$#" -ne 2 ]; then
 fi
 version=$1
 outdir=$2
-if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-  echo "version must look like 0.8.0, without a leading v: $version" >&2
-  exit 2
-fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
+# shellcheck source-path=SCRIPTDIR source=lib/release-format.sh
+. scripts/lib/release-format.sh
+
+# A version that `sidera update` would refuse could never be installed by anyone.
+if ! is_release_version "$version"; then
+  echo "version must be a release version without a leading v or build metadata, like 0.8.0 or 0.8.0-rc.1: $version" >&2
+  exit 2
+fi
 
 # The key the releases are signed with is the second line of the .pub file, and the
 # install guides quote it for whoever verifies a download by hand. A key that changed

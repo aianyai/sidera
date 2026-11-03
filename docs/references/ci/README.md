@@ -162,6 +162,17 @@ A release is made by pushing a tag `v<version>` (`v0.8.0`); nothing else starts
 it. The version is the tag without the `v`, and `CHANGELOG.md` must have a section
 for it, `## [0.8.0] - <date>`, because that section is the text of the release.
 
+The version must be a release version, which is what a node that updates itself accepts:
+SemVer 2.0.0 without build metadata (`0.8.0`, `0.8.0-rc.1`) as
+[`sdk/go/semver`](../../../sdk/go/semver) reads it, so no leading zero in a number or in a
+numeric pre-release identifier (`0.12.0-rc.01` is refused), no empty identifier
+(`0.12.0-rc..1`), at most nine digits in major, minor and patch and at most 64
+characters. A tag outside that grammar would build, be signed and be published, and then
+every node would refuse it, so both release scripts refuse it first.
+`scripts/lib/release-format.sh` is the one place the scripts say what a release version
+and a `checksums.txt` are (see "Signature"); `scripts/release.sh` and
+`scripts/release-sign.sh` source it.
+
 To cut a release:
 
 1. Move what the release holds from `## [Unreleased]` into a new `## [<version>]`
@@ -183,7 +194,7 @@ workflow artifacts:
 | Job | Permissions | Secrets | Does |
 | --- | ----------- | ------- | ---- |
 | `build` | `contents: read` | none | checks out the tag, installs Go as `ci.yml` does, takes the release notes from the changelog (a tag without a section fails here, before anything is built), runs `scripts/release.sh`; uploads the directory of archives (artifact `dist`) and the notes (artifact `notes`) |
-| `sign` | `contents: read`, `id-token: write`, `attestations: write` | `MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, from the environment `release` | checks out only `scripts/release-sign.sh`, `scripts/update-from` and `internal/release/minisign.pub` of the tag; downloads `dist` and runs `sha256sum --check` on it; installs minisign; signs `checksums.txt` with `scripts/release-sign.sh`; attests the archives and `checksums.txt`; uploads `checksums.txt.minisig` (artifact `signature`) |
+| `sign` | `contents: read`, `id-token: write`, `attestations: write` | `MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, from the environment `release` | checks out only `scripts/release-sign.sh`, `scripts/lib/release-format.sh`, `scripts/update-from` and `internal/release/minisign.pub` of the tag; downloads `dist` and runs `sha256sum --check` on it; installs minisign; signs `checksums.txt` with `scripts/release-sign.sh`; attests the archives and `checksums.txt`; uploads `checksums.txt.minisig` (artifact `signature`) |
 | `release` | `contents: write` | none | downloads the three artifacts into one directory, with no checkout, and creates the GitHub Release as a draft with `gh release create --draft` |
 
 A tag whose `build` job fails, because the changelog has no section for it or the
@@ -271,8 +282,8 @@ same way with an embedded key, and a person can check it by hand with `minisign`
 - **The floor** is the oldest version that may update itself to this release. It is
   the one version line of [`scripts/update-from`](../../../scripts/update-from)
   (`#` comment lines and blank lines allowed), read at release time. It is a release
-  version, `MAJOR.MINOR.PATCH` without leading zeros, a pre-release part or build
-  metadata, and the script validates it so. It is `0.8.0`
+  version without a pre-release part (`MAJOR.MINOR.PATCH`, no leading zeros, at most nine
+  digits each, no build metadata), and the script validates it so. It is `0.8.0`
   and stays there until a release needs a manual step that an in-place update cannot
   do, such as a change of the state on disk that has no migration. The commit that
   adds that step raises the floor to the first version whose install does not need
@@ -282,13 +293,21 @@ same way with an embedded key, and a person can check it by hand with `minisign`
   included, so an install of `0.8.0-rc.1` is below the floor `0.8.0`. The script
   refuses a floor above the version it signs by the same rule: `0.8.0` may carry the
   floor `0.8.0`, but `0.8.0-rc.1` may not, because a pre-release precedes its release.
-  It also refuses a `checksums.txt` with a line that is not an archive of the version,
-  as `scripts/release.sh` names them, which is what keeps a string that is not a version
-  out of the signed comment. The verifier in
+  It also refuses a `checksums.txt` the verifier would refuse: every line
+  `<64 lowercase hex digits>  <name>` (two spaces) ending in a newline alone, no blank,
+  comment or carriage-return line, no extra column, the name one of the archives
+  `scripts/release.sh` writes for exactly this version (`.zip` for Windows only), none
+  twice. A release need not list every platform. That keeps a string that is not a version
+  out of the signed comment, and means the script never signs a file the verifier refuses.
+- **One grammar, two implementations**: the verifier in
   [`cmd/sidera/internal/update/verify`](../../../cmd/sidera/internal/update/verify) reads the
-  comment and `checksums.txt` by the same grammar, which it restates rather than shares with
-  the scripts; its rules are described in that package's `README.md` until the `update`
-  reference topic lands.
+  comment and `checksums.txt` with `sdk/go/semver` and its own parser; the scripts cannot
+  call Go, so `scripts/lib/release-format.sh` (`is_release_version`, `is_release_floor`,
+  `check_checksums`) writes the same grammar in shell. The verifier's tests run those
+  functions over a table of versions and floors and over every `checksums.txt` fixture, and
+  require the answer the verifier gives (they skip where `bash` is not installed). A
+  change to either side that makes them differ fails there; the rules themselves are in that
+  package's `README.md` until the `update` reference topic lands.
 - **The public key** is committed once, as the two-line `.pub` file
   [`internal/release/minisign.pub`](../../../internal/release/minisign.pub) (key id
   `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it,
@@ -638,7 +657,8 @@ machine, and nothing has run the tests on that platform until CI does.
 
 - Workflow: `.github/workflows/ci.yml`.
 - Release: `.github/workflows/release.yml`, `scripts/release.sh`,
-  `scripts/release-sign.sh` (signs `checksums.txt`), `scripts/update-from` (the floor),
+  `scripts/release-sign.sh` (signs `checksums.txt`),
+  `scripts/lib/release-format.sh` (what a release version and a `checksums.txt` are), `scripts/update-from` (the floor),
   `internal/release/minisign.pub` (the public key),
   `scripts/release-notes.sh` (prints the changelog section of a version),
   `scripts/third-party-notices.sh` (writes `THIRD_PARTY_NOTICES`) and
@@ -691,7 +711,7 @@ done
 ```
 
 The workflow files are checked with `actionlint .github/workflows/*.yml`, and the
-scripts with `shellcheck scripts/*.sh`. `scripts/release-sign.sh` needs `minisign`.
+scripts with `shellcheck scripts/*.sh scripts/lib/*.sh`. `scripts/release-sign.sh` needs `minisign`.
 `scripts/release.sh` needs `go`, `git`,
 `tar`, `zip` and `sha256sum` (or `shasum`); the archives are written to the directory
 given, which must be empty, and the build reports "modified" after the commit when

@@ -3,10 +3,10 @@
 #
 #   scripts/release-sign.sh <version> <distdir>
 #
-# <version> is the release version without a leading "v" (0.8.0). <distdir> is the
-# output of scripts/release.sh; the script adds checksums.txt.minisig to it, the
-# prehashed minisign signature of checksums.txt. Its trusted comment, which the
-# signature covers, is
+# <version> is the release version without a leading "v" (0.8.0), as
+# lib/release-format.sh defines it. <distdir> is the output of scripts/release.sh; the
+# script adds checksums.txt.minisig to it, the prehashed minisign signature of
+# checksums.txt. Its trusted comment, which the signature covers, is
 #
 #   sidera <version> update-from <floor>
 #
@@ -14,8 +14,9 @@
 # version can therefore tell that the signature belongs to that version, and which
 # installs may update to it. The script refuses a floor above <version> by SemVer
 # precedence (a pre-release is below its release, so 0.8.0-rc.1 cannot have the
-# floor 0.8.0) and a checksums.txt that does not list exactly the archives of
-# <version> that scripts/release.sh writes.
+# floor 0.8.0) and a checksums.txt that the verifier of the program would refuse: one
+# that does not list only archives of <version> that scripts/release.sh writes, each
+# once, in the form it writes them.
 #
 # The secret key comes from the environment, never from the command line:
 #
@@ -38,33 +39,29 @@ version=$1
 dist=$2
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source-path=SCRIPTDIR source=lib/release-format.sh
+. "$root/scripts/lib/release-format.sh"
 public_key=${MINISIGN_PUBLIC_KEY_FILE:-$root/internal/release/minisign.pub}
 
 [ -f "$dist/checksums.txt" ] || { echo "$dist/checksums.txt does not exist; run scripts/release.sh first" >&2; exit 1; }
-# The version is the one scripts/release.sh built, and that script alone defines
-# what a version looks like: every line of checksums.txt must name an archive of
-# exactly this version, so a string that is not such a version fails here.
-while read -r sum name extra; do
-  if [[ -n $extra || ! $sum =~ ^[0-9a-f]{64}$ || $name != "sidera_${version}_"* \
-    || ! ${name#"sidera_${version}_"} =~ ^(darwin|linux|windows)_(arm64|amd64)\.(tar\.gz|zip)$ ]]; then
-    echo "$dist/checksums.txt has a line that is not an archive of version $version: $sum $name $extra" >&2
-    exit 1
-  fi
-done <"$dist/checksums.txt"
-[ -s "$dist/checksums.txt" ] || { echo "$dist/checksums.txt is empty" >&2; exit 1; }
-[[ $version =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-.*)?$ ]] || { echo "cannot read the version: $version" >&2; exit 1; }
-version_core=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
-version_pre=${BASH_REMATCH[4]}
+# The version is the one scripts/release.sh built, and that script and this one both
+# take what a version and a checksums.txt look like from lib/release-format.sh, which is
+# what the verifier of the program reads. Every line of checksums.txt must name an
+# archive of exactly this version, so a string that is not such a version fails here.
+is_release_version "$version" || { echo "not a release version: $version" >&2; exit 1; }
+check_checksums "$dist/checksums.txt" "$version" || exit 1
+core=${version%%-*}
+version_pre=${version#"$core"}
+IFS=. read -r -a version_core <<<"$core"
 
 # The floor: the one line of scripts/update-from that is not a comment. It is a
-# release version, MAJOR.MINOR.PATCH without leading zeros, pre-release part or
-# build metadata.
+# release version without a pre-release part (see is_release_floor).
 floor=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$root/scripts/update-from" || true)
-if ! [[ $floor =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+if ! is_release_floor "$floor"; then
   echo "scripts/update-from must hold exactly one version MAJOR.MINOR.PATCH, found: \"$floor\"" >&2
   exit 1
 fi
-floor_core=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+IFS=. read -r -a floor_core <<<"$floor"
 # A floor above the release would forbid every install from updating to it. By
 # SemVer precedence a pre-release is below the release of the same numbers, so
 # 0.8.0-rc.1 is below the floor 0.8.0 too.

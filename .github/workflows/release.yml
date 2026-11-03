@@ -87,6 +87,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/release-sign.sh
+            scripts/lib/release-format.sh
             scripts/update-from
             internal/release/minisign.pub
           sparse-checkout-cone-mode: false

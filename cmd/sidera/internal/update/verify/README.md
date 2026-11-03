@@ -47,7 +47,9 @@ and an empty list trusts nothing.
 - **The trusted comment is exactly `sidera <version> update-from <floor>`.** Four fields
   separated by single spaces; the version is a release version without `v`, the floor a plain
   `MAJOR.MINOR.PATCH` (no pre-release, no leading zeros). The grammar is written by
-  `scripts/release-sign.sh`; the two cannot share code. The signed files of the real 0.11.0
+  `scripts/release-sign.sh`, which takes it from `scripts/lib/release-format.sh`; shell
+  cannot share this package's code, so `releasescripts_test.go` runs that file's functions
+  against this package and requires the same answers (see Tests). The signed files of the real 0.11.0
   release in `testdata/release-0.11.0` are a static snapshot: they show that this package
   reads what the pipeline produced at 0.11.0, and they do not change when the pipeline does,
   so a later change of either side is not caught by them.
@@ -68,7 +70,8 @@ and an empty list trusts nothing.
   blank line, comment, carriage return, extra column or path, and the name is
   `sidera_<version>_<os>_<arch>.<tar.gz|zip>` of exactly the verified version for a platform
   the releases are built for (`.zip` for Windows). A name may occur once. A line is never
-  skipped, so the rule applied to a line is the signer's. The release need not list every
+  skipped, so the rule applied to a line is the signer's (`check_checksums` in
+  `scripts/lib/release-format.sh`). The release need not list every
   platform; `Archive` reports a missing one as `ErrNoArchive`.
 - **The signature covers `checksums.txt`, not the archives.** An archive is believed only
   when `VerifyDigest` of its bytes equals the sum `Archive` returned. The digest is computed
@@ -87,3 +90,11 @@ lives only for the run). The table in `verify_test.go` names the part of the mes
 refusal must mention; the tampering of the signature itself is `internal/minisign`'s tests,
 and here one case shows that such a failure reaches the caller as `ErrNotTrusted`. The floor
 rule is tried in `admits_test.go` on Releases made inside the package.
+
+`releasescripts_test.go` is what keeps the release scripts and this package one grammar. It
+runs `is_release_version`, `is_release_floor` and `check_checksums` of
+`scripts/lib/release-format.sh` with `bash` over a table of versions (leading zeros, empty
+identifiers, nine-digit and 64-character limits, build metadata, non-ASCII), the floors of
+the comment fixtures and every `sums-*` fixture, and requires that the shell accepts
+exactly what `Verify` accepts. A new deviation the verifier refuses belongs in the table or
+in `generate.sh`. The test is skipped where `bash` is not installed.

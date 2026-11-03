@@ -158,6 +158,7 @@ func VerifyDigest(content io.Reader, want [sha256.Size]byte) error {
 // parseVersion accepts a release version in canonical form. Build metadata is
 // refused here because semver.Parse would drop it silently, and a version with a
 // suffix that is ignored is not the version that was signed.
+// scripts/lib/release-format.sh makes the release scripts accept exactly these.
 func parseVersion(text string) (semver.Version, error) {
 	if strings.Contains(text, "+") {
 		return semver.Version{}, fmt.Errorf("%w: %q has build metadata", ErrInvalidVersion, text)
