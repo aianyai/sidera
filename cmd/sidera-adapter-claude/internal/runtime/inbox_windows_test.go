@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,13 +35,20 @@ func newPipeServer(t *testing.T, token string) *pipeServer {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// One file owns the handle for the life of the server: a second os.NewFile on
+	// the same handle has a finalizer of its own that would close it, and the cleanup
+	// closes it once.
+	f := os.NewFile(uintptr(h), s.name)
+	var stopping atomic.Bool
 	go func() {
 		defer close(s.lines)
-		for {
-			if err := windows.ConnectNamedPipe(h, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		for !stopping.Load() {
+			// A client that connected, wrote and closed before the server got here is
+			// answered with ERROR_PIPE_CONNECTED or ERROR_NO_DATA; what it wrote is
+			// still in the pipe and is read below.
+			if err := windows.ConnectNamedPipe(h, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) && !errors.Is(err, windows.ERROR_NO_DATA) {
 				return
 			}
-			f := os.NewFile(uintptr(h), s.name)
 			sc := bufio.NewScanner(f)
 			first := true
 			for sc.Scan() {
@@ -53,7 +61,20 @@ func newPipeServer(t *testing.T, token string) *pipeServer {
 			_ = windows.DisconnectNamedPipe(h)
 		}
 	}()
-	t.Cleanup(func() { windows.CloseHandle(h) })
+	t.Cleanup(func() {
+		// The handle is synchronous: closing it waits for a connect or a read that is
+		// pending on it, so the pending call is cancelled until the loop has ended.
+		stopping.Store(true)
+		for ended := false; !ended; {
+			_ = windows.CancelIoEx(h, nil)
+			select {
+			case _, ok := <-s.lines:
+				ended = !ok
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		_ = f.Close()
+	})
 	return s
 }
 
