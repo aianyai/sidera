@@ -29,7 +29,7 @@ test, the crash walks of `internal/node/store` included.
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64 |
-| `release-dry-run` | Linux | `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
+| `release-dry-run` | Linux | `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, which also checks that both install guides quote the release public key, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
 
 Limits of every job, in minutes. `go test -timeout` is set a few minutes under
 the job's limit so that a hang ends with the goroutine dump of the test binary:
@@ -186,6 +186,10 @@ workflow artifacts:
 | `sign` | `contents: read`, `id-token: write`, `attestations: write` | `MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, from the environment `release` | checks out only `scripts/release-sign.sh`, `scripts/update-from` and `internal/release/minisign.pub` of the tag; downloads `dist` and runs `sha256sum --check` on it; installs minisign; signs `checksums.txt` with `scripts/release-sign.sh`; attests the archives and `checksums.txt`; uploads `checksums.txt.minisig` (artifact `signature`) |
 | `release` | `contents: write` | none | downloads the three artifacts into one directory, with no checkout, and creates the GitHub Release as a draft with `gh release create --draft` |
 
+A tag whose `build` job fails, because the changelog has no section for it or the
+install guides do not quote the public key, has created no release: the cause is fixed
+on `main`, and the tag is deleted and cut again on the corrected commit.
+
 The split is there because steps of one job share a runner: any of them can write
 `$GITHUB_ENV` or `$GITHUB_PATH` or change the checkout, which a later step runs, and
 job-level `id-token: write` lets every step of the job ask for an identity token. The
@@ -233,8 +237,12 @@ client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 | `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and `adapters/claude/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
-The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
-does not report the version it was given. The release holds one more file, which
+Before it builds anything the script checks that both install guides,
+`docs/guide/install.md` and `docs/agent-guide.md`, quote the second line of
+`internal/release/minisign.pub`, the key the release is signed with and the one copy of
+it (see "Signature"): a key that changed in one place only would make every manual
+verification fail. It refuses a non-empty `<outdir>`, and stops if the `sidera` it just
+built does not report the version it was given. The release holds one more file, which
 `scripts/release-sign.sh` adds to `<outdir>` (see "Signature"):
 
 | File | Holds |
@@ -280,7 +288,7 @@ same way with an embedded key, and a person can check it by hand with `minisign`
 - **The public key** is committed once, as the two-line `.pub` file
   [`internal/release/minisign.pub`](../../../internal/release/minisign.pub) (key id
   `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it,
-  the install guides quote its second line.
+  the install guides quote its second line, which `scripts/release.sh` checks.
   No code reads the file yet; the program
   that will verify updates is to embed it with `go:embed`, so that the key has one source.
 - **Secrets**: `MINISIGN_SECRET_KEY`, the whole content of the minisign
@@ -342,8 +350,11 @@ only says it is under either of two licences (`go-base36` says Apache-2.0 or MIT
 ships neither text) is listed as `Apache-2.0 OR MIT` with the file it ships.
 
 The `release-dry-run` job runs the script a tag runs, so that a change which breaks
-it, such as a program that no longer packages or a module whose licence the
-notices refuse, fails on the commit that makes it and not at the first release. Its
+it, such as a program that no longer packages, a module whose licence the
+notices refuse or an install guide that no longer quotes the public key, fails on the
+commit that makes it and not at the first release. An edit of a guide alone starts no
+run of the workflow, but the check is in the script, so the `build` job of every tag
+makes it before anything is built. Its
 version, `0.0.0-dryrun`, is a placeholder that no tag will carry: the script needs
 a well-formed version and nothing else, and reading the latest changelog section
 instead would tie the job to the changelog's layout and to which version was last

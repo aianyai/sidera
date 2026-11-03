@@ -7,6 +7,9 @@
 # one archive per platform, sidera_<version>_<os>_<arch>.tar.gz (.zip for Windows),
 # and checksums.txt, the SHA-256 of every archive. Nothing else is left in it.
 #
+# Before anything is built it checks that both install guides quote the public key the
+# release is signed with, internal/release/minisign.pub.
+#
 # An archive holds, at its top level, sidera, sidera-adapter-console (which is also
 # the owner's command-line client), LICENSE, THIRD_PARTY_NOTICES and README.txt. The adapters' programs
 # are only inside their packages, adapters/<name>/, ready for `sidera adapter
@@ -34,6 +37,22 @@ fi
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
+
+# The key the releases are signed with is the second line of the .pub file, and the
+# install guides quote it for whoever verifies a download by hand. A key that changed
+# in one place only would make every manual verification fail, so a release whose
+# guides disagree with the file stops before anything is built.
+key=$(sed -n 2p internal/release/minisign.pub)
+if [ -z "$key" ]; then
+  echo "internal/release/minisign.pub has no key on its second line" >&2
+  exit 1
+fi
+for guide in docs/guide/install.md docs/agent-guide.md; do
+  if ! grep -qF -- "$key" "$guide"; then
+    echo "$guide does not quote the key of internal/release/minisign.pub" >&2
+    exit 1
+  fi
+done
 
 mkdir -p "$outdir"
 outdir=$(cd "$outdir" && pwd)
