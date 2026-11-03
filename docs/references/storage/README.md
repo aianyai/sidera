@@ -397,6 +397,13 @@ Specifically, for Windows:
   Go's own read retry also leaves out: the file may genuinely not exist, and an
   absent file would otherwise cost the whole budget. The waits use a timer of
   `clock.System()`, the one use of a clock in `fsx`.
+- **A held file.** `fsx.IsHeld` is the one place that says whether an error means
+  another process holds the file: access denied or a sharing violation on Windows,
+  which is what removing or replacing a program that is running gives, and always
+  false on Unix, where such a file can be removed. It is the retried error set
+  without file not found, and the retry is built on it, so the two cannot drift
+  apart. A caller that must tell a held file from another failure asks it instead
+  of testing error codes itself.
 - **Append handles.** Go maps `O_APPEND` on Windows to a handle without
   `GENERIC_WRITE`, on which `FlushFileBuffers` fails; `fsx` opens the handle
   itself.
@@ -1891,6 +1898,7 @@ so that the double cannot drift from what it stands for.
 | leftovers | `internal/node/fsx/leftovers.go` | `leftovers_test.go` |
 | `Exists` | `internal/node/fsx/fsx.go` | `exists_test.go` |
 | retry | `internal/node/fsx/retry.go`, `os_windows.go` | `retry_internal_test.go`, `retry_windows_test.go` |
+| a held file | `internal/node/fsx/held.go`, `held_unix.go`, `held_windows.go` | `held_unix_test.go`, `held_windows_test.go` (pending verification by CI on main) |
 | real file system | `internal/node/fsx/os.go`, `os_unix.go`, `os_windows.go` | `os_test.go`, `os_unix_test.go`, `os_windows_test.go`, `retry_windows_test.go` |
 | private files outside the root | `internal/node/fsx/private.go`, `private_unix.go`, `private_windows.go`; the shared Windows DACL builder and descriptor rule in `os_windows.go` | `TestCreatePrivateFileIsPrivateBeforeTheFirstWrite`, `TestCreatePrivateFileNeverReplacesAnExistingName`, verification and cleanup fault tests, Windows volume capability and descriptor tests |
 | crash model | `internal/node/fsx/fsxtest/mem.go`, `crash.go` | `mem_test.go` (each rule above, and the append and directory-rename result table `TestAppendAndRenameDirResultTable`), `counterexample_test.go` |

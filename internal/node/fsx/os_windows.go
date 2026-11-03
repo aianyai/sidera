@@ -24,9 +24,7 @@ import (
 // process (antivirus, indexer, a reader holding the file open) briefly keeps
 // the file from being opened, replaced or removed.
 func retryable(err error) bool {
-	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
-		errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
-		errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
+	return isHeld(err) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
 }
 
 // retryableRead is retryable without file not found. A rename or a remove that
