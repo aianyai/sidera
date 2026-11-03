@@ -1,9 +1,20 @@
 name: Release
 
-# Pushing a tag v<version> builds the archives of that version and creates a draft
-# GitHub Release, published by hand once its archives are checked. The work is in scripts/release.sh, which can be run on a
-# development machine to see what a release would contain; this file only gives it
-# a runner, a token and the tag.
+# Pushing a tag v<version> builds the archives of that version, signs their
+# checksums and creates a draft GitHub Release, published by hand once its archives
+# are checked. The work is in scripts/release.sh and scripts/release-sign.sh, which
+# can be run on a development machine to see what a release would contain; this file
+# only gives them a runner, the secrets, a token and the tag.
+#
+# Three jobs, so that no job holds both what runs the build and what authorizes
+# the release. The build runs third-party code (the Go toolchain, the modules the
+# adapters link) and has no secret and no write access. The signing key and the
+# identity token for the attestation are in the job that runs none of the
+# repository's build code. The job that writes the release has neither.
+# Steps of one job share its environment files ($GITHUB_ENV, $GITHUB_PATH) and its
+# checkout, so a step that is compromised could reach the secrets of a later step
+# of the same job; steps of different jobs cannot. The jobs hand files to each
+# other as artifacts.
 on:
   push:
     tags: ['v*']
@@ -12,14 +23,12 @@ permissions:
   contents: read
 
 jobs:
-  release:
-    name: Build and publish
+  build:
+    name: Build the archives
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Creating the release is the one write; the build steps run with the token
-    # of the job, but only the last step uses it.
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,12 +48,130 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: scripts/release.sh "${TAG#v}" "$RUNNER_TEMP/dist"
+      # The archives are already compressed; the artifact holds the files of the
+      # directory at its top level, with the names release.sh gave them.
+      - name: Hand over the archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+      - name: Hand over the release notes
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # The environment holds the signing secrets and allows this job to run only for
+  # a tag v*. The checkout is only for the signing script, the floor and the public
+  # key; nothing of the repository is built or run besides the script.
+  sign:
+    name: Sign the checksums
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    # The attestation step mints an identity token and stores the attestation;
+    # the signing step needs neither, and they are the permissions of this job only.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-sign.sh
+            scripts/update-from
+            internal/release/minisign.pub
+          sparse-checkout-cone-mode: false
+      - name: Fetch the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist
+      # What was handed over is what release.sh wrote: the signature covers
+      # these checksums, so they must describe these archives.
+      - name: Check the archives against checksums.txt
+        working-directory: ${{ runner.temp }}/dist
+        run: sha256sum --check checksums.txt
+      # Upstream's static build, pinned by version and digest: the Ubuntu package
+      # lags upstream, and the signing is tested against this version. The digest
+      # was taken from a download whose minisign signature verified with upstream's
+      # public key (RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3).
+      - name: Install minisign
+        env:
+          MINISIGN_VERSION: '0.12'
+          MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+        run: |
+          [ "$(uname -m)" = x86_64 ] || { echo "the minisign build below is for x86_64" >&2; exit 1; }
+          archive="minisign-$MINISIGN_VERSION-linux.tar.gz"
+          mkdir "$RUNNER_TEMP/minisign"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/jedisct1/minisign/releases/download/$MINISIGN_VERSION/$archive"
+          echo "$MINISIGN_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/minisign"
+          echo "$RUNNER_TEMP/minisign/minisign-linux/x86_64" >> "$GITHUB_PATH"
+      # Signs checksums.txt and checks the signature against the committed public
+      # key, so a wrong secret fails here and not for the first user who verifies.
+      - name: Sign the checksums
+        env:
+          TAG: ${{ github.ref_name }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: scripts/release-sign.sh "${TAG#v}" "$RUNNER_TEMP/dist"
+      - name: Attest the archives and the checksums
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/dist/sidera_*
+            ${{ runner.temp }}/dist/checksums.txt
+      - name: Hand over the signature
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signature
+          path: ${{ runner.temp }}/dist/checksums.txt.minisig
+          if-no-files-found: error
+          retention-days: 7
+
+  # Creating the release is the one write of the token, and nothing else runs
+  # here: no checkout, no secret, no build.
+  release:
+    name: Create the release
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: ${{ runner.temp }}/dist
+      - name: Fetch the signature
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signature
+          path: ${{ runner.temp }}/dist
+      - name: Fetch the release notes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           version=${TAG#v}
+          test -f "$RUNNER_TEMP/dist/checksums.txt.minisig"
           flags=()
           # A version with a pre-release part (0.9.0-rc.1) is not the latest release.
           case $version in *-*) flags+=(--prerelease) ;; esac
@@ -52,5 +179,5 @@ jobs:
             --verify-tag \
             --draft \
             --title "Sidera $version" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
+            --notes-file "$RUNNER_TEMP/notes/notes.md" \
             "${flags[@]}"

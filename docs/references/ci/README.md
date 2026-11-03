@@ -171,19 +171,51 @@ To cut a release:
 3. `git tag -a v<version> -m "Sidera <version>"` on that commit and
    `git push origin v<version>`.
 4. The workflow leaves the release as a draft. Download its archives, check them
-   against `checksums.txt` and install them on each platform; then publish it with
+   against `checksums.txt` and its signature with `minisign` (below), and install them
+   on each platform; then publish it with
    `gh release edit v<version> --draft=false`. The windows/arm64 archive is checked
    on an Arm Windows machine when one is at hand; otherwise it relies on the CI
    jobs on the `windows-11-arm` runner.
 
-`release.yml` checks out the tag, installs Go as `ci.yml` does, takes the release
-notes from the changelog (a tag without a section fails here, before anything is
-built), runs `scripts/release.sh`, and creates the GitHub Release as a draft with
-`gh release create --draft`, using the job's `GITHUB_TOKEN`. A draft is visible only to
-the repository's maintainers, so the archives are checked before anyone can download
-them. A version with a pre-release
-part (`0.9.0-rc.1`) is marked as a pre-release. It does not run the tests: they ran
-on `main`.
+`release.yml` has three jobs, each in its own runner, that hand files to the next as
+workflow artifacts:
+
+| Job | Permissions | Secrets | Does |
+| --- | ----------- | ------- | ---- |
+| `build` | `contents: read` | none | checks out the tag, installs Go as `ci.yml` does, takes the release notes from the changelog (a tag without a section fails here, before anything is built), runs `scripts/release.sh`; uploads the directory of archives (artifact `dist`) and the notes (artifact `notes`) |
+| `sign` | `contents: read`, `id-token: write`, `attestations: write` | `MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, from the environment `release` | checks out only `scripts/release-sign.sh`, `scripts/update-from` and `internal/release/minisign.pub` of the tag; downloads `dist` and runs `sha256sum --check` on it; installs minisign; signs `checksums.txt` with `scripts/release-sign.sh`; attests the archives and `checksums.txt`; uploads `checksums.txt.minisig` (artifact `signature`) |
+| `release` | `contents: write` | none | downloads the three artifacts into one directory, with no checkout, and creates the GitHub Release as a draft with `gh release create --draft` |
+
+The split is there because steps of one job share a runner: any of them can write
+`$GITHUB_ENV` or `$GITHUB_PATH` or change the checkout, which a later step runs, and
+job-level `id-token: write` lets every step of the job ask for an identity token. The
+build runs the Go toolchain and the programs of the adapters, third-party code
+included, so it is the job that must not hold a secret, a write permission or the
+right to mint a token; `sign` runs no code of the repository's build, only the signing
+script; `release` runs nothing but `gh`. Each job gets only the permissions its own
+steps use. A draft is visible only to the repository's maintainers, so the archives are
+checked before anyone can download them. A version with a pre-release part
+(`0.9.0-rc.1`) is marked as a pre-release. The workflow does not run the tests: they
+ran on `main`.
+
+The artifacts keep what the next job needs. `dist` is uploaded as the directory
+itself, so it holds the files of `scripts/release.sh` at its top level, under their
+names, and a download with a `name` goes into the directory given with no level of the
+artifact's name added. The archives are opaque files whose bytes the artifact store
+returns unchanged (it keeps no file modes, which no later step needs), and the
+download fails on a digest mismatch. `sign` runs `sha256sum --check checksums.txt`
+on what it downloaded, so a change in transit fails before anything is signed. The
+signing script writes `checksums.txt.minisig` beside `checksums.txt`; `signature`
+holds only that file, which `release` downloads into the directory of `dist`.
+
+The secrets are not repository secrets: they are secrets of the GitHub environment
+`release`, which only `sign` names. The environment's deployment rule allows tags
+`v*` only, so a run on any other ref cannot read them, and a run whose environment
+lacks a secret receives an empty value, so the `sign` job fails loudly, before any
+release exists: `scripts/release-sign.sh` refuses an empty key
+(`MINISIGN_SECRET_KEY is not set`) and minisign refuses an empty password. A tag
+carries the script that signs, so who may create a tag `v*` is who may sign; protecting
+`v*` tags is a setting of the repository, not of the workflow.
 
 `scripts/release.sh <version> <outdir>` builds, with `CGO_ENABLED=0` and the
 version stamped into every program (see
@@ -202,7 +234,90 @@ client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 The script refuses a non-empty `<outdir>`, and stops if the `sidera` it just built
-does not report the version it was given.
+does not report the version it was given. The release holds one more file, which
+`scripts/release-sign.sh` adds to `<outdir>` (see "Signature"):
+
+| File | Holds |
+| ---- | ----- |
+| `checksums.txt.minisig` | the minisign signature of `checksums.txt` |
+
+#### Signature
+
+`checksums.txt` is signed, so that whoever has the archives and the public key can
+tell they are the release's, offline, without trusting the place they were downloaded
+from: the archives are covered by the SHA-256 lines, and the lines by the signature.
+A program that updates itself from a release is meant to verify it the
+same way with an embedded key, and a person can check it by hand with `minisign`.
+
+- **Format**: minisign's default, prehashed signature (the signature is over the
+  BLAKE2b-512 of the file, so there is no size limit and the legacy format is not
+  used), `checksums.txt.minisig`. The archives themselves carry no signature of their own.
+- **Trusted comment**: exactly `sidera <version> update-from <floor>`, the version
+  without the leading `v` as in the archive names, for example
+  `sidera 0.11.0 update-from 0.8.0`. The trusted comment is signed, unlike the
+  untrusted one, so a verifier can check both that the signature belongs to the
+  version it asked for (a valid signature of another release's checksums, replayed
+  under this name, does not match) and the floor.
+- **The floor** is the oldest version that may update itself to this release. It is
+  the one version line of [`scripts/update-from`](../../../scripts/update-from)
+  (`#` comment lines and blank lines allowed), read at release time. It is a release
+  version, `MAJOR.MINOR.PATCH` without leading zeros, a pre-release part or build
+  metadata, and the script validates it so. It is `0.8.0`
+  and stays there until a release needs a manual step that an in-place update cannot
+  do, such as a change of the state on disk that has no migration. The commit that
+  adds that step raises the floor to the first version whose install does not need
+  it; a verifier refuses a self-update from an install older than the floor, so the
+  step is done by hand instead. Nothing else raises it. A verifier compares the
+  version of the install with the floor by SemVer precedence, pre-release parts
+  included, so an install of `0.8.0-rc.1` is below the floor `0.8.0`. The script
+  refuses a floor above the version it signs by the same rule: `0.8.0` may carry the
+  floor `0.8.0`, but `0.8.0-rc.1` may not, because a pre-release precedes its release.
+  It also refuses a `checksums.txt` with a line that is not an archive of the version,
+  as `scripts/release.sh` names them, which is what keeps a string that is not a version
+  out of the signed comment: the grammar of a version is defined once, in
+  `scripts/release.sh`.
+- **The public key** is committed once, as the two-line `.pub` file
+  [`internal/release/minisign.pub`](../../../internal/release/minisign.pub) (key id
+  `BA9335CE3A9A8F7B`), and that file is the one copy: the signing script verifies against it.
+  No code reads the file yet; the program
+  that will verify updates is to embed it with `go:embed`, so that the key has one source.
+- **Secrets**: `MINISIGN_SECRET_KEY`, the whole content of the minisign
+  secret key file (itself encrypted with the password), and `MINISIGN_PASSWORD`, both
+  secrets of the environment `release` (see the jobs above). The
+  signing step passes them as environment variables of that step only. The script writes
+  the key to a file with mode 0600 (the umask is set for that write alone, so the
+  signature keeps the usual mode) in a directory of its own under `$RUNNER_TEMP`,
+  because minisign takes a key from a path only, removes it when it ends, and gives the
+  password to minisign on its standard input, which minisign reads when it is not a
+  terminal. Neither value is in a command line or a log.
+- **The check after signing**: the script verifies the signature it made with the
+  committed public key and compares the verified trusted comment with the one it meant to
+  write. A secret that belongs to another key fails the job there, before any release
+  exists, and the signature is deleted.
+
+`scripts/release-sign.sh <version> <outdir>` can be run on a development machine on the
+output of `scripts/release.sh`, with the key in `MINISIGN_SECRET_KEY` and the password in
+`MINISIGN_PASSWORD` (when the password is unset, minisign asks for it). A signature made
+with a key other than the release key fails the check against the committed key unless
+`MINISIGN_PUBLIC_KEY_FILE` names that key's public file.
+
+#### Attestation
+
+The archives and `checksums.txt` also get a GitHub artifact attestation (SLSA build
+provenance, signed through Sigstore) from `actions/attest`, in the `sign` job. It
+states which workflow, repository and commit the run belongs to, and complements the
+minisign signature: the signature proves the file is the one the key's holder released,
+the attestation proves where it was built. Anyone with the GitHub CLI can check a
+download:
+
+```sh
+gh attestation verify sidera_<version>_<os>_<arch>.tar.gz -R aianyai/sidera
+```
+
+The `sign` job needs `id-token: write` and `attestations: write` for it, beside
+`contents: read`; they are the permissions of that job only. The attestation is made
+from the files as `sign` downloaded them, after their checksums were checked against
+`checksums.txt`.
 
 `THIRD_PARTY_NOTICES` is written by `scripts/third-party-notices.sh` before anything
 is built, and every archive holds the same file. It lists the Go standard library
@@ -382,6 +497,25 @@ to the workflow.
   shipped with every archive, so a platform's archive never lacks a notice for a
   module that another platform links, and the file does not change with the
   platform it was built on.
+- **minisign, signing the checksums**: the update check must work offline with a key
+  embedded in the program, and minisign gives that with a two-line public key, a
+  one-file signature and verifiers in many languages (Go among them), where GPG would
+  bring a keyring and sigstore a network. Signing `checksums.txt` and not each archive
+  keeps one signature per release and makes it cover all six archives, because their
+  SHA-256 lines are in the file. The prehashed form is minisign's default; the legacy
+  one is for old verifiers. The signature is not an attestation of the build: that is
+  the second mechanism, which needs the GitHub API to verify and so cannot be the
+  program's own check.
+- **minisign from upstream, pinned by digest**: the runner installs upstream's static
+  `0.12` build for Linux after checking its SHA-256, instead of the Ubuntu package.
+  The package version follows the runner image (`ubuntu-latest` moves between Ubuntu
+  releases), so the tool that signs would change without a commit, while a download pinned
+  by version and digest changes only when this file does, and it is the build the
+  signing was tested with. The digest was computed from a download whose minisign
+  signature verified with upstream's public key. To update, download the new release
+  and its `.minisig`, verify it with that key, and replace the version and digest in
+  `release.yml`. The build is for x86_64, which is what the runner is, and the step
+  fails on any other machine.
 - **A script, not a release tool**: the build is a static cross-compile and each
   adapter's own `package` subcommand, which a short script says plainly, runs
   the same on a development machine as on the runner, and adds no tool to learn;
@@ -399,9 +533,14 @@ to the workflow.
   the binary, but for a build in a linked git worktree it records the main
   checkout's, so `scripts/release.sh` passes `git rev-parse HEAD` to the linker. A
   release built on the runner has the same commit either way.
-- **The release job's token**: `contents: read` for the workflow and
-  `contents: write` for the one job that creates the release; the checkout does not
-  persist the token and only the last step receives it. Its outputs are written
+- **Three jobs, not one**: see "Release" for the split and its reason. A single job
+  with the secrets passed only to the signing step was rejected: the steps of a job
+  share its environment files and checkout, so a build that is compromised could still
+  reach them, and the identity token of the attestation would be open to every step.
+  The artifacts between the jobs cost a few uploads of a few megabytes.
+- **The tokens**: `contents: read` for the workflow and for `build`; `sign` adds
+  `id-token: write` and `attestations: write` for the attestation; `release` alone has
+  `contents: write`. No checkout persists the token. The outputs of `build` are written
   under `$RUNNER_TEMP`, since a file in the checkout would make the build report
   an uncommitted change.
 - **Go version**: `actions/setup-go` reads it from the `toolchain` line of the
@@ -482,6 +621,8 @@ machine, and nothing has run the tests on that platform until CI does.
 
 - Workflow: `.github/workflows/ci.yml`.
 - Release: `.github/workflows/release.yml`, `scripts/release.sh`,
+  `scripts/release-sign.sh` (signs `checksums.txt`), `scripts/update-from` (the floor),
+  `internal/release/minisign.pub` (the public key),
   `scripts/release-notes.sh` (prints the changelog section of a version),
   `scripts/third-party-notices.sh` (writes `THIRD_PARTY_NOTICES`) and
   `CHANGELOG.md`.
@@ -522,13 +663,19 @@ dist=$(mktemp -d)
 scripts/release.sh 0.8.0 "$dist" && (cd "$dist" && shasum -a 256 -c checksums.txt)
 scripts/release-notes.sh 0.8.0
 
+# signing it, with a throwaway key and its public key
+key=$(mktemp -d)/throwaway && minisign -G -p "$key.pub" -s "$key.key"
+MINISIGN_SECRET_KEY=$(cat "$key.key") MINISIGN_PUBLIC_KEY_FILE="$key.pub" scripts/release-sign.sh 0.8.0 "$dist"
+minisign -Vm "$dist/checksums.txt" -p "$key.pub"
+
 for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
   CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go build ./... ./sdk/go/... || echo "build failed: $p"
 done
 ```
 
 The workflow files are checked with `actionlint .github/workflows/*.yml`, and the
-scripts with `shellcheck scripts/*.sh`. `scripts/release.sh` needs `go`, `git`,
+scripts with `shellcheck scripts/*.sh`. `scripts/release-sign.sh` needs `minisign`.
+`scripts/release.sh` needs `go`, `git`,
 `tar`, `zip` and `sha256sum` (or `shasum`); the archives are written to the directory
 given, which must be empty, and the build reports "modified" after the commit when
 the working tree has uncommitted changes.

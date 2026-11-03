@@ -1,0 +1,11 @@
+# The oldest version that may update itself to a release built from this tree.
+#
+# scripts/release-sign.sh signs it into the release (the trusted comment of
+# checksums.txt.minisig). One release version on one line, MAJOR.MINOR.PATCH with
+# no leading zeros, pre-release part or build metadata; lines starting with # and
+# blank lines are ignored. A release whose version is below it by SemVer precedence
+# (a pre-release is below its own release) is refused when signing. Raise it, in the
+# commit that adds the migration, when a release needs a manual step that an
+# in-place update cannot do; leave it alone otherwise.
+# docs/references/ci/README.md says what it means.
+0.8.0
