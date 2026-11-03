@@ -97,9 +97,10 @@ logged at info level.
 - **Windows.** It is created with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS |
   CREATE_BREAKAWAY_FROM_JOB`; when the job the adapter runs in forbids breakaway
   (`ERROR_ACCESS_DENIED`) it is started again without that flag. The job is then read:
-  the server's life ends with the adapter only when the job kills its processes when it
-  closes, and only then does the log carry the warning; a job that merely forbids
-  breakaway leaves the server running when the daemon ends.
+  a job that merely forbids breakaway leaves the server running when the daemon ends.
+  The log carries the warning whenever `process.Start` cannot promise that the server
+  outlives the daemon: the job kills its processes when it closes, its limits cannot be
+  read, or an outer job of a nest refused the breakaway, whose limits are not known.
 
 **Working directory.** The server runs in an empty directory of the adapter's own,
 `<user cache>/sidera-adapter-codex/<instance>-<hash>` (`os.UserCacheDir`: `~/Library/Caches`
