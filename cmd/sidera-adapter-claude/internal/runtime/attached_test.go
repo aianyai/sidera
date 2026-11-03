@@ -93,9 +93,6 @@ func (w *world) setRegistry(session, status string, statusAt int64, extra ...map
 			doc[k] = v
 		}
 	}
-	// The document is built with the world locked: a look that reads the registry
-	// waits for the write, and TestAStatusReadBeforeTheTranscriptOpensNoTurn fails
-	// when the document is built before the lock is taken.
 	w.locked(func() {
 		w.files[attached.RegistryFile(claudeHome, claudePID)] = registryDoc(claudePID, session, status, statusAt, doc)
 	})
@@ -504,24 +501,34 @@ func TestAPromptWrittenBeforeAClearIsFoundInTheNewFile(t *testing.T) {
 // the transcript, read at the next look, will end, and must not open a turn that is
 // over already.
 func TestAStatusReadBeforeTheTranscriptOpensNoTurn(t *testing.T) {
-	w, _ := attachedWorld(t)
+	w, app := attachedWorld(t)
 	w.appendRecord(transcript(claudeSess), `{"type":"queue-operation","operation":"enqueue","sessionId":"`+claudeSess+`"}`)
 	settle()
-	var fired atomic.Bool
+	ended := make(chan struct{})
+	armed := false // read and written under the session's lock: by the test, and by a look's hook
 	w.mu.Lock()
 	w.afterOpen = func(w *world, path string) {
-		busy := bytes.Contains(w.file(attached.RegistryFile(claudeHome, claudePID)), []byte(`"busy"`))
-		if path != transcript(claudeSess) || !busy || !fired.CompareAndSwap(false, true) {
+		if !armed || path != transcript(claudeSess) {
 			return
 		}
-		// The turn ends in the middle of the look.
+		armed = false
+		// The turn ends while the look reads the transcript, after its first reading of the registry.
 		w.appendRecord(path, turnEndRecord(claudeSess))
 		w.setRegistry(claudeSess, "idle", 3000)
+		close(ended)
 	}
 	w.mu.Unlock()
+	// A look holds the session's lock: the busy status is written between two looks,
+	// so the first reading of the next look is the only one that sees it.
+	s := app.attachedSession(ep)
+	s.mu.Lock()
 	w.setRegistry(claudeSess, "busy", 2000)
-	for deadline := time.Now().Add(5 * time.Second); !fired.Load() && time.Now().Before(deadline); {
-		time.Sleep(time.Millisecond)
+	armed = true
+	s.mu.Unlock()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no look read the transcript")
 	}
 	settle()
 	if n := w.noteList(); len(n) != 0 {
