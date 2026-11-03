@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,9 +26,17 @@ import (
 //	SIDERA_REALCLAUDE=1 go test -tags realclaude -run RealClaude -count=1 ./cmd/sidera-adapter-claude/internal/runtime
 //
 // TestMain lets the test binary serve as the SDK's interrupt helper, which the
-// interrupt of a turn process on Windows starts from the adapter's own executable.
+// interrupt of a turn process on Windows starts from the adapter's own executable,
+// and as the stand-in for the sidera program that the MCP configuration names:
+// Claude Code starts that as `<program> mcp`, and a test binary given those
+// arguments would otherwise run the whole suite again, starting a Claude Code whose
+// own stand-in starts another, and leaving the processes of every level behind when
+// the level above ends them.
 func TestMain(m *testing.M) {
 	process.HandleHelperInvocation()
+	if len(os.Args) == 2 && os.Args[1] == "mcp" {
+		os.Exit(0)
+	}
 	os.Exit(m.Run())
 }
 
@@ -77,7 +86,7 @@ func TestRealClaudeProbe(t *testing.T) {
 
 // startIdleTurn starts a turn process of the real Claude that is given no input,
 // so that no prompt is sent and no model runs, and returns its session uuid. The
-// process is interrupted when the test ends, if it still runs.
+// process is ended when the test ends, if it still runs (endAtCleanup).
 func startIdleTurn(t *testing.T, app *App) (session string, started proc.Started, dir string) {
 	t.Helper()
 	claude, _, mcpConfig := app.executables()
@@ -108,13 +117,42 @@ func startIdleTurn(t *testing.T, app *App) (session string, started proc.Started
 	if err != nil {
 		t.Fatal(err)
 	}
+	endAtCleanup(t, started.Identity)
 	time.Sleep(2 * time.Second)
-	t.Cleanup(func() { // a failed test must not leave the process behind
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = proc.NewSignaller().Interrupt(ctx, started.Identity)
-	})
 	return session, started, dir
+}
+
+// endAtCleanup registers, as soon as a process is started, the end of the test's
+// last duty to it: the process is interrupted by its identity, never by name, and
+// waited for, so that a failed test, a repeated run or a parallel one leaves none
+// behind. A process that does not end fails the test and names its PID. The
+// interrupt is sent again while it runs, since Claude Code ignores one that arrives
+// before it has installed its handler.
+func endAtCleanup(t *testing.T, id proc.Identity) {
+	t.Helper()
+	t.Cleanup(func() {
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := proc.NewSignaller().Interrupt(ctx, id)
+			cancel()
+			if err != nil && !errors.Is(err, proc.ErrNotRunning) {
+				t.Errorf("interrupt the turn process %d: %v", id.PID, err)
+			}
+			for until := time.Now().Add(2 * time.Second); time.Now().Before(until); time.Sleep(50 * time.Millisecond) {
+				if running, err := proc.NewTable().Running(id); err != nil {
+					t.Errorf("the turn process %d cannot be looked at: %v", id.PID, err)
+					return
+				} else if !running {
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("the turn process %d did not end: it is left running", id.PID)
+				return
+			}
+		}
+	})
 }
 
 // The process table finds a turn process of the real Claude by what the adapter
