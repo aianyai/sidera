@@ -34,6 +34,7 @@ Sidera 0.9.0 is the current release; 0.8.0 was the first public release.
 - Pairing: two nodes trust each other after both owners confirm.
 - Claude Code on macOS, Linux and Windows.
 - Codex on macOS, Linux and Windows.
+- Interrupting a running turn, on Claude Code and Codex.
 - Creating a session on another machine and exchanging messages with it.
 - The console bridge: the owner starts sessions and reads replies from a terminal.
 - A Claude Code or Codex session you opened yourself becomes a controller with an
@@ -64,12 +65,10 @@ Sidera 0.9.0 is the current release; 0.8.0 was the first public release.
 - Agents
   - Replies to your own console that wait until you read them, instead of
     expiring after the queue time.
-  - Interrupting a running turn, on Claude Code and Codex.
   - Sandboxed sessions that still send and receive, and an operating-system sandbox
     for Claude Code.
   - Approval and input requests an agent raises that its preset does not allow are
     refused at once, so a turn never hangs.
-  - Claude Code on Linux and Windows.
   - Chat adapters, so you can talk to your agents from a chat app.
 - Messages
   - Messages to several recipients.
