@@ -99,6 +99,8 @@ func TestUnlistable(t *testing.T) {
 	}{
 		{"access denied", windows.ERROR_ACCESS_DENIED, true},
 		{"denied as a status", windows.STATUS_ACCESS_DENIED, true},
+		{"exiting, the status of a native query", windows.STATUS_PROCESS_IS_TERMINATING, true},
+		{"exiting, wrapped", &wrapped{windows.STATUS_PROCESS_IS_TERMINATING}, true},
 		{"anything else, no handle to say it ended", windows.ERROR_NOT_ENOUGH_MEMORY, false},
 	} {
 		if got := unlistable(0, tc.err); got != tc.want {

@@ -247,10 +247,17 @@ func listed(pid int, self *windows.SID) (p Process, ok bool, err error) {
 }
 
 // unlistable reports whether the error of reading a process leaves it out of a
-// listing: the read was denied, or the process has ended. Any other error is a
-// failure to ask.
+// listing: the read was denied, or the process has ended or is ending. Any other
+// error is a failure to ask.
+//
+// A process that is exiting is not yet signalled, so the handle cannot tell it has
+// ended; the native queries say so themselves with STATUS_PROCESS_IS_TERMINATING
+// ("An attempt was made to access an exiting process."). The Win32 calls report
+// the same condition as ERROR_ACCESS_DENIED, which RtlNtStatusToDosError gives for
+// that status.
 func unlistable(h windows.Handle, err error) bool {
-	if errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.STATUS_ACCESS_DENIED) {
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.STATUS_ACCESS_DENIED) ||
+		errors.Is(err, windows.STATUS_PROCESS_IS_TERMINATING) {
 		return true
 	}
 	alive, aerr := running(h)
