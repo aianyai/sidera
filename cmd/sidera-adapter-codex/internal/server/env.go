@@ -2,7 +2,8 @@ package server
 
 import (
 	"strings"
-	"unicode/utf8"
+
+	"github.com/aianyai/sidera/sdk/go/adapterkit/environ"
 )
 
 // Environ returns the environment the App Server is started with: the adapter's
@@ -18,20 +19,11 @@ import (
 //     of the Claude Code that may have started it: the server would take them for
 //     its own.
 func Environ(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, kv := range in {
-		if !utf8.ValidString(kv) {
-			continue
-		}
-		name, _, _ := strings.Cut(kv, "=")
-		if dropped(name) {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
+	return environ.Compose(in, environ.Spec{Drop: dropped})
 }
 
+// dropped reports whether the variable is left out. The name arrives in upper case
+// on Windows, where names have no case, so the list is of upper-case names.
 func dropped(name string) bool {
 	switch name {
 	case "SIDERA_TOKEN", "SIDERA_PROBE_TOKEN",

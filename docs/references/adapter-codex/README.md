@@ -56,14 +56,50 @@ socket path already makes a second server impossible, and a failed probe goes
 straight to a start, which ends with the error above when an earlier server holds
 the socket.
 
-**Detached start.** On Unix the child gets a session of its own (`setsid`), so the
-signals aimed at the adapter's process group do not reach it and its pid is the id
-of its process group. On Windows it is created with `CREATE_NEW_PROCESS_GROUP |
-DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB`; when the job the adapter runs in
-forbids breakaway (`ERROR_ACCESS_DENIED`) it is started again without that flag and
-the log says its life then ends with the job. Standard input is the null device;
-standard output and error are appended to `<state_dir>/app-server.log`, which is
-moved to `app-server.log.1` at each start.
+**A process that cannot be queried is taken as not running.** The check above asks the
+process table (`process.Lookup` of `sdk/go/adapterkit/process`) for the recorded pid and
+reads its start time as nanoseconds since the epoch; a pid that names no process and a
+process table that does not answer (access denied included) both mean "not running", and
+the adapter then starts a server. This differs on purpose from the Claude adapter, which
+treats a table that cannot be read as an error: a wrong "not running" there leaves two
+writers on one session, silently and beyond repair, while here it starts a second App
+Server, which shows (two processes, a log, a waiting reconnect loop) and ends with the
+owner stopping one. The state file's start time is written for every start, on Unix too,
+but only Windows reads it back.
+
+**Detached start.** The Codex program is resolved to an absolute path first (a name through `PATH`, a relative
+path against the adapter's directory), because `process.Start` runs its first argument as
+written and the server's working directory is not the adapter's. The server is started with
+`process.Start`, not interruptible (it is
+ended by signalling its process group, and Codex needs no console of its own), with
+standard input on the null device and standard output and error appended to
+`<state_dir>/app-server.log`, which is moved to `app-server.log.1` at each start. The
+package decides how far the server escapes the adapter, and the adapter logs it: a
+`Detachment` whose `OutlivesDaemon` is false is a warning, and any non-empty `Caveat` is
+logged at info level.
+
+- **Unix.** The child gets a session of its own (`setsid`), so the signals aimed at the
+  adapter's process group do not reach it and its pid is the id of its process group,
+  which `Server.Stop` signals.
+- **Linux, systemd user scope.** The child is also moved out of the adapter's control
+  group, into a scope named `sidera-codex-<16 hex digits>.scope`, so that stopping the
+  unit the daemon runs in does not take it along. The pid and the process group are the
+  same as without a scope. The scope is used only when the user manager answers
+  (`systemd-run --user --scope --quiet -- true` succeeds) and either `Linger=yes` or the
+  adapter itself is under `user@<uid>.service/`; otherwise, and when `systemd-run` is
+  missing, the child gets the session only. A scope belongs to the user manager, which ends
+  at the last logout of a user without linger, while a daemon started from a login
+  session (SSH, a terminal multiplexer) is not under the user manager, and a process in a
+  session of its own survives that logout where a scope would not. Without linger a
+  daemon under the user manager ends at that logout together with the server, so the
+  scope adds no risk there; a node that must run with nobody logged in needs
+  `loginctl enable-linger`.
+- **Windows.** It is created with `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS |
+  CREATE_BREAKAWAY_FROM_JOB`; when the job the adapter runs in forbids breakaway
+  (`ERROR_ACCESS_DENIED`) it is started again without that flag. The job is then read:
+  the server's life ends with the adapter only when the job kills its processes when it
+  closes, and only then does the log carry the warning; a job that merely forbids
+  breakaway leaves the server running when the daemon ends.
 
 **Working directory.** The server runs in an empty directory of the adapter's own,
 `<user cache>/sidera-adapter-codex/<instance>-<hash>` (`os.UserCacheDir`: `~/Library/Caches`
@@ -97,12 +133,14 @@ reports the `app-server` dependency as `wrong_version` with a detail that says t
 it, since the adapter does not end a server it did not start. Restarting it does not take
 back an ACE the Windows sandbox already granted on `<state_dir>`.
 
-**Environment.** The server is started with the adapter's environment less: a pair
+**Environment.** The server is started with the adapter's environment (composed by
+`environ.Compose` of `sdk/go/adapterkit`, with this list of what to leave out) less: a pair
 that is not valid UTF-8 (the server refuses to start on one); `SIDERA_TOKEN` and
 `SIDERA_PROBE_TOKEN`, which belong to one session and would be seen by every
 thread; `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `CODEX_SANDBOX*`, `CODEX_CI` and
 `CODEX_TOOL_CALL_ID` (the daemon may itself run inside a Codex session); `CLAUDECODE`
-and `CLAUDE_CODE_*`. The owner's Codex configuration (`CODEX_HOME`, `config.toml`)
+and `CLAUDE_CODE_*`. On Windows names have no case, so a variable is left out whatever the
+case it is spelled in (`Codex_Thread_Id`). The owner's Codex configuration (`CODEX_HOME`, `config.toml`)
 is left alone and loads as usual.
 
 **Ending it.** Only a server this process started and still holds is ever ended
@@ -747,9 +785,8 @@ about ten seconds to the background.
   order of prompts and the books of turns the adapter's own; the daemon retries a
   refusal when the turn ends.
 - **Only the server this process started is ended.** The alternative needs a check of
-  the identity of a process from a pid and a start time on every platform, which is
-  other work; a wrong kill is worse than a leftover server, which is found and reused
-  anyway.
+  the identity of a process from a pid and a start time; even with that, a wrong kill
+  is worse than a leftover server, which is found and reused anyway.
 - **A hand-written client and subset of types.** The schema is large with many `oneOf`s,
   and a generated copy would carry all of it and its instability. The guard test pins
   what is used. The community Go SDKs found target an older Codex, start the server as

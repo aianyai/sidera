@@ -225,6 +225,12 @@ Check with `tmux ls` right away and again after a few seconds. If the session
 `sidera` is gone, the daemon exited: run `sidera daemon` once in the foreground, in
 the same shell, to see the error.
 
+On Linux, the Codex App Server a node starts is put in a systemd user scope of its
+own when the user manager is available and either linger is enabled or the daemon
+itself runs under the user manager, so that it keeps running when the daemon ends.
+A node that must run with nobody logged in needs `loginctl enable-linger`: without
+it the scope, like a daemon under the user manager, ends at the last logout.
+
 If your shell sets an alias for `tmux`, run `/usr/bin/env tmux` instead.
 `screen` or `cd ~ && nohup sidera daemon >> ~/sidera-daemon.log 2>&1 &` work the same
 way.

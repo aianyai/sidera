@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 )
 
 // File names inside the state directory.
@@ -101,9 +102,26 @@ type Server struct {
 	retryWaits   []time.Duration
 }
 
+// ownedProcess is the server this process started.
 type ownedProcess struct {
-	cmd    *exec.Cmd
-	exited chan struct{}
+	started process.Started
+	exited  chan struct{} // closed once the server has ended and been reaped
+	// exitErr is how it ended (nil for exit status 0); read only after exited is
+	// closed.
+	exitErr error
+}
+
+// processStart reports whether the process with the pid is running and when it
+// started, in nanoseconds since the Unix epoch. A pid that names no process, or one
+// the platform cannot be asked about, is not running as far as the adapter can
+// tell: a wrong "not running" starts a second server, which shows and can be ended,
+// where the same mistake about a session's writer would corrupt the session.
+func processStart(pid int) (int64, bool) {
+	p, found, err := process.Lookup(pid)
+	if err != nil || !found {
+		return 0, false
+	}
+	return p.StartTime.UnixNano(), true
 }
 
 // New returns a Server for the configuration.
@@ -260,9 +278,10 @@ func (s *Server) unixEndpoint() (appserver.Endpoint, error) {
 type state struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
-	// StartedNS is when the process started, in nanoseconds since the Unix epoch,
-	// where the platform can tell (Windows); zero otherwise. With the pid it
-	// identifies the process.
+	// StartedNS is when the process started, in nanoseconds since the Unix epoch;
+	// zero when it could not be read. With the pid it identifies the process. Only
+	// Windows reads it back: on Unix the lock per socket path already keeps a second
+	// server from running, and the start time there is derived from the boot time.
 	StartedNS int64 `json:"started_ns,omitempty"`
 	// WorkDir is the working directory the server was started in. A server an
 	// earlier adapter started has none recorded: it ran in the state directory.
@@ -319,20 +338,41 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	}
 	defer logFile.Close()
 
-	cmd, err := s.spawn(args, workDir, logFile)
+	program, err := s.program()
 	if err != nil {
 		return ep, fmt.Errorf("%w: %v", ErrStartFailed, err)
 	}
-	owned := &ownedProcess{cmd: cmd, exited: make(chan struct{})}
+	started, err := process.Start(process.Spec{
+		Argv:   append([]string{program}, args...),
+		Env:    Environ(s.cfg.Environ),
+		Dir:    workDir,
+		Stdout: logFile,
+		Stderr: logFile,
+	})
+	if err != nil {
+		if !errors.Is(err, process.ErrStartedUnidentified) {
+			return ep, fmt.Errorf("%w: %v", ErrStartFailed, err)
+		}
+		// The server runs; only its start time could not be read, so the state file
+		// records none and a check of the recorded server tests the pid alone.
+		s.log.Warn("started the App Server but could not identify it", "error", err)
+	}
+	owned := &ownedProcess{started: started, exited: make(chan struct{})}
 	go func() {
-		_ = cmd.Wait()
+		owned.exitErr = <-started.Done
 		close(owned.exited)
 	}()
 	s.mu.Lock()
 	s.owned, s.exposure = owned, ""
 	s.mu.Unlock()
-	s.log.Info("started the App Server", "pid", cmd.Process.Pid, "listen", ep.Network, "dir", workDir)
-	s.writeState(cmd.Process.Pid, ep, workDir)
+	s.log.Info("started the App Server", "pid", started.PID, "listen", ep.Network, "dir", workDir)
+	if !started.Detachment.OutlivesDaemon {
+		s.log.Warn("the App Server's life ends with the adapter and the daemon")
+	}
+	if started.Detachment.Caveat != "" {
+		s.log.Info("how the App Server is detached", "detail", started.Detachment.Caveat)
+	}
+	s.writeState(started, ep, workDir)
 
 	deadline := time.NewTimer(s.cfg.StartTimeout)
 	defer deadline.Stop()
@@ -341,8 +381,8 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	for {
 		select {
 		case <-owned.exited:
-			return ep, fmt.Errorf("%w: it exited (%v) before it was reachable; an earlier App Server may hold the socket, see %s",
-				ErrStartFailed, cmd.ProcessState, logName)
+			return ep, fmt.Errorf("%w: it exited (%s) before it was reachable; an earlier App Server may hold the socket, see %s",
+				ErrStartFailed, exitStatus(owned.exitErr), logName)
 		case <-ctx.Done():
 			return ep, ctx.Err()
 		case <-deadline.C:
@@ -357,6 +397,18 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 			}
 		}
 	}
+}
+
+// program is the absolute path of the Codex executable. process.Start runs its
+// first argument as written, in the server's working directory, so a name that is
+// looked up in PATH, or a path relative to the adapter's own directory, has to be
+// resolved here, as the adapter's configuration allows both.
+func (s *Server) program() (string, error) {
+	path, err := exec.LookPath(s.cfg.Program)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(path)
 }
 
 // workDir is the working directory the server is started in: an empty directory
@@ -391,25 +443,12 @@ func (s *Server) workDir() (string, error) {
 	return dir, nil
 }
 
-// spawn starts the server detached in dir. Where the job the adapter runs in
-// forbids breakaway (Windows), it starts without it and says so: the server then
-// ends with the job.
-func (s *Server) spawn(args []string, dir string, logFile *os.File) (*exec.Cmd, error) {
-	cmd, err := s.spawnOnce(args, dir, logFile, true)
-	if err != nil && breakawayRefused(err) {
-		s.log.Warn("the job the adapter runs in forbids breakaway: the App Server's life ends with the job")
-		cmd, err = s.spawnOnce(args, dir, logFile, false)
+// exitStatus says how a process ended, from the error of waiting for it.
+func exitStatus(err error) string {
+	if err == nil {
+		return "exit status 0"
 	}
-	return cmd, err
-}
-
-func (s *Server) spawnOnce(args []string, dir string, logFile *os.File, breakaway bool) (*exec.Cmd, error) {
-	cmd := exec.Command(s.cfg.Program, args...)
-	cmd.Env = Environ(s.cfg.Environ)
-	cmd.Dir = dir
-	cmd.Stdout, cmd.Stderr = logFile, logFile
-	cmd.SysProcAttr = detachAttr(breakaway)
-	return cmd, cmd.Start()
+	return err.Error()
 }
 
 // openLog opens the server's log for appending, after moving the previous one
@@ -422,9 +461,12 @@ func (s *Server) openLog() (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
 }
 
-func (s *Server) writeState(pid int, ep appserver.Endpoint, workDir string) {
-	started, _ := s.processStart(pid)
-	raw, _ := json.Marshal(state{PID: pid, Address: ep.Address, StartedNS: started, WorkDir: workDir})
+func (s *Server) writeState(started process.Started, ep appserver.Endpoint, workDir string) {
+	var startedNS int64 // zero when the start could not be read
+	if !started.StartTime.IsZero() {
+		startedNS = started.StartTime.UnixNano()
+	}
+	raw, _ := json.Marshal(state{PID: started.PID, Address: ep.Address, StartedNS: startedNS, WorkDir: workDir})
 	if err := os.WriteFile(filepath.Join(s.cfg.StateDir, stateFileName), raw, 0o600); err != nil {
 		s.log.Warn("cannot write the state file", "error", err)
 	}
@@ -471,12 +513,12 @@ func (s *Server) Stop() error {
 		return nil
 	default:
 	}
-	pid := o.cmd.Process.Pid
-	_ = signalGroup(o.cmd.Process, false)
+	pid := o.started.PID
+	_ = signalGroup(o.started.Handle, false)
 	select {
 	case <-o.exited:
 	case <-time.After(termWait):
-		_ = signalGroup(o.cmd.Process, true)
+		_ = signalGroup(o.started.Handle, true)
 		select {
 		case <-o.exited:
 		case <-time.After(killWait):
@@ -488,7 +530,7 @@ func (s *Server) Stop() error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if !groupGone(pid) {
-		_ = signalGroup(o.cmd.Process, true)
+		_ = signalGroup(o.started.Handle, true)
 	}
 	return nil
 }
@@ -500,5 +542,5 @@ func (s *Server) GroupGone() bool {
 	if o == nil {
 		return true
 	}
-	return groupGone(o.cmd.Process.Pid)
+	return groupGone(o.started.PID)
 }
