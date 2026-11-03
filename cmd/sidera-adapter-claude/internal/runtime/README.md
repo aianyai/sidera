@@ -13,7 +13,7 @@ for the rules and their reasons.
 | ---- | ---- |
 | `New(Options)` | Builds the adapter. Every `Options` field left zero takes the operating system's implementation; tests pass fakes. |
 | `App` methods | `Initialize`, `Start`, `Probe`, `CreateSession`, `DeliverPrompt`, `Reconcile`, `CloseSession`, `AttachSession`, `SessionDetached`, `Shutdown`; `Interrupt` is `adapterkit.Base`'s (not declared) except that an attached endpoint answers `1002`. |
-| `Daemon`, `Files`, `Runner`, `Inbox` | What the adapter sends to the daemon, how it reaches the file system, how it runs short programs and how it writes to the inbox socket of a session someone else runs. `proc.Table`, `proc.Launcher` and `proc.Signaller` are the rest of its outside. |
+| `Daemon`, `Files`, `Runner`, `Inbox` | What the adapter sends to the daemon, how it reaches the file system, how it runs short programs and how it writes to the inbox socket (on Windows the named pipe) of a session someone else runs. `proc.Table`, `proc.Launcher` and `proc.Signaller` are the rest of its outside. |
 | `attached.go` | Attached sessions: `AttachSession`, `SessionDetached`, the entries of `adapter.start`, the monitor that follows a session, delivery to its inbox and its reconciliation. |
 | `availability.go` | The one snapshot of conditions the daemon takes as the whole truth: the probe's and those of the attached endpoints. |
 

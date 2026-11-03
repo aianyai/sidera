@@ -236,7 +236,7 @@ adapter's `CLAUDE_CONFIG_DIR`, else `~/.claude`):
 | ---- | ----- | -------- |
 | The registry entry of the running process | `sessions/<pid>.json`: `pid`, `sessionId`, `cwd`, `kind`, `procStart`, `status`, `statusUpdatedAt`, `peerProtocol` or `messagingSocketPath` | that the session exists and is the same process; its status; its current session id |
 | The session record (transcript) | `projects/<record directory>/<sessionId>.jsonl`, the record directory derived from `cwd` as for a created session | the user record of a delivered prompt; the end of a turn |
-| The inbox socket | the wake's `CLAUDE_CODE_MESSAGING_SOCKET`, one line `{"type":"user","message":{"role":"user","content":"<text>"},"uuid":"<attempt>"}` per prompt, preceded by `{"type":"auth","token":"<token>"}` when the wake has `CLAUDE_CODE_MESSAGING_TOKEN` | delivering a prompt; the runtime answers nothing |
+| The inbox socket | the wake's `CLAUDE_CODE_MESSAGING_SOCKET` (a Unix domain socket; on Windows the named pipe `\\.\pipe\LOCAL\cc-msg-<hex>`, opened with a plain file open when the message is ready, tried again every 10 ms within the 3 seconds while it is busy), one line `{"type":"user","message":{"role":"user","content":"<text>"},"uuid":"<attempt>"}` per prompt, preceded by `{"type":"auth","token":"<token>"}` when the wake has `CLAUDE_CODE_MESSAGING_TOKEN` (optional on macOS and Linux, required on Windows, each line a write of its own) | delivering a prompt; the runtime answers nothing |
 
 The wake is the three keys `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN` and
 `CLAUDE_PID`, copied from the environment of the process that attached. The adapter holds it in
@@ -349,9 +349,12 @@ on the session's behalf.
   as well (this could not be checked).
 - A prompt can be reported as taken into a person's turn when the registry showed the turn a moment
   before the record appeared: the delivery is proved all the same.
-- The adapter runs on macOS only. The inbox of Claude Code on Windows is a named pipe, which the socket
-  writer does not reach, and the authentication line, which Windows requires and macOS does not check,
-  is sent but was never tested against a runtime that enforces it.
+- Delivery on Windows cannot tell a wrong token from a delivery. Claude Code there closes a connection
+  whose first line is not a valid authentication line and delivers nothing, but it answers nothing, so
+  the write of the message reports a failure only when the pipe was already closed by then; a message
+  that was dropped is found missing by the reconciliation, as for any delivery whose outcome is unknown.
+  The wake carries the right token (the session's own `CLAUDE_CODE_MESSAGING_TOKEN`), so this is for a
+  wake that went stale.
 - Only the transcript of the session now running is read: after a `/clear` the history of the old
   session is not looked at again. A record directory name over 200 characters cannot be located: such a
   session is followed from the registry alone, and its prompts are never reported persisted.
@@ -370,7 +373,6 @@ the runtime's messaging socket is another way worth testing), `recv.observed` (i
 runtime's `ack_markers` in the manifest and the tool results read from the record), detection of a
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
 accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed),
-process observation on Linux and Windows, `systemd-run --user` on Linux, Windows' detached start
 and sandbox settings. The turn files in the state directory are not cleaned up.
 
 ### The record directory
