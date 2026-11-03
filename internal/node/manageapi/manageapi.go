@@ -48,6 +48,10 @@ type Config struct {
 	// Stop asks the daemon to shut down. It is called without waiting, once the
 	// answer to a request whose operation stops the daemon has been written.
 	Stop func(reason string)
+	// StartID names this start of the daemon, so that a client can tell the process
+	// it asked about from the one that took its place; the status shows it. Empty
+	// shows none.
+	StartID string
 	// Version is the version of the program, for the status to show; empty shows
 	// none.
 	Version string

@@ -259,6 +259,10 @@ type Daemon struct {
 	// what the shutdown has to undo: the hooks that began
 	agentBegan, adaptersBegan bool
 
+	// startID names this start, for a client to tell this process from the one that
+	// takes its place; drawn from Rand when the management interface opens.
+	startID string
+
 	stopOnce sync.Once
 	stopCh   chan struct{}
 	// stopReason is written once, inside stopOnce, before stopCh is closed, and read

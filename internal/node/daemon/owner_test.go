@@ -264,6 +264,7 @@ func TestStatusAnswersTheStateOfARunningNode(t *testing.T) {
 			Daemon struct {
 				State     string `json:"state"`
 				StartedAt string `json:"started_at"`
+				StartID   string `json:"start_id"`
 			} `json:"daemon"`
 			Clock struct {
 				RollbackPaused bool `json:"rollback_paused"`
@@ -286,6 +287,9 @@ func TestStatusAnswersTheStateOfARunningNode(t *testing.T) {
 	r := env.Result
 	if r.Node.ID != nodeOf(t, c).String() || r.Node.Version != "9.9.9-test" || r.Daemon.State != "running" || r.Daemon.StartedAt != t0.Format(time.RFC3339) {
 		t.Errorf("who and how: %+v %+v", r.Node, r.Daemon)
+	}
+	if len(r.Daemon.StartID) != 16 || strings.Trim(r.Daemon.StartID, "0123456789abcdef") != "" {
+		t.Errorf("start id %q, want 16 lower-case hexadecimal digits", r.Daemon.StartID)
 	}
 	if r.Clock.RollbackPaused {
 		t.Error("a node that has just started is paused")

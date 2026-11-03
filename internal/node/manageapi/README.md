@@ -23,7 +23,7 @@ reading a body.
 | `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Call one node as its local owner; return the complete management response without retrying. |
 | `RevocationExportResult` | The shared online and offline export result: the armored statement and its backup digest. |
 | `Request` | The caller's operation identifier, optional expected version and params; zero identifier and nil members are omitted. |
-| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the version of the program for the status, and the log. |
+| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the start identifier and the version of the program for the status, and the log. |
 
 The methods are a table in `methods.go`, one row each: the name on the wire, the
 catalogue entry of the operation, and how the params are read. The owner of an

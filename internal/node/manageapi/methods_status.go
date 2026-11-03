@@ -40,6 +40,7 @@ type statusJSON struct {
 	Daemon struct {
 		State     string `json:"state"`
 		StartedAt string `json:"started_at"`
+		StartID   string `json:"start_id,omitempty"`
 	} `json:"daemon"`
 	Reminders []reminderJSON `json:"reminders"`
 	Alerts    struct {
@@ -98,6 +99,7 @@ var status = &method{
 			var out statusJSON
 			out.Node.ID, out.Node.Version = st.Node.String(), s.cfg.Version
 			out.Daemon.State, out.Daemon.StartedAt = phaseName(st.Phase), timeText(st.StartedAt)
+			out.Daemon.StartID = s.cfg.StartID
 			out.Reminders = []reminderJSON{}
 			for _, k := range st.Reminders {
 				out.Reminders = append(out.Reminders, reminderJSON{Kind: k.String(), Message: reminderMessage[k]})

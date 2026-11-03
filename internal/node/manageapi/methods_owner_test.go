@@ -233,6 +233,7 @@ func TestTheRetirementStopsTheDaemonAfterTheAnswer(t *testing.T) {
 func TestStatusAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testing.T) {
 	r := newRig(t)
 	r.srv.cfg.Version = "1.2.3"
+	r.srv.cfg.StartID = "0011223344556677"
 	started := t0.Add(-time.Hour)
 	r.svc.status = engine.NodeStatus{
 		Node: ownNode, Phase: engine.PhaseRunning, StartedAt: started,
@@ -248,7 +249,7 @@ func TestStatusAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testing.T) {
 	}
 	status, out := r.post("status", `{}`)
 	want := `{"result":{"node":{"id":"` + ownNode.String() + `","version":"1.2.3"},` +
-		`"daemon":{"state":"running","started_at":"2026-10-24T08:00:00Z"},` +
+		`"daemon":{"state":"running","started_at":"2026-10-24T08:00:00Z","start_id":"0011223344556677"},` +
 		`"reminders":[{"kind":"revocation_backup_unconfirmed","message":"` + reminderMessage[engine.ReminderRevocationBackupUnconfirmed] + `"}],` +
 		`"alerts":{"open":3},` + // the two records and the standing pause of the clock
 		`"clock":{"rollback_paused":true,"rollback_paused_since":"2026-10-24T08:59:00Z","high_water":"2026-10-24T09:00:00Z"},` +

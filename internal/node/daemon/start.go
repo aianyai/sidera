@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -325,6 +327,10 @@ func (n engineNetwork) StartPairing(ctx context.Context, node ident.NodeID, addr
 // and of the gate on vouchers. A node of one machine has none of it.
 func (d *Daemon) stepTrust(ctx context.Context) error { return run(ctx, d.cfg.Attach.TrustSync, d) }
 
+// startIDBytes is the length of the random start identifier, before it is written in
+// hexadecimal: long enough that two starts of one node do not share one.
+const startIDBytes = 8
+
 // Step 8: the loop starts, in the phase of recovery, and the management interface
 // opens. It answers reads, and refuses what changes state as unavailable until the
 // start is over: the owner can see that the node is starting, and cannot change
@@ -339,8 +345,15 @@ func (d *Daemon) stepManage(context.Context) error {
 	if err != nil {
 		return err
 	}
+	var id [startIDBytes]byte
+	if _, err := io.ReadFull(d.cfg.Rand, id[:]); err != nil {
+		l.Close()
+		return fmt.Errorf("drawing the start identifier: %w", err)
+	}
+	d.startID = hex.EncodeToString(id[:])
 	cfg := manageapi.Config{
-		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, Version: d.cfg.Version, Log: d.log,
+		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, StartID: d.startID,
+		Version: d.cfg.Version, Log: d.log,
 	}
 	if err := configureManagementTests(&cfg); err != nil {
 		l.Close()
