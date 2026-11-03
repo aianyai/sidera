@@ -280,7 +280,9 @@ wins.
 
 - **The path is the real one, and exists.** The sandbox compares the paths a command
   opens with the one it is told to deny, so symbolic links in `SIDERA_HOME` (the data
-  directory of the session's `tool_access.env`) are resolved first, and Codex creates a
+  directory of the session's `tool_access.env`) are resolved first (`realpath.Resolve` of `sdk/go/adapterkit`: on Windows it also follows
+  junctions and gives the long form of an 8.3 name, which is the spelling the sandbox itself
+  ends up with), and Codex creates a
   denied path that does not exist. A `SIDERA_HOME` that is unset, relative or missing is
   refused before anything is sent (the same failure as a profile that did not take, below).
 - **Nothing else may name a sandbox.** When the same `config`, or the `sandbox` member of

@@ -9,6 +9,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/realpath"
 )
 
 // errUnprotected marks a thread that cannot be given, or did not take, the
@@ -43,14 +44,20 @@ func (a *App) threadConfig(s *session, p codexcfg.Preset) (map[string]any, error
 	return cfg, nil
 }
 
-// realDir is the directory a path names, with symbolic links resolved: the sandbox
-// compares the paths a command opens with the path it is told to deny. The
-// directory has to exist, since Codex creates a denied path that does not.
+// realDir is the directory a path names, as the platform resolves it: the sandbox
+// compares the paths a command opens with the path it is told to deny, so a symbolic
+// link, a junction or a short name in it must not make the two differ. The directory
+// has to exist, since Codex creates a denied path that does not, and the path has to
+// be absolute, since a relative one would be resolved against the adapter's working
+// directory, which is not where the session's data directory is.
 func realDir(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("is not set")
 	}
-	return filepath.EvalSymlinks(path)
+	if !filepath.IsAbs(path) {
+		return "", errors.New("is not an absolute path")
+	}
+	return realpath.Resolve(path)
 }
 
 // threadStart starts the session's thread with its configuration and checks that
