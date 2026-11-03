@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
@@ -54,10 +55,20 @@ func stopCommand(b byte, content string) engine.ManagementCommand {
 	}
 }
 
+func encodeRestart(program, version string) ([]byte, error) {
+	return []byte(`{"restarting":true,"program":"` + program + `","version":"` + version + `"}`), nil
+}
+
+func checkRestarted(context.Context) (string, string, error) { return "/bin/sidera", "1.0.0", nil }
+
 func restartCommand(b byte, content string) engine.ManagementCommand {
+	return restartCommandChecked(b, content, checkRestarted)
+}
+
+func restartCommandChecked(b byte, content string, check func(context.Context) (string, string, error)) engine.ManagementCommand {
 	return engine.ManagementCommand{
 		Key: requestKey(b), Fingerprint: fingerprintOf(content), Name: "daemon.restart",
-		Operation: engine.RestartDaemonOp(encodeStop),
+		Operation: engine.RestartDaemonOp(check, encodeRestart),
 	}
 }
 
@@ -246,6 +257,94 @@ func TestAResendOfARestartThatAnEarlierRunStoredAsksForNothing(t *testing.T) {
 		res, err := e.Execute(ctx, tc.cmd)
 		if err != nil || !res.Replayed || res.Ending != tc.want {
 			t.Errorf("%s again after a start: %+v, %v; want a replay with Ending = %v", tc.cmd.Name, res, err, tc.want)
+		}
+	}
+}
+
+// What a restart would start is found out outside the loop and only for a request
+// that is not a replay: a resend is answered with the stored result whatever the
+// program is by then, where a check made first could refuse it (the program may
+// since have been replaced, and the restart is what hid itself) and hide a restart
+// that happened. A check that refuses stores nothing, and its error reaches the
+// caller as it is.
+func TestARestartIsCheckedOnceAndAResendIsNotChecked(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	ctx := context.Background()
+	var checks int
+	errGone := errors.New("the program is gone")
+	var failWith error
+	check := func(context.Context) (string, string, error) {
+		checks++
+		return "/bin/sidera", "1.0.0", failWith
+	}
+
+	failWith = errGone
+	if _, err := e.Execute(ctx, restartCommandChecked(40, "restart", check)); !errors.Is(err, errGone) {
+		t.Fatalf("a restart whose check fails: %v; want the error of the check", err)
+	}
+	failWith = nil
+	first, err := e.Execute(ctx, restartCommandChecked(40, "restart", check))
+	if err != nil || first.Replayed || first.Ending != engine.EndingRestart ||
+		string(first.Result) != `{"restarting":true,"program":"/bin/sidera","version":"1.0.0"}` {
+		t.Fatalf("the same identifier after the refusal: %+v, %v; want it free and the check's program in the result", first, err)
+	}
+	if checks != 2 {
+		t.Fatalf("the program was checked %d times for two requests that ran, want 2", checks)
+	}
+
+	// The check would refuse now; the resend must not reach it.
+	failWith = errGone
+	again, err := e.Execute(ctx, restartCommandChecked(40, "restart", check))
+	if err != nil || !again.Replayed || !bytes.Equal(again.Result, first.Result) {
+		t.Errorf("the resend: %+v, %v; want the stored result", again, err)
+	}
+	// Nor must the reuse of the identifier, which is refused as such.
+	_, err = e.Execute(ctx, restartCommandChecked(40, "another restart", check))
+	wantReason(t, err, engine.ReasonOperationIDReused)
+	if checks != 2 {
+		t.Errorf("the program was checked %d times, want the resend and the reuse not to check it", checks)
+	}
+}
+
+// A check may take as long as running a program takes, so it holds neither the loop
+// nor the one place of the install worker: the engine answers while it waits, and
+// another restart is checked meanwhile.
+func TestACheckOfARestartHoldsNeitherTheLoopNorTheInstallWorker(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	ctx := context.Background()
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	check := func(context.Context) (string, string, error) {
+		entered <- struct{}{}
+		<-release
+		return "/bin/sidera", "1.0.0", nil
+	}
+	errs := make(chan error, 2)
+	for _, b := range []byte{41, 42} {
+		go func() {
+			_, err := e.Execute(ctx, restartCommandChecked(b, "restart", check))
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case err := <-errs:
+			t.Fatalf("a restart was answered before its check ran: %v", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("two restarts were not checked at once")
+		}
+	}
+	if _, err := e.Endpoints(ctx); err != nil {
+		t.Errorf("a read while two restarts are checked: %v", err)
+	}
+	close(release)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Errorf("a restart: %v", err)
 		}
 	}
 }

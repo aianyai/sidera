@@ -76,6 +76,7 @@ func (o *installAdapterOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpInstallAdapter}
 }
 func (o *installAdapterOp) ends() Ending { return EndingNone }
+func (o *installAdapterOp) alone() bool  { return true }
 
 func (o *installAdapterOp) prepare(_ context.Context, e *Engine, rnd io.Reader) {
 	o.staged, o.stageErr = e.stagePackage(o.source, rnd)

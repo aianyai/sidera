@@ -290,8 +290,44 @@ func StopDaemonOp(encode func() ([]byte, error)) Operation {
 // start the program again. Like the stop, its only effect is its stored result;
 // the restart is the composition root's, asked for through StoredResult.Ending
 // (Ending.replayed says what a resend asks for).
-func RestartDaemonOp(encode func() ([]byte, error)) Operation {
-	return &endDaemonOp{kind: admin.OpRestartDaemon, ending: EndingRestart, encode: encode}
+//
+// A restart that does not come back leaves nobody to start the program, so the
+// operation first has check find out what would be started: it is a prepared
+// operation, run outside the loop (it may run the program and wait) and only for a
+// request that is not a replay, so the answer to a resend never depends on what the
+// program is now. The error check returns refuses the request and stores nothing;
+// the engine hands it on as it is, which lets the interface give it its words.
+// encode makes the result from the program and the version check returned; it runs
+// in the loop and must not wait.
+func RestartDaemonOp(check func(ctx context.Context) (program, version string, err error), encode func(program, version string) ([]byte, error)) Operation {
+	o := &restartDaemonOp{check: check}
+	o.endDaemonOp = endDaemonOp{
+		kind: admin.OpRestartDaemon, ending: EndingRestart,
+		encode: func() ([]byte, error) { return encode(o.program, o.version) },
+	}
+	return o
+}
+
+type restartDaemonOp struct {
+	endDaemonOp
+	check func(ctx context.Context) (program, version string, err error)
+
+	// What prepare leaves for run: written by the worker before the loop is handed
+	// the command, so the handover orders them.
+	program, version string
+	checkErr         error
+}
+
+func (o *restartDaemonOp) alone() bool { return false }
+func (o *restartDaemonOp) prepare(ctx context.Context, _ *Engine, _ io.Reader) {
+	o.program, o.version, o.checkErr = o.check(ctx)
+}
+func (o *restartDaemonOp) settle(*Engine) {}
+func (o *restartDaemonOp) run(e *Engine, x *opRun) ([]byte, error) {
+	if o.checkErr != nil {
+		return nil, o.checkErr
+	}
+	return o.endDaemonOp.run(e, x)
 }
 
 // endDaemonOp is an operation whose effect is that the daemon ends, one way or the
@@ -327,21 +363,30 @@ func (w *waitForDrain) Error() string {
 // preparedOperation is an operation that has work to do outside the loop before
 // the loop may commit it: the copy of an adapter package, which takes as long as
 // the package is large and must not hold up the loop (the adapters' notifications
-// are held in a buffer that the loop's stall must stay short enough for). The
-// engine runs it in this order: the loop looks the request up in the stored results
-// (a request that was done is answered without any preparation, so that nothing is
-// copied again), takes the one place of the install worker, and starts the worker;
-// the worker prepares, then has the loop run the operation as an ordinary one,
-// which looks the request up again, because an identical resend may have come
-// between the two, and commits; the worker then settles whatever the preparation
-// left, whether the commit happened or not, and only then is the request answered.
+// are held in a buffer that the loop's stall must stay short enough for), or the
+// run of the program a restart would start. The engine runs it in this order: the
+// loop looks the request up in the stored results (a request that was done is
+// answered without any preparation, so that nothing is copied or run again), takes
+// the one place of the install worker if the operation prepares alone, and starts
+// the worker; the worker prepares, then has the loop run the operation as an
+// ordinary one, which looks the request up again, because an identical resend may
+// have come between the two, and commits; the worker then settles whatever the
+// preparation left, whether the commit happened or not, and only then is the
+// request answered. What the preparation finds out is left in the operation for
+// run to use or to refuse with: a preparation has no answer of its own.
 type preparedOperation interface {
 	Operation
-	// prepare runs in the install worker, outside the loop. rnd is what the loop
-	// drew for it: the worker draws no randomness of its own.
+	// alone says whether the operation prepares alone, as the copy of a package
+	// does: the engine then takes the one place of the install worker for it (a
+	// second such operation meanwhile is refused, nothing of it done) and draws the
+	// randomness for the name of its staging. Otherwise any number prepare at once
+	// and rnd is nil.
+	alone() bool
+	// prepare runs in a worker, outside the loop. rnd is what the loop drew for it:
+	// the worker draws no randomness of its own.
 	prepare(ctx context.Context, e *Engine, rnd io.Reader)
-	// settle runs in the install worker after the loop has answered the command
-	// that carried the operation: it drops what the preparation left that the commit
+	// settle runs in the worker after the loop has answered the command that
+	// carried the operation: it drops what the preparation left that the commit
 	// did not take over. It is not called after a fatal failure of the disk: nothing
 	// more is written then.
 	settle(e *Engine)
@@ -359,39 +404,49 @@ func (c *cmdPrepare) run(e *Engine, _ time.Time) {
 		c.done(res, err)
 		return
 	}
-	if !e.installing.CompareAndSwap(nil, &c.cmd.Key) {
-		if running := e.installing.Load(); running != nil && *running == c.cmd.Key {
-			c.fail(refuse(ReasonInstallRepeated))
-		} else {
-			c.fail(refuse(ReasonInstallInProgress))
+	alone := c.op.alone()
+	var drawn []byte
+	if alone {
+		if !e.installing.CompareAndSwap(nil, &c.cmd.Key) {
+			if running := e.installing.Load(); running != nil && *running == c.cmd.Key {
+				c.fail(refuse(ReasonInstallRepeated))
+			} else {
+				c.fail(refuse(ReasonInstallInProgress))
+			}
+			return
 		}
-		return
+		drawn = make([]byte, config.StageSuffixBytes)
+		if _, err := io.ReadFull(e.randomReader(), drawn); err != nil {
+			e.installing.Store(nil)
+			c.fail(fmt.Errorf("engine: the randomness for a staging directory: %w", err))
+			return
+		}
 	}
-	var drawn [config.StageSuffixBytes]byte
-	if _, err := io.ReadFull(e.randomReader(), drawn[:]); err != nil {
-		e.installing.Store(nil)
-		c.fail(fmt.Errorf("engine: the randomness for a staging directory: %w", err))
-		return
-	}
-	if !e.spawn(func(ctx context.Context) { c.done(e.runPrepared(ctx, c, drawn[:])) }) {
-		e.installing.Store(nil)
+	if !e.spawn(func(ctx context.Context) { c.done(e.runPrepared(ctx, c, drawn)) }) {
+		if alone {
+			e.installing.Store(nil)
+		}
 		c.fail(refuse(ReasonShuttingDown))
 	}
 }
 
-// runPrepared is the install worker's whole task. It holds the place of the
-// worker until it has settled, so that the next installation does not start while
-// this one's staging is still on the disk. After a fatal failure of the disk it
-// writes nothing more, neither the preparation nor the settling: the next start
-// removes what is left. A copy that is under way when the failure comes finishes,
-// because the staging does not take a context; the settling that follows it is what
-// does not happen.
+// runPrepared is the worker's whole task. An operation that prepares alone holds
+// the place of the install worker until it has settled, so that the next
+// installation does not start while this one's staging is still on the disk. After
+// a fatal failure of the disk it writes nothing more, neither the preparation nor
+// the settling: the next start removes what is left. A copy that is under way when
+// the failure comes finishes, because the staging does not take a context; the
+// settling that follows it is what does not happen.
 func (e *Engine) runPrepared(ctx context.Context, c *cmdPrepare, drawn []byte) (StoredResult, error) {
-	defer e.installing.Store(nil)
+	var rnd io.Reader
+	if c.op.alone() {
+		defer e.installing.Store(nil)
+		rnd = bytes.NewReader(drawn)
+	}
 	if e.diskFailed(nil) {
 		return StoredResult{}, refuse(ReasonStorageFatal)
 	}
-	c.op.prepare(ctx, e, bytes.NewReader(drawn))
+	c.op.prepare(ctx, e, rnd)
 	run := &cmdExecute{call: newCall[StoredResult](), cmd: c.cmd}
 	res, err := roundTrip(ctx, e, submitInternal, run, run.call)
 	if !e.diskFailed(err) {

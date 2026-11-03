@@ -173,7 +173,10 @@ delivery to a session: when it is judged and how the verdict is recorded.
   engine owns that `Quiesce` counts, prepares, has the loop run the operation as an
   ordinary one (which looks the request up again) and settles what the preparation left,
   and only then is the request answered. A request that was done is answered without any
-  preparation, so nothing is copied twice. What is judged is the staged copy, never the
+  preparation, so nothing is copied twice. An operation whose preparation is not a copy
+  (the run of the program a restart would start, `RestartDaemonOp`) does not prepare
+  alone: it takes no place of the install worker and draws no randomness, and any
+  number prepare at once. What is judged is the staged copy, never the
   source.
 - **Enabling again waits for the closing of the disabling.** An operation that cannot
   run until the records of an endpoint are closed returns `waitForDrain`; its command is

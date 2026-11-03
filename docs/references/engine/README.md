@@ -308,6 +308,23 @@ runs, and its result is not stored because the statement can retire the node.
 
 The addresses of `SetPeerAddressesOp` are judged by `Network.CheckAddresses` before anything is written, because the rule depends on the certificate held for the node and the network is the layer that derives peer identifiers from certificates: while none is held one address must name the peer, and once one is held every `/p2p/` must be its peer. A refusal is made a `config.ChangeInvalid` change with the path of the address, so it reaches the owner in the words of every other invalid value; it is judged before the version is compared, which `config` does for its own rules, and with no network the rule is not judged.
 
+**Work outside the loop before an operation runs.** `preparedOperation` is the one
+mechanism for an operation that must find something out, or copy something, before
+the loop may commit it, without holding the loop. The order is the same for every such
+operation: the loop looks the request up in the stored results, and a request that was
+done is answered with the stored result, nothing prepared and nothing checked, so a
+resend never depends on what the world is now; otherwise a worker (a goroutine the
+engine owns and `Quiesce` counts) prepares, has the loop run the operation as an
+ordinary one, which looks the request up again, and settles what the preparation left.
+What the preparation found is left in the operation for its run to use or to refuse
+with, and a refusal stores nothing. An operation says through `alone` whether it
+prepares alone: the copy of a package does (the one place of the install worker, the
+randomness for the staging name), the check of a restart does not. `RestartDaemonOp` is
+given a check, which returns the program a restart would start and the version it
+reports, or an error; the error refuses the request as it is, so that the interface
+words it, and the result is made from what the check returned. The check runs
+outside the loop, with the context of the engine, and any number run at once.
+
 **Installing an adapter package.** The copy of a package takes as long as the package
 is large and the loop must not wait for it, so `InstallAdapterOp` has work outside the
 loop and the engine runs it in a fixed order (`preparedOperation`). The loop looks the
@@ -2056,6 +2073,7 @@ reproducible).
 | The removal of a node from trust recovers from a crash at every point | `transactions.go` (`trust-local-revoke`), `trust.go` | `TestARemovalFromTrustRecoversFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |
+| What a restart would start is checked outside the loop and not for a resend; a refusing check stores nothing; it holds neither the loop nor the install worker | `manage.go` (`RestartDaemonOp`, `restartDaemonOp`, `cmdPrepare`) | `TestARestartIsCheckedOnceAndAResendIsNotChecked`, `TestACheckOfARestartHoldsNeitherTheLoopNorTheInstallWorker` |
 | The copy is what is judged | `operations_adapters.go` (`stagePackage`) | `TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource`, `TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree` |
 | The version that is current is installed again by storing its result; an adapter that does not run is upgraded and the old version discarded | `operations_adapters.go`, `transactions.go` | `TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult`, `TestUpgradingAnAdapterThatDoesNotRunReplacesTheVersion` |
 | A package that replaces the installed one, another version or the same version with other contents, is installed alike: the local owner only for an enabled instance, the instances restarted, the old files left | `operations_adapters.go` (`installAdapterOp.run`, `restartInstancesOf`) | `TestReplacingThePackageOfAnAdapterThatRunsRestartsTheInstance` |
