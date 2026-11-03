@@ -50,8 +50,10 @@ type State struct {
 	StartedReported bool `json:"started_reported"`
 	// EndedReported: turn.ended was sent.
 	EndedReported bool `json:"ended_reported"`
-	// Interrupted: the adapter interrupted the process, so its end is an
-	// interrupted turn whatever its output says.
+	// Interrupted: the adapter means to interrupt the process, or did, and is
+	// recorded as having done so before it signals. The end of the turn is then an
+	// interrupted turn unless the process finished the turn successfully anyway,
+	// as one does that ends before the signal reaches it.
 	Interrupted bool `json:"interrupted"`
 	// Abandoned: the process ended before the prompt reached the record. Nothing
 	// was reported and nothing will be; the daemon finds out by reconciling.
@@ -131,10 +133,10 @@ func (s State) Step(o Observation) (State, []Event) {
 
 func (s State) final(o record.Outcome) adapterproto.TurnFinal {
 	switch {
-	case s.Interrupted:
-		return adapterproto.TurnInterrupted
 	case o == record.Succeeded:
 		return adapterproto.TurnCompleted
+	case s.Interrupted:
+		return adapterproto.TurnInterrupted
 	}
 	return adapterproto.TurnFailed
 }

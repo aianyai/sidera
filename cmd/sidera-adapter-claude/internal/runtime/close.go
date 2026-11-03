@@ -41,26 +41,19 @@ func (a *App) CloseSession(ctx context.Context, p adapterproto.CloseParams) (ada
 		return a.closeByReference(ctx, string(p.NativeRef))
 	}
 
+	// A close and an interrupt of one session are served one at a time.
+	s.interruptMu.Lock()
+	defer s.interruptMu.Unlock()
+
 	s.mu.Lock()
 	writers, err := a.writers(s.id, s.turn)
+	s.mu.Unlock()
 	if err != nil {
-		s.mu.Unlock()
 		a.log.Warn("the processes of a session cannot be looked at", "endpoint", s.endpoint, "error", err)
 		return unreachable, nil
 	}
-	if s.turn != nil && !s.turn.Done() {
-		for _, w := range writers {
-			if w.Same(s.turn.Process) {
-				s.turn.Interrupted = true
-				if err := a.persistSession(ctx, s); err != nil {
-					a.log.Warn("the checkpoint of a session was not stored", "endpoint", s.endpoint, "error", err)
-				}
-			}
-		}
-	}
-	s.mu.Unlock()
 
-	gone, err := a.interruptAndWait(ctx, writers, a.o.CloseWait)
+	gone, err := a.interruptAndWait(ctx, s, writers, a.o.CloseWait)
 	if err != nil {
 		a.log.Warn("a session cannot be interrupted", "endpoint", s.endpoint, "error", err)
 		return unreachable, nil
@@ -91,7 +84,7 @@ func (a *App) closeByReference(ctx context.Context, ref string) (adapterproto.Cl
 		a.log.Warn("the processes of a session cannot be looked at", "error", err)
 		return unreachable, nil
 	}
-	gone, err := a.interruptAndWait(ctx, writers, a.o.CloseWait)
+	gone, err := a.interruptAndWait(ctx, nil, writers, a.o.CloseWait)
 	switch {
 	case err != nil:
 		a.log.Warn("a session cannot be interrupted", "error", err)
@@ -127,30 +120,82 @@ func (a *App) writers(session string, t *turn.State) ([]turn.Process, error) {
 }
 
 // interruptAndWait interrupts each process that is still the process it was, and
-// waits up to wait for all of them to end. It reports whether they all did.
-func (a *App) interruptAndWait(ctx context.Context, procs []turn.Process, wait time.Duration) (bool, error) {
+// waits up to wait for all of them to end. It reports whether they all did. s is
+// the session the processes belong to, nil for a session the adapter does not
+// hold; the turn process of s is interrupted by interruptProcess.
+func (a *App) interruptAndWait(ctx context.Context, s *session, procs []turn.Process, wait time.Duration) (bool, error) {
 	for _, p := range procs {
 		alive, err := a.alive(p)
 		if err != nil {
 			return false, err
 		}
-		if alive {
-			if err := a.signal(ctx, p); err != nil {
-				return false, err
-			}
+		if !alive {
+			continue
+		}
+		// A process that ended since it was looked at is what waitEnded is for.
+		if err := a.interruptProcess(ctx, s, p); err != nil && !errors.Is(err, proc.ErrNotRunning) {
+			return false, err
 		}
 	}
 	return a.waitEnded(ctx, procs, wait)
 }
 
-// signal interrupts a turn process the way Ctrl-C does. A process that ended
-// since it was looked at is what waitEnded is for.
-func (a *App) signal(ctx context.Context, p turn.Process) error {
-	err := a.o.Signaller.Interrupt(ctx, proc.Identity{PID: p.PID, StartKey: p.StartKey})
-	if err != nil && !errors.Is(err, proc.ErrNotRunning) {
-		return err
+// interruptProcess interrupts a process the way Ctrl-C does. A signal that fails
+// is returned as it came, proc.ErrNotRunning for a process that ended since it
+// was looked at.
+//
+// The turn process of s is held to two facts. The turn is marked interrupted, and
+// the mark stored, before the signal, so that however soon the process ends, and
+// even if this adapter does not live to see it, its end is reported as
+// interrupted; a signal that fails takes the mark back, because the turn was
+// not interrupted. And once a signal has been delivered to the process, s
+// remembers it in memory, so that no second signal is sent to it and the mark
+// is never taken for proof of one. The caller holds s.interruptMu, so that no
+// other interrupt sees the mark of a signal that is still on its way.
+func (a *App) interruptProcess(ctx context.Context, s *session, p turn.Process) error {
+	if s == nil {
+		return a.signal(ctx, p)
 	}
-	return nil
+	s.mu.Lock()
+	t := s.turn
+	if t == nil || t.Done() || !t.Process.Same(p) {
+		s.mu.Unlock()
+		return a.signal(ctx, p)
+	}
+	if s.signalled.Same(p) {
+		s.mu.Unlock()
+		return nil
+	}
+	t.Interrupted = true
+	a.persistTurn(ctx, s)
+	s.mu.Unlock()
+
+	err := a.signal(ctx, p)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		s.signalled = p
+		return nil
+	}
+	if t := s.turn; t != nil && !t.Done() && t.Process.Same(p) {
+		t.Interrupted = false
+		a.persistTurn(ctx, s)
+	}
+	return err
+}
+
+// persistTurn stores the session's checkpoint; a store that fails is logged, and
+// the next change of the turn stores it again. The caller holds s.mu.
+func (a *App) persistTurn(ctx context.Context, s *session) {
+	if err := a.persistSession(ctx, s); err != nil {
+		a.log.Warn("the checkpoint of a session was not stored", "endpoint", s.endpoint, "error", err)
+	}
+}
+
+// signal interrupts a process the way Ctrl-C does, SIGINT or CTRL_C_EVENT on Windows.
+func (a *App) signal(ctx context.Context, p turn.Process) error {
+	return a.o.Signaller.Interrupt(ctx, proc.Identity{PID: p.PID, StartKey: p.StartKey})
 }
 
 // waitEnded waits up to wait for the processes to end, and reports whether they all did.

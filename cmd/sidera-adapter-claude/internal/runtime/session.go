@@ -30,14 +30,20 @@ type session struct {
 	// the daemon sends it again with every request that needs it.
 	toolEnv map[string]string
 
-	// interruptMu serves the interrupts of the session one at a time. It is taken
-	// before mu, and held across the wait for the turn to end.
+	// interruptMu serves the interrupts and the close of the session one at a
+	// time. It is taken before mu, and held across the wait for the turn to end.
 	interruptMu sync.Mutex
 
 	// mu guards everything below and orders the notifications of the session.
 	mu sync.Mutex
 	// turn is the last turn, nil before the first.
 	turn *turn.State
+	// signalled is the turn process an interrupt was delivered to, the zero
+	// process before one was. Unlike the turn's Interrupted mark, which says how
+	// the end of the turn is reported and is stored before the signal is sent,
+	// it is set only once the signal was delivered, and is not stored: a
+	// restarted adapter cannot tell whether the signal of a stored mark was sent.
+	signalled turn.Process
 	// stored is the turn as the last successful checkpoint holds it, nil while
 	// none was stored from this process; a look that leaves the turn as stored
 	// writes nothing.

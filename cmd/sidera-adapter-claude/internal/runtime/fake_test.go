@@ -57,7 +57,10 @@ type world struct {
 	onInterrupt func(w *world, p *fakeProc)
 	// interruptErr is what Interrupt answers; the signal is counted all the same.
 	interruptErr error
-	loggedIn     bool
+	// atSignal runs in Interrupt, with the world unlocked, before it answers: what
+	// the world holds at the moment a signal is sent.
+	atSignal func(w *world)
+	loggedIn bool
 	// detachment is what Start and Host report.
 	detachment proc.Detachment
 
@@ -312,8 +315,11 @@ func (w *world) Interrupt(_ context.Context, id proc.Identity) error {
 	pid := id.PID
 	w.mu.Lock()
 	w.signals = append(w.signals, pid)
-	p, hook, err := w.procs[pid], w.onInterrupt, w.interruptErr
+	p, hook, err, at := w.procs[pid], w.onInterrupt, w.interruptErr, w.atSignal
 	w.mu.Unlock()
+	if at != nil {
+		at(w)
+	}
 	if err != nil {
 		return err
 	}

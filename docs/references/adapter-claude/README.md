@@ -223,7 +223,7 @@ a reconciliation proves that nothing was started.
 
 `session.close` of a session the adapter holds interrupts its turn process the way Ctrl-C does (SIGINT on Unix, a
 `CTRL_C_EVENT` sent by a helper on Windows), which ends a turn cleanly (SIGTERM leaves half a turn), waits up to 10 seconds, reports the turn's end as
-`interrupted` and answers `closed`; a process that does not end is answered `close_unconfirmed` with
+`interrupted` (as the process left it, when it finished the turn with a success anyway) and answers `closed`; a process that does not end is answered `close_unconfirmed` with
 `turn_still_running` and is never killed. A session the adapter no longer holds is found by the
 `native_ref` in the process table and treated the same, and none found is `closed`. The uuid of a
 session held under another open endpoint is left alone and answered `closed`. A process table that
@@ -240,27 +240,39 @@ seconds with exit code 0, its output ends with a `result` of subtype `error_duri
 (`terminal_reason` `aborted_tools` or `aborted_streaming`), the session file ends with
 "[Request interrupted by user for tool use]" and no `turn_duration`, and the processes of the Bash
 tool end with it. So the process's end is the confirmation that the turn stopped, and the final
-`interrupted` is reported for it whatever the output says, as for a close.
+`interrupted` is reported for it, as for a close, unless the process finished the turn with a
+successful `result` anyway (one that ended before the signal reached it): then the turn is
+`completed`, as it was.
 
-The adapter looks at the session's recorded turn process (its PID and start key; a look that fails
-is an error and never "not running"), marks the turn as interrupted in the checkpoint before it
-signals (so that the process's end, however soon, is reported as `interrupted`), signals, and waits
-up to `InterruptWait` (10 seconds) for the process to end. The answers:
+The adapter first brings the session's turn up to date, then looks at the recorded turn process
+(its PID and start key; a look that fails is an error and never "not running"). A turn has begun
+when its prompt is in the session record, as for `turn.started`; a process that has not got that
+far has no turn to stop, and is not signalled, because a signal would end it with no trace of the
+prompt, which the daemon would then find absent and deliver again. Otherwise the adapter marks the
+turn as interrupted in the checkpoint before it signals (so that the process's end, however soon,
+or an adapter that restarts between the two, is reported as `interrupted`), signals, remembers in
+memory that the signal was delivered, and waits up to `InterruptWait` (10 seconds) for the process
+to end. The mark and the memory are two facts: the mark says how the end of the turn is reported
+and may outlive a signal that was never sent, so only the memory, set after the signal succeeded,
+stops a second signal. A signal that fails takes the mark back. The answers:
 
 | Situation | Answer |
 | --------- | ------ |
 | The process ended within the wait | `turn.ended` (`interrupted`) is reported, then `stopped` |
-| The process runs after the wait | `requested`; `turn.ended` is reported when the process ends, and the daemon turns the answer into `stopped` then |
-| The session has no turn, the turn is over, or its process is gone | `not_running` |
-| The process cannot be looked at | `refused`, `native_unreachable` |
-| The signal cannot be sent | `refused`, `native_error`; the turn is no longer marked interrupted |
+| The process runs after the wait, or cannot be looked at any more after the signal | `requested`; `turn.ended` is reported when the process ends. The daemon turns `requested` into `stopped` only when `turn.ended` arrives within its own confirm wait and only for a turn it knows runs |
+| The session has no turn, the turn is over, its prompt is not in the record yet, or its process is gone | `not_running` |
+| The process ended after it was looked at and before the signal reached it | `not_running`; the turn is no longer marked, and ends as the process left it |
+| The process cannot be looked at before the signal | `refused`, `native_unreachable` |
+| The signal cannot be sent | `refused`, `native_error`; the turn is no longer marked interrupted, and the next request signals |
 | The endpoint is unknown (also while the session is still being created, as for a close) | error `1001` |
 | The endpoint is an attached session | error `1002` |
 
-A repeated request for a turn already interrupted does not signal again; it waits for the end like
-the first one. The interrupts of one session are served one at a time. The process is never killed:
-a turn that ignores the interrupt stays `requested`. A turn that was running when the adapter
-restarted is the recorded turn all the same.
+A repeated request for a turn whose process was signalled does not signal again; it waits for the
+end like the first one. The interrupts and the close of one session are served one at a time, and
+a close signals a turn process in the same way, so a close does not signal a process an interrupt
+already signalled and an interrupt after a close that could not signal does signal. The process is
+never killed: a turn that ignores the interrupt stays `requested`. A turn that was running when the
+adapter restarted is the recorded turn all the same.
 
 ### Attached sessions
 
@@ -562,9 +574,10 @@ session again), all of them belong to the one turn and the last one decides how 
 - `prompt.persisted` goes before it for a prompt that `prompt.deliver` answered as
   accepted.
 - `turn.ended` is sent once, when the process is gone and the turn had started. Its final
-  is `interrupted` if the adapter interrupted the process, `completed` if the last
-  `result` is a success without the error mark, otherwise `failed`, which includes a
-  process with no result at all.
+  is `completed` if the last `result` is a success without the error mark, otherwise
+  `interrupted` if the adapter interrupted the process (or was about to, and the signal
+  failed after the mark was stored), otherwise `failed`, which includes a process with no
+  result at all.
 - The process is looked at before the record is read, so that a process seen as gone has
   written everything it will.
 - The session's checkpoint is stored when the turn's state changes, not at every look: a turn is
@@ -805,7 +818,8 @@ at another path.
   `TestCreateAfterACrashBetweenStartingAndRecording`), `session_test.go` (delivery, closing,
   reconciliation, `TestStartTakesSessionsBack`, `TestProbe`), `interrupt_test.go` (`TestInterrupt`,
   `TestRepeatedInterruptDoesNotSignalAgain`, `TestConcurrentInterruptsAreServedOneAtATime`,
-  `TestInterruptThatCannotSignalLeavesTheTurnAsItWas`), `attached_test.go` (attached sessions:
+  `TestInterruptThatCannotSignalLeavesTheTurnAsItWas`, `TestInterruptBeforeTheTurnStarted`,
+  `TestTurnIsMarkedInTheCheckpointBeforeTheSignal`, `TestInterruptAfterACloseThatCouldNotSignal`), `attached_test.go` (attached sessions:
   `TestAttachOutcomes`, `TestADeliveredPromptIsWrittenAndFollowedToTheEndOfItsTurn`,
   `TestATurnThePersonStartsIsReportedWithoutAnAttempt`, `TestClearIsFollowed`,
   `TestAGoneSessionRefusesPromptsAndIsReportedUnavailable`, `TestAnAttachedEndpointIsNotClosedOrInterrupted`,

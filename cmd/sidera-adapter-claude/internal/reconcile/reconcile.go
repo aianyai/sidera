@@ -30,7 +30,8 @@ type Input struct {
 
 	// TurnAlive: the process that carried the attempt is alive.
 	TurnAlive bool
-	// Interrupted: the adapter interrupted the process; matters only when InRecord.
+	// Interrupted: the adapter interrupted the process, or meant to; matters only
+	// when InRecord, and not when the process finished the turn successfully anyway.
 	Interrupted bool
 	// Outcome is the last result of the attempt's output stream, read when the
 	// process is not alive. A successful result means the process worked on the
@@ -75,10 +76,10 @@ func turnState(in Input) adapterproto.TurnState {
 	switch {
 	case in.TurnAlive:
 		return adapterproto.TurnStateRunning
-	case in.Interrupted:
-		return adapterproto.TurnStateInterrupted
 	case in.Outcome == record.Succeeded:
 		return adapterproto.TurnStateCompleted
+	case in.Interrupted:
+		return adapterproto.TurnStateInterrupted
 	}
 	return adapterproto.TurnStateFailed
 }
