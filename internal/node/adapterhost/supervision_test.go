@@ -408,6 +408,53 @@ func TestAnInstanceIsStoppingUntilItsProcessHasEnded(t *testing.T) {
 	}
 }
 
+// An instance that is stopped again before its new supervisor has launched is
+// still stopping while the process of the supervisor before it ends: that process
+// holds the files of its version just as the one the caller stopped last did, and
+// no supervisor started after it launches before it has ended.
+func TestAnInstanceStoppedBeforeItLaunchedIsStoppingUntilThePreviousProcessHasEnded(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	var first *pipeProcess
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, _ := r.scriptedProcess(nil, n == 1)
+		if n == 1 {
+			first = pp
+		}
+		return pp, nil
+	}
+	r.start()
+	r.waitConnected("chat")
+	r.settle()
+
+	r.host.Stop("chat")
+	r.host.EnsureRunning("chat")
+	r.host.Stop("chat")
+	// The first adapter is stubborn: it ends only when killed, after ShutdownWait.
+	<-first.serveDone
+	eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
+
+	// The supervisor that was stopped before it launched has nothing of its own to
+	// end; the instance stays stopping all the same. The spin gives a supervisor
+	// that finishes early time to do so.
+	for end := time.Now().Add(100 * time.Millisecond); time.Now().Before(end); time.Sleep(time.Millisecond) {
+		if !r.host.Stopping("chat") {
+			t.Fatal("an instance whose previous process is still ending is not stopping")
+		}
+	}
+	// A restart now waits for that process too.
+	r.host.EnsureRunning("chat")
+	r.settle()
+	if n := r.lau.launches(); n != 1 {
+		t.Fatalf("the instance was launched again while the first adapter was ending: %d launches", n)
+	}
+
+	r.clk.Advance(testParams().ShutdownWait)
+	eventually(t, "the first adapter to be killed", func() bool { return first.killed() == 1 })
+	first.release()
+	r.waitLaunches(2)
+	r.waitConnected("chat")
+}
+
 // Shutdown sends shutdown to every adapter in service, closes the stream and waits
 // for the process at most ShutdownWait before it kills it; the host reports nothing.
 func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {

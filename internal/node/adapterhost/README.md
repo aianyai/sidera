@@ -21,7 +21,7 @@ and its own log goes through the handle the daemon gives it.
 | ---- | ------- |
 | `New(Config)`, `Host.Start`, `Host.Shutdown`, `Host.Abort` | Make the host, start the supervision of every enabled instance once, end it gracefully, end it at once. |
 | `Host.EnsureRunning`, `Host.Stop` | Start and end the supervision of one instance. Both are idempotent. |
-| `Host.Stopping` | Whether a process of the instance is still being ended after `Stop`, which returns at once. |
+| `Host.Stopping` | Whether a process of the instance is still being ended after `Stop`, which returns at once. It stays true when the instance was restarted and stopped again before the new adapter launched, until the process before it has ended too: a supervisor does not finish before the process it waits for. |
 | `Host.CreateSession`, `DeliverPrompt`, `Reconcile`, `Interrupt`, `Close`, `Attach`, `NotifyPending`, `NotifyDetached` | The calls the engine makes on an adapter. They are the host's half of the interface the engine defines for it. |
 | `Host.Counts` | What the host counts of the connection of an instance, for the question whether the system is quiet. |
 | `LockPath(home, instance)` | The file an instance's adapter locks: the one definition. |

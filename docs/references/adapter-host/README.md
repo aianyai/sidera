@@ -278,6 +278,12 @@ false for an instance that runs, that waits to be started again or that is not
 supervised. A caller that must not remove what the adapter runs from while a process may
 hold it (the files of its version, which a running executable keeps open on Windows)
 asks it first.
+A supervisor that `EnsureRunning` made after a `Stop` waits for the previous process before
+it launches, and it does not finish before that process has ended, whatever stops it: an
+instance stopped again before the new adapter launched is still stopping until the
+previous process has ended, and a further restart waits for the supervisor before it, so
+for the whole chain. An instance that was restarted and not stopped again is wanted
+running, so it is not stopping.
 `Stop` reports nothing to the engine either, so the engine goes on showing the
 instance as online until it is told otherwise: the caller that disables an instance
 marks it offline itself, with `AdapterGone`, which the engine takes only for an
@@ -433,7 +439,7 @@ check on every test):
 | What an error of the engine does to the connection | `TestAnErrorOfTheEngineEndsTheConnection`, `TestRequestsAfterShutdownBeganAreAnsweredAsShuttingDown` |
 | `Start`, `StartWait`, refusals | `TestStartReturnsWhenEveryEnabledInstanceHasStartedOrBeenJudgedOffline`, `TestStartRefusesWhatItCannotStart`, `TestStartEndsWithItsContext` |
 | `EnsureRunning` and `Stop` | `TestEnsureRunningAndStopOfAnInstance` |
-| `Stopping` is true from `Stop` until the process has ended | `TestAnInstanceIsStoppingUntilItsProcessHasEnded` |
+| `Stopping` is true from `Stop` until the process has ended, also for an instance stopped before its adapter launched, which waits for the previous process | `TestAnInstanceIsStoppingUntilItsProcessHasEnded`, `TestAnInstanceStoppedBeforeItLaunchedIsStoppingUntilThePreviousProcessHasEnded` |
 | `Shutdown` and `Abort` | `TestShutdownSendsShutdownWaitsThenKills`, `TestAbortKillsAtOnceAndSendsNoShutdown` |
 | The log of the adapter | `TestTheStderrOfTheAdapterGoesToItsLog` |
 | The lock path and the instance the launcher is given | `TestLockPath`, `TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold` |

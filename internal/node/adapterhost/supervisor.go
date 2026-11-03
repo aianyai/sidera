@@ -150,6 +150,16 @@ func (s *supervisor) finish() {
 		close(helpers)
 	}()
 	s.wait(waits{over: helpers})
+	if s.prev != nil {
+		// A supervisor stopped before it launched has not waited for the process of
+		// the supervisor before it, which may still be ending, and has not finished
+		// until that process has: done is what Stopping and the next supervisor of
+		// the instance rely on to know that no process of the instance is left.
+		// That supervisor was stopped (or the host ended) before this one was made,
+		// so the wait is bounded by its ShutdownWait and kill. It is idle: the
+		// process waited for is not this supervisor's work.
+		s.park(waits{over: s.prev, final: true}, true)
+	}
 	close(s.done)
 	s.h.forget(s)
 }
