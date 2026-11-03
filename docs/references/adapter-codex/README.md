@@ -513,10 +513,13 @@ items of its commands that have a process (`item/started`, a `commandExecution` 
    server no longer lists once the connection is back), lists the thread's background terminals
    and terminates those whose item is one of the turn's commands, **before `turn.ended` is
    reported**. Commands that earlier turns left running on purpose are not touched, and a turn
-   that ran no command with a process costs no further request. The session is still busy while
-   this goes on: it is made idle only after the commands are ended, so a prompt delivered at the
-   end of the turn is refused as busy, and the turn it would start never has its own commands
-   ended along with the old one's.
+   that ran no command with a process costs no further request. For a turn whose end the adapter
+   sees as it happens, the session is still busy while this goes on: it is made idle only after
+   the commands are ended, so a prompt delivered at the end of the turn is refused as busy, and
+   the turn it would start never has its own commands ended along with the old one's. A turn
+   found ended when the connection came back is made idle before its commands are ended, so a
+   prompt delivered in that gap is accepted and its commands may be ended along with the old
+   turn's.
 4. Answers `stopped` once `turn.ended` has been reported. The end of the turn and the answer
    therefore both mean the commands ended too.
 
