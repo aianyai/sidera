@@ -68,8 +68,8 @@ owner stopping one. The state file's start time is written for every start, on U
 but only Windows reads it back.
 
 **Detached start.** The Codex program is resolved to an absolute path first (a name through `PATH`, a relative
-path against the adapter's directory), because `process.Start` runs its first argument as
-written and the server's working directory is not the adapter's. The server is started with
+path against the adapter's directory), because `process.Start` requires an absolute path and runs
+it as written, and the server's working directory is not the adapter's. The server is started with
 `process.Start`, not interruptible (it is
 ended by signalling its process group, and Codex needs no console of its own), with
 standard input on the null device and standard output and error appended to
