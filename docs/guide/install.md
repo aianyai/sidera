@@ -163,9 +163,7 @@ You need Go 1.26 or newer and the repository checked out.
 git clone https://github.com/aianyai/sidera.git
 cd sidera
 mkdir -p bin
-CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex
-# macOS only:
-CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude
+CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex ./cmd/sidera-adapter-claude
 ```
 
 Then make the adapter packages that `sidera adapter install` reads. Each adapter
