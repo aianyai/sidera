@@ -327,6 +327,25 @@ func (n engineNetwork) StartPairing(ctx context.Context, node ident.NodeID, addr
 // and of the gate on vouchers. A node of one machine has none of it.
 func (d *Daemon) stepTrust(ctx context.Context) error { return run(ctx, d.cfg.Attach.TrustSync, d) }
 
+// checkRestart asks the relauncher what a restart would start, and logs a refusal.
+// The wire says of a restart that cannot happen only that it cannot
+// (restart_unavailable): the reason is the log's. The error of a program that did
+// not answer as expected is also on the wire (restart_check_failed), where only the
+// local owner reads it, and is logged here as well. A daemon without a relauncher
+// refuses in the same way, so that the log always says which.
+func (d *Daemon) checkRestart(ctx context.Context) (string, string, error) {
+	if d.cfg.Relauncher == nil {
+		err := fmt.Errorf("%w: this daemon was started without a way to start the program again", ErrRestartUnavailable)
+		d.log.Warn("a restart was refused", "error", err.Error())
+		return "", "", err
+	}
+	program, version, err := d.cfg.Relauncher.CheckRestart(ctx)
+	if err != nil {
+		d.log.Warn("a restart was refused", "error", err.Error())
+	}
+	return program, version, err
+}
+
 // startIDBytes is the length of the random start identifier, before it is written in
 // hexadecimal: long enough that two starts of one node do not share one.
 const startIDBytes = 8
@@ -352,7 +371,8 @@ func (d *Daemon) stepManage(context.Context) error {
 	}
 	d.startID = hex.EncodeToString(id[:])
 	cfg := manageapi.Config{
-		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, StartID: d.startID,
+		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop,
+		Restart: d.RequestRestart, CheckRestart: d.checkRestart, StartID: d.startID,
 		Version: d.cfg.Version, Log: d.log,
 	}
 	if err := configureManagementTests(&cfg); err != nil {

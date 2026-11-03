@@ -118,12 +118,42 @@ type Config struct {
 	// Version is the version of the program, for the status the management
 	// interface shows; empty shows none.
 	Version string
+	// Relauncher checks the program a restart would start. Nil is a daemon that
+	// cannot be restarted: daemon.restart is refused (and the refusal logged) and
+	// nothing is shut down.
+	Relauncher Relauncher
 	// ShutdownGrace is how long the interfaces, the adapters and the engine each
 	// have to stop in an orderly shutdown, on the real clock; zero is
 	// DefaultShutdownGrace. After a fatal failure of the disk nothing more is
 	// written, and the grace is FatalGrace whatever this says.
 	ShutdownGrace time.Duration
 }
+
+// Relauncher is what the process around the daemon knows of starting the program
+// again, which the daemon does not: how it was started and whether what is started
+// would outlive it. The daemon asks before it accepts a restart and, after the
+// shutdown, leaves the starting itself to the caller of Run.
+type Relauncher interface {
+	// CheckRestart runs the program a restart would start, far enough to learn
+	// which version it reports, and returns that program's path and version. An error
+	// that wraps ErrRestartUnavailable says the program cannot be started again from
+	// here; any other, that it was run and did not answer as expected. It may wait
+	// and bounds its own wait; its context ends when the daemon shuts down.
+	CheckRestart(ctx context.Context) (program, version string, err error)
+}
+
+// Ending is how a daemon that ran ended, for the caller to tell what the process
+// does next.
+type Ending int
+
+const (
+	// EndStopped: the process ends, with the error Run returned.
+	EndStopped Ending = iota
+	// EndRestart: a restart was asked for first, the shutdown was orderly and the
+	// daemon holds nothing any more (the instance lock is let go, the sockets are
+	// gone): the caller starts the program again in the daemon's place.
+	EndRestart
+)
 
 func (c Config) withDefaults() Config {
 	if c.ShutdownGrace == 0 {
@@ -269,9 +299,10 @@ type Daemon struct {
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
-	// stopReason is written once, inside stopOnce, before stopCh is closed, and read
-	// only after stopCh is closed, which orders the two.
+	// stopReason and stopEnding are written once, inside stopOnce, before stopCh is
+	// closed, and read only after stopCh is closed, which orders the two.
 	stopReason string
+	stopEnding Ending
 	done       chan struct{}
 	err        error
 }
@@ -296,32 +327,60 @@ func (d *Daemon) Home() string { return d.home }
 // every cause (the management interface, a signal, the program) and may be called
 // from any goroutine any number of times: the shutdown runs once. It returns at
 // once.
-func (d *Daemon) RequestStop(reason string) {
+func (d *Daemon) RequestStop(reason string) { d.requestEnd(reason, EndStopped) }
+
+// RequestRestart asks for the shutdown in the normal way, after which Run reports
+// EndRestart. It is the same single entry as RequestStop: the shutdown runs once
+// and the first request, of either kind, decides how the daemon ends. It returns
+// at once.
+func (d *Daemon) RequestRestart(reason string) { d.requestEnd(reason, EndRestart) }
+
+func (d *Daemon) requestEnd(reason string, ending Ending) {
 	d.stopOnce.Do(func() {
-		d.stopReason = reason
+		d.stopReason, d.stopEnding = reason, ending
 		close(d.stopCh)
 	})
 }
 
+// Ending waits for the shutdown to end and says how the daemon ended: EndRestart
+// only when a restart was the first request and the shutdown ended without an
+// error. After ErrEngineNotStopped (the lock is still held) or a fatal failure of
+// the disk the process must end, whatever was asked for.
+func (d *Daemon) Ending() Ending {
+	<-d.done
+	if d.err == nil && closed(d.stopCh) && d.stopEnding == EndRestart {
+		return EndRestart
+	}
+	return EndStopped
+}
+
 // Run starts the daemon, waits until the context ends or the daemon stops itself,
-// shuts it down in the normal way and returns how it ended. The context of the
-// process is the place to cancel; Run also takes SIGINT and SIGTERM where the
-// system has them, from before the first step: a signal during the start stops it
-// between two steps and unwinds what had begun, and Run returns the error that
-// says the start was interrupted.
-func Run(ctx context.Context, cfg Config) error {
+// shuts it down in the normal way and returns how it ended: the Ending says whether
+// the process is to end or the program is to be started again, and the error is
+// what Wait returns. The context of the process is the place to cancel; Run also
+// takes SIGINT and SIGTERM where the system has them, from before the first step: a
+// signal during the start stops it between two steps and unwinds what had begun, and
+// Run returns the error that says the start was interrupted. A signal or the end of
+// the context at any time before the shutdown is over also overrides a restart that
+// is under way, which the first management request would otherwise decide: it is
+// an order for the process to end, and EndStopped is what Run reports.
+func Run(ctx context.Context, cfg Config) (Ending, error) {
 	sig, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	d, err := Start(sig, cfg)
 	if err != nil {
-		return err
+		return EndStopped, err
 	}
 	select {
 	case <-sig.Done():
 		d.RequestStop("signal")
 	case <-d.Done():
 	}
-	return d.Wait()
+	err = d.Wait()
+	if sig.Err() != nil {
+		return EndStopped, err
+	}
+	return d.Ending(), err
 }
 
 func resolveHome(home string) (string, error) {

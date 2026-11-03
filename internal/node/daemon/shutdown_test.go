@@ -264,7 +264,7 @@ func TestRunReturnsAfterANormalShutdownWhenItsContextEnds(t *testing.T) {
 	c, _ := initialized(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- daemon.Run(ctx, c) }()
+	go func() { _, err := daemon.Run(ctx, c); done <- err }()
 	// The management interface answers from step 8, while the start goes on, and a
 	// context that ends before the last step interrupts the start, which is another
 	// result: wait for the start to have ended.

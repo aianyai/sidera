@@ -147,7 +147,7 @@ func TestASignalDuringTheStartStopsItBetweenTwoSteps(t *testing.T) {
 		}
 		return nil
 	}
-	err = daemon.Run(context.Background(), c)
+	_, err = daemon.Run(context.Background(), c)
 	if signalErr != nil {
 		t.Skipf("this platform cannot send itself a signal: %v", signalErr)
 	}

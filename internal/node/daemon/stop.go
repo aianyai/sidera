@@ -43,7 +43,7 @@ func (d *Daemon) shutdown(fatal bool) {
 	}
 	select {
 	case <-d.stopCh:
-		d.log.Info("shutdown requested", "reason", d.stopReason)
+		d.log.Info("shutdown requested", "reason", d.stopReason, "restart", d.stopEnding == EndRestart)
 	default:
 	}
 	step := func(n int, name string, fn func(context.Context)) {

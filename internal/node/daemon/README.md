@@ -17,20 +17,21 @@ touches files only through `fsx`, and reads time only through the injected clock
 
 | Name | Purpose |
 | ---- | ------- |
-| `Start(ctx, Config)`, `Run(ctx, Config)` | Take the fifteen steps of the start and return a `*Daemon`; `Run` also waits for the end of the context, a signal or a stop, and returns how the daemon ended. |
-| `Daemon.RequestStop`, `Wait`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times; the end, and what ended it. |
+| `Start(ctx, Config)`, `Run(ctx, Config)` | Take the fifteen steps of the start and return a `*Daemon`; `Run` also waits for the end of the context, a signal, a stop or a restart, and returns how the daemon ended: an `Ending` and the error. |
+| `Daemon.RequestStop`, `RequestRestart`, `Wait`, `Ending`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times, the first request deciding whether the process is to end (`EndStopped`) or the program is to be started again (`EndRestart`, only after an orderly shutdown and when no signal came); the end, and what ended it. |
+| `Config.Relauncher`, `Relauncher`, `ErrRestartUnavailable` | What the daemon asks before it accepts `daemon.restart`: the program a restart would start and its version. Nil refuses the restart, and the refusal is logged. The daemon never starts the program itself; its caller does, after `Run`. |
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
 | `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the configuration and of what of the keys no renewal changes, the instance lock's assertion, the engine, the logs), and a task on a period. |
 | `Config.Rand`, `Config.TempRand`, `Config.FS` | Node randomness, optional independent temporary-name randomness for daemon-opened OS filesystems, and an optional caller-owned filesystem. |
 | `Config.InitPort` | The port `init` writes into `network.json`; zero is `config.DefaultListenPort`. A daemon listens where the file says. |
 | `Config.AdapterHost` | The adapter host (`*adapterhost.Host`), or nil for a node that starts no adapter. Given to the engine at step 6, started at step 10 and shut down at step 3 of the shutdown. |
-| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
+| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `ErrRestartUnavailable`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
 | `ClockState`, `RestoreClock`, `AddClockState` | Restore the persisted clock before signing, durably pause a newly detected rollback, and register persistence of the engine's live state before it starts. |
 | `ClockStateEvery`, `CertificateCheckEvery`, `ArchiveSweepEvery` | The period of the clock state, of the look at the certificate, and of the archive sweep (the engine's: the daemon names only the period). |
 
-The five sentinel values are re-exported from the standard-library-only
+The sentinel values are re-exported from the standard-library-only
 `daemonerr` leaf, and `FatalError` is a type alias to its declaration. Their
 identities, original text and unwrap chains are preserved. This lets `apiwire`
 recognize lifecycle failures without importing this composition root; all wire

@@ -66,7 +66,9 @@ func (c *command) local(ctx context.Context, args []string) error {
 		return err
 	}
 	cfg.AdapterHost = host
-	if err := daemon.Run(ctx, cfg); err != nil {
+	// cfg has no Relauncher, so the daemon accepts no restart and the ending is
+	// always a stop.
+	if _, err := daemon.Run(ctx, cfg); err != nil {
 		return &daemonError{err}
 	}
 	return nil
