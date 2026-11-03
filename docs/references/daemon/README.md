@@ -174,6 +174,52 @@ answer as expected. It may wait and bounds its own wait; its context ends when t
 daemon shuts down. Nil makes the daemon one that cannot be restarted: the refusal is
 the same and is logged.
 
+### Restart
+
+The foreground command (`sidera daemon`) is the daemon's `Relauncher` and starts the
+program again when `Run` returns `EndRestart`. `main` records, before anything else
+(the daemon changes the working directory in its first step), the program path, the
+arguments and the working directory it was started with. The path is `argv[0]` made
+absolute the way the system resolved it, with symbolic links kept, so that a link a
+package manager keeps pointing at the current version starts the new version; the path
+`os.Executable` reports replaces it when `argv[0]` cannot be resolved or names another
+file than the one running, though on Linux that has its links resolved.
+
+`CheckRestart` runs that path as `sidera version --json` within 20 seconds and returns
+the path and the version it reports. The program is run under the name `sidera`, never
+under the name it was started with: the name `siderad` selects `daemon`, and
+`siderad version --json` would run `daemon version --json`. Output is capped, and a
+program that fails, prints something other than the version object, reports no version
+or does not answer in time is a failed check, refused as `restart_check_failed`. It is
+refused as `restart_unavailable` when how the program was started was not recorded and,
+on Windows, when a process started now would not outlive the daemon (below).
+
+After `Run` returns `EndRestart`, `cli.Run` has released everything the command held (the
+instance lock, the logs, the sockets and the records of a test process) and only then
+starts the program, so that the new daemon takes the lock and the sockets over:
+
+- **Unix**: `chdir` to the recorded start directory, then `execve` of the recorded path
+  with the recorded arguments and the environment of the process. The process keeps
+  its number, its terminal, its standard streams and the signals it ignores (a
+  `nohup`), so a daemon in a tmux session stays in it and a foreground one stays in the
+  foreground. The Go runtime opens its files close-on-exec, so no descriptor of the old
+  daemon reaches the new one. `execve` returns only on failure, which ends the command
+  with `error: the daemon stopped but could not start <program> again: <why>` and exit
+  code 1: the daemon has gone and nobody is left to start it.
+- **Windows**: a process cannot replace itself, so `adapterkit/process.Start` starts a
+  detached process with the recorded path, arguments and directory and the environment
+  of the process; its standard output and error go on when they are files (the `>>`
+  redirection of a start script) and to the null device otherwise, because a pipe would
+  tie it to the old process. The old process then ends with exit code 0. The new process
+  stays in the job the old one ran in when that job forbids breakaway; that is safe only
+  when the job does not end its processes when it closes (as the job of a scheduled
+  task does not), which `process.HostDetachment().OutlivesDaemon` says before anything is
+  shut down. A job that ends its processes when it closes, or that cannot be read, makes
+  the restart `restart_unavailable`: a service wrapper restarts the daemon it started.
+
+If `ErrEngineNotStopped` or a fatal failure of the disk ended the daemon, the process ends
+as for a stop and starts nothing.
+
 ### init
 
 `daemon.Init` makes the data directory in one transaction (`init`) under the

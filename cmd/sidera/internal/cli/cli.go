@@ -54,6 +54,8 @@ type command struct {
 	observer   txn.Observer
 	afterRecv  func()
 	arguments  *commandArguments
+	// restart is set when the foreground daemon ended because it was asked to restart.
+	restart bool
 }
 type usageError struct{ message string }
 
@@ -67,7 +69,10 @@ type failure struct{ message string }
 func (e *failure) Error() string { return e.message }
 
 // Run dispatches argv, including the executable name, and returns its exit code.
-// Only main ends the process, so clients and daemon resources are closed first.
+// Only main ends the process, so clients and daemon resources are closed first. A
+// daemon that was restarted is the exception that proves it: once everything it held
+// is released, Run starts the program again, which on Unix replaces the process and
+// returns only when that failed.
 func Run(ctx context.Context, argv []string, cfg Config) int {
 	c := command{Config: cfg}
 	args := argv[1:]
@@ -83,7 +88,7 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 			err = usage("a command is required; use --help")
 		} else {
 			role := "cli"
-			if args[0] == "init" || (args[0] == "daemon" && (len(args) == 1 || args[1] != "stop")) {
+			if runsLocally(args) {
 				role = args[0]
 			}
 			close, setupErr := c.configureTestProcess(role)
@@ -92,6 +97,13 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 			} else {
 				err = c.run(ctx, args)
 				err = errors.Join(err, close())
+				if err == nil && c.restart {
+					// Everything the daemon and this command held is released: the
+					// instance lock, the logs, the sockets and the test records.
+					if replaceErr := c.Launch.Replace(); replaceErr != nil {
+						err = &failure{fmt.Sprintf("the daemon stopped but could not start %s again: %v", c.Launch.Program, replaceErr)}
+					}
+				}
 			}
 		}
 	}
@@ -228,8 +240,18 @@ func (c *command) encode(v any) error {
 	return enc.Encode(v)
 }
 
+// runsLocally says whether the command is carried out by this process on the data
+// directory, and not by asking the daemon: `init` and the foreground `daemon`.
+// `daemon stop` and `daemon restart` ask the daemon that runs.
+func runsLocally(args []string) bool {
+	if args[0] == "init" {
+		return true
+	}
+	return args[0] == "daemon" && (len(args) == 1 || (args[1] != "stop" && args[1] != "restart"))
+}
+
 func (c *command) run(ctx context.Context, args []string) error {
-	if args[0] == "init" || (args[0] == "daemon" && (len(args) == 1 || args[1] != "stop")) {
+	if runsLocally(args) {
 		return c.local(ctx, args)
 	}
 	switch args[0] {

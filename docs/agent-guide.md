@@ -49,7 +49,7 @@ conversation. Ask once, say what you will do and why, and wait.
    from the official release archive of Sidera or from a build the owner gave you.
    An adapter runs as a program with the owner's rights.
 6. **Any owner command from inside a Sidera session.** `preset`, `adapter`, `trust`,
-   `network`, `endpoint close`, `daemon stop` and `identity` manage the node. When
+   `network`, `endpoint close`, `daemon stop`, `daemon restart` and `identity` manage the node. When
    you run inside a Sidera session (Part 2) the node would let you run them under a
    full-access preset, because it trusts the user, but they are the owner's to
    decide. Do not run them there without a yes.
@@ -754,7 +754,7 @@ find a node's runtime endpoint by running `sidera endpoint list --instance codex
 `claude`) on that machine and taking the `runtime` row whose `STATE` is `open`.
 
 Inside a session, the owner commands (`preset`, `adapter`, `trust`, `network`,
-`endpoint close`, `daemon stop`, `identity`) may work, depending on the preset,
+`endpoint close`, `daemon stop`, `daemon restart`, `identity`) may work, depending on the preset,
 because the node's management interface trusts the user, not the session. Do not run
 them there without your owner's yes (see "Ask your owner before").
 

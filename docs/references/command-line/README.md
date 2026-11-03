@@ -44,6 +44,7 @@ arguments, purpose and one example.
 | `setup controller` | Print what a person does once to let their own sessions become controllers: the command that adds the `sidera` MCP server to Claude Code (`claude mcp add --scope user sidera -- <sidera> mcp`, every session of the user) and the rule `"mcp__sidera"` to add to the `permissions.allow` list of `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows; `$CLAUDE_CONFIG_DIR/settings.json`, `%CLAUDE_CONFIG_DIR%\settings.json`, when that variable relocates Claude Code's configuration); the command that adds it to Codex (`codex mcp add sidera -- <sidera> mcp`, the user configuration) and the line `default_tools_approval_mode = "approve"` to add to the `[mcp_servers.sidera]` table in `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml`, when that variable relocates Codex's), because `codex mcp add` has no option for it; and one line saying what that enables. Without the permission step a woken controller stalls at a prompt only a person can answer: Claude Code asks for each tool call of a server unless a rule allows it, Codex for each call of a tool that is not read-only. `<sidera>` is the absolute path of the program that ran the command (`os.Executable`, as the platform reports it, made absolute and not resolved further; always in double quotes on Windows, which cmd and PowerShell both read literally for every character a user name may hold, and in single quotes elsewhere when the path needs them), never the bare name: a client starts the server without a shell, Codex on Windows reports `program not found` for the bare name although the program is on the user's `PATH`, and a Linux session that is not a login shell has no `~/.local/bin` on its `PATH`. A program whose path cannot be determined is a failure (exit 1) that prints nothing. A program in a temporary directory (`os.TempDir()` or `GOTMPDIR`), as a `go run` build is and deleted when it exits, is warned about on standard error, because the path printed would not last; the exit code and the printed text are unchanged. The printed text ends with a note that the path is stored in each configuration: after the program moves, `claude mcp remove --scope user sidera` must precede adding it again (it refuses an existing server), and the Codex approval line must be added again after `codex mcp add`, which rewrites the table with only the command and arguments. When the data directory is not the default (`--home` or `SIDERA_HOME`) both commands name it, `<sidera> --home <dir> mcp`, because a client starts the server with an environment of its own (Codex passes only an allow-list of variables, so `SIDERA_HOME` would not reach it). It only prints: it runs nothing, edits no configuration and needs no node; `--json` has no effect. |
 | `version` | Print `sidera <version> (commit <commit>, go<version>)`, with `modified` after the commit when the build's checkout had uncommitted changes; with `--json`, the object `{"version", "commit", "modified", "go_version"}` (`commit` is left out when the build carries none). It needs no running node and takes no arguments. A release build reports the release version; a build without it reports `0.0.0-dev` (see [`internal/release`](../../../internal/release/README.md)). |
 | `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
+| `daemon restart [--expect-version <version>] [--wait <duration>]` | Ask the running daemon to shut down and start the program again as it was started, then wait for the new daemon (default `--wait 2m`, `0` returns once the restart is accepted). See [Restarting the daemon](#restarting-the-daemon). |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. |
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. |
 | `adapter install <package-directory>` / `adapter list` | Install a local package by its absolute path (another version, like the same version with other contents, replaces the installed package and restarts the instances that run, which keep their sessions; the same contents change nothing), or list installed packages, instances and probe results. |
@@ -137,6 +138,42 @@ never retries.
 Installation only resolves the package directory and names it to the daemon.
 The daemon's existing package reader owns the regular-file checks and bounded
 reads, as described in [configuration](../configuration/README.md).
+
+### Restarting the daemon
+
+`daemon restart` is a change like any other: one operation identifier, one resend after
+an unknown outcome. It sends `daemon.restart` (with `expect_version` when
+`--expect-version` is given; the daemon refuses when the program it would start
+reports another version, which is how a program that was just replaced is told from
+the old one still on disk), and then waits, on the client's side only, until `status`
+answers `running` with a `daemon.start_id` other than the one the daemon gave in its
+answer. The old daemon may still answer for a moment, then nothing does while the
+program starts again, then the new daemon answers while it recovers; all of these, an
+answer that was cut off included, are "not yet". Any other failure of a read (the new
+daemon refuses this user, for one) ends the command with that error, because waiting
+does not mend it. `--wait` is a duration (`30s`, `2m`); a bare number or a negative
+one is usage error 2 before anything is sent, and the time waited is counted as the
+intervals slept (200 ms), as for `trust request`.
+
+The human output is the `key value` lines of the other changes: `restarting`, `program`
+(the path that is started), `version` (what the program reported when the daemon ran
+it before accepting) and `previous_start_id`, printed as soon as the daemon has
+answered; then, once the wait has seen the new daemon, `running true` and its `start_id`;
+last `operation_id` and `replayed`. With `--json` one object is written when the wait is
+over: `{"operation_id","replayed","result":{"restarting","program","version","previous_start_id","running"?,"start_id"?}}`,
+the last two left out when `--wait` is `0`.
+
+The daemon refuses before it shuts anything down, with `refused/restart_unavailable`
+(exit 7: it was not told how it was started, or what is started would not outlive it on
+Windows), `refused/restart_check_failed` (exit 7: the program failed to answer
+`version`) or `conflict/restart_version_mismatch` (exit 6); it then keeps running. A
+wait that runs out is a plain failure, exit 1, whose message names the daemon log
+(`<home>/logs/daemon.log`) and says to start the daemon the way it was started when it
+is not running: a program that fails after the check, at its start, can only be seen
+there. `daemon restart` is not the foreground `daemon` command and never runs one: the
+command dispatcher treats `daemon stop` and `daemon restart` as requests to the running
+daemon. How the foreground daemon starts the program again is in
+[the daemon reference](../daemon/README.md#restart).
 
 ### Network commands
 
@@ -356,6 +393,11 @@ an interrupted receive followed by a possibly-duplicate retry, two separately
 created sessions in one directory, and five 60 KiB messages in English and
 Chinese, checking visible parts against acknowledgement counts. The CLI Agent
 driver is in [`acceptance/agent/cli`](../../../cmd/sidera/internal/acceptance/agent/cli/README.md).
+A restart is tested on the built program on every platform: the daemon is started as a
+child, `daemon restart` is run, and the test asserts a new start identifier, the same
+node, a daemon that serves again and holds the data directory, and an orderly
+`daemon stop` of the new one. On Unix the child is replaced in place and never ends; on
+Windows it ends and a detached process takes its place.
 
 ## Tagged test process controls
 

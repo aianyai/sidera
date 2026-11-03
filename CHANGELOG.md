@@ -8,6 +8,21 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **`sidera daemon restart [--expect-version <version>] [--wait <duration>]`** restarts the
+  running daemon in place with one command. The daemon first runs the program it would
+  start as `version --json` and refuses, staying up, when that fails or reports a version
+  other than `--expect-version` (`refused/restart_check_failed`,
+  `conflict/restart_version_mismatch`), or when it was not told how it was started or, on
+  Windows, when the job it runs in would end the new process (`refused/restart_unavailable`).
+  It then shuts down in its orderly way and starts the program again: on macOS and Linux it
+  replaces its own process, so the process number, terminal and tmux session stay; on
+  Windows it starts a detached process and ends, which a scheduled task's daemon survives.
+  The command waits until `status` shows a new `daemon.start_id` and the daemon running
+  (default 2 minutes) and prints both start identifiers, the program and its version.
+- `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
+
 ## [0.11.0] - 2026-11-03
 
 Releases are now signed, and an upgrade of an adapter no longer ends the sessions of the node:

@@ -141,6 +141,13 @@ adapters restart.
 3. Start the daemon again, the way you started it before, from your home directory
    (not from one that may be deleted, such as a git worktree).
 
+   A daemon that runs can instead be restarted onto the new program, which makes steps
+   1 and 3 unnecessary: replace the programs as in step 2 (renaming a running program
+   works on every system), then run
+   `sidera daemon restart --expect-version <the new version>` (see
+   [Restart the daemon](#restart-the-daemon)). Do this only when the daemon's program
+   is the one you replaced; the version check refuses the restart otherwise.
+
 4. Install the new release's package of each adapter:
 
    ```sh
@@ -299,6 +306,48 @@ rename is the only move to rely on. A folder that a Codex sandbox's setup had al
 granted its group carries that entry along in the rename, and the daemon then refuses
 to start and names it. A Codex App Server that an older adapter started in the state
 directory and that you did not end is a leftover that step 6 and the section above deal with.
+
+## Restart the daemon
+
+```sh
+sidera daemon restart
+sidera daemon restart --expect-version 0.12.0   # after replacing the program
+```
+
+The daemon shuts down in its orderly way and starts the program again as it was started:
+the same path, arguments, environment and working directory. Before it accepts, it runs
+that program as `version --json` and refuses to restart, staying up, when the program
+does not answer, when it reports a version other than `--expect-version`, or when the
+daemon cannot start itself again here. The command waits (`--wait`, 2 minutes by
+default) until the status shows a new `start_id` and the daemon running, and prints
+both start identifiers, the program and its version. Use it after replacing the
+program, after `sidera network listen set`, or to make the daemon find a new Codex
+release. The sessions of the adapters are handled as for any restart of the daemon: see
+[Stop the daemon and the Codex App Server](#stop-the-daemon-and-the-codex-app-server).
+
+- macOS and Linux: the process is replaced in place. Its process number, its terminal
+  and its tmux session stay, and a daemon running in the foreground stays in the
+  foreground. The program is the path the daemon was started from; a link that points
+  at the current version (a package manager's) is started again as the link. If the
+  daemon was started as `sidera` from a directory on your `PATH`, that is the file
+  found there.
+- Windows: a process cannot replace itself, so the old process ends and a detached new
+  one takes its place, with the same arguments and environment, at the same level of
+  privilege. Its output goes on to the file the start script redirected to
+  (`daemon.log` in the script above). A daemon started by a scheduled task stays alive
+  after the restart: the new process stays in the task's job, which does not end its
+  processes when it closes, so the task shows as Ready once the old process has
+  ended, and ending the task in Task Scheduler no longer stops the daemon (use
+  `sidera daemon stop`); starting the task again fails, because a daemon holds the
+  data directory. When whatever started the daemon puts it in a job that ends its
+  processes when it closes (some service wrappers), the daemon refuses the restart
+  (`restart_unavailable`): restart it through the wrapper.
+
+If the program was accepted by the check but does not come back (for example it was
+replaced by a file that fails to start after the check), the daemon is gone. The command
+then fails after the wait and names `<data directory>/logs/daemon.log`; start the daemon
+the way you started it before, and read the log and the output of the start script to
+see why it did not run.
 
 ## Stop the daemon and the Codex App Server
 

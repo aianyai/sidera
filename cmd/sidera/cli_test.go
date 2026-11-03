@@ -1220,6 +1220,115 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 	}
 }
 
+// daemonStatus reads what the running daemon of home reports of itself.
+func daemonStatus(t *testing.T, home string) (nodeID, version, state, startID string) {
+	t.Helper()
+	code, out, diag := runHome(t, home, "status", "--json")
+	var body struct {
+		Result struct {
+			Node struct {
+				ID      string `json:"id"`
+				Version string `json:"version"`
+			} `json:"node"`
+			Daemon struct {
+				State   string `json:"state"`
+				StartID string `json:"start_id"`
+			} `json:"daemon"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); code != 0 || err != nil {
+		t.Fatalf("status: %d %q %q %v", code, out, diag, err)
+	}
+	r := body.Result
+	return r.Node.ID, r.Node.Version, r.Daemon.State, r.Daemon.StartID
+}
+
+// A daemon restarted by `sidera daemon restart` is the same program started again
+// on the same data directory, with a start identifier of its own. On Unix it is the
+// same process, replaced in place (the child the test started never ends); on
+// Windows the process ends and a detached one takes its place. Either way the new
+// daemon answers, holds the data directory's lock (a second daemon is refused), and
+// stops with `daemon stop`.
+func TestDaemonRestartStartsTheProgramAgain(t *testing.T) {
+	home, done := startDaemon(t)
+	// The daemon that replaces a child of the test on Windows is nobody's child:
+	// whatever the test ends with, stop it.
+	t.Cleanup(func() { runHome(t, home, "daemon", "stop") })
+	nodeID, version, _, before := daemonStatus(t, home)
+	if before == "" {
+		t.Fatal("the daemon does not report a start identifier")
+	}
+
+	code, out, diag := runHome(t, home, "daemon", "restart", "--wait", "60s", "--expect-version", version, "--json")
+	var body struct {
+		Result struct {
+			Restarting      bool   `json:"restarting"`
+			Program         string `json:"program"`
+			Version         string `json:"version"`
+			PreviousStartID string `json:"previous_start_id"`
+			Running         bool   `json:"running"`
+			StartID         string `json:"start_id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); code != 0 || err != nil || diag != "" {
+		t.Fatalf("daemon restart: %d %q %q %v", code, out, diag, err)
+	}
+	r := body.Result
+	if !r.Restarting || !r.Running || r.PreviousStartID != before || r.StartID == "" || r.StartID == before || r.Program != binary(t) || r.Version != version {
+		t.Fatalf("daemon restart answered %q, want a running daemon other than %s, started from %s as %s", out, before, binary(t), version)
+	}
+
+	afterNode, afterVersion, state, after := daemonStatus(t, home)
+	if afterNode != nodeID || afterVersion != version || state != "running" || after != r.StartID {
+		t.Fatalf("status after the restart: node %s version %s %s start %s; want node %s version %s running start %s", afterNode, afterVersion, state, after, nodeID, version, r.StartID)
+	}
+	if runtime.GOOS == "windows" {
+		// A new process took the place of the one the test started.
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("the replaced daemon ended with %v", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("the replaced daemon did not end")
+		}
+	} else {
+		select {
+		case err := <-done:
+			t.Fatalf("the daemon process ended instead of being replaced: %v", err)
+		default:
+		}
+	}
+	// The new daemon holds the data directory.
+	if code, out, diag := runHome(t, home, "daemon"); code != 1 || !strings.Contains(diag, "already running") {
+		t.Fatalf("a second daemon beside the restarted one: %d %q %q", code, out, diag)
+	}
+
+	if code, out, diag := runHome(t, home, "daemon", "stop", "--json"); code != 0 {
+		t.Fatalf("daemon stop: %d %q %q", code, out, diag)
+	}
+	if runtime.GOOS != "windows" {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("orderly exit of the restarted daemon: %v", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("the restarted daemon did not stop")
+		}
+		return
+	}
+	// Nobody waits for the detached process: it is gone when nothing answers.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		if code, _, _ := runHome(t, home, "status", "--json"); code == 9 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the restarted daemon did not stop")
+		}
+	}
+}
+
 func TestIdentityExportBackupAndRetirement(t *testing.T) {
 	home, done := startDaemon(t)
 	code, armor, diag := runHome(t, home, "identity", "export-revocation")

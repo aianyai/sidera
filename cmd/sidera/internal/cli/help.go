@@ -10,6 +10,7 @@ type helpEntry struct{ usage, purpose, example string }
 var helpEntries = map[string]helpEntry{
 	"setup controller":           {"setup controller", "Print the commands that add the sidera MCP server to Claude Code (user scope) and Codex, and the permission each needs so that its tools run without a prompt, so that sessions you open can attach themselves as controllers. It only prints; it runs nothing and changes no configuration.", "sidera setup controller"},
 	"mcp":                        {"mcp", "Serve Agent tools over MCP stdio; stdout contains protocol messages only, including with --json.", "sidera mcp"},
+	"daemon restart":             {"daemon restart [--expect-version <version>] [--wait <duration>]", "Shut the running node down and start the program again as it was started, then wait for the new daemon (default --wait 2m; 0 returns once the restart is accepted). The daemon first runs the program, and refuses to restart, staying up, if it cannot be started again or does not report --expect-version.", "sidera daemon restart --expect-version 0.12.0"},
 	"daemon stop":                {"daemon stop", "Ask the running node to stop after acknowledging the request.", "sidera daemon stop --json"},
 	"alerts list":                {"alerts list [--all]", "List open alerts, optionally including acknowledged alerts.", "sidera alerts list --all --json"},
 	"alerts ack":                 {"alerts ack <id>", "Acknowledge an alert.", "sidera alerts ack <id>"},
@@ -58,7 +59,7 @@ var helpEntries = map[string]helpEntry{
 	"probe":                      {"probe", "Present SIDERA_PROBE_TOKEN for the CLI front end.", "sidera probe --json"},
 }
 
-var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "version", "mcp", "setup controller", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter config", "adapter disable", "adapter remove", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "network show", "network address set", "network address remove", "network listen set", "trust expect", "trust forget", "trust reject", "trust request", "trust list", "trust remove", "trust clear", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
+var helpOrder = []string{"init", "daemon", "daemon stop", "daemon restart", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "version", "mcp", "setup controller", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter config", "adapter disable", "adapter remove", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "network show", "network address set", "network address remove", "network listen set", "trust expect", "trust forget", "trust reject", "trust request", "trust list", "trust remove", "trust clear", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
 
 func (c *command) printHelp(args []string) error {
 	if len(args) == 0 {

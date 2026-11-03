@@ -218,7 +218,7 @@ sidera daemon
 ```
 
 `sidera daemon` runs in the foreground and stops with Ctrl-C or
-`sidera daemon stop`. The node's own log is
+`sidera daemon stop`; `sidera daemon restart` starts it again in place. The node's own log is
 in `~/.sidera/logs/` (on Windows `%LOCALAPPDATA%\Sidera\logs\`). Sidera does not start itself at boot and does not install a
 background service yet; the options below keep it running after you close the
 terminal. Stopping the daemon leaves the Codex App Server that the Codex adapter
@@ -336,9 +336,15 @@ sidera network show
 sidera daemon stop
 ```
 
-After a Codex upgrade, restart the daemon once so that it finds the new release.
+After a Codex upgrade, restart the daemon once so that it finds the new release:
+`sidera daemon restart` does it in one command (see
+[Restart the daemon](operations.md#restart-the-daemon)); the new daemon is a detached
+process started with the same arguments and environment as the old one, whose output
+goes on to the same `daemon.log`.
 The daemon does not start at boot. To start it at logon, register a scheduled
-task that runs the same `start-daemon.cmd`.
+task that runs the same `start-daemon.cmd`. The daemon of such a task survives
+`sidera daemon restart`: the task shows as Ready afterwards, and ending the task in
+Task Scheduler no longer stops the daemon, so stop it with `sidera daemon stop`.
 
 ## Ports and the firewall
 

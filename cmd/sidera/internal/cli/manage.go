@@ -26,6 +26,9 @@ type managementPlan struct {
 	// wait is how long `trust request` waits, on the client's side only, for the
 	// pairing to complete after the node has answered; zero does not wait.
 	wait time.Duration
+	// expectVersion is the version `daemon restart` requires of the program the
+	// daemon starts again; empty requires none.
+	expectVersion string
 }
 
 func (c *command) manage(ctx context.Context, args []string) error {
@@ -44,6 +47,9 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	defer client.Close()
 	if plan.method == "identity.export_revocation" {
 		return c.exportRevocation(ctx, client, plan.exportOut)
+	}
+	if plan.method == "daemon.restart" {
+		return c.restartCommand(ctx, client, c.random, restartRequest{ExpectVersion: plan.expectVersion, Wait: plan.wait, Home: home})
 	}
 	req := manageapi.Request{Params: plan.params, ExpectedVersion: plan.expected}
 	if plan.versionMethod != "" && req.ExpectedVersion == nil {
@@ -65,10 +71,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	}
 	// The version, identifier and params are chosen once. A lost answer permits
 	// one resend of this request, never a fresh read or a newly chosen identifier.
-	raw, err := client.Call(ctx, plan.method, req)
-	if err != nil && !req.OperationID.IsZero() && apiwire.FromError(err).Category == apiwire.CategoryOutcomeUnknown {
-		raw, err = client.Call(ctx, plan.method, req)
-	}
+	raw, err := callResending(ctx, client, plan.method, req)
 	if err != nil {
 		return err
 	}
@@ -97,6 +100,17 @@ func (c *command) manage(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// callResending sends req, and when it carries an operation identifier and its
+// outcome is unknown sends the same request once more. The daemon answers a resend
+// of a request that took effect with the stored result.
+func callResending(ctx context.Context, client caller, method string, req manageapi.Request) ([]byte, error) {
+	raw, err := client.Call(ctx, method, req)
+	if err != nil && !req.OperationID.IsZero() && apiwire.FromError(err).Category == apiwire.CategoryOutcomeUnknown {
+		raw, err = client.Call(ctx, method, req)
+	}
+	return raw, err
 }
 
 func managementVersion(raw []byte) (admin.Version, error) {
@@ -134,6 +148,9 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	switch group + " " + action {
 	case "daemon stop":
 		plan.method = "daemon.stop"
+		plan.change = true
+	case "daemon restart":
+		plan.method = "daemon.restart"
 		plan.change = true
 	case "alerts list":
 		plan.method = "alerts.list"
@@ -258,6 +275,11 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	}
 	want := 0
 	switch plan.method {
+	case "daemon.restart":
+		if o.wait < 0 {
+			return plan, usage("--wait cannot be negative")
+		}
+		plan.wait, plan.expectVersion = o.wait, o.expectVersion
 	case "trust.request":
 		if len(p) < 1 {
 			return plan, usage("trust request needs a node and optionally multiaddrs to dial")
@@ -419,6 +441,7 @@ func assignments(args []string) (map[string]any, error) {
 
 type managementFlags struct {
 	file, instance, node, output string
+	expectVersion                string
 	all, yes                     bool
 	version                      uint64
 	wait                         time.Duration
@@ -441,6 +464,9 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&o.output, "out", "", "write the verified raw record to a new private file")
 	case "trust request":
 		f.DurationVar(&o.wait, "wait", defaultPairingWait, "how long to wait for the pairing to complete; 0 returns at once")
+	case "daemon restart":
+		f.DurationVar(&o.wait, "wait", defaultRestartWait, "how long to wait for the new daemon to run; 0 returns once the restart is accepted")
+		f.StringVar(&o.expectVersion, "expect-version", "", "refuse to restart unless the program that would be started reports this version")
 	case "identity retire":
 		f.StringVar(&o.node, "node", "", "node to retire")
 		f.BoolVar(&o.yes, "yes", false, "confirm permanent retirement")

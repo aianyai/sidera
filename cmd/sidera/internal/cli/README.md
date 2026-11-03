@@ -4,7 +4,11 @@
 includes the executable name. The owner supplies standard streams, an environment
 lookup, the path of the running program (`Executable`), what the program was built from (`release.Info`) and
 how it was started (`Launch`, recorded by `main`, or `LaunchErr`). The dispatcher returns an exit code and never exits the
-process itself. It borrows the streams, owns and closes the Agent client, and
+process itself, with one exception: after a foreground daemon that was asked to
+restart has finished and everything is closed, it calls `Launch.Replace`, which on
+Unix replaces the process and returns only on failure (`error: the daemon stopped but
+could not start <program> again: …`, exit 1) and on Windows returns once a detached
+process runs. It borrows the streams, owns and closes the Agent client, and
 waits for a foreground daemon to finish before returning. For `mcp`, it passes
 stdin/stdout ownership to the MCP peer and borrows stderr for diagnostics. MCP
 process failures always use stderr, including with `--json`; tool and RPC failures
@@ -22,11 +26,18 @@ and its bound values. A local value stays attached, including a body spelled
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: human results; structured results use the shared JSON encoder.
 - `local.go`: initialization (with its `--port` flag, judged by
-  `config.ValidatePort`) and foreground daemon composition.
+  `config.ValidatePort`) and foreground daemon composition, including the daemon's
+  `Relauncher`: it refuses a restart when `LaunchErr` is set or `launch.Restartable`
+  says no (wrapping `daemon.ErrRestartUnavailable`) and otherwise probes the program
+  within its own 20 seconds, the daemon's context ending only with the daemon.
+- `restart.go`: `daemon restart`. `restartDaemon` is the one place that sends
+  `daemon.restart` and waits for the new daemon, whoever asks; the wait reads `status`
+  until a `start_id` other than the old one runs, treating a daemon that is gone, going
+  or starting (and a cut-off read) as "not yet" and any other failure as the answer.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request
-  for a single resend after an unknown outcome; the commands `network address set|remove`
+  for a single resend after an unknown outcome (`callResending`); the commands `network address set|remove`
   and `network listen set` have three words, which `commandPath` discovers.
 - `manage_output.go`: complete JSON responses and human settings and lists; a `contact`
   line of a result is printed first, on a line of its own, so that it can be copied.

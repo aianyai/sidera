@@ -4,7 +4,12 @@ The node's command-line program. `main.go` supplies the process streams and
 environment to [`internal/cli`](internal/cli/README.md), and is the only place
 that calls `os.Exit`. Before anything else it records how the program was started
 ([`internal/launch`](internal/launch/README.md)), because the daemon changes the
-working directory. Build it with `go build ./cmd/sidera`.
+working directory. Only `main` ends the process, with one exception: a foreground
+daemon that was asked to restart (`sidera daemon restart`) is replaced by the program
+started again, which on Unix `cli.Run` does itself, as its last act, once the daemon's
+lock, logs and sockets are released (the call returns only when that failed); on
+Windows it starts a detached process and returns, and `main` then ends the old one.
+Build it with `go build ./cmd/sidera`.
 
 [`command-line`](../../docs/references/command-line/README.md) describes the
 commands, output and exit codes. Agent commands use the checked local Agent
@@ -40,7 +45,9 @@ byte, kills its CLI process, and reads the unacknowledged message again. It
 does not depend on pipe capacity or a process winning a timing race.
 
 Management integration tests run against the real management server and also
-start and stop the actual foreground daemon process. A checked-IPC HTTP fault
+start and stop the actual foreground daemon process, and restart it with
+`daemon restart` (on every platform: the process is replaced in place on Unix, a
+detached one takes over on Windows). A checked-IPC HTTP fault
 peer drops management responses to verify the CLI's one resend keeps the
 operation identifier, version and body unchanged. The decoder and settings
 argument fuzz tests live in `internal/cli`, alongside a parser fuzz target that

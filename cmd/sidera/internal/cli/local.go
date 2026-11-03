@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/launch"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
@@ -66,10 +68,40 @@ func (c *command) local(ctx context.Context, args []string) error {
 		return err
 	}
 	cfg.AdapterHost = host
-	// cfg has no Relauncher, so the daemon accepts no restart and the ending is
-	// always a stop.
-	if _, err := daemon.Run(ctx, cfg); err != nil {
+	cfg.Relauncher = relauncher{c.Launch, c.LaunchErr}
+	ending, err := daemon.Run(ctx, cfg)
+	if err != nil {
 		return &daemonError{err}
 	}
+	// Run starts the program again once this command has released what it holds.
+	c.restart = ending == daemon.EndRestart
 	return nil
+}
+
+// restartCheckLimit bounds the run of the program that a restart would start:
+// `version` answers at once, and a program that does not is not one to start. The
+// daemon's context ends only when the daemon does.
+const restartCheckLimit = 20 * time.Second
+
+// relauncher is how the daemon learns whether, and into what, it can restart:
+// the way this process was started, or why that is not known.
+type relauncher struct {
+	launch    launch.Launch
+	launchErr error
+}
+
+func (r relauncher) CheckRestart(ctx context.Context) (string, string, error) {
+	if r.launchErr != nil {
+		return "", "", fmt.Errorf("%w: how this program was started was not recorded: %v", daemon.ErrRestartUnavailable, r.launchErr)
+	}
+	if ok, why := launch.Restartable(); !ok {
+		return "", "", fmt.Errorf("%w: %s", daemon.ErrRestartUnavailable, why)
+	}
+	ctx, cancel := context.WithTimeout(ctx, restartCheckLimit)
+	defer cancel()
+	info, err := r.launch.Probe(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	return r.launch.Program, info.Version, nil
 }
