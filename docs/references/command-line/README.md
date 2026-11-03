@@ -186,7 +186,9 @@ refuses and why is [the update reference](../update/README.md).
 `--version` takes a release version with or without a leading `v`; anything else is usage
 error 2. Without `--check` and `--yes` the command needs a terminal on standard input
 to ask on, and refuses with usage error 2, before any request, when there is none.
-`--check` needs neither, reads a release and writes nothing; it exits 0 whatever it finds.
+`--check` needs neither, reads a release and writes nothing; it exits 0 once it has read a
+release it can believe, whether or not an update is available or admitted, and exits 1 when
+it cannot reach or believe a release.
 
 The plan, the question and the progress go to standard error, so that standard output is
 the report. The human report is `key value` lines: before the

@@ -87,7 +87,8 @@ sidera update            # shows what it will do and asks
 ```
 
 It downloads the release, checks it against the signing key built into the program
-(`--check` does only that part, and always exits 0; with `--json` it says
+(`--check` does only that part, and exits 0 once it has read a release it can believe, 1 when
+it cannot; with `--json` it says
 `update_available` and `admitted`; it looks at the release and this program only, not at
 the daemon or the adapters, which `sidera update` without `--check` finishes), unpacks the archive for this platform, runs the
 unpacked program to see that it is the release, and asks `Update? [y/N]` (`--yes` skips the

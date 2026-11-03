@@ -29,8 +29,9 @@ The name `siderad` (also `siderad.exe`) selects `daemon`.
 `sidera update` is the converging upgrade of an installation from a release archive:
 [`internal/update`](internal/update/README.md) does the run (and its packages the network,
 the signature, the archive and the replacement of the programs), `internal/cli` the
-command and the management calls it makes. It is the only part of the program that reaches
-the internet, and only while it runs; the rules are in
+command and the management calls it makes. It is the only part of the program that contacts
+GitHub or any release server (the daemon does reach its peers, possibly across the
+internet), and only while it runs; the rules are in
 [the update reference](../../docs/references/update/README.md).
 
 [`internal/acceptance`](internal/acceptance/README.md) contains test support

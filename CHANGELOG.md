@@ -33,7 +33,8 @@ protocol has a version of its own.
   is finished by running it again. It refuses a downgrade, a program below the floor, a
   program that is a symbolic link or owned by another user (do not run it with `sudo`), a
   directory that cannot be written, and builds that are not from a release archive.
-  `--check` reports `update_available` and `admitted` and exits 0. Only this command
+  `--check` reports `update_available` and `admitted` and exits 0 once it has read a release
+  it can believe, 1 when it cannot. Only this command
   contacts GitHub or any release server; the daemon never does.
 - `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
 - `sidera version --json` reports `distribution`: `archive` for the programs of a release
