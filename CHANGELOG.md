@@ -22,6 +22,11 @@ protocol has a version of its own.
   The command waits until `status` shows a new `daemon.start_id` and the daemon running
   (default 2 minutes) and prints both start identifiers, the program and its version.
 - `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
+- **Go SDK: `semver` is a public package.** It was internal; it now parses a Semantic
+  Versioning 2.0.0 version (`Parse`) and orders two parsed versions by the precedence rules
+  of the specification (`Compare`), so that any reader of an adapter version applies the same
+  syntax and the same order. It uses the standard library only; nothing else in the SDK
+  changes.
 
 ## [0.11.0] - 2026-11-03
 

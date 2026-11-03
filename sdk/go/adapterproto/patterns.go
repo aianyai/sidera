@@ -3,7 +3,7 @@ package adapterproto
 import (
 	"regexp"
 
-	"github.com/aianyai/sidera/sdk/go/internal/semver"
+	"github.com/aianyai/sidera/sdk/go/semver"
 )
 
 // Patterns of names with a fixed syntax, also used by the manifest. The schema

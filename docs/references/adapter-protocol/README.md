@@ -912,6 +912,10 @@ is authoritative.
   `TestDecodeTypeErrorPaths`, `TestDecodeRefusalOfATypeThatDecodesItselfHasPath`,
   `TestDecodeRejectsUnpairedSurrogates`, `TestDecodePreservesUnicodeStrings`,
   `FuzzDecodeTypeErrorsHavePaths`.
+- `sdk/go/semver`: the SemVer 2.0.0 syntax of a version (`Parse`, the `Pattern` the schema
+  repeats) and its precedence (`Compare`). It is a public package so that readers outside the
+  SDK, such as the CLI, order versions by the same code; the
+  rules are in its README. Test: `TestCompare`.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
   `TestBusyReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,
   `TestEnumNamesMatchContractPackages` (the reasons are the delivery package's

@@ -17,6 +17,7 @@ that reach into the operating system (`adapterkit/process` and
 | [`adapterkit/process`](adapterkit/process/README.md) | Native processes for an adapter that drives an agent runtime: start one detached so that it outlives the adapter, name it by PID and start so it is found again after a restart, list the user's processes, interrupt it the way Ctrl-C would. macOS, Linux and Windows |
 | [`adapterkit/realpath`](adapterkit/realpath/README.md) | The path the platform itself reports for an existing path: symbolic links and junctions followed, names in their on-disk case and long form on Windows |
 | [`manifest`](manifest/README.md) | The adapter package manifest: types, strict parsing and structural validation |
+| [`semver`](semver/README.md) | Semantic Versioning 2.0.0: the syntax of a version and the precedence of two versions; public so that any other reader of a version applies the same rules |
 | [`strictjson`](strictjson/README.md) | The strict JSON decoder the packages above share: exact key names, no repeated key, no `null`, required fields; public so that any other reader of the same kinds of documents applies the same rules |
 
 The module root holds no package.
