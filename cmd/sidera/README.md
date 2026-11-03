@@ -26,6 +26,12 @@ through the management method `sessions.attach` for `sidera mcp` and for the age
 commands, which then hold the returned token in memory only. `sidera setup controller`
 prints the commands that add the MCP server to the two clients and the permission each needs.
 The name `siderad` (also `siderad.exe`) selects `daemon`.
+`sidera update` is the converging upgrade of an installation from a release archive:
+[`internal/update`](internal/update/README.md) does the run (and its packages the network,
+the signature, the archive and the replacement of the programs), `internal/cli` the
+command and the management calls it makes. It is the only part of the program that reaches
+the internet, and only while it runs; the rules are in
+[the update reference](../../docs/references/update/README.md).
 
 [`internal/acceptance`](internal/acceptance/README.md) contains test support
 that drives the executable. The external tests in `cli_test.go` build the real

@@ -259,6 +259,8 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return c.version(args[1:])
 	case "setup":
 		return c.setup(args[1:])
+	case "update":
+		return c.update(ctx, args[1:])
 	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust":
 		return c.manage(ctx, args)
 	case "status":

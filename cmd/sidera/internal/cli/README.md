@@ -34,6 +34,13 @@ and its bound values. A local value stays attached, including a body spelled
   `daemon.restart` and waits for the new daemon, whoever asks; the wait reads `status`
   until a `start_id` other than the old one runs, treating a daemon that is gone, going
   or starting (and a cut-off read) as "not yet" and any other failure as the answer.
+- `update.go`: `update`. It builds the run's configuration from the process (the built-in
+  key, the real GitHub client, the user cache directory, the program as it was started),
+  asks the confirmation (the plan to the output, the answer from stdin; to standard error
+  with `--json`), writes the report, and implements the run's `Node` over the management
+  client, opened at its first call so that a run that stops early never needs the data
+  directory. It reads the answers loosely. `terminal*.go` say whether stdin is a terminal,
+  which a run without `--yes` needs.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request

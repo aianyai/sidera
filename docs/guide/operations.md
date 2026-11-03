@@ -77,6 +77,80 @@ manual step on existing nodes, they say so. Let the work that agents are doing o
 the node finish first: the node is out of reach while its daemon is stopped, and the
 adapters restart.
 
+### With `sidera update`
+
+For a node installed from a release archive, `sidera update` does the whole upgrade:
+
+```sh
+sidera update --check    # what is the latest release, may this program update to it
+sidera update            # shows what it will do and asks
+```
+
+It downloads the release, checks it against the signing key built into the program
+(`--check` does only that part, and always exits 0; with `--json` it says
+`update_available` and `admitted`; it looks at the release and this program only, not at
+the daemon or the adapters, which `sidera update` without `--check` finishes), unpacks the archive for this platform, runs the
+unpacked program to see that it is the release, and asks `Update? [y/N]` (`--yes` skips the
+question; without a terminal the command refuses unless it has `--yes`). Then, for each of
+these that is not at the new version yet:
+
+1. it replaces `sidera`, and `sidera-adapter-console` when it is in the same directory,
+   all or none; the previous programs stay beside them as `sidera.old` and
+   `sidera-adapter-console.old` (`sidera.exe.old` and `sidera-adapter-console.exe.old` on
+   Windows), to go back to (rename one over its program, with the daemon
+   stopped), and the next update that replaces the programs removes them;
+2. it restarts the running daemon onto the new program (`sidera daemon restart
+   --expect-version <the new version>`) and waits for it. The sessions of the adapters are
+   handled as for any restart of the daemon (see
+   [Restart the daemon](#restart-the-daemon));
+3. it installs the new package of each adapter you have installed (`sidera adapter
+   install`, in place: nothing is disabled, the instances restart and keep their sessions).
+   The old version directory of a replaced adapter is removed at the next start of the
+   daemon, not at once. An adapter that is newer than the release, or whose version is
+   not a release version (one you built or got elsewhere), is left as it is and listed.
+
+Only the steps that are missing are done, so a run that was interrupted, or that stopped
+at an error, is finished by running `sidera update` again. If no daemon runs, only the
+programs are replaced and it says so: start the daemon, then run `sidera update` once
+more to install the adapters (until then it does not report the node as current). `--version 0.12.1` (or `v0.12.1`, a pre-release too) names
+a release instead of the latest. It manages the data directory of `--home` or
+`SIDERA_HOME` like every command; another node on the machine needs its own
+`sidera update --home <directory>`, which finds the programs already new and only
+restarts its daemon and installs its adapters.
+
+It refuses, changing nothing and saying what to do, when:
+
+- the program is not from a release archive (a build from source: rebuild it; anything
+  else: update it the way it was installed, or by hand as below);
+- the release is older than the program or than the running daemon (it does not go back;
+  see below), or the program is older than the release's `update-from` floor (update in
+  steps);
+- `sidera` or its directory is a symbolic link, or (not checked on Windows) is not owned by
+  you: do not run it with `sudo`; run it as the user who owns the programs;
+- the directory of the programs cannot be written;
+- the release's signature, version, checksum or archive does not check out. This is never
+  worked around: download nothing by hand to "get past" it;
+- another `sidera update` is running.
+
+The download goes through the proxy named by `HTTPS_PROXY`/`NO_PROXY` and is kept in
+the user cache directory (`sidera-update/`), removed when the run ends. Nothing else
+contacts GitHub or any release server: the daemon never does. The rules, with their reasons, are in
+[the update reference](../references/update/README.md).
+
+To go back to the previous version after an update, stop the daemon, rename each `.old`
+program over its program (on Windows an `.old` can be renamed while it runs), and start
+the daemon. State that the newer version wrote may not be readable by the older one, so
+this is your decision, and it does not install the older adapters: install their packages
+from the older release's archive. A crash in the middle of the replacement leaves the
+programs as the crash table of the reference says; the usual result is a complete old or
+new set, and running `sidera update` again repairs the rest. If `sidera` itself is missing
+after a power cut, rename `sidera.old` (`sidera.exe.old` on Windows) back.
+
+### By hand
+
+The release archive installed by hand, a build that `sidera update` refuses, and any
+release before 0.12.0 are upgraded with these steps.
+
 1. Stop the daemon and wait until it has exited. `sidera daemon stop` returns as
    soon as the daemon has accepted the request, before the process is gone, so
    check that it is:
@@ -123,16 +197,24 @@ adapters restart.
 
      ```powershell
      $bin = "$env:USERPROFILE\sidera\bin"
-     Rename-Item $bin\sidera.exe sidera.exe.old
-     Rename-Item $bin\sidera-adapter-console.exe sidera-adapter-console.exe.old
+     foreach ($p in 'sidera.exe', 'sidera-adapter-console.exe') {
+         $old = "$bin\$p.old"
+         if (Test-Path $old) {
+             Remove-Item $old -ErrorAction SilentlyContinue
+             # Still there: a process runs from it. Set it aside under a free name.
+             if (Test-Path $old) { Rename-Item $old "$p.old-$(Get-Date -Format yyyyMMddHHmmss)" }
+         }
+         Rename-Item "$bin\$p" "$p.old"
+     }
      Copy-Item $env:USERPROFILE\sidera-release\*.exe $bin\
      ```
 
-     Once the new daemon runs, delete the two `.old` files: they are only the renamed
-     programs of the release before, and nothing uses them. (Windows refuses to delete
-     one while a process still runs from it, such as a `sidera mcp` helper of a Codex
-     session; leave it until that session ends.) Do not kill the Codex App Server or
-     its helpers.
+     The loop first removes the `.old` file of an earlier upgrade: renaming a program to
+     a name that is taken fails. Once the new daemon runs, delete the `.old` files
+     (and any `.old-<number>` ones): they are only the renamed programs of the release
+     before, and nothing uses them. (Windows refuses to delete one while a process still
+     runs from it, such as a `sidera mcp` helper of a Codex session; leave it until that
+     session ends.) Do not kill the Codex App Server or its helpers.
 
    Only these two programs belong in the directory on your `PATH`. A directory
    filled by an earlier layout of the archive can still hold adapter programs such

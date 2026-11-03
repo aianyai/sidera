@@ -187,6 +187,13 @@ type AdapterReport struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Acted says whether a run changed or restored anything, or found that nothing needed
+// changing: the cases in which its report is worth showing although it failed.
+func (r Report) Acted() bool {
+	p := r.Program
+	return r.AlreadyCurrent || p.Updated || len(p.Restored) > 0 || len(p.Left) > 0 || r.Daemon.Restarted || len(r.Adapters) > 0
+}
+
 // NormalizeVersion reads the version a person asked for: the release version
 // syntax with or without a leading v. The empty string means the latest release.
 func NormalizeVersion(text string) (string, error) {

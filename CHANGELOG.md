@@ -21,6 +21,20 @@ protocol has a version of its own.
   Windows it starts a detached process and ends, which a scheduled task's daemon survives.
   The command waits until `status` shows a new `daemon.start_id` and the daemon running
   (default 2 minutes) and prints both start identifiers, the program and its version.
+- **`sidera update [--check] [--version <version>] [--yes]`** brings an installation from a
+  release archive to a release: it finds the latest release (or the one asked for), checks
+  `checksums.txt` against the minisign key built into the program, the version the
+  signature is for and the release's `update-from` floor, downloads the archive for the
+  platform, checks its SHA-256, unpacks it and runs the unpacked program, asks for
+  confirmation (`--yes`, or a terminal), and then replaces `sidera` and
+  `sidera-adapter-console` all or none (the old ones stay as `.old`), restarts the running
+  daemon onto the new program with `daemon restart`, and installs the new package of each
+  installed adapter in place. Each run does only the missing steps, so an interrupted run
+  is finished by running it again. It refuses a downgrade, a program below the floor, a
+  program that is a symbolic link or owned by another user (do not run it with `sudo`), a
+  directory that cannot be written, and builds that are not from a release archive.
+  `--check` reports `update_available` and `admitted` and exits 0. Only this command
+  contacts GitHub or any release server; the daemon never does.
 - `status` shows `daemon.start_id`, a random identifier of each start of the daemon.
 - `sidera version --json` reports `distribution`: `archive` for the programs of a release
   archive, and no member for a build made any other way.

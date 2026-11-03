@@ -223,6 +223,12 @@ Choose A (release archive) or B (source).
    Linux and `%USERPROFILE%\sidera-release\adapters\<name>` on Windows; the adapter
    programs for Codex and Claude Code are inside them and are not copied by hand.
 
+   Later, upgrade a node installed this way with `sidera update` (ask your owner first: it
+   replaces the programs, restarts the daemon and installs the new adapter packages;
+   `sidera update --check` only reads). It needs a terminal or `--yes`, refuses to run with
+   `sudo` or from a symbolic link, and does the missing steps again if it is interrupted;
+   see [Upgrade](guide/operations.md#upgrade).
+
 ### B. Build from source
 
 You need Go 1.26 or newer.

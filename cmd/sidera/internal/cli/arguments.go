@@ -14,6 +14,7 @@ type commandArguments struct {
 	recv       receiveFlags
 	management managementFlags
 	init       initFlags
+	update     updateFlags
 }
 
 func arguments(args []string) *commandArguments {
@@ -32,6 +33,8 @@ func arguments(args []string) *commandArguments {
 		out.recv.add(out.flags)
 	case "init":
 		out.init.add(out.flags)
+	case "update":
+		out.update.add(out.flags)
 	default:
 		out.management.add(out.flags, name)
 	}

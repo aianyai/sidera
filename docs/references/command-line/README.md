@@ -43,6 +43,7 @@ arguments, purpose and one example.
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
 | `setup controller` | Print what a person does once to let their own sessions become controllers: the command that adds the `sidera` MCP server to Claude Code (`claude mcp add --scope user sidera -- <sidera> mcp`, every session of the user) and the rule `"mcp__sidera"` to add to the `permissions.allow` list of `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows; `$CLAUDE_CONFIG_DIR/settings.json`, `%CLAUDE_CONFIG_DIR%\settings.json`, when that variable relocates Claude Code's configuration); the command that adds it to Codex (`codex mcp add sidera -- <sidera> mcp`, the user configuration) and the line `default_tools_approval_mode = "approve"` to add to the `[mcp_servers.sidera]` table in `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml`, when that variable relocates Codex's), because `codex mcp add` has no option for it; and one line saying what that enables. Without the permission step a woken controller stalls at a prompt only a person can answer: Claude Code asks for each tool call of a server unless a rule allows it, Codex for each call of a tool that is not read-only. `<sidera>` is the absolute path of the program that ran the command (`os.Executable`, as the platform reports it, made absolute and not resolved further; always in double quotes on Windows, which cmd and PowerShell both read literally for every character a user name may hold, and in single quotes elsewhere when the path needs them), never the bare name: a client starts the server without a shell, Codex on Windows reports `program not found` for the bare name although the program is on the user's `PATH`, and a Linux session that is not a login shell has no `~/.local/bin` on its `PATH`. A program whose path cannot be determined is a failure (exit 1) that prints nothing. A program in a temporary directory (`os.TempDir()` or `GOTMPDIR`), as a `go run` build is and deleted when it exits, is warned about on standard error, because the path printed would not last; the exit code and the printed text are unchanged. The printed text ends with a note that the path is stored in each configuration: after the program moves, `claude mcp remove --scope user sidera` must precede adding it again (it refuses an existing server), and the Codex approval line must be added again after `codex mcp add`, which rewrites the table with only the command and arguments. When the data directory is not the default (`--home` or `SIDERA_HOME`) both commands name it, `<sidera> --home <dir> mcp`, because a client starts the server with an environment of its own (Codex passes only an allow-list of variables, so `SIDERA_HOME` would not reach it). It only prints: it runs nothing, edits no configuration and needs no node; `--json` has no effect. |
 | `version` | Print `sidera <version> (commit <commit>, go<version>)`, with `modified` after the commit when the build's checkout had uncommitted changes; with `--json`, the object `{"version", "distribution", "commit", "modified", "go_version"}` (`commit` is left out when the build carries none, and `distribution` when the build states none; the programs of a release archive report `archive`). It needs no running node and takes no arguments. A release build reports the release version; a build without it reports `0.0.0-dev` (see [`internal/release`](../../../internal/release/README.md)). |
+| `update [--check] [--version <version>] [--yes]` | Bring this installation to a release: the programs next to the running one, the running daemon and the installed adapters, doing only the steps that are missing. See [Updating](#updating). |
 | `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
 | `daemon restart [--expect-version <version>] [--wait <duration>]` | Ask the running daemon to shut down and start the program again as it was started, then wait for the new daemon (default `--wait 2m`, `0` returns once the restart is accepted). See [Restarting the daemon](#restarting-the-daemon). |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. |
@@ -174,6 +175,35 @@ there. `daemon restart` is not the foreground `daemon` command and never runs on
 command dispatcher treats `daemon stop` and `daemon restart` as requests to the running
 daemon. How the foreground daemon starts the program again is in
 [the daemon reference](../daemon/README.md#restart).
+
+### Updating
+
+`update` is carried out by the command itself, with the management interface only for the
+daemon (`status`, `daemon.restart`, `adapters.list`, `adapters.install`, which a client
+that ignores unknown members of the answers reads across releases). What it does, what it
+refuses and why is [the update reference](../update/README.md).
+
+`--version` takes a release version with or without a leading `v`; anything else is usage
+error 2. Without `--check` and `--yes` the command needs a terminal on standard input
+to ask on, and refuses with usage error 2, before any request, when there is none.
+`--check` needs neither, reads a release and writes nothing; it exits 0 whatever it finds.
+
+The plan, the question and the progress go to standard error, so that standard output is
+the report. The human report is `key value` lines: before the
+question `current`, `target`, `release` (the page of the release), `replace`, `restart
+daemon`, `install adapters`; after the run `program updated` (the paths), `daemon restarted
+version` or `daemon running version` or a note that none runs, one `adapter <id> version <v>
+replaced <bool>` (or `skipped`, or `failed`) per installed adapter, and a note that the
+`.old` programs are the way back and that the old version directories of replaced adapters
+are removed at the next daemon start. A check looks at the release and the running program
+only (not the daemon or the adapters): it prints `current`, `target`, `release`, `floor`,
+`update_available`, `admitted` and, when a run would stop, `refusal`, and with `--json` it
+is one object of exactly those members. A run with `--json` is one object: `current`,
+`target`, `release`, `admitted`, `floor`, `already_current` (never true while no daemon
+runs), `program` (`updated`, `replaced`, `console_missing`, `restored`, `left`), `daemon`
+(`running`, `previous_version`, `restarted`, `version`) and `adapters`, and `error` when the
+run failed after it had done something (the exit code is then 1; a failure before anything was done
+prints the error on standard error only).
 
 ### Network commands
 

@@ -40,5 +40,5 @@ is untrusted until the caller has verified it, which is why it does not pin a ho
   to the dial (30 s) and TLS (10 s) limits of the standard library.
 - Requests carry no credential. Errors name what failed and the host that
   answered, never the URL of a redirect, whose query may be a signed token.
-- Only the CLI uses this package, when it runs `update`; the daemon never reaches
-  the internet.
+- Only the CLI uses this package, when it runs `update`; the daemon never contacts
+  GitHub or any release server.
