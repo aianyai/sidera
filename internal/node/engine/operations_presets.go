@@ -73,7 +73,7 @@ type addPresetOp struct {
 func (o *addPresetOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpChangePreset, PresetChange: admin.PresetChangeLoosening}
 }
-func (o *addPresetOp) stops() bool { return false }
+func (o *addPresetOp) ends() Ending { return EndingNone }
 func (o *addPresetOp) run(e *Engine, x *opRun) ([]byte, error) {
 	after, err := e.d.Config.AddPreset(x.configRequest(), o.name, o.preset, presetResult(o.encode, o.name, x))
 	if err != nil {
@@ -99,7 +99,7 @@ type removePresetOp struct {
 func (o *removePresetOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpChangePreset, PresetChange: admin.PresetChangeNarrowing}
 }
-func (o *removePresetOp) stops() bool { return false }
+func (o *removePresetOp) ends() Ending { return EndingNone }
 func (o *removePresetOp) run(e *Engine, x *opRun) ([]byte, error) {
 	after, err := e.d.Config.RemovePreset(x.configRequest(), o.name, presetResult(o.encode, o.name, x))
 	if err != nil {

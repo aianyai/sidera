@@ -54,6 +54,13 @@ func stopCommand(b byte, content string) engine.ManagementCommand {
 	}
 }
 
+func restartCommand(b byte, content string) engine.ManagementCommand {
+	return engine.ManagementCommand{
+		Key: requestKey(b), Fingerprint: fingerprintOf(content), Name: "daemon.restart",
+		Operation: engine.RestartDaemonOp(encodeStop),
+	}
+}
+
 // The same identifier and the same request is answered with the stored result
 // and nothing is executed or written; the same identifier with another request is
 // refused and nothing is written. Without the replay check the second close would
@@ -179,31 +186,67 @@ func TestARefusedRequestStoresNothingAndTheIdentifierStaysFree(t *testing.T) {
 	}
 }
 
-// What a request that stops the daemon says is the operation's, not the result's:
-// a resend of it asks for the stop again, so a daemon that was killed between
-// storing the result and stopping is stopped by the resend.
-func TestStopFollowsTheOperationOfTheRequest(t *testing.T) {
+// How a request ends the daemon is the operation's, not the result's, and a resend
+// of it is answered by the operation too: a resend of a stop asks for the stop
+// again, so a daemon that was killed between storing the result and stopping is
+// stopped by the resend; a resend of a restart that this run stored asks for the
+// restart again, because the answer may not have reached the client and this
+// daemon has not yet restarted.
+func TestTheEndingOfTheDaemonFollowsTheOperationOfTheRequest(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	e := r.start()
 	a := register(t, e, "a")
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name string
-		cmd  engine.ManagementCommand
-		stop bool
+		name     string
+		cmd      engine.ManagementCommand
+		replayed bool
+		want     engine.Ending
 	}{
-		{"stopping the daemon", stopCommand(20, "stop"), true},
-		{"the same request again", stopCommand(20, "stop"), true},
-		{"closing an endpoint", closeCommand(21, "close a", a), false},
-		{"the same close again", closeCommand(21, "close a", a), false},
+		{"stopping the daemon", stopCommand(20, "stop"), false, engine.EndingStop},
+		{"the same stop again", stopCommand(20, "stop"), true, engine.EndingStop},
+		{"restarting the daemon", restartCommand(22, "restart"), false, engine.EndingRestart},
+		{"the same restart again", restartCommand(22, "restart"), true, engine.EndingRestart},
+		{"closing an endpoint", closeCommand(21, "close a", a), false, engine.EndingNone},
+		{"the same close again", closeCommand(21, "close a", a), true, engine.EndingNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := e.Execute(ctx, tc.cmd)
-			if err != nil || res.Stop != tc.stop {
-				t.Errorf("answered %+v, %v; want Stop = %v", res, err, tc.stop)
+			if err != nil || res.Replayed != tc.replayed || res.Ending != tc.want {
+				t.Errorf("answered %+v, %v; want Replayed = %v, Ending = %v", res, err, tc.replayed, tc.want)
 			}
 		})
+	}
+}
+
+// A restart that an earlier run stored was carried out by the start of this one:
+// the daemon that answers its resend is the program the restart asked for, so the
+// resend asks for nothing, where a stop that an earlier run stored is asked for
+// again.
+func TestAResendOfARestartThatAnEarlierRunStoredAsksForNothing(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	ctx := context.Background()
+	for _, c := range []engine.ManagementCommand{stopCommand(20, "stop"), restartCommand(22, "restart")} {
+		if _, err := e.Execute(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.restart()
+	e = r.start()
+	for _, tc := range []struct {
+		cmd  engine.ManagementCommand
+		want engine.Ending
+	}{
+		{stopCommand(20, "stop"), engine.EndingStop},
+		{restartCommand(22, "restart"), engine.EndingNone},
+	} {
+		res, err := e.Execute(ctx, tc.cmd)
+		if err != nil || !res.Replayed || res.Ending != tc.want {
+			t.Errorf("%s again after a start: %+v, %v; want a replay with Ending = %v", tc.cmd.Name, res, err, tc.want)
+		}
 	}
 }
 
@@ -246,7 +289,7 @@ func TestExecuteRefusesAnOperationThatChangesNothing(t *testing.T) {
 	r := newRig(t, 10)
 	e := r.start()
 	ran := false
-	op := engine.NewTestOperation(admin.Operation{Kind: admin.OpRead}, false, func(engine.TestRun) ([]byte, error) {
+	op := engine.NewTestOperation(admin.Operation{Kind: admin.OpRead}, engine.EndingNone, func(engine.TestRun) ([]byte, error) {
 		ran = true
 		return []byte(`{}`), nil
 	})
@@ -264,7 +307,7 @@ func TestExecuteRefusesAnOperationThatChangesNothing(t *testing.T) {
 // expected version over and config checks it inside the change, in the same step
 // as the write.
 func nodeSetOperation(r *rig, patch string) engine.Operation {
-	return engine.NewTestOperation(admin.Operation{Kind: admin.OpChangeNodeSettings}, false, func(x engine.TestRun) ([]byte, error) {
+	return engine.NewTestOperation(admin.Operation{Kind: admin.OpChangeNodeSettings}, engine.EndingNone, func(x engine.TestRun) ([]byte, error) {
 		req := config.Request{Key: x.Key, Fingerprint: x.Fingerprint, Expected: x.Expected}
 		_, err := r.cfg.SetNodeSettings(req, []byte(patch), func(config.Node) (json.RawMessage, error) {
 			return json.RawMessage(`{"changed":true}`), nil

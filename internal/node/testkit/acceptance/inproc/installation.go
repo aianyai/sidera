@@ -59,7 +59,7 @@ func newInstallOps() recipes.InstallOps {
 			if err != nil {
 				return recipes.InstallOutcome{}, err
 			}
-			if !again.Replayed || again.Stop != out.Stop || !bytes.Equal(again.Result, out.Result) {
+			if !again.Replayed || again.Ending != out.Ending || !bytes.Equal(again.Result, out.Result) {
 				return recipes.InstallOutcome{}, fmt.Errorf("%w: replay differs from actual installation result", recipes.ErrInstallationEffect)
 			}
 			var installed engine.AdapterInstalled

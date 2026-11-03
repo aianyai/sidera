@@ -120,7 +120,7 @@ func TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds(t *testing.T) {
 	}
 
 	first, err := e.Execute(ctx, backupCommand(82, "confirm", statement.Digest()))
-	if err != nil || first.Replayed || first.Stop {
+	if err != nil || first.Replayed || first.Ending != engine.EndingNone {
 		t.Fatalf("the confirmation: %+v, %v", first, err)
 	}
 	if want := `{"confirmed_at":"` + t0.Format(time.RFC3339) + `"}`; string(first.Result) != want {
@@ -180,7 +180,7 @@ func TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop(t *testing.T) {
 	}
 
 	res, err := e.Execute(ctx, retireCommand(84, "retire", r.node))
-	if err != nil || res.Replayed || !res.Stop {
+	if err != nil || res.Replayed || res.Ending != engine.EndingStop {
 		t.Fatalf("the retirement: %+v, %v; want a result that asks for the stop", res, err)
 	}
 	if !r.cfg.RevocationSet().NodeRetired(r.node) {
@@ -196,7 +196,7 @@ func TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop(t *testing.T) {
 	// The same request sent again is the stored result and asks for the stop again,
 	// so that a daemon that died between the result and the stop is stopped by it.
 	again, err := e.Execute(ctx, retireCommand(84, "retire", r.node))
-	if err != nil || !again.Replayed || !again.Stop || string(again.Result) != string(res.Result) {
+	if err != nil || !again.Replayed || again.Ending != engine.EndingStop || string(again.Result) != string(res.Result) {
 		t.Errorf("the retirement sent again: %+v, %v", again, err)
 	}
 

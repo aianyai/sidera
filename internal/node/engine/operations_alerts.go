@@ -23,7 +23,7 @@ type acknowledgeAlertOp struct {
 func (o *acknowledgeAlertOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpAcknowledgeAlert}
 }
-func (o *acknowledgeAlertOp) stops() bool { return false }
+func (o *acknowledgeAlertOp) ends() Ending { return EndingNone }
 func (o *acknowledgeAlertOp) run(e *Engine, x *opRun) ([]byte, error) {
 	i := e.view.alertIndex(o.alert)
 	if i < 0 {

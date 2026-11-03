@@ -34,7 +34,7 @@ type setNodeSettingsOp struct {
 func (o *setNodeSettingsOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpChangeNodeSettings}
 }
-func (o *setNodeSettingsOp) stops() bool { return false }
+func (o *setNodeSettingsOp) ends() Ending { return EndingNone }
 func (o *setNodeSettingsOp) run(e *Engine, x *opRun) ([]byte, error) {
 	n, err := e.d.Config.SetNodeSettings(x.configRequest(), o.patch, func(after config.Node) (json.RawMessage, error) {
 		b, err := o.encode(after)
@@ -81,7 +81,7 @@ type setEndpointSettingsOp struct {
 func (o *setEndpointSettingsOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpChangeEndpointSettings}
 }
-func (o *setEndpointSettingsOp) stops() bool { return false }
+func (o *setEndpointSettingsOp) ends() Ending { return EndingNone }
 func (o *setEndpointSettingsOp) run(e *Engine, x *opRun) ([]byte, error) {
 	st := e.view.endpoints[o.endpoint]
 	if st == nil {

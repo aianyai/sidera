@@ -203,7 +203,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string, m *m
 		Replayed    bool            `json:"replayed"`
 		Result      json.RawMessage `json:"result"`
 	}{hex.EncodeToString(d.id[:]), res.Replayed, res.Result})
-	if res.Stop && s.cfg.Stop != nil {
+	if res.Ending == engine.EndingStop && s.cfg.Stop != nil {
 		// The answer is on its way: flush it, so that the client has it before the
 		// daemon starts to go away.
 		if f, ok := w.(http.Flusher); ok {

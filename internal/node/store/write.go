@@ -800,7 +800,8 @@ func (s *Store) AlertRaise(a AlertRecord) error {
 	return tx.Commit()
 }
 
-// DaemonStop records the result of the stop operation.
+// DaemonStop records the result of an operation that ends the daemon: the stop
+// and the restart.
 func (s *Store) DaemonStop(result AdminRecord) error {
 	f, err := recordFile(AdminDir, result)
 	if err != nil {

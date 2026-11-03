@@ -52,8 +52,40 @@ type Operation interface {
 	// that writes it, by the package that owns the file (admin.CheckVersion,
 	// config's checkVersion), because the check and the write are one step.
 	run(e *Engine, x *opRun) ([]byte, error)
-	// stops reports whether the daemon is to shut down once the result is stored.
-	stops() bool
+	// ends says how the daemon is to end once the result is stored, when the
+	// operation runs; Ending.replayed says it for a resend.
+	ends() Ending
+}
+
+// Ending is how a management request ends the daemon, if it does.
+type Ending int
+
+const (
+	// EndingNone: the request leaves the daemon running.
+	EndingNone Ending = iota
+	// EndingStop: the daemon shuts down and the process ends.
+	EndingStop
+	// EndingRestart: the daemon shuts down and the program is started again in its
+	// place.
+	EndingRestart
+)
+
+// replayed is the ending a resend of a request that ends the daemon this way
+// asks for; thisRun says whether the daemon that answers the resend is the one that
+// stored the result. A stop is asked for again either way, so that a daemon that
+// died between storing the result and stopping is stopped by the resend. A restart
+// is asked for again only by the daemon that stored it: that daemon has not yet
+// been replaced, and the answer may not have reached the client, which resends to
+// learn that the restart is under way (asking twice is harmless, the shutdown runs
+// once). A daemon that loaded the result from the disk is the process the restart
+// produced, which is what was asked for, and asking again would restart a daemon
+// that already did what was asked, in a loop for a client that resends after an
+// unknown outcome.
+func (e Ending) replayed(thisRun bool) Ending {
+	if e == EndingRestart && !thisRun {
+		return EndingNone
+	}
+	return e
 }
 
 // ManagementCommand is one replay-protected management request.
@@ -83,12 +115,11 @@ type StoredResult struct {
 	// Replayed: the request had been executed before, and Result is the one stored
 	// then; nothing was executed.
 	Replayed bool
-	// Stop: the daemon is to shut down. It follows the operation of the request,
-	// not the result: the resend of a request that stops the daemon asks for the
-	// stop again, so a daemon that died between storing the result and stopping is
-	// stopped by the resend. The engine does not control the process; the
-	// interface that gets this calls the stop entry of the composition root.
-	Stop bool
+	// Ending: how the daemon is to end. It follows the operation of the request,
+	// not the result (Ending.replayed says what a resend asks for). The engine does
+	// not control the process; the interface that gets this calls the stop or the
+	// restart entry of the composition root.
+	Ending Ending
 }
 
 // opRun is what an operation is told of the command that runs it.
@@ -169,7 +200,7 @@ func (e *Engine) replayOf(c ManagementCommand) (res StoredResult, answered bool,
 	}
 	switch v := admin.CheckReplay(seen, c.Fingerprint); v.Action {
 	case admin.ReplayReturnStored:
-		return StoredResult{Result: stored.result, Replayed: true, Stop: c.Operation.stops()}, true, nil
+		return StoredResult{Result: stored.result, Replayed: true, Ending: c.Operation.ends().replayed(stored.thisRun)}, true, nil
 	case admin.ReplayConflict:
 		return StoredResult{}, true, refuse(ReasonOperationIDReused)
 	}
@@ -186,7 +217,7 @@ func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, erro
 		return StoredResult{}, err
 	}
 	e.view.putStored(c.Key, c.Fingerprint, result)
-	return StoredResult{Result: result, Stop: c.Operation.stops()}, nil
+	return StoredResult{Result: result, Ending: c.Operation.ends()}, nil
 }
 
 type cmdOperationResult struct {
@@ -220,7 +251,7 @@ func (e *Engine) OperationResult(ctx context.Context, key admin.RequestKey) ([]b
 // into the table the lookup reads, beside those of state/admin/.
 func (v *view) addConfigResults(ops []config.Operation) {
 	for _, op := range ops {
-		v.putStored(op.Key(), op.Fingerprint, op.Result)
+		v.putLoaded(op.Key(), op.Fingerprint, op.Result)
 	}
 }
 
@@ -241,7 +272,7 @@ type closeEndpointOp struct {
 func (o *closeEndpointOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpManageEndpointSession}
 }
-func (o *closeEndpointOp) stops() bool { return false }
+func (o *closeEndpointOp) ends() Ending { return EndingNone }
 func (o *closeEndpointOp) run(e *Engine, x *opRun) ([]byte, error) {
 	_, result, err := e.closeEndpoint(x.now, o.endpoint, &closeVia{x: x, encode: o.encode})
 	return result, err
@@ -249,15 +280,31 @@ func (o *closeEndpointOp) run(e *Engine, x *opRun) ([]byte, error) {
 
 // StopDaemonOp is the operation that asks the daemon to shut down normally. Its
 // only effect is its stored result; the stop itself is the composition root's,
-// asked for through StoredResult.Stop once the result is stored. encode makes the
+// asked for through StoredResult.Ending once the result is stored. encode makes the
 // result; it runs in the loop and must not wait.
-func StopDaemonOp(encode func() ([]byte, error)) Operation { return &stopDaemonOp{encode: encode} }
+func StopDaemonOp(encode func() ([]byte, error)) Operation {
+	return &endDaemonOp{kind: admin.OpStopDaemon, ending: EndingStop, encode: encode}
+}
 
-type stopDaemonOp struct{ encode func() ([]byte, error) }
+// RestartDaemonOp is the operation that asks the daemon to shut down normally and
+// start the program again. Like the stop, its only effect is its stored result;
+// the restart is the composition root's, asked for through StoredResult.Ending
+// (Ending.replayed says what a resend asks for).
+func RestartDaemonOp(encode func() ([]byte, error)) Operation {
+	return &endDaemonOp{kind: admin.OpRestartDaemon, ending: EndingRestart, encode: encode}
+}
 
-func (o *stopDaemonOp) Admin() admin.Operation { return admin.Operation{Kind: admin.OpStopDaemon} }
-func (o *stopDaemonOp) stops() bool            { return true }
-func (o *stopDaemonOp) run(e *Engine, x *opRun) ([]byte, error) {
+// endDaemonOp is an operation whose effect is that the daemon ends, one way or the
+// other: it stores its result and asks for the ending.
+type endDaemonOp struct {
+	kind   admin.OpKind
+	ending Ending
+	encode func() ([]byte, error)
+}
+
+func (o *endDaemonOp) Admin() admin.Operation { return admin.Operation{Kind: o.kind} }
+func (o *endDaemonOp) ends() Ending           { return o.ending }
+func (o *endDaemonOp) run(e *Engine, x *opRun) ([]byte, error) {
 	result, err := o.encode()
 	if err != nil {
 		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)

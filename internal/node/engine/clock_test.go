@@ -78,7 +78,7 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 	// The owner clears the pause.
 	e := h.Engine()
 	res, err := e.Execute(ctx, clearCommand(71, "clear"))
-	if err != nil || res.Replayed || res.Stop {
+	if err != nil || res.Replayed || res.Ending != engine.EndingNone {
 		t.Fatalf("the clear: %+v, %v", res, err)
 	}
 	now := h.Clock().Now()

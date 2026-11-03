@@ -119,6 +119,9 @@ type arrivalKey struct {
 type storedResult struct {
 	fingerprint admin.Fingerprint
 	result      []byte
+	// thisRun: this run of the engine stored the result, as against one that was on
+	// the disk when it started. Ending.replayed needs the difference.
+	thisRun bool
 }
 
 // buildView reads a scan into a view. An endpoint whose declaration field the
@@ -213,11 +216,18 @@ func sortAlerts(alerts []store.AlertRecord) {
 
 // putResult records the stored result of an administrative operation as it is on
 // disk now.
-func (v *view) putResult(a store.AdminRecord) { v.putStored(a.Key, a.Fingerprint, a.Result) }
+func (v *view) putResult(a store.AdminRecord) { v.putLoaded(a.Key, a.Fingerprint, a.Result) }
 
-// putStored records a result that is on disk, wherever its operation kept it.
-func (v *view) putStored(key admin.RequestKey, fp admin.Fingerprint, result []byte) {
+// putLoaded records a result that was on the disk when the engine started, wherever
+// its operation kept it.
+func (v *view) putLoaded(key admin.RequestKey, fp admin.Fingerprint, result []byte) {
 	v.results[key] = storedResult{fingerprint: fp, result: result}
+}
+
+// putStored records a result that this run has just written, wherever its
+// operation kept it.
+func (v *view) putStored(key admin.RequestKey, fp admin.Fingerprint, result []byte) {
+	v.results[key] = storedResult{fingerprint: fp, result: result, thisRun: true}
 }
 
 // OpenEndpoints is how many endpoints are open or being created: the ones that

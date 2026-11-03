@@ -193,14 +193,17 @@ func runManagement(e scenario.Env, node *engine.Engine, q recipes.ManagementRequ
 	if err != nil {
 		return recipes.ManagementOutcome{}, err
 	}
-	if !again.Replayed || again.Stop != result.Stop || !bytes.Equal(again.Result, result.Result) {
-		return recipes.ManagementOutcome{}, fmt.Errorf("%w: %s replay changed the result or stop request", recipes.ErrManagementEffect, name)
+	// The node that stored the result answers the resend, so the engine's rule for
+	// what a resend asks of the daemon (Ending.replayed) gives the ending of the
+	// first answer, for a restart as for a stop.
+	if !again.Replayed || again.Ending != result.Ending || !bytes.Equal(again.Result, result.Result) {
+		return recipes.ManagementOutcome{}, fmt.Errorf("%w: %s replay changed the result or the ending of the daemon", recipes.ErrManagementEffect, name)
 	}
 	var out recipes.ManagementOutcome
 	if err := json.Unmarshal(result.Result, &out); err != nil {
 		return recipes.ManagementOutcome{}, err
 	}
-	out.Replayed, out.Stop = result.Replayed, result.Stop
+	out.Replayed, out.Stop = result.Replayed, result.Ending == engine.EndingStop
 	return out, nil
 }
 

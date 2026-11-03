@@ -27,7 +27,7 @@ type networkOp struct {
 }
 
 func (networkOp) Admin() admin.Operation { return admin.Operation{Kind: admin.OpChangeNodeSettings} }
-func (networkOp) stops() bool            { return false }
+func (networkOp) ends() Ending           { return EndingNone }
 
 // result is the ResultFunc of a change of network.json.
 func (o networkOp) result(x *opRun) config.ResultFunc[config.Network] {

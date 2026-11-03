@@ -75,7 +75,7 @@ type installAdapterOp struct {
 func (o *installAdapterOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpInstallAdapter}
 }
-func (o *installAdapterOp) stops() bool { return false }
+func (o *installAdapterOp) ends() Ending { return EndingNone }
 
 func (o *installAdapterOp) prepare(_ context.Context, e *Engine, rnd io.Reader) {
 	o.staged, o.stageErr = e.stagePackage(o.source, rnd)
@@ -269,7 +269,7 @@ type enableAdapterOp struct {
 func (o *enableAdapterOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpEnableAdapter}
 }
-func (o *enableAdapterOp) stops() bool { return false }
+func (o *enableAdapterOp) ends() Ending { return EndingNone }
 func (o *enableAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if in, ok := e.d.Config.Instances().Items[o.instance]; ok && !in.Enabled {
 		// What the owner disabled is still being closed: the endpoints of the
@@ -345,7 +345,7 @@ type configureAdapterOp struct {
 func (o *configureAdapterOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpEnableAdapter}
 }
-func (o *configureAdapterOp) stops() bool { return false }
+func (o *configureAdapterOp) ends() Ending { return EndingNone }
 func (o *configureAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	after, err := e.d.Config.SetInstanceConfig(x.configRequest(), o.instance, o.config, e.endpointOpen, instanceResult(o.encode, o.instance, x))
 	if err != nil {
@@ -378,7 +378,7 @@ type disableAdapterOp struct {
 func (o *disableAdapterOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpDisableAdapter}
 }
-func (o *disableAdapterOp) stops() bool { return false }
+func (o *disableAdapterOp) ends() Ending { return EndingNone }
 func (o *disableAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	after, err := e.d.Config.DisableAdapter(x.configRequest(), o.instance, e.endpointOpen, instanceResult(o.encode, o.instance, x))
 	if err != nil {
@@ -413,7 +413,7 @@ type removeAdapterInstanceOp struct {
 func (o *removeAdapterInstanceOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpDisableAdapter}
 }
-func (o *removeAdapterInstanceOp) stops() bool { return false }
+func (o *removeAdapterInstanceOp) ends() Ending { return EndingNone }
 func (o *removeAdapterInstanceOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if in, ok := e.d.Config.Instances().Items[o.instance]; ok && !in.Enabled && e.openSessions(o.instance) == 0 {
 		if id, busy := e.instanceClosing(o.instance); busy {

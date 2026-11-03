@@ -49,7 +49,7 @@ func TestAfterTheIdentityIsRetiredNothingIsSigned(t *testing.T) {
 	msg := send(t, h, "a", "b", "before the retirement")
 	quiet(t, h)
 	res, err := h.Engine().Execute(context.Background(), retireCommand(103, "retire", harness.NodeID()))
-	if err != nil || !res.Stop {
+	if err != nil || res.Ending != engine.EndingStop {
 		t.Fatalf("the retirement: %+v, %v", res, err)
 	}
 	_, err = h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "after", addrOf(t, h, "a"), "", "x"))
@@ -72,7 +72,7 @@ func TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded(t *testing.
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	send(t, h, "a", "b", "before the retirement")
 	quiet(t, h)
-	if res, err := h.Engine().Execute(context.Background(), retireCommand(104, "retire", harness.NodeID())); err != nil || !res.Stop {
+	if res, err := h.Engine().Execute(context.Background(), retireCommand(104, "retire", harness.NodeID())); err != nil || res.Ending != engine.EndingStop {
 		t.Fatalf("the retirement: %+v, %v", res, err)
 	}
 	before, err := h.Records()

@@ -28,7 +28,7 @@ import (
 type trustOp struct{ kind admin.OpKind }
 
 func (o trustOp) Admin() admin.Operation { return admin.Operation{Kind: o.kind} }
-func (trustOp) stops() bool              { return false }
+func (trustOp) ends() Ending             { return EndingNone }
 
 // pairingRequest is who asks and under which identifier, for the state machine: the
 // actor the management interface made for the request.

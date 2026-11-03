@@ -412,7 +412,7 @@ func TestAReadAnswersItsResult(t *testing.T) {
 func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t *testing.T) {
 	r := newRig(t)
 	r.svc.execute = func(_ context.Context, c engine.ManagementCommand) (engine.StoredResult, error) {
-		return engine.StoredResult{Result: []byte(`{"stopping":true}`), Stop: c.Name == "daemon.stop"}, nil
+		return engine.StoredResult{Result: []byte(`{"stopping":true}`), Ending: stopIf(c.Name == "daemon.stop")}, nil
 	}
 	status, out := r.post("endpoints.close", `{"operation_id":"`+opID(1)+`","params":{"endpoint":"`+addressOf(1)+`"}}`)
 	if status != 200 {
@@ -439,7 +439,7 @@ func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t 
 	}
 	// a refused request asks for no stop
 	r.svc.execute = func(context.Context, engine.ManagementCommand) (engine.StoredResult, error) {
-		return engine.StoredResult{Stop: true}, &engine.Refusal{Reason: engine.ReasonRecovering}
+		return engine.StoredResult{Ending: engine.EndingStop}, &engine.Refusal{Reason: engine.ReasonRecovering}
 	}
 	status, out = r.post("daemon.stop", `{"operation_id":"`+opID(3)+`"}`)
 	r.wantError(503, "unavailable", "recovering", status, out)

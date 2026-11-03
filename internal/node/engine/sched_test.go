@@ -494,7 +494,7 @@ func TestAPeriodicTaskIsToldWhetherTheNodeMaySign(t *testing.T) {
 	}
 	retire := func(t *testing.T, r *rig, e *engine.Engine) {
 		t.Helper()
-		if res, err := e.Execute(context.Background(), retireCommand(110, "retire", r.node)); err != nil || !res.Stop {
+		if res, err := e.Execute(context.Background(), retireCommand(110, "retire", r.node)); err != nil || res.Ending != engine.EndingStop {
 			t.Fatalf("the retirement: %+v, %v", res, err)
 		}
 	}

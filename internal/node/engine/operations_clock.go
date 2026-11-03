@@ -46,7 +46,7 @@ type clearClockOp struct {
 func (o *clearClockOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpClearClockRollback}
 }
-func (o *clearClockOp) stops() bool { return false }
+func (o *clearClockOp) ends() Ending { return EndingNone }
 func (o *clearClockOp) run(e *Engine, x *opRun) ([]byte, error) {
 	out := ClockClear{Cleared: e.paused, HighWater: e.hw.Value(), Now: x.now}
 	var prepared nodekeys.PreparedClockCleared

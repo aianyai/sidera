@@ -367,18 +367,18 @@ type TestRun struct {
 // the loop like the engine's own operations. It lets the tests of the door show
 // what the door does for an operation whose result is kept somewhere other than
 // the one place the engine's two operations keep theirs.
-func NewTestOperation(op admin.Operation, stops bool, run func(TestRun) ([]byte, error)) Operation {
-	return &testOperation{op: op, stop: stops, run_: run}
+func NewTestOperation(op admin.Operation, ending Ending, run func(TestRun) ([]byte, error)) Operation {
+	return &testOperation{op: op, ending: ending, run_: run}
 }
 
 type testOperation struct {
-	op   admin.Operation
-	stop bool
-	run_ func(TestRun) ([]byte, error)
+	op     admin.Operation
+	ending Ending
+	run_   func(TestRun) ([]byte, error)
 }
 
 func (o *testOperation) Admin() admin.Operation { return o.op }
-func (o *testOperation) stops() bool            { return o.stop }
+func (o *testOperation) ends() Ending           { return o.ending }
 func (o *testOperation) run(_ *Engine, x *opRun) ([]byte, error) {
 	return o.run_(TestRun{Now: x.now, Key: x.key, Fingerprint: x.fingerprint, Expected: x.expected, Name: x.name})
 }

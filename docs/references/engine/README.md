@@ -248,12 +248,18 @@ updates the table, so a resend is answered the same before and after a restart. 
 free. The expected version of a versioned setting is handed to the operation and is
 checked inside the change that writes the file, by the package that owns it: the
 check and the write are one step, and `admin.CheckVersion` is called there and
-nowhere else. `StoredResult.Stop` says that the daemon is to shut down; it follows
-the operation, not the result, so the resend of a request that stops the daemon
-asks for the stop again. An operation is a value of a type of the engine, because
+nowhere else. `StoredResult.Ending` says how the daemon is to end (not at all, stop, restart);
+it follows the operation, not the result. The resend of a request that stops the
+daemon asks for the stop again. The resend of a restart asks for the restart again
+when the daemon that answers it is the one that stored the result (the answer may not
+have reached the client, and that daemon has not yet been replaced; asking twice is
+harmless, the shutdown runs once), and for nothing when the result was loaded from
+the disk at the start, because that daemon was started after the request, which is
+what the restart asked for (`Ending.replayed` is the one place of the rule; the view
+marks the results this run stored). Both are
+stored by the same write, whose declaration is `daemon-stop`. An operation is a value of a type of the engine, because
 its effect needs the view, the store and the configuration that only the loop may
-touch; the owner of another operation adds its type next to `CloseEndpointOp` and
-`StopDaemonOp`.
+touch; the owner of another operation adds its type next to `CloseEndpointOp`, `StopDaemonOp` and `RestartDaemonOp`.
 
 **The owner's operations on the clock, the identity, the alerts and the settings.**
 Each is a type of the engine behind the door above, whose effect runs in the loop
@@ -2028,7 +2034,7 @@ reproducible).
 | A crash at any point of an operation leaves nothing, the effect alone or both, never the result alone; a resend is carried out again or answered from the result | `manage.go`, `endpoints.go` (`closeWithResult`) | `TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint` |
 | A stored result is read by its request key, from both places, and by no other key | `manage.go` (`OperationResult`) | `TestTheStoredResultOfAnOperationIsReadByItsRequestKey`, `TestAStoredResultIsReadWhileRecoveringAndNotWhileStopping` |
 | The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
-| A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
+| A request that stops the daemon says so, resent or not; a restart says so again to the daemon that stored it and says nothing to one that started after it | `manage.go` (`StopDaemonOp`, `RestartDaemonOp`, `Ending`, `StoredResult.Ending`) | `TestTheEndingOfTheDaemonFollowsTheOperationOfTheRequest`, `TestAResendOfARestartThatAnEarlierRunStoredAsksForNothing` |
 | The owner's clear of the pause is one replacement and the loop forgets the pause after the commit, then makes the periodic tasks due at once | `operations_clock.go`, `transactions.go` (`clock-clear`), `engine.go` (`clearRollback`) | `TestClockRollbackPausesSigningUntilCleared`, `TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone`, `TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt`, `TestClearingThePauseSchedulesThePeriodicTasksFromTheClockTheOwnerAccepted` |
 | The backup is confirmed only for the statement the node holds; the reminder is derived | `operations_identity.go`, `nodestatus.go` | `TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds`, `TestAConfirmationOfAnotherStatementDoesNotPutTheReminderOut` |
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |

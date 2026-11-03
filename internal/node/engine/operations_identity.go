@@ -42,7 +42,7 @@ type confirmBackupOp struct {
 func (o *confirmBackupOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpConfirmRevocationBackup}
 }
-func (o *confirmBackupOp) stops() bool { return false }
+func (o *confirmBackupOp) ends() Ending { return EndingNone }
 func (o *confirmBackupOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if e.d.Keys == nil {
 		return nil, errNoKeys
@@ -103,7 +103,7 @@ type retireIdentityOp struct {
 func (o *retireIdentityOp) Admin() admin.Operation {
 	return admin.Operation{Kind: admin.OpRetireIdentity}
 }
-func (o *retireIdentityOp) stops() bool { return true }
+func (o *retireIdentityOp) ends() Ending { return EndingStop }
 func (o *retireIdentityOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if e.d.Keys == nil {
 		return nil, errNoKeys

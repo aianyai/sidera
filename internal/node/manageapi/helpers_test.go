@@ -346,3 +346,11 @@ func opID(b byte) string {
 }
 
 var _ = admin.OpRead
+
+// stopIf is the ending of a method that stops the daemon, or none.
+func stopIf(stops bool) engine.Ending {
+	if stops {
+		return engine.EndingStop
+	}
+	return engine.EndingNone
+}
