@@ -99,6 +99,9 @@ type side struct {
 	notes []string // the methods of the notifications the adapter sent
 }
 
+// A test creates the directory of its lock before it calls serveOn: cleanups run
+// in reverse order, so the directory is then removed after Serve has returned and
+// released the lock, which Windows does not let be removed while it is held.
 func serveOn(t *testing.T, cfg adapterkit.Config) *side {
 	t.Helper()
 	aR, dW := io.Pipe() // the daemon writes, the adapter reads
@@ -195,10 +198,11 @@ func TestShutdownHandsTheApplicationItsIntent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			lock := filepath.Join(t.TempDir(), "lock")
 			app := &stub{}
 			s := serveOn(t, config(app, runtimeCaps()))
 			var init adapterproto.InitializeResult
-			if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &init); err != nil {
+			if err := s.call(adapterproto.MethodInitialize, initParams(lock), &init); err != nil {
 				t.Fatal(err)
 			}
 			if !init.Capabilities.ShutdownIntent {
@@ -217,9 +221,10 @@ func TestShutdownHandsTheApplicationItsIntent(t *testing.T) {
 // An intent the protocol does not define is invalid params, and the adapter keeps
 // serving; an error of the application is the answer, and the adapter ends anyway.
 func TestShutdownRefusesAnUnknownIntentAndAnswersTheApplicationsError(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "lock")
 	app := &stub{shutdownErr: peer.NewError(peer.CodeInternalError, "a process was left")}
 	s := serveOn(t, config(app, runtimeCaps()))
-	if err := s.initialize(filepath.Join(t.TempDir(), "lock")); err != nil {
+	if err := s.initialize(lock); err != nil {
 		t.Fatal(err)
 	}
 	var raw json.RawMessage
@@ -605,9 +610,10 @@ func (a *deadlineApp) Probe(ctx context.Context, p adapterproto.ProbeParams) (ad
 // Start and Probe must answer inside the limit the daemon waits for a handshake
 // call, so their contexts end a little before it, counted from the request.
 func TestStartAndProbeContextsEndBeforeTheHandshakeLimit(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "work.lock")
 	app := &deadlineApp{left: make(chan time.Duration, 2)}
 	s := serveOn(t, config(app, adapterproto.Capabilities{}))
-	if err := s.initialize(filepath.Join(t.TempDir(), "work.lock")); err != nil {
+	if err := s.initialize(lock); err != nil {
 		t.Fatal(err)
 	}
 	start := adapterproto.StartParams{
