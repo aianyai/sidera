@@ -18,6 +18,9 @@ why `--apply` does only what it does are in
 - **No Hermes configuration file is written by this package.** Hermes's own commands
   change it; the only files written are the Skill in the state directory and the copy in
   a profile's `skills` directory (a temporary file and a rename).
+- **What is written in the state directory is owner-only.** The daemon refuses to start
+  an adapter whose state directory holds an entry others can reach; the copy in a profile's
+  `skills` directory is Hermes's, with ordinary modes.
 - **Nothing is restarted.** The output tells the owner to restart the gateways.
 - **The Skill never contains an address.** A card names an alias.
 - **A Hermes command gets the environment of the adapter's own** (`kanban.ChildEnv`): the

@@ -685,7 +685,10 @@ platforms), and the knowledge of how to write a card. The second is a Skill, a p
 Hermes loads when the agent has a use for it.
 
 **The Skill** (`setup.Skill`) is generated from the alias table, once per `setup` run,
-and written to `skill/SKILL.md` in the instance's state directory. Its front matter is
+and written to `skill/SKILL.md` in the instance's state directory, owner-only (directory
+`0700`, file `0600`; a `skill` directory an earlier run left wider is narrowed): the
+daemon starts an adapter only when its whole state directory is private to its owner, so a
+wider entry would stop the instance at its next start. Its front matter is
 `name: sidera` and a description of at most 60 characters (Hermes cuts the description
 in the list the agent chooses from, so the part that says when to use it comes first).
 The body tells the agent:

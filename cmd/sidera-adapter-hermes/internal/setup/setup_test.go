@@ -1,6 +1,10 @@
 package setup
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -84,5 +88,47 @@ func TestSkillListsEveryAliasWithItsModesAndPresets(t *testing.T) {
 	}
 	if strings.Contains(text, "nodeb/codex") || strings.Contains(text, "nodec/ops") {
 		t.Error("the Skill shows an address: a card names an alias, never an address")
+	}
+}
+
+// The daemon refuses to start an adapter whose state directory holds an entry that
+// others can reach, so what setup writes there must be owner-only, also in a directory
+// an earlier version made wider.
+func TestWriteSkillLeavesTheStateDirectoryOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("access on Windows is an access list inherited from the private state directory, not mode bits")
+	}
+	for _, wide := range []bool{false, true} {
+		stateDir := filepath.Join(t.TempDir(), "state")
+		if err := os.Mkdir(stateDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if wide {
+			if err := os.Mkdir(filepath.Join(stateDir, "skill"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(filepath.Join(stateDir, "skill"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := writeSkill(stateDir, []byte("skill")); err != nil {
+			t.Fatal(err)
+		}
+		err := filepath.WalkDir(stateDir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().Perm()&0o077 != 0 {
+				t.Errorf("wide=%v: %s has mode %v, want no access for group and others", wide, p, info.Mode().Perm())
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

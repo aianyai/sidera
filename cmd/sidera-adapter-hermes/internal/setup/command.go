@@ -137,8 +137,8 @@ func run(o options, env Env) error {
 	if err != nil {
 		return err
 	}
-	skillFile := filepath.Join(dir, "skill", "SKILL.md")
-	if err := writeFile(skillFile, skill); err != nil {
+	skillFile, err := writeSkill(dir, skill)
+	if err != nil {
 		return err
 	}
 
@@ -212,11 +212,27 @@ func readConfig(file string, stdin io.Reader) (config.Config, error) {
 	return cfg, nil
 }
 
+// writeSkill writes the Skill into the instance's state directory and returns its path.
+// The daemon starts an adapter only when its whole state directory is private to the
+// owner, so the directory and the file are owner-only; one that is wider, as an earlier
+// version of this command left it, is narrowed, or the instance would not start again.
+func writeSkill(stateDir string, skill []byte) (string, error) {
+	file := filepath.Join(stateDir, "skill", "SKILL.md")
+	if err := writeFile(file, skill, 0o700, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(filepath.Dir(file), 0o700); err != nil {
+		return "", err
+	}
+	return file, nil
+}
+
 // writeFile replaces the file with a temporary file and a rename, so that a reader
-// (Hermes scanning its skills) never sees half of it.
-func writeFile(path string, data []byte) error {
+// (Hermes scanning its skills) never sees half of it. The directory is made with
+// dirMode when it is missing; the file has fileMode.
+func writeFile(path string, data []byte, dirMode, fileMode os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -231,7 +247,7 @@ func writeFile(path string, data []byte) error {
 		os.Remove(tmp.Name())
 		return werr
 	}
-	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+	if err := os.Chmod(tmp.Name(), fileMode); err != nil {
 		os.Remove(tmp.Name())
 		return err
 	}
@@ -288,7 +304,7 @@ func apply(ctx context.Context, cfg config.Config, steps []Step, env Env) error 
 		if s.IsCopy() {
 			data, err := os.ReadFile(s.CopyFrom)
 			if err == nil {
-				err = writeFile(s.CopyTo, data)
+				err = writeFile(s.CopyTo, data, 0o755, 0o644)
 			}
 			if err != nil {
 				return fmt.Errorf("step %d failed: %w", i+1, err)
