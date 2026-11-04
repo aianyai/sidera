@@ -25,6 +25,10 @@ func TestCommandsBecomeTheEndpointCallTheyName(t *testing.T) {
 		{"whoami", []string{"whoami"}, `{"op":"whoami"}`},
 		{"status", []string{"status", "m-1"}, `{"op":"status","status":{"endpoint":"","message_id":"m-1"}}`},
 		{"recv waits as told", []string{"recv", "--wait", "7"}, `{"op":"recv","recv":{"endpoint":"","wait_s":7}}`},
+		{"directory of this node", []string{"directory"}, `{"op":"directory","directory":{"endpoint":""}}`},
+		{"directory page of another node", []string{"directory", "--node", "n2", "--limit", "5", "--cursor", "c-1"},
+			`{"op":"directory","directory":{"endpoint":"","node":"n2","cursor":"c-1","limit":5}}`},
+		{"peers", []string{"peers"}, `{"op":"peers"}`},
 		{"send to two", []string{"send", "--to", "n/a, n/b", "--body", "hi"},
 			`{"op":"send","send":{"endpoint":"","to":["n/a","n/b"],"content_type":"text/plain","body":"hi"}}`},
 		{"send from stdin, flags first", []string{"send", "--body-file", "-", "--to", "n/a"},
@@ -66,6 +70,9 @@ func TestCommandsRefuseWhatTheyCannotSend(t *testing.T) {
 		"recv waits too long": {"recv", "--wait", "31"},
 		"status without id":   {"status"},
 		"extra argument":      {"whoami", "x"},
+		"directory limit 0":   {"directory", "--limit", "0"},
+		"directory limit 101": {"directory", "--limit", "101"},
+		"peers takes nothing": {"peers", "--node", "n2"},
 	} {
 		if _, err := parseCommand(args, env); err == nil {
 			t.Errorf("%s: %v was accepted", name, args)

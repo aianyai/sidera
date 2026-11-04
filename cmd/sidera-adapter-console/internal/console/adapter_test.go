@@ -33,10 +33,18 @@ type daemon struct {
 	statuses []adapterproto.MessageStatusParams
 	recvs    []adapterproto.RecvParams
 	acks     []adapterproto.AckParams
+	dirs     []adapterproto.DirectoryParams
+	peers    []adapterproto.PeersParams
 
 	// registerGate, when set, holds every endpoint.register until it is closed,
 	// as the daemon does until it is running.
 	registerGate chan struct{}
+
+	// directAccess is whether the daemon declares direct_endpoint_access in
+	// initialize; the directory and peers handlers are only reached when it does.
+	directAccess    bool
+	directoryAnswer adapterproto.DirectoryResult
+	peersAnswer     adapterproto.PeersResult
 
 	pages        []adapterproto.RecvPage // handed out one per recv; then an empty page
 	statusAnswer func(n int) adapterproto.MessageStatusResult
@@ -125,6 +133,18 @@ func newHarness(t *testing.T, d *daemon) *harness {
 		}
 		return res, nil
 	})
+	p.Handle(adapterproto.MethodEndpointDirectory, func(_ context.Context, raw json.RawMessage) (any, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.dirs = append(d.dirs, decode[adapterproto.DirectoryParams](raw))
+		return d.directoryAnswer, nil
+	})
+	p.Handle(adapterproto.MethodEndpointPeers, func(_ context.Context, raw json.RawMessage) (any, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.peers = append(d.peers, decode[adapterproto.PeersParams](raw))
+		return d.peersAnswer, nil
+	})
 	p.Start()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,7 +171,8 @@ func newHarness(t *testing.T, d *daemon) *harness {
 	var init adapterproto.InitializeResult
 	call(adapterproto.MethodInitialize, adapterproto.InitializeParams{
 		Protocol: adapterproto.SupportedRange(), Daemon: adapterproto.DaemonInfo{Version: "test"},
-		Instance: adapterproto.InstanceInfo{ID: AdapterID, LockPath: filepath.Join(dir, "adapter.lock"), StateDir: dir},
+		Instance:     adapterproto.InstanceInfo{ID: AdapterID, LockPath: filepath.Join(dir, "adapter.lock"), StateDir: dir},
+		Capabilities: adapterproto.DaemonCapabilities{DirectEndpointAccess: d.directAccess},
 	}, &init)
 	if init.Capabilities.Direct == nil || init.Capabilities.Direct.MaxEndpoints != 8 || init.Capabilities.Runtime != nil {
 		t.Fatalf("capabilities %+v, want direct with 8 endpoints and no runtime", init.Capabilities)
@@ -395,5 +416,71 @@ func TestTheClientFindsNoAdapterWhenNoneIsRunning(t *testing.T) {
 	c := &client{env: Env{Stdout: io.Discard, Stderr: &bytes.Buffer{}}, dir: dir, dial: dialLocal}
 	if _, err := c.call(context.Background(), request{Op: opWhoami}); err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Errorf("call with no adapter: %v", err)
+	}
+}
+
+func TestDirectoryPrintsOneLinePerEntryAndTheCursorOfTheNextPage(t *testing.T) {
+	d := &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{
+		Outcome: adapterproto.DirectoryOK,
+		Endpoints: []adapterproto.DirectoryEntry{
+			{Address: "node-2/rt", Kind: adapterproto.EndpointRuntime, DisplayName: "Dev runtime",
+				Accepts: []adapterproto.EndpointAction{adapterproto.ActionSessionCreate, adapterproto.ActionEndpointStatus}},
+			{Address: "node-2/ep-x", Kind: adapterproto.EndpointDirect, Accepts: []adapterproto.EndpointAction{}},
+		},
+		NextCursor: "c-2",
+	}}
+	h := newHarness(t, d)
+	code := h.run("directory", "--node", "node-2", "--limit", "2", "--cursor", "c-1")
+	if code != exitOK {
+		t.Fatalf("directory: exit %d, stderr %q", code, h.errOut.String())
+	}
+	want := "node-2/rt  runtime  Dev runtime  session.create,endpoint.status\nnode-2/ep-x  direct  -  -\nnext cursor: c-2\n"
+	if got := h.out.String(); got != want {
+		t.Errorf("output %q, want %q", got, want)
+	}
+	if len(d.dirs) != 1 || d.dirs[0].Endpoint != ownerEndpoint || d.dirs[0].Node != "node-2" || d.dirs[0].Limit != 2 || d.dirs[0].Cursor != "c-1" {
+		t.Errorf("endpoint.directory calls %+v, want one for the owner endpoint with the node, limit and cursor", d.dirs)
+	}
+}
+
+func TestDirectoryThatGaveNoPageFailsWithItsReason(t *testing.T) {
+	h := newHarness(t, &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{
+		Outcome: adapterproto.DirectoryUnavailable, Reason: adapterproto.DirectoryReasonUnavailable, Endpoints: []adapterproto.DirectoryEntry{},
+	}})
+	if code := h.run("directory", "--node", "node-2"); code != exitFailed || h.out.Len() != 0 ||
+		!strings.Contains(h.errOut.String(), "unavailable (directory_unavailable)") {
+		t.Errorf("exit %d, stdout %q, stderr %q, want exit 1 naming the outcome and the reason", code, h.out.String(), h.errOut.String())
+	}
+}
+
+func TestPeersPrintsOneLinePerNode(t *testing.T) {
+	d := &daemon{directAccess: true, peersAnswer: adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{
+		{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true},
+		{Node: "node-2", Trust: adapterproto.PeerDirect},
+	}}}
+	h := newHarness(t, d)
+	if code := h.run("peers"); code != exitOK {
+		t.Fatalf("peers: exit %d, stderr %q", code, h.errOut.String())
+	}
+	if got, want := h.out.String(), "node-1  this node  trust self  connected\nnode-2  trust direct  not connected\n"; got != want {
+		t.Errorf("output %q, want %q", got, want)
+	}
+	if len(d.peers) != 1 || d.peers[0].Endpoint != ownerEndpoint {
+		t.Errorf("endpoint.peers calls %+v, want one for the owner endpoint", d.peers)
+	}
+}
+
+// A daemon that did not declare direct_endpoint_access does not serve the two
+// requests: the commands say so and send nothing.
+func TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem(t *testing.T) {
+	d := &daemon{}
+	h := newHarness(t, d)
+	for _, cmd := range []string{"directory", "peers"} {
+		if code := h.run(cmd); code != exitFailed || h.out.Len() != 0 || !strings.Contains(h.errOut.String(), "too old") {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q, want exit 1 saying the daemon is too old", cmd, code, h.out.String(), h.errOut.String())
+		}
+	}
+	if len(d.dirs) != 0 || len(d.peers) != 0 {
+		t.Errorf("requests reached the daemon: directory %v, peers %v", d.dirs, d.peers)
 	}
 }

@@ -39,6 +39,8 @@ apply to what arrives.
 | `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message with its sender and id, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. |
 | `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. |
 | `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
+| `directory [--node <id>] [--limit <n>] [--cursor <c>]` | Calls `endpoint.directory`: one page of the endpoints a node shows to the owner endpoint, this node without `--node`. One line per entry, `<address>  <kind>  <display name>  <accepted actions>`, with `-` for an absent name or an empty list, then `next cursor: <c>` when more follow, to give back with `--cursor` (and the same `--node`). `--limit` is 1 to 100. An outcome other than `ok` is printed with its reason and exits 1. |
+| `peers` | Calls `endpoint.peers`: one line per node the owner endpoint can address, this node first, `<node>  [this node  ]trust <trust>  connected\|not connected`. The node text is what `directory --node` takes. |
 | `status <message-id>` | `endpoint.message_status`: the delivery state of each recipient and the control reply. |
 | `package` | Writes an adapter package (below). |
 | `version` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version. |
@@ -49,6 +51,12 @@ directory: the flag, then `SIDERA_HOME`, then `~/.sidera` or on Windows
 refuses the former Windows default when it is the only one there) and
 `--instance` (default `console`, the name `adapter enable console` gives). Flags may
 come before or after the positional argument.
+
+`directory` and `peers` need the daemon to have declared the capability
+`direct_endpoint_access` in `initialize` (see [adapter-protocol](../adapter-protocol/README.md)).
+Without it the adapter sends nothing and the client prints that the daemon of this node
+is too old to do it for a direct endpoint, and exits 1. The console does not make
+`endpoint.declare` requests: the owner endpoint keeps the declaration it starts with.
 
 Exit codes: 0 done; 1 refused or failed (the daemon's refusal is printed with its
 protocol code); 2 usage; 3 not settled: `new` got no reply within `--timeout`
@@ -91,7 +99,7 @@ client derives the same one, in a single function (`stateDir`).
 
 The protocol on the channel is one request per connection, one line of JSON each
 way, at most 1 MiB. A request is an operation (`whoami`, `send`, `status`, `recv`,
-`ack`) with the parameters of the `endpoint.*` call it becomes; the adapter fills in
+`ack`, `directory`, `peers`) with the parameters of the `endpoint.*` call it becomes; the adapter fills in
 the endpoint, so a client never names one. An answer is the result of that call,
 or an error with the daemon's code. The adapter calls the daemon with the context
 of the request, so a recv waits as long as the client asked, up to 30 seconds.
@@ -156,6 +164,14 @@ sidera adapter enable console
   `new` and for `status` alike; the node of this adapter would be right only for a
   runtime on the same node, and sending to that address anywhere else is rejected
   as `endpoint_missing`.
+- **The adapter says when the daemon is too old.** Only the adapter holds the
+  capabilities the daemon declared, and the SDK refuses the call before sending it, so the
+  client learns it as an ordinary failure of the request with a readable reason, and no
+  request reaches a daemon that would answer it with an unknown-method error. A page that
+  could not be given (`unavailable`, `refused`) is a result of the call, not a failure of
+  it, and the client turns it into the exit code.
+- **No `declare` in the console.** The owner endpoint keeps the declaration it is
+  registered with; nothing a person does at a terminal needs another.
 - **Polling lives in the client.** `new` is a `send` and a series of `status`
   requests; the adapter stays a mapping of one request to one call, with no timers.
 - **A token on Windows.** The repository's own local interfaces use named pipes
@@ -178,6 +194,9 @@ sidera adapter enable console
   `TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered`,
   `TestNewSendsTheControlSignalAndPollsForTheReply` (a runtime on another node),
   `TestStatusNamesTheSessionOnTheNodeOfTheRuntime`,
+  `TestDirectoryPrintsOneLinePerEntryAndTheCursorOfTheNextPage`,
+  `TestDirectoryThatGaveNoPageFailsWithItsReason`, `TestPeersPrintsOneLinePerNode`,
+  `TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
   `TestReplyGoesToTheSenderSeenInRecv` (the adapter over pipes against a stand-in
   for the daemon), `TestTokenTransportServesOnlyAClientThatPresentsTheToken`,

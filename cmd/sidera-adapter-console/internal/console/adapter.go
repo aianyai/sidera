@@ -282,10 +282,37 @@ func (a *adapter) dispatch(ctx context.Context, req request) response {
 			return fail(err)
 		}
 		resp.Ack = &res
+	case opDirectory:
+		if req.Directory == nil {
+			return fail(errors.New("directory needs its parameters"))
+		}
+		p := *req.Directory
+		p.Endpoint = endpoint
+		res, err := a.conn.Directory(ctx, p)
+		if err != nil {
+			return fail(notSupported(err, "list the directory"))
+		}
+		resp.Directory = &res
+	case opPeers:
+		res, err := a.conn.Peers(ctx, adapterproto.PeersParams{Endpoint: endpoint})
+		if err != nil {
+			return fail(notSupported(err, "list the peers"))
+		}
+		resp.Peers = &res
 	default:
 		return fail(fmt.Errorf("unknown operation %q", req.Op))
 	}
 	return resp
+}
+
+// notSupported words the refusal of a daemon that did not declare
+// direct_endpoint_access, which the SDK reports without sending anything. Any
+// other error is returned as it is.
+func notSupported(err error, what string) error {
+	if errors.Is(err, adapterkit.ErrDirectEndpointAccess) {
+		return fmt.Errorf("the daemon of this node is too old to %s for a direct endpoint: update the node", what)
+	}
+	return err
 }
 
 func (a *adapter) remember(msgs []adapterproto.PageMessage) {

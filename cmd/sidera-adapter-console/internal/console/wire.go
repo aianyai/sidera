@@ -16,6 +16,10 @@ const (
 	opStatus = "status"
 	opRecv   = "recv"
 	opAck    = "ack"
+	// opDirectory and opPeers need the daemon to have declared
+	// direct_endpoint_access; the adapter refuses them otherwise.
+	opDirectory = "directory"
+	opPeers     = "peers"
 )
 
 // maxLine bounds one line of the local protocol: a message body is at most 64 KiB,
@@ -28,18 +32,23 @@ type request struct {
 	Status *adapterproto.MessageStatusParams `json:"status,omitempty"`
 	Recv   *adapterproto.RecvParams          `json:"recv,omitempty"`
 	Ack    *adapterproto.AckParams           `json:"ack,omitempty"`
+	// Directory names the node to ask, the cursor and the page size; its endpoint
+	// is filled in by the adapter, as for every operation. peers has no parameters.
+	Directory *adapterproto.DirectoryParams `json:"directory,omitempty"`
 }
 
 // response is the answer: an error, or the result of the call that was made. Node
 // comes with every success so the client can write addresses.
 type response struct {
-	Error    *failure                          `json:"error,omitempty"`
-	Node     string                            `json:"node,omitempty"`
-	Endpoint adapterproto.EndpointRef          `json:"endpoint,omitempty"`
-	Send     *adapterproto.SendResult          `json:"send,omitempty"`
-	Status   *adapterproto.MessageStatusResult `json:"status,omitempty"`
-	Recv     *adapterproto.RecvResult          `json:"recv,omitempty"`
-	Ack      *adapterproto.AckResult           `json:"ack,omitempty"`
+	Error     *failure                          `json:"error,omitempty"`
+	Node      string                            `json:"node,omitempty"`
+	Endpoint  adapterproto.EndpointRef          `json:"endpoint,omitempty"`
+	Send      *adapterproto.SendResult          `json:"send,omitempty"`
+	Status    *adapterproto.MessageStatusResult `json:"status,omitempty"`
+	Recv      *adapterproto.RecvResult          `json:"recv,omitempty"`
+	Ack       *adapterproto.AckResult           `json:"ack,omitempty"`
+	Directory *adapterproto.DirectoryResult     `json:"directory,omitempty"`
+	Peers     *adapterproto.PeersResult         `json:"peers,omitempty"`
 }
 
 // failure is what went wrong; Code is the protocol's when the daemon refused.

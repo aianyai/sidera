@@ -64,7 +64,8 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 	fs.StringVar(&inv.instance, "instance", AdapterID, "")
 	var (
 		preset, body, bodyFile, to string
-		waitS, timeoutS            int
+		node, cursor               string
+		waitS, timeoutS, limit     int
 	)
 	positionals := 0
 	switch inv.cmd {
@@ -87,7 +88,11 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 		positionals = 1
 	case "recv":
 		fs.IntVar(&waitS, "wait", 0, "")
-	case "whoami":
+	case "directory":
+		fs.StringVar(&node, "node", "", "")
+		fs.StringVar(&cursor, "cursor", "", "")
+		fs.IntVar(&limit, "limit", 0, "")
+	case "whoami", "peers":
 	default:
 		return nil, fmt.Errorf("unknown command %q", inv.cmd)
 	}
@@ -104,6 +109,13 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 	switch inv.cmd {
 	case "whoami":
 		inv.req = request{Op: opWhoami}
+	case "peers":
+		inv.req = request{Op: opPeers}
+	case "directory":
+		if set["limit"] && (limit < 1 || limit > adapterproto.MaxDirectoryLimit) {
+			return nil, fmt.Errorf("--limit is 1 to %d", adapterproto.MaxDirectoryLimit)
+		}
+		inv.req = request{Op: opDirectory, Directory: &adapterproto.DirectoryParams{Node: node, Cursor: cursor, Limit: limit}}
 	case "status":
 		inv.req = request{Op: opStatus, Status: &adapterproto.MessageStatusParams{MessageID: adapterproto.MessageID(rest[0])}}
 	case "recv":
@@ -264,6 +276,10 @@ func (r response) answers(op string) bool {
 		return r.Recv != nil
 	case opAck:
 		return r.Ack != nil
+	case opDirectory:
+		return r.Directory != nil
+	case opPeers:
+		return r.Peers != nil
 	}
 	return false
 }
@@ -300,6 +316,10 @@ func (c *client) execute(ctx context.Context, inv *invocation) int {
 			return c.errorf(err)
 		}
 		c.printStatus(*resp.Status)
+	case "directory":
+		return c.directory(ctx, inv)
+	case "peers":
+		return c.peers(ctx, inv)
 	case "recv":
 		return c.receive(ctx, inv)
 	case "new":

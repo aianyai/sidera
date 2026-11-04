@@ -56,6 +56,9 @@ commands:
                          print the messages waiting for the owner endpoint, then acknowledge them
   reply <message-id> [--to <address>] (--body <text> | --body-file <file>)
   send --to <address>[,<address>...] (--body <text> | --body-file <file>)
+  directory [--node <id>] [--limit <n>] [--cursor <c>]
+                         list the endpoints a node shows to the owner endpoint (--node names a node from 'peers')
+  peers                  list the nodes the owner endpoint can address
   status <message-id>    delivery state of a message sent from the owner endpoint
   whoami                 the address of the owner endpoint
   version                the version, the commit and the Go version of this program

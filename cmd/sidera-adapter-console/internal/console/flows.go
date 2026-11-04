@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -190,4 +191,64 @@ func (c *client) printMessage(m adapterproto.PageMessage) {
 		fmt.Fprint(w, "  (possibly shown before)")
 	}
 	fmt.Fprintf(w, "\n%s\n\n", m.Body)
+}
+
+// directory is `directory`: it prints one page of the endpoints a node shows to
+// the owner endpoint, and the cursor of the next page when there is one. A page
+// the node asked could not give is a result, not a failure of the call, and ends
+// the command as a failure with its reason.
+func (c *client) directory(ctx context.Context, inv *invocation) int {
+	resp, err := c.call(ctx, inv.req)
+	if err != nil {
+		return c.errorf(err)
+	}
+	res := resp.Directory
+	if res.Outcome != adapterproto.DirectoryOK {
+		fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: the directory was not given: %s (%s)\n", res.Outcome, res.Reason)
+		return exitFailed
+	}
+	if len(res.Endpoints) == 0 {
+		fmt.Fprintln(c.env.Stderr, "no endpoints")
+	}
+	for _, e := range res.Endpoints {
+		accepts := make([]string, len(e.Accepts))
+		for i, a := range e.Accepts {
+			accepts[i] = string(a)
+		}
+		fmt.Fprintf(c.env.Stdout, "%s  %s  %s  %s\n", e.Address, e.Kind, orDash(e.DisplayName), orDash(strings.Join(accepts, ",")))
+	}
+	if res.NextCursor != "" {
+		fmt.Fprintln(c.env.Stdout, "next cursor:", res.NextCursor)
+	}
+	return exitOK
+}
+
+// peers is `peers`: it prints the nodes the owner endpoint can address, this
+// node first, with the name each is known by in `directory --node`.
+func (c *client) peers(ctx context.Context, inv *invocation) int {
+	resp, err := c.call(ctx, inv.req)
+	if err != nil {
+		return c.errorf(err)
+	}
+	for _, n := range resp.Peers.Nodes {
+		line := n.Node
+		if n.Self {
+			line += "  this node"
+		}
+		line += "  trust " + string(n.Trust)
+		if n.Connected {
+			line += "  connected"
+		} else {
+			line += "  not connected"
+		}
+		fmt.Fprintln(c.env.Stdout, line)
+	}
+	return exitOK
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
