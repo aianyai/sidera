@@ -15,8 +15,9 @@ part of this directory yet.
 | ---- | ----- |
 | `internal/config/` | The instance configuration and its checks; the alias allow-list. |
 | `internal/card/` | The card envelope, strict decoding, validation against the aliases, the assignee rule, the creator check. |
+| `internal/kanban/` | The client of the board: runs `hermes kanban --json`, decodes the answers, classifies failures, names the block kinds and checks the Hermes release. Described in [`kanban-cli`](../../docs/references/adapter-hermes/kanban-cli.md). |
 | `internal/state/` | The state directory: records of cards, endpoints, remote sessions and processed messages, and the store that writes them. |
-| `internal/lane/` | Pure decisions over the records: endpoint keys and capacity, matching a reply to a card, queueing, recovery, failures, closing remote sessions, the parent of a continuation. |
+| `internal/lane/` | Pure decisions over the records: endpoint keys and capacity, matching a reply to a card, queueing, recovery, failures and the Hermes block kind of each, closing remote sessions, the parent of a continuation. |
 
 ## Conventions
 

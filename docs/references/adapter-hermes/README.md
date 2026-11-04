@@ -6,9 +6,10 @@ the task to an agent on another node and writes the answer back to the card. Thi
 document describes the part of `cmd/sidera-adapter-hermes/` that is committed: the
 instance configuration, the card and its validation, the endpoint model, the state
 directory and the decisions the adapter makes over them. They are pure functions
-and local persistence; the program that reads the board, talks to the daemon and
-carries these decisions out is not in the directory yet, and this document grows
-with it.
+and local persistence. The client of the board, which runs `hermes kanban` and
+decodes what it prints, has a document of its own: [kanban-cli](kanban-cli.md). The
+program that reads the board, talks to the daemon and carries the decisions out is
+not in the directory yet, and this document grows with it.
 
 The adapter imports only the `sdk/go` module, as a third-party adapter would.
 
@@ -152,6 +153,9 @@ start persisted, the send may or may not have happened), `sent` (the message id 
 known; waiting for the reply), `blocked` or `finished`. Whether a card holds its peer
 (`Waiting`) is true in `attempting` and `sent` only: a blocked card does not, or one
 stuck card would stall every card behind it for as long as its creator leaves it.
+Whether a reply would still answer the card (`AwaitsReply`) is wider: it also holds
+for a card blocked for no reply or by a transient failure, since the peer may only
+have been late.
 `Prune` forgets a finished card after the retention, except one whose remote session
 is still open, because a follow-up needs its parent's peer.
 
@@ -159,14 +163,37 @@ is still open, because a follow-up needs its parent's peer.
 
 All of them are in `lane` and take the records and the time as arguments.
 
-**Matching a received message to a card** (`MatchReply`). The card is the one waiting
-at the endpoint that received the message whose peer is the sender. If none matches
-and some waiting card has no peer yet, the verdict is to read again: the first reply
-of a new session can arrive before the adapter has read the control reply that names
-the session. The caller reads the pending creations of that endpoint, records the
-addresses and asks again with `reread` set; a second miss is a new message, not a
-reply. The inbound message id is checked against the table of processed messages
-first, so a redelivery after the card was completed is not taken for a new request.
+**Matching a received message to a card** (`MatchReply`). The card is the one at the
+endpoint that received the message whose peer is the sender and that awaits a reply:
+a card waiting, or blocked for no reply or by a transient failure. A reply that
+arrives after the card was blocked is the answer the card was waiting for, so the
+adapter completes the card with it, as it would a waiting card; handing it to the
+conversation as a new message would answer a request the creator is already being
+asked about with something it did not ask. The card stays out of the queue while
+blocked, so a late reply and a stuck card never cost the cards behind it their turn.
+A card blocked as invalid sent nothing and is never matched. If two cards of one peer
+await a reply, the oldest answers, because a peer answers in the order it was asked.
+If none matches and some waiting card has no peer yet, the verdict is to read again:
+the first reply of a new session can arrive before the adapter has read the control
+reply that names the session. The caller reads the pending creations of that
+endpoint, records the addresses and asks again with `reread` set; a second miss is a
+new message, not a reply. The inbound message id is checked against the table of
+processed messages first, so a redelivery after the card was completed is not taken
+for a new request.
+
+*Completing a card that is blocked.* `hermes kanban complete` takes a card from
+`blocked` straight to `done` (Hermes 0.22.2, `hermes_cli/kanban_db.py`: the update
+that completes a card matches `status IN ('running', 'ready', 'blocked', 'review')`).
+So the matched card needs no unblock and no new claim first, and the same call works
+if its creator unblocked it meanwhile (`ready`) or the adapter claimed it again
+(`running`): the fence against a live worker looks for a worker process, and a claim
+made from the command line has none. The completion clears the block kind and its
+recurrence count, appends no `blocked` event and so is not counted as a block. The
+creator, who was woken when the card was blocked, is woken once more by the
+`completed` event with the reply as the handoff; that is the same as blocking,
+unblocking and completing in turn. A card that its creator moved to `todo` or
+`triage` cannot be completed; the client reports that as a permanent failure
+(`cannot complete <id> (unknown id or terminal state)`).
 
 **Queueing** (`ShouldQueue`, `NextQueued`). Every send, follow-ups included, waits
 while another card at the same endpoint still waits for a reply from the same peer,
@@ -203,7 +230,18 @@ released:
 delivery failed, outcome unknown, remote session closed and no reply (`no reply` is
 `NoReplyDue`, true once the wait reaches the timeout). They fall into three
 categories: invalid card; transient, which holds delivery failed, outcome unknown and
-remote session closed; no reply. A card is blocked once per category. The second
+remote session closed; no reply. Each category has its own Hermes block kind
+(`lane.BlockKindOf`, the one mapping), and the three kinds differ on purpose:
+
+| Category | Hermes block kind |
+| -------- | ----------------- |
+| Invalid card | `capability`: the card cannot be done as written |
+| Transient | `transient`: a failure that may be gone on the next try |
+| No reply | `needs_input`: the card waits for an answer that has not come |
+
+Hermes counts blocks per kind and sends a card to triage on the second block of one
+kind, so two categories sharing a kind would use up the one block of the other. A
+card is blocked once per category. The second
 time it is completed, saying why, because Hermes puts a card blocked twice for the same
 kind into a state where nobody is woken. So: a first timeout blocks the card; once
 unblocked it waits again, and a second timeout completes it saying the peer still
@@ -255,6 +293,7 @@ and the caller subscribes the notify fields recorded with the endpoint.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
+| Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |
 | State directory | `cmd/sidera-adapter-hermes/internal/state` | `state_test.go` |

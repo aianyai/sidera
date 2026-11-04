@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 )
 
@@ -70,13 +71,22 @@ func card(id, endpoint, peer string, phase state.Phase) state.Card {
 	return state.Card{ID: id, Endpoint: endpoint, Peer: peer, Phase: phase}
 }
 
+func blockedFor(id, endpoint, peer string, cat state.Category) state.Card {
+	c := card(id, endpoint, peer, state.PhaseBlocked)
+	c.BlockedFor = cat
+	return c
+}
+
 func TestMatchReply(t *testing.T) {
 	cards := []state.Card{
 		card("a", "e1", "peer-1", state.PhaseSent),
-		card("b", "e1", "peer-2", state.PhaseBlocked),
+		card("b", "e1", "peer-2", state.PhaseNew),
 		card("c", "e2", "peer-1", state.PhaseSent),
 		card("d", "e1", "peer-3", state.PhaseFinished),
 		card("e", "e1", "peer-4", state.PhaseAttempting),
+		blockedFor("f", "e1", "peer-5", state.CategoryNoReply),
+		blockedFor("g", "e1", "peer-6", state.CategoryTransient),
+		blockedFor("h", "e1", "peer-7", state.CategoryInvalidCard),
 	}
 	cases := []struct {
 		name     string
@@ -89,7 +99,13 @@ func TestMatchReply(t *testing.T) {
 		{"waiting card of that endpoint and sender", cards, "e1", "peer-1", false, Match{MatchCard, "a"}},
 		{"same sender, other endpoint", cards, "e2", "peer-1", false, Match{MatchCard, "c"}},
 		{"a send whose message id is not recorded yet still waits", cards, "e1", "peer-4", false, Match{MatchCard, "e"}},
-		{"blocked card does not wait", cards, "e1", "peer-2", false, Match{Kind: MatchNone}},
+		{"card blocked for no reply is still answered", cards, "e1", "peer-5", false, Match{MatchCard, "f"}},
+		{"card blocked by a transient failure is still answered", cards, "e1", "peer-6", false, Match{MatchCard, "g"}},
+		{"card that has sent nothing yet", cards, "e1", "peer-2", false, Match{Kind: MatchNone}},
+		{"card blocked as invalid sent nothing", cards, "e1", "peer-7", false, Match{Kind: MatchNone}},
+		{"blocked card on another endpoint", cards, "e2", "peer-5", false, Match{Kind: MatchNone}},
+		{"a blocked card without a peer does not ask for a read", append(cards[:1:1], blockedFor("n", "e1", "", state.CategoryTransient)), "e1", "session-x", false, Match{Kind: MatchNone}},
+		{"the oldest card of a peer answers, blocked or not", []state.Card{blockedFor("a", "e", "p", state.CategoryNoReply), card("b", "e", "p", state.PhaseSent)}, "e", "p", false, Match{MatchCard, "a"}},
 		{"finished card does not wait", cards, "e1", "peer-3", false, Match{Kind: MatchNone}},
 		{"stranger", cards, "e1", "peer-9", false, Match{Kind: MatchNone}},
 		{"endpoint without cards", cards, "e3", "peer-1", false, Match{Kind: MatchNone}},
@@ -178,6 +194,24 @@ func TestOnReady(t *testing.T) {
 	for _, tc := range cases {
 		if got := OnReady(tc.card, t0, window); got != tc.want {
 			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestBlockKindOf(t *testing.T) {
+	cases := []struct {
+		reason Reason
+		want   kanban.BlockKind
+	}{
+		{ReasonInvalidCard, kanban.BlockCapability},
+		{ReasonDeliveryFailed, kanban.BlockTransient},
+		{ReasonOutcomeUnknown, kanban.BlockTransient},
+		{ReasonSessionClosed, kanban.BlockTransient},
+		{ReasonNoReply, kanban.BlockNeedsInput},
+	}
+	for _, tc := range cases {
+		if got := BlockKindOf(tc.reason.Category()); got != tc.want || !got.Valid() {
+			t.Errorf("reason %d: got %q, want %q", tc.reason, got, tc.want)
 		}
 	}
 }

@@ -81,6 +81,17 @@ type Card struct {
 // would hold up every card behind it for as long as Hermes leaves it blocked.
 func (c Card) Waiting() bool { return c.Phase == PhaseAttempting || c.Phase == PhaseSent }
 
+// AwaitsReply reports whether a reply from the card's peer would still answer it:
+// the card is waiting, or it is blocked after a message may have gone out (no
+// reply in time, or a transient failure whose outcome was not certain). The peer
+// answers late, not wrongly, so the reply belongs to the card even though a
+// blocked card no longer holds its peer (Waiting). A card blocked as invalid
+// never sent anything.
+func (c Card) AwaitsReply() bool {
+	return c.Waiting() ||
+		(c.Phase == PhaseBlocked && (c.BlockedFor == CategoryNoReply || c.BlockedFor == CategoryTransient))
+}
+
 // Unfinished reports whether the card may still send or receive.
 func (c Card) Unfinished() bool { return c.Phase != PhaseFinished }
 

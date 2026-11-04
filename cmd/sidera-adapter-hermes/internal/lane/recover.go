@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 )
 
@@ -41,6 +42,25 @@ func (r Reason) Category() state.Category {
 		return state.CategoryNoReply
 	default:
 		return state.CategoryTransient
+	}
+}
+
+// BlockKindOf is the kind a card blocked in the category is blocked with in
+// Hermes. It is the one place that maps the adapter's categories to Hermes'
+// vocabulary: an invalid card cannot be done as written (capability), a failure
+// that may be gone on the next try is transient, and a card waiting for a peer
+// that has not answered waits for input. The three stay distinct because Hermes
+// counts blocks per kind and sends a card to triage, where nobody is woken, on the
+// second block of one kind; mapping two categories to one kind would spend that
+// second block on a different cause.
+func BlockKindOf(cat state.Category) kanban.BlockKind {
+	switch cat {
+	case state.CategoryInvalidCard:
+		return kanban.BlockCapability
+	case state.CategoryNoReply:
+		return kanban.BlockNeedsInput
+	default:
+		return kanban.BlockTransient
 	}
 }
 
