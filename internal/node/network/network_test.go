@@ -637,21 +637,23 @@ func TestCallDoesNotUseAConnectionTheNodeIsClosing(t *testing.T) {
 }
 
 // TestRenewedCertificateIsExchangedOnANewConnection changes the serial of the
-// node's own certificate and shows that the connection is closed when idle and
-// the next call presents the new certificate.
+// node's own certificate and shows that the node closes its idle connection and
+// the next call presents the new certificate on a new connection.
+//
+// The test does not wait for the other node to see the close. The library
+// closes a TCP connection with linger 0, which sends a single RST that is not
+// retransmitted, and the far end's kernel does not always process it (observed
+// on macOS loopback), which leaves a half-open connection on the other node. The
+// product tolerates that: the next call on it fails and clears it, and the yamux
+// keepalive clears an idle one within about 30 seconds. What the test asserts is
+// what the renewing node does and what the next call carries, neither of which
+// depends on the far end's kernel.
 func TestRenewedCertificateIsExchangedOnANewConnection(t *testing.T) {
 	// The hour the test lets pass would run the tick, and the members would ask
 	// each other whether they can dial back (each dialing the other) while the
 	// renewal closes the connection. That is not what the test is about, and it
-	// leaves the far end of the closed connection open now and then: the library
-	// closes a TCP connection with linger 0, which sends a single RST that is not
-	// retransmitted, and when it coincides with the dial-back connection being
-	// handshaken and reset on the same listening port, the peer's kernel was
-	// observed (macOS loopback, 35 runs in 300, none in 300 with a FIN close)
-	// never to process it. The product tolerates such a half-open connection (the
-	// next call fails on it and clears it, and the yamux keepalive clears it
-	// within about 30 seconds), but this test waits for both ends to see the
-	// close.
+	// makes the call after the renewal fail now and then (its connection is
+	// reset, or is still being authenticated when the call takes it).
 	a, b := pair(t, false, true, true, func(c *Config) { c.TickEvery = 24 * time.Hour })
 	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
 		t.Fatal(err)
@@ -659,11 +661,18 @@ func TestRenewedCertificateIsExchangedOnANewConnection(t *testing.T) {
 	if got := b.node.noted(); len(got) != 1 || got[0].Serial != 1 {
 		t.Fatalf("b was told %+v, want serial 1", got)
 	}
+	old := a.net.memberConn(b.id)
+	if old == nil {
+		t.Fatal("no connection after the first send")
+	}
 	a.clk.Advance(time.Hour)
 	a.setMembership(2, b)
-	eventually(t, "the idle connection to be closed", func() bool { return a.connCount() == 0 && b.connCount() == 0 })
+	eventually(t, "the idle connection to be closed", func() bool { return a.connCount() == 0 })
 	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
 		t.Fatal(err)
+	}
+	if now := a.net.memberConn(b.id); now == nil || now == old {
+		t.Fatalf("the call after the renewal used connection %v, want a new one (the old one is %v)", now, old)
 	}
 	if got := b.node.noted(); len(got) != 2 || got[1].Serial != 2 {
 		t.Fatalf("b was told %+v, want serial 2 second", got)
