@@ -29,6 +29,9 @@ const (
 	// locked database does. ReadyFile holds the answer to `list --status ready`.
 	DownFile  = "down"
 	ReadyFile = "ready.json"
+	// VersionFile, in the control directory, replaces the recorded output of
+	// `--version`.
+	VersionFile = "version.txt"
 )
 
 // The modes.
@@ -115,6 +118,12 @@ func recorded(args []string, control string) int {
 	switch cmd {
 	case "--version":
 		file = "version.txt"
+		if control != "" {
+			if b, err := os.ReadFile(filepath.Join(control, VersionFile)); err == nil {
+				os.Stdout.Write(b)
+				return 0
+			}
+		}
 	case "boards list --json":
 		file = "boards-list.json"
 	case "assignees --json":

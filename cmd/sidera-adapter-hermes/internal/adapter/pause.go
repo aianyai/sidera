@@ -47,6 +47,9 @@ type timing struct {
 	idleCheck time.Duration
 	// tick is how often the timer handler runs.
 	tick time.Duration
+	// verifyEvery is how often the gate runs the whole probe of Hermes (release,
+	// profiles, board) instead of the one cheap command.
+	verifyEvery time.Duration
 	// retryMin and retryMax bound the pause of a loop whose Hermes is unusable or
 	// whose handler asked to retry. The pause grows with every failure in a row
 	// and stays well under the lease of a message, which is 15 minutes at most.
@@ -60,6 +63,7 @@ var defaultTiming = timing{
 	receivePoll: 30 * time.Second,
 	idleCheck:   10 * time.Minute,
 	tick:        10 * time.Second,
+	verifyEvery: 5 * time.Minute,
 	retryMin:    time.Second,
 	retryMax:    2 * time.Minute,
 	registerMin: 200 * time.Millisecond,

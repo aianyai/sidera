@@ -29,6 +29,7 @@ var fastTiming = timing{
 	receivePoll: 20 * time.Millisecond,
 	idleCheck:   time.Hour,
 	tick:        20 * time.Millisecond,
+	verifyEvery: time.Hour,
 	retryMin:    40 * time.Millisecond,
 	retryMax:    80 * time.Millisecond,
 	registerMin: 5 * time.Millisecond,
@@ -110,7 +111,9 @@ type options struct {
 	hermesDown bool
 	// ready is the fake Hermes' answer to listing the ready cards.
 	ready string
-	now   func() time.Time
+	// hermesVersion, if set, is the fake Hermes' answer to --version.
+	hermesVersion string
+	now           func() time.Time
 	// tick, if set, replaces the interval of the timer loop; a long one leaves the
 	// cards to the flows an event starts.
 	tick time.Duration
@@ -136,6 +139,11 @@ func start(t *testing.T, o options) *harness {
 	}
 	if o.ready != "" {
 		if err := os.WriteFile(filepath.Join(hermesCtl, kanbantest.ReadyFile), []byte(o.ready), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if o.hermesVersion != "" {
+		if err := os.WriteFile(filepath.Join(hermesCtl, kanbantest.VersionFile), []byte(o.hermesVersion), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

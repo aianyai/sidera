@@ -3,10 +3,8 @@ package kanban
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -171,17 +169,11 @@ func (c *Client) BoardExists(ctx context.Context) (bool, error) {
 }
 
 // Probe checks everything the adapter needs of Hermes before it takes a card: a
-// hermes that is not a Windows batch shim, in the supported version range, with
-// the board in place and no profile that the dispatcher would confuse with the
-// lane. The returned error says which check failed.
+// hermes that can be run (a Windows batch shim is refused by every command, this
+// one included), in the supported version range, with the board in place and no
+// profile that the dispatcher would confuse with the lane. The returned error says
+// which check failed.
 func (c *Client) Probe(ctx context.Context) error {
-	resolved, err := exec.LookPath(c.cfg.Executable)
-	if err != nil {
-		return fmt.Errorf("kanban: hermes executable: %w", err)
-	}
-	if err := CheckExecutable(runtime.GOOS, resolved); err != nil {
-		return err
-	}
 	v, err := c.Version(ctx)
 	if err != nil {
 		return err

@@ -79,7 +79,7 @@ Two rules keep text that another agent wrote off the command line.
    permanent.
 
 The client enforces, in `run` (the one place hermes is started), what it can see: the
-size and the NUL. It cannot tell whose words a line holds;
+size, the NUL and the executable (see Probe). It cannot tell whose words a line holds;
 that the lines are the adapter's own is the callers' rule. The one flow that handled
 another agent's words in a completion, the reply to a delegated card, attaches them.
 
@@ -100,7 +100,7 @@ the version found and the range.
 
 ### Probe
 
-`Probe` runs before the adapter takes a card, and fails with the first of:
+`Probe` fails with the first of:
 
 1. the resolved `hermes` executable is a Windows `.cmd` or `.bat` shim
    (`CheckExecutable(goos, path)`, a function of the path so that any machine can
@@ -112,6 +112,13 @@ the version found and the range.
    of Hermes tests each card's assignee with `profile_exists` on every tick and
    starts a worker for the card when such a profile exists. Names that only
    appear as assignees of cards, as the adapter's own do, are fine.
+
+The first check is not only the probe's: `run`, the single place hermes is started,
+resolves the executable and applies it before every command, so no command of the
+client reaches a shim whatever the caller does. The other three are the probe's, and
+the adapter does not leave them to a caller who may not ask: its gate runs `Probe`
+before anything is read or written and again at intervals, and keeps receiving and
+polling paused while it fails (see the Hermes adapter reference, availability).
 
 ### Decoding
 
@@ -217,7 +224,8 @@ which is for the caller to read as "already done".
   `TestCreateBodyThroughStdin` (a 256 KiB body, the explicit homes and the removed
   worker variable, through a stand-in for hermes), `TestArgTooLongIsRefusedWithoutRunning` (also the NUL rows),
   `TestTimeoutIsTransient`, `TestProbeAgainstRecordedOutputs`,
-  `TestParseAndCheckVersion`, `TestCheckExecutable`, `TestCheckProfiles`.
+  `TestParseAndCheckVersion`, `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
+  `TestCheckProfiles`.
 - Not confirmed: the client has run on macOS against Hermes 0.22.2 only. The
   Windows rule is checked as a function of the path; whether Hermes installs a
   `hermes.exe` or a shim there is for the first run on Windows to show.

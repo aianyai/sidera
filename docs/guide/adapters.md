@@ -257,11 +257,13 @@ process and no session.
 **Needs.**
 
 - The `hermes` command, found on the daemon's `PATH` or named by `hermes_path`. On
-  Windows it must be an executable, not a `.cmd` or `.bat` shim: the probe reports it
-  as missing otherwise.
+  Windows it must be an executable, not a `.cmd` or `.bat` shim: the adapter refuses to
+  run a shim, and the probe reports Hermes as missing.
 - A Hermes release from 0.22.2 up to, but not including, 0.23.0. Hermes is a 0.x project
   and a minor release may rename a flag or a field of the output the adapter reads, so
-  the adapter refuses a release outside this range and the probe says which it found.
+  the adapter does not read or write anything while Hermes is outside this range, tells
+  the node (the probe and the node's status say which release it found), and takes up
+  its work again when the release is back in range. It looks again every few minutes.
   Move to a newer Hermes only with a Sidera release that names it.
 - A Kanban board that already exists in that Hermes, and no Hermes profile named
   `sidera`, `sidera-inbox` or beginning with `sidera:`. Those names are the adapter's

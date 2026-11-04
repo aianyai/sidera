@@ -38,8 +38,12 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 - **A message is acknowledged only for a `Written` verdict, or when its id was already
   processed.** No other path calls `endpoint.ack` (`receiver.process`).
 - **Nothing is read while Hermes is unusable** (`gate`, asked at the start of every
-  round of both loops). A read that is not followed by an acknowledgement uses up
-  one of the message's leases.
+  round of the three loops). Unusable includes a release outside the supported range
+  and a profile that makes the dispatcher start workers: the gate runs the client's
+  whole probe at the start, after every failure and at intervals. A read that is not
+  followed by an acknowledgement uses up one of the message's leases.
+- **Availability reports reach the daemon in the order of the changes**: the gate holds
+  its lock from the decision to the end of the report.
 - **A send never names a delivery deadline** (`Env.Send`, `Outgoing`). The idempotency
   window of the lane depends on it.
 - **A record of an endpoint is written before the endpoint is used**, and removed

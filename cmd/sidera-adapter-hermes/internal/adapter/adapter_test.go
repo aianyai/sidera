@@ -168,6 +168,51 @@ func TestNoReadWhileHermesIsUnusable(t *testing.T) {
 	}
 }
 
+// A Hermes that runs but is not one the adapter was built against is unusable like
+// one that does not run: nothing is read from Sidera or from the board, and the
+// daemon is told, until the release is back in range.
+func TestNoDrivingAHermesOutOfRange(t *testing.T) {
+	sample, err := os.ReadFile(filepath.Join("..", "kanban", "testdata", "list-ready.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &daemon{directAccess: true}
+	d.recvAnswer = unacknowledged(d, message("m1", "do it"))
+	s := &scripted{verdict: always(Written)}
+	h := start(t, options{d: d, flows: s.flows, ready: string(sample), tick: time.Hour, hermesVersion: "Hermes Agent v0.23.0 (2026.12.1)\n"})
+	h.pending(h.instanceRef())
+	h.eventually("the unavailable report", func() bool { return len(d.available) > 0 })
+
+	time.Sleep(10 * fastTiming.receivePoll)
+	d.mu.Lock()
+	reads, report := len(d.recvs), d.available[0].Conditions
+	d.mu.Unlock()
+	s.mu.Lock()
+	polled := len(s.cards)
+	s.mu.Unlock()
+	if reads != 0 || polled != 0 {
+		t.Fatalf("%d endpoint.recv and %d cards polled while the release was out of range", reads, polled)
+	}
+	if len(report) != 1 || report[0].Condition != adapterproto.ConditionDependencyMissing || !strings.Contains(report[0].Detail, "0.23.0") {
+		t.Errorf("availability %+v, want one dependency_missing naming the release", report)
+	}
+
+	if err := os.Remove(filepath.Join(h.hermes, kanbantest.VersionFile)); err != nil {
+		t.Fatal(err)
+	}
+	h.eventually("the message to be acknowledged", func() bool { return len(d.acks) > 0 })
+	until(t, "the board to be polled", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.cards) > 0
+	})
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if last := d.available[len(d.available)-1]; len(last.Conditions) != 0 {
+		t.Errorf("last availability %+v, want it cleared", last)
+	}
+}
+
 // A message the adapter already processed, redelivered because the acknowledgement
 // was lost, is acknowledged without the handler.
 func TestProcessedMessageIsNotHandledAgain(t *testing.T) {

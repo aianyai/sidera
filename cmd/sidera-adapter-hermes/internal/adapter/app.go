@@ -123,7 +123,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	if err := eps.adopt(p.DirectEndpoints); err != nil {
 		return adapterproto.StartResult{}, fmt.Errorf("recording the endpoints the daemon lists: %w", err)
 	}
-	gate := &gate{board: board, report: a.conn.Availability, log: a.log}
+	gate := &gate{board: board, report: a.conn.Availability, log: a.log, now: a.now, verifyEvery: a.tm.verifyEvery}
 	a.env = &Env{Config: cfg, Board: board, State: store, Log: a.log, Now: a.now, StateDir: a.stateDir, conn: a.conn, endpoints: eps}
 	handlers := a.flows(a.env)
 	a.receiver = newReceiver(a.conn, eps, store, gate, handlers.Messages, a.log, a.now, a.tm)

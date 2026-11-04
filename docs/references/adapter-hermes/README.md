@@ -175,12 +175,21 @@ that outlives it (a Hermes command ends with its call, or is killed with its
 context), so the intent changes nothing the adapter does; the state needs no cleanup,
 since every transition was written before it was acted on.
 
-**Availability.** Before every round of reading and of polling the adapter runs a
-cheap command that needs the board (listing the boards). When it fails, the loop does
-not touch Sidera or the board, the daemon is told with `adapter.availability`
-(condition `dependency_missing`, the cause in the detail) and the loop tries again
-after a pause that doubles from one second to two minutes. A success clears the
-condition. Only the change is reported.
+**Availability.** Before every round of reading, of polling and of the timers the
+adapter asks the gate whether Hermes can be used. The gate runs the client's whole
+probe (the release, the profiles, the board) the first time, whenever the last check
+failed, and every five minutes; in between it runs the one cheap command that needs the
+board (listing the boards). It is the probe and not a lighter check because the
+adapter must not claim, block or complete cards under a release nobody checked, nor
+next to a profile that makes the dispatcher start workers for the lane's cards; a
+Hermes upgraded while the adapter runs is found within the interval. When a check
+fails, the loop does not touch Sidera or the board, the daemon is told with
+`adapter.availability` (condition `dependency_missing`, the cause in the detail) and
+the loop tries again after a pause that doubles from one second to two minutes. A
+success clears the condition. Only the change is reported, and the reports reach the
+daemon in the order of the changes (the gate holds its lock until the daemon has been
+told). A Windows batch shim is not a check of the gate: the client refuses to run it
+(`kanban-cli`), and the gate reports that refusal like any other.
 
 ### Endpoints in the program
 

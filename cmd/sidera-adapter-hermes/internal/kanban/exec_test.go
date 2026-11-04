@@ -100,6 +100,45 @@ func TestArgTooLongIsRefusedWithoutRunning(t *testing.T) {
 	}
 }
 
+// On Windows a batch shim would hand every argument to cmd.exe, so the client
+// refuses to run one, whichever command it is asked for. The rule is applied for
+// another operating system here; the file is a real executable, so a run that was
+// not refused would show as another error.
+func TestShimIsRefusedByEveryCommand(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		file    string
+		refused bool
+	}{
+		{"hermes.cmd", true},
+		{"hermes.BAT", true},
+		{"hermes.exe", false},
+		{"hermes", false},
+	} {
+		path := filepath.Join(dir, tc.file)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		c, err := New(Config{Executable: path, Home: "h", Board: "b"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.goos = "windows"
+		_, err = c.resolve("version")
+		var ke *Error
+		switch {
+		case tc.refused && (!errors.As(err, &ke) || ke.Class != Permanent || ke.ExitCode != -1):
+			t.Errorf("%s: err = %v, want a permanent refusal", tc.file, err)
+		case tc.refused:
+			if _, err := c.Version(context.Background()); !errors.As(err, &ke) || ke.Class != Permanent {
+				t.Errorf("%s: Version err = %v, want the refusal too", tc.file, err)
+			}
+		case err != nil:
+			t.Errorf("%s: err = %v, want it let through", tc.file, err)
+		}
+	}
+}
+
 func TestProbeAgainstRecordedOutputs(t *testing.T) {
 	c := fakeClient(t, kanbantest.ModeRecorded)
 	if err := c.Probe(context.Background()); err != nil {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -51,6 +52,9 @@ type Config struct {
 // safe for concurrent use.
 type Client struct {
 	cfg Config
+	// goos is the operating system the executable rule is applied for; it is
+	// runtime.GOOS except in tests, which run the rule for another one.
+	goos string
 }
 
 // New checks cfg and returns a Client.
@@ -66,7 +70,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Author == "" {
 		cfg.Author = defaultAuthor
 	}
-	return &Client{cfg: cfg}, nil
+	return &Client{cfg: cfg, goos: runtime.GOOS}, nil
 }
 
 // childEnv is the environment of a hermes child: the parent's, without the
@@ -104,8 +108,22 @@ func (c *Client) kanban(ctx context.Context, op string, stdin []byte, args ...st
 	return c.run(ctx, op, stdin, argv)
 }
 
+// resolve finds the program the client runs and refuses one that must not be run.
+// It is the one place hermes is located, so that what is checked is what is run.
+func (c *Client) resolve(op string) (string, error) {
+	resolved, err := exec.LookPath(c.cfg.Executable)
+	if err != nil {
+		return "", &Error{Op: op, Class: Transient, ExitCode: -1, Err: fmt.Errorf("hermes executable: %w", err)}
+	}
+	if err := CheckExecutable(c.goos, resolved); err != nil {
+		return "", &Error{Op: op, Class: Permanent, ExitCode: -1, Err: err}
+	}
+	return resolved, nil
+}
+
 // run executes hermes with argv, without a shell. stdin may be nil. Every start of
-// hermes passes through here, so the rules about its arguments are enforced once.
+// hermes passes through here, so the rules about what may be started and with
+// which arguments are enforced once.
 func (c *Client) run(ctx context.Context, op string, stdin []byte, argv []string) ([]byte, error) {
 	for _, a := range argv {
 		switch {
@@ -119,7 +137,11 @@ func (c *Client) run(ctx context.Context, op string, stdin []byte, argv []string
 				ErrArgInvalid)}
 		}
 	}
-	cmd := exec.CommandContext(ctx, c.cfg.Executable, argv...)
+	executable, err := c.resolve(op)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, executable, argv...)
 	cmd.Env = childEnv(os.Environ(), c.cfg)
 	cmd.WaitDelay = killDelay
 	if stdin != nil {
@@ -127,7 +149,7 @@ func (c *Client) run(ctx context.Context, op string, stdin []byte, argv []string
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err == nil {
 		return stdout.Bytes(), nil
 	}
