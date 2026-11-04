@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -166,6 +167,30 @@ func (c *Client) Complete(ctx context.Context, id string, done Completion) error
 	return err
 }
 
+// attachFilePrefix begins the name of the temporary file Attach writes.
+const attachFilePrefix = "attach-"
+
+// RemoveLeftoverAttachFiles removes the temporary files of Attach that a process
+// which died between writing and removing them left in dir; they hold the text of an
+// attachment. Only regular files whose name begins like Attach's are removed, and
+// only directly in dir. It must not run while an Attach into dir may be under way.
+func RemoveLeftoverAttachFiles(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		if e.Type().IsRegular() && strings.HasPrefix(e.Name(), attachFilePrefix) {
+			errs = append(errs, os.Remove(filepath.Join(dir, e.Name())))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Attach stores content as an attachment of the card under the given name. It
 // writes the content to a temporary file in dir, which the caller names, hands
 // Hermes the path (Hermes copies the bytes and keeps its own copy), and removes
@@ -176,7 +201,7 @@ func (c *Client) Attach(ctx context.Context, id, dir, name string, content []byt
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return &Error{Op: "attach", Class: Transient, ExitCode: -1, Err: err}
 	}
-	f, err := os.CreateTemp(dir, "attach-*")
+	f, err := os.CreateTemp(dir, attachFilePrefix+"*")
 	if err != nil {
 		return &Error{Op: "attach", Class: Transient, ExitCode: -1, Err: err}
 	}

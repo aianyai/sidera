@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -114,6 +115,9 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	store, err := state.Open(a.stateDir)
 	if err != nil {
 		return adapterproto.StartResult{}, fmt.Errorf("opening the state: %w", err)
+	}
+	if err := kanban.RemoveLeftoverAttachFiles(filepath.Join(a.stateDir, attachDir)); err != nil {
+		a.log.Warn("removing attachment files an earlier run left", "error", err)
 	}
 	board, err := kanban.New(kanban.Config{Executable: cfg.HermesPath, Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome, Board: cfg.Board})
 	if err != nil {

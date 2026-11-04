@@ -18,7 +18,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 
 | File | Holds |
 | ---- | ----- |
-| `app.go` | `App`; the capability check, `Start`, `Probe`, `Shutdown`. |
+| `app.go` | `App`; the capability check, `Start` (it clears the attachment files an earlier run left), `Probe`, `Shutdown`. |
 | `endpoints.go` | The instance endpoint, registration on first use, hiding, adoption of the endpoints the daemon lists, idle retirement. |
 | `receive.go` | The receive loop. |
 | `poll.go` | The board poll loop. |

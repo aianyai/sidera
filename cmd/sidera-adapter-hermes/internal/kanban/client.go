@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,13 +49,16 @@ type Config struct {
 	Author string
 }
 
-// Client runs hermes kanban commands against one board. It holds no state and is
-// safe for concurrent use.
+// Client runs hermes kanban commands against one board. It holds no state about the
+// board beyond the probe in progress (Probe) and is safe for concurrent use.
 type Client struct {
 	cfg Config
 	// goos is the operating system the executable rule is applied for; it is
 	// runtime.GOOS except in tests, which run the rule for another one.
 	goos string
+
+	probeMu sync.Mutex
+	probing *probeCall
 }
 
 // New checks cfg and returns a Client.

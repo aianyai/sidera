@@ -39,7 +39,7 @@ Verified against Hermes 0.22.2 (`hermes_cli/kanban_parser.py` and
 | `Block` | `block <id> --kind=<kind> [-- <reason>]` | Text. Hermes writes the reason as a comment first and then tries the block, so a refused block can leave a `BLOCKED:` comment. |
 | `Comment` | `comment <id> --author=<a> -- <text>` | Text. |
 | `Complete` | `complete <id> [--summary=] [--result=] [--metadata=<json object>]` | Text. A completion with neither summary nor result is refused. Accepts a card in `running`, `ready`, `blocked` or `review`; a blocked card needs no unblock or new claim first (see the Hermes adapter reference, matching a received message to a card). |
-| `Attach` | `attach <id> <path> --name=<name> --author=<a>` | Text. Hermes copies the bytes (25 MB cap) and renames a duplicate name to `name (1).ext`. |
+| `Attach` | `attach <id> <path> --name=<name> --author=<a>` | Text. Hermes copies the bytes (25 MB cap) and renames a duplicate name to `name (1).ext`. The client writes the content to `attach-*` in the directory it is given and removes the file after; `RemoveLeftoverAttachFiles` removes what a process that died in between left. |
 | `Attachments` | `attachments <id> --json` | Array of `id`, `filename`, `content_type`, `size`, `uploaded_by`, `stored_path`, `created_at`. |
 | `NotifyList` | `notify-list <id> --json` | Array with every column of the subscription table, `delivery_metadata` as an object. A card without subscriptions, or an unknown card, gives `[]`. |
 | `NotifySubscribe` | `notify-subscribe <id> --platform= --chat-id= --notifier-profile= [--thread-id=] [--user-id=] [--user-id-alt=] [--chat-type=] [--parent-chat-id=] [--guild-id=] [--delivery-mode=]` | Text. `--parent-chat-id` and `--guild-id` are stored in `delivery_metadata`; other keys of it (a scope id) cannot be set from the command line. A new subscription starts caught up on the card's events. |
@@ -128,7 +128,9 @@ resolves the executable and applies it before every command, so no command of th
 client reaches a shim whatever the caller does. The other three are the probe's, and
 the adapter does not leave them to a caller who may not ask: its gate runs `Probe`
 before anything is read or written and again at intervals, and keeps receiving and
-polling paused while it fails (see the Hermes adapter reference, availability).
+polling paused while it fails (see the Hermes adapter reference, availability). The
+probe costs several processes and the loops ask at about the same time, so there is one
+at a time: a caller that arrives while one runs waits for it and returns its result.
 
 ### Decoding
 

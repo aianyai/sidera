@@ -429,7 +429,9 @@ message that matches no card goes to the inbound half. For the card:
    id's digest>.txt`), after `attachments` showed no file of that name (Hermes stores
    a second file of one name as `name (1).ext`, so a replay that attached again would
    leave the reply twice). The name is a digest and not the id because the id is
-   chosen by the sender and may be any visible ASCII, a path among it.
+   chosen by the sender and may be any visible ASCII, a path among it. The file holds
+   the remote text until the client removes it after the command, so a start removes
+   the `attach-*` files in that directory that a process which died in between left.
 3. The message id is recorded on the card (`state.Card.ReplyID`), and then `complete`
    with a summary, a result and metadata holding the message id. The
    summary ("Sidera reply from <alias>; the full text is in the attachment <name>")

@@ -168,12 +168,45 @@ func (c *Client) BoardExists(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// probeCall is a probe in progress, which every caller that arrives meanwhile waits
+// for.
+type probeCall struct {
+	done chan struct{}
+	err  error
+}
+
 // Probe checks everything the adapter needs of Hermes before it takes a card: a
 // hermes that can be run (a Windows batch shim is refused by every command, this
 // one included), in the supported version range, with the board in place and no
 // profile that the dispatcher would confuse with the lane. The returned error says
 // which check failed.
+//
+// The probe costs several Hermes processes, so there is one at a time: a caller that
+// arrives while one runs waits for it and returns its result.
 func (c *Client) Probe(ctx context.Context) error {
+	c.probeMu.Lock()
+	if call := c.probing; call != nil {
+		c.probeMu.Unlock()
+		select {
+		case <-call.done:
+			return call.err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	call := &probeCall{done: make(chan struct{})}
+	c.probing = call
+	c.probeMu.Unlock()
+
+	call.err = c.probe(ctx)
+	c.probeMu.Lock()
+	c.probing = nil
+	c.probeMu.Unlock()
+	close(call.done)
+	return call.err
+}
+
+func (c *Client) probe(ctx context.Context) error {
 	v, err := c.Version(ctx)
 	if err != nil {
 		return err
