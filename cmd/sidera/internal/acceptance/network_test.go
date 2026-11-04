@@ -96,7 +96,7 @@ type netNode struct {
 
 // startNetNode starts a daemon whose direct endpoint is called name. With runtime
 // the node also has an adapter that starts sessions, so that the test can call the
-// agent methods a direct endpoint has no access to.
+// agent methods a direct endpoint has no access to (`me`, `probe` and the like).
 func startNetNode(ctx context.Context, t *testing.T, name string, runtime bool) *netNode {
 	t.Helper()
 	binaries := testBinaries

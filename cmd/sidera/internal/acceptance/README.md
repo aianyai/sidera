@@ -186,7 +186,7 @@ the other, and a reply back. It asserts that the sender sees `accepted`, that
 the recipient receives the exact body and acknowledges it, that the sender's pull brings
 the report back (`delivered`), and that each node lists the other as a connected peer with
 its certificate held. A session of the first node, started through the runtime adapter that only this node
-has (`createSession`; a direct endpoint has no access to `peers` and `directory`), then lists
+has (`createSession`), then lists
 the node itself and the other as `self` and `direct` trust, both connected, and reads the
 other node's directory to find its one endpoint. After the first owner runs `trust remove`
 for the other, a message to it stays `queued` while the node retries; once the clock has
@@ -247,8 +247,11 @@ received. The bridge renders each typed page for its own reader; `Raw` contains
 that rendered display, without claiming to retain the daemon's JSON formatting.
 The existing `fakeagent.Recording` wrapper records the bridge's calls and what
 its reader saw. Direct endpoints use the product's direct receive budget even
-when a shared script names the CLI reader. The session-only `Me`, `Declare`,
-`Peers`, `Directory` and `Probe` methods return `ErrNotAvailable`.
+when a shared script names the CLI reader. `Peers`, `Directory` and `Declare` are
+`endpoint.peers`, `endpoint.directory` and `endpoint.declare`, which the daemon
+serves to a direct endpoint; a directory read that got no page is returned as the
+error the Agent interface answers it with (`unavailable` or `refused`, the reason as the
+code). The session-only `Me` and `Probe` methods return `ErrNotAvailable`.
 
 The adapter send result does not report whether an idempotency key replayed a
 message. The direct driver returns `ReplayUnknown` for nonempty keys and

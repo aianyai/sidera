@@ -34,6 +34,34 @@ func TestDirectProtocolLifecycleAcrossGeneration(t *testing.T) {
 	if _, err := e.Agent("sender").Me(ctx); !errors.Is(err, fakeagent.ErrNotAvailable) {
 		t.Fatalf("direct Me fabricated a session: %v", err)
 	}
+	// The bridge finds the other endpoint in the directory until that endpoint hides
+	// itself, and the node lists itself as a peer.
+	listsReceiver := func() bool {
+		t.Helper()
+		page, err := e.Agent("sender").Directory(ctx, fakeagent.DirectoryInput{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range page.Endpoints {
+			if entry.Address == receiver {
+				return true
+			}
+		}
+		return false
+	}
+	if peers, err := e.Agent("sender").Peers(ctx); err != nil || len(peers.Nodes) != 1 || !peers.Nodes[0].Self {
+		t.Fatalf("peers: %+v %v", peers, err)
+	}
+	if !listsReceiver() {
+		t.Fatal("the directory does not list the receiver")
+	}
+	hidden := true
+	if err := e.Agent("receiver").Declare(ctx, fakeagent.DeclareInput{HiddenFromDirectory: &hidden}); err != nil {
+		t.Fatal(err)
+	}
+	if listsReceiver() {
+		t.Fatal("the directory lists the receiver after it hid itself")
+	}
 	sendAndRead := func(body string) {
 		t.Helper()
 		sent, err := e.Agent("sender").Send(ctx, fakeagent.SendInput{To: []string{receiver}, Body: body})

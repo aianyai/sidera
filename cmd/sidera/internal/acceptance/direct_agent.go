@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -34,17 +35,71 @@ func (a *directAgent) controller(ctx context.Context) (fakeadapter.Controller, e
 func (*directAgent) Me(context.Context) (fakeagent.MeResult, error) {
 	return fakeagent.MeResult{}, scenario.NotAvailable("direct endpoint Me")
 }
-func (*directAgent) Peers(context.Context) (fakeagent.PeersResult, error) {
-	return fakeagent.PeersResult{}, scenario.NotAvailable("direct endpoint Peers")
+func (a *directAgent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
+	ctl, err := a.controller(ctx)
+	if err != nil {
+		return fakeagent.PeersResult{}, err
+	}
+	res, err := ctl.Peers(ctx, adapterproto.PeersParams{Endpoint: a.endpoint.ref})
+	if err != nil {
+		return fakeagent.PeersResult{}, directError(err)
+	}
+	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, len(res.Nodes))}
+	for i, n := range res.Nodes {
+		out.Nodes[i] = fakeagent.PeerNode{Node: n.Node, Self: n.Self, Trust: string(n.Trust), Connected: n.Connected}
+	}
+	return out, nil
 }
-func (*directAgent) Directory(context.Context, fakeagent.DirectoryInput) (fakeagent.DirectoryResult, error) {
-	return fakeagent.DirectoryResult{}, scenario.NotAvailable("direct endpoint Directory")
+
+// Directory reads one page. A read that got no page is a result of the protocol
+// and an error of the Agent interface, so it is returned as the error that
+// interface answers with: the category of the outcome and the reason as its code.
+func (a *directAgent) Directory(ctx context.Context, in fakeagent.DirectoryInput) (fakeagent.DirectoryResult, error) {
+	ctl, err := a.controller(ctx)
+	if err != nil {
+		return fakeagent.DirectoryResult{}, err
+	}
+	res, err := ctl.Directory(ctx, adapterproto.DirectoryParams{Endpoint: a.endpoint.ref, Node: in.Node, Cursor: in.Cursor, Limit: in.Limit})
+	if err != nil {
+		return fakeagent.DirectoryResult{}, directError(err)
+	}
+	switch res.Outcome {
+	case adapterproto.DirectoryUnavailable:
+		return fakeagent.DirectoryResult{}, &fakeagent.Error{Category: fakeagent.CategoryUnavailable, Code: string(res.Reason), Message: "the directory could not be reached in time"}
+	case adapterproto.DirectoryRefused:
+		return fakeagent.DirectoryResult{}, &fakeagent.Error{Category: fakeagent.CategoryRefused, Code: string(res.Reason), Message: "the node asked refused the read"}
+	}
+	out := fakeagent.DirectoryResult{Endpoints: make([]fakeagent.DirectoryEndpoint, len(res.Endpoints)), NextCursor: res.NextCursor}
+	for i, e := range res.Endpoints {
+		accepts := make([]string, len(e.Accepts))
+		for j, act := range e.Accepts {
+			accepts[j] = string(act)
+		}
+		out.Endpoints[i] = fakeagent.DirectoryEndpoint{Address: string(e.Address), Kind: string(e.Kind), DisplayName: e.DisplayName, Description: e.Description, Accepts: accepts}
+	}
+	return out, nil
 }
 func (*directAgent) Probe(context.Context, fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
 	return fakeagent.ProbeResult{}, scenario.NotAvailable("direct endpoint Probe")
 }
-func (*directAgent) Declare(context.Context, fakeagent.DeclareInput) error {
-	return scenario.NotAvailable("direct endpoint Declare")
+func (a *directAgent) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
+	ctl, err := a.controller(ctx)
+	if err != nil {
+		return err
+	}
+	p := adapterproto.DeclareParams{
+		Endpoint: a.endpoint.ref, Paused: in.Paused, RefuseMultiRecipient: in.RefuseMultiRecipient,
+		RestrictSenders: in.RestrictSenders, HiddenFromDirectory: in.HiddenFromDirectory,
+	}
+	if in.AcceptFrom != nil {
+		list := make([]adapterproto.Address, len(*in.AcceptFrom))
+		for i, s := range *in.AcceptFrom {
+			list[i] = adapterproto.Address(s)
+		}
+		p.AcceptFrom = &list
+	}
+	_, err = ctl.Declare(ctx, p)
+	return directError(err)
 }
 
 func (a *directAgent) Send(ctx context.Context, in fakeagent.SendInput) (fakeagent.SendResult, error) {
@@ -194,7 +249,14 @@ func directError(err error) error {
 	case adapterproto.CodeWrongEndpointKind:
 		category, code = fakeagent.CategoryInvalidArgument, "wrong_endpoint_kind"
 	case peer.CodeInvalidParams:
+		// The reason of the data is the code the Agent interface answers with.
 		category, code = fakeagent.CategoryInvalidArgument, "malformed_request"
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(p.Data, &data) == nil && slices.Contains(adapterproto.ParamsReasons(), data.Reason) {
+			code = data.Reason
+		}
 	case adapterproto.CodeEndpointLimit:
 		category, code = fakeagent.CategoryRefused, "endpoint_limit"
 	case adapterproto.CodeSendRefused:
