@@ -2,6 +2,8 @@ package adapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -12,10 +14,6 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
-
-// inlineLimit is the longest reply written into the result of a card. The result is
-// a command-line argument and the client bounds those; anything longer is attached.
-const inlineLimit = kanban.MaxArgBytes - 64
 
 // attachDir is the directory below the state directory where the text of an
 // attachment is written for Hermes to copy; the client removes the file after.
@@ -106,18 +104,19 @@ func (f *laneFlows) write(ctx context.Context, m Message, c state.Card) (Verdict
 	if who == "" {
 		who = "the peer"
 	}
-	done := kanban.Completion{
-		Summary:  fmt.Sprintf("Sidera reply from %s; full text in the result", who),
-		Result:   m.Body,
-		Metadata: map[string]any{metaMessageID: string(m.ID), metaFrom: string(m.From), metaAttempt: c.Attempt},
+	// The reply is another agent's text and only ever reaches the card as an
+	// attachment: Hermes uploads to the creator's chat every local file that the
+	// summary or the result of a completed card names, so a reply there could make
+	// it send a file of this machine to a chat. The summary and result are the
+	// adapter's words and name no path.
+	name := replyAttachmentName(m.ID)
+	if err := f.attach(ctx, c.ID, name, m.Body); err != nil {
+		return f.failed(ctx, c.ID, err)
 	}
-	if len(m.Body) > inlineLimit {
-		name := string(m.ID)
-		if err := f.attach(ctx, c.ID, name, m.Body); err != nil {
-			return f.failed(ctx, c.ID, err)
-		}
-		done.Summary = fmt.Sprintf("Sidera reply from %s; full text in the attachment %s", who, name)
-		done.Result = "The reply is in the attachment " + name + "."
+	done := kanban.Completion{
+		Summary:  fmt.Sprintf("Sidera reply from %s; the full text is in the attachment %s", who, name),
+		Result:   fmt.Sprintf("The reply of %s is attached as %s.", who, name),
+		Metadata: map[string]any{metaMessageID: string(m.ID), metaFrom: string(m.From), metaAttempt: c.Attempt},
 	}
 	if err := f.env.Board.Complete(ctx, c.ID, done); err != nil {
 		return f.failed(ctx, c.ID, err)
@@ -140,7 +139,16 @@ func (f *laneFlows) failed(ctx context.Context, id string, err error) (Verdict, 
 	return 0, true, nil
 }
 
-// attach stores the text as an attachment named after the message, unless it is
+// replyAttachmentName is the name of the attachment that holds the reply to a
+// message. It is derived from the message id and is not the id itself: an id is
+// chosen by the sender and may be any visible ASCII, a file path included, and the
+// name is quoted in the result, where Hermes reads paths.
+func replyAttachmentName(id adapterproto.MessageID) string {
+	sum := sha256.Sum256([]byte(id))
+	return "reply-" + hex.EncodeToString(sum[:8]) + ".txt"
+}
+
+// attach stores the text as an attachment of the card under the name, unless it is
 // there already: Hermes renames a second attachment of the same name, so a replay
 // that attached again would leave the reply twice.
 func (f *laneFlows) attach(ctx context.Context, id, name, text string) error {

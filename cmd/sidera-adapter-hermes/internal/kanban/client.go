@@ -18,12 +18,12 @@ import (
 )
 
 // MaxArgBytes bounds every command-line argument the client passes to hermes.
-// Remote text must not travel on a command line: a Linux argument is limited to
-// 128 KiB, a Windows command line to about 32K characters, and a Windows batch
-// shim would let cmd.exe interpret metacharacters in it. Card bodies go through
-// standard input; what can only be an argument (a summary, a result, metadata, a
-// comment, a block reason, a title) is refused above this bound without running
-// anything, so a caller puts long text in an attachment.
+// A Linux argument is limited to 128 KiB and a Windows command line to about 32K
+// characters. Card bodies go through standard input; what can only be an argument
+// (a summary, a result, metadata, a comment, a block reason, a title) is refused
+// above this bound without running anything, so a caller puts long text in an
+// attachment. An argument is always text the caller wrote, never text another
+// agent sent: see the reference for why Hermes makes that a safety rule.
 const MaxArgBytes = 8 << 10
 
 // defaultAuthor labels the comments and attachments the client writes, in place
@@ -104,13 +104,19 @@ func (c *Client) kanban(ctx context.Context, op string, stdin []byte, args ...st
 	return c.run(ctx, op, stdin, argv)
 }
 
-// run executes hermes with argv, without a shell. stdin may be nil.
+// run executes hermes with argv, without a shell. stdin may be nil. Every start of
+// hermes passes through here, so the rules about its arguments are enforced once.
 func (c *Client) run(ctx context.Context, op string, stdin []byte, argv []string) ([]byte, error) {
 	for _, a := range argv {
-		if len(a) > MaxArgBytes {
+		switch {
+		case len(a) > MaxArgBytes:
 			return nil, &Error{Op: op, Class: Permanent, ExitCode: -1, Err: fmt.Errorf(
 				"%w: %d bytes against a bound of %d; long text belongs in an attachment",
 				ErrArgTooLong, len(a), MaxArgBytes)}
+		case strings.IndexByte(a, 0) >= 0:
+			return nil, &Error{Op: op, Class: Permanent, ExitCode: -1, Err: fmt.Errorf(
+				"%w: it holds a NUL byte; text that is not the caller's own belongs in standard input or an attachment",
+				ErrArgInvalid)}
 		}
 	}
 	cmd := exec.CommandContext(ctx, c.cfg.Executable, argv...)

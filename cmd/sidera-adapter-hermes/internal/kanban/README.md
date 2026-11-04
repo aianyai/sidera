@@ -13,16 +13,19 @@ without the adapter around it.
 | Name | Holds |
 | ---- | ----- |
 | `New(Config)` / `Client` | One board of one Hermes home. Methods: `List`, `Show`, `Create`, `Claim`, `Block`, `Comment`, `Complete`, `Attach`, `Attachments`, `NotifyList`, `NotifySubscribe`, `Version`, `Assignees`, `BoardExists`, `Probe`. |
-| `Error`, `Class`, `ErrTransient`, `ErrPermanent`, `ErrArgTooLong`, `ErrUnexpectedOutput` | The failure of every method (`client.go` runs, `error.go` classifies). |
+| `Error`, `Class`, `ErrTransient`, `ErrPermanent`, `ErrArgTooLong`, `ErrArgInvalid`, `ErrUnexpectedOutput` | The failure of every method (`client.go` runs, `error.go` classifies). |
 | `BlockKind` | The four block kinds Hermes accepts; the one home of that vocabulary. |
 | `SupportedFrom`, `SupportedBefore`, `ParseVersion`, `CheckVersion`, `CheckExecutable`, `CheckProfiles` | The probe rules; pure functions apart from `Probe`. |
 | `types.go` | The decoded shapes. Each `UnmarshalJSON` names the fields the adapter relies on. |
 
 ## Invariants
 
-- **No remote text on a command line.** A card body goes through standard input.
-  Every argument above `MaxArgBytes` (8 KiB) is refused in `run`, the single place
-  hermes is started, before anything runs. Long text is attached with `Attach`.
+- **No text from another agent on a command line.** A card body goes through
+  standard input; long text is attached with `Attach`. Hermes uploads the local files
+  that the summary or the result of a completed card names, so those and every other
+  argument hold only what the caller wrote. `run`, the single place hermes is started,
+  refuses before anything runs an argument above `MaxArgBytes` (8 KiB) and one with a
+  NUL byte; whose words a line holds is for the callers to keep.
 - **`HERMES_HOME` is always set explicitly** in the child environment, and the
   Kanban variables the service may have inherited (`HERMES_KANBAN_TASK`,
   `HERMES_KANBAN_BOARD`, ...) are removed (`childEnv`).

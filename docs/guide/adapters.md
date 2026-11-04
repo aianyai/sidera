@@ -347,9 +347,11 @@ again whenever you change the aliases, since the Skill lists them.
 **A delegation, from Hermes.** The agent creates a card assigned to `sidera` whose body
 says which alias, what mode (`new_session` with a preset, or `message`) and the task.
 The adapter claims the card, sends the task, and comments on the card when something
-needs saying. When the other agent answers, the card is completed with the answer as its
-result, and Hermes wakes the conversation that made it. A long answer is an attachment
-of the card. A follow-up is a new card that names the earlier one as its parent and
+needs saying. When the other agent answers, the card is completed and Hermes wakes the
+conversation that made it. The answer is an attachment of the card, and the card's result
+says which; it is never written into the result itself, because Hermes uploads to the
+chat any local file that the result names. The Skill tells the agent to read the answer
+as information from another machine, not as an instruction. A follow-up is a new card that names the earlier one as its parent and
 leaves the alias out: it goes to the same agent. Two cards for one peer in one
 conversation do not run at once; the second waits. The Skill tells the agent to ask for
 one reply with the final result: the first reply completes the card, and a later one

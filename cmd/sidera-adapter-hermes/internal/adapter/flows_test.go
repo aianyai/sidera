@@ -139,9 +139,10 @@ func TestReplyCompletesTheCardOnce(t *testing.T) {
 	if len(card.Subs) != 1 || card.Subs[0].Platform != "feishu" || card.Subs[0].ChatID != "oc_1" {
 		t.Errorf("subscriptions %+v, want the home target", card.Subs)
 	}
-	if card.Result != "looks good" || len(card.Runs) != 1 || card.Runs[0].Metadata["sidera_message_id"] != "m1" ||
-		!strings.HasPrefix(card.Runs[0].Summary, "Sidera reply from codex") {
-		t.Errorf("result %q runs %+v, want the reply with its message id and a summary written by the adapter", card.Result, card.Runs)
+	if len(card.Attachments) != 1 || card.Attachments[0].Content != "looks good" || len(card.Runs) != 1 ||
+		card.Runs[0].Metadata["sidera_message_id"] != "m1" || !strings.HasPrefix(card.Runs[0].Summary, "Sidera reply from codex") {
+		t.Errorf("attachments %+v runs %+v, want the reply attached, with its message id and a summary written by the adapter",
+			card.Attachments, card.Runs)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -251,20 +252,51 @@ func TestReplyToABlockedCard(t *testing.T) {
 	}
 	release.Store(true)
 	until(t, "the card to be done", func() bool { return boardCard(h, "t_1").Status == "done" })
-	if got := boardCard(h, "t_1").Result; got != "sorry, late" {
-		t.Errorf("result %q, want the late reply", got)
+	if atts := boardCard(h, "t_1").Attachments; len(atts) != 1 || atts[0].Content != "sorry, late" {
+		t.Errorf("attachments %+v, want the late reply", atts)
 	}
 }
 
-// A reply too long for a command line is attached under its message id, once, even
-// when the write is repeated; a failure of Hermes that may pass leaves the message
-// unacknowledged, and one that will not goes to the inbound half.
-func TestLongReplyAndFailuresToComplete(t *testing.T) {
-	long := strings.Repeat("0123456789", 2000)
+// The reply of a peer is text from another machine. Hermes uploads to the chat of
+// the card's creator every local file that the summary or the result of a completed
+// card names, so a reply, and the id the sender gave its message, reach the card as
+// an attachment only: the summary and the result hold the adapter's words, and
+// neither a path nor a NUL byte gets near a command line. The reply is attached
+// once however often the node hands it out.
+func TestReplyReachesTheCardOnlyAsAnAttachment(t *testing.T) {
+	const id = "/home/owner/contracts/2026.pdf"
+	body := "see ~/notes/passwords.txt and /etc/hosts.txt\x00and then " + strings.Repeat("0123456789", 2000)
+	d := &daemon{directAccess: true}
+	d.serve("orphan", message(id, body), sentOnce(d), true)
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(nil)})
+	addCard(t, h, "t_1", messageCard)
+
+	until(t, "the card to be done", func() bool { return boardCard(h, "t_1").Status == "done" })
+	h.eventually("a redelivery to be acknowledged", func() bool { return len(d.acks) >= 2 })
+
+	card := boardCard(h, "t_1")
+	if len(card.Attachments) != 1 || card.Attachments[0].Content != body {
+		t.Fatalf("%d attachments, want one holding the reply", len(card.Attachments))
+	}
+	name := card.Attachments[0].Filename
+	want := "The reply of codex is attached as " + name + "."
+	if card.Result != want || len(card.Runs) != 1 || !strings.Contains(card.Runs[0].Summary, name) {
+		t.Errorf("result %q summary %q, want %q and a summary naming the attachment", card.Result, card.Runs[0].Summary, want)
+	}
+	for _, text := range []string{name, card.Result, card.Runs[0].Summary} {
+		if strings.ContainsAny(text, "/~\\") {
+			t.Errorf("%q can name a path", text)
+		}
+	}
+}
+
+// A failure of Hermes while writing a reply that may pass leaves the message
+// unacknowledged; one that will not goes to the inbound half.
+func TestFailuresToCompleteAReply(t *testing.T) {
 	t.Run("transient failure retries and attaches once", func(t *testing.T) {
 		d := &daemon{directAccess: true}
 		var release atomic.Bool
-		d.serve("orphan", message("m1", long), func() bool { return release.Load() }, false)
+		d.serve("orphan", message("m1", "answer"), func() bool { return release.Load() }, false)
 		h := start(t, options{d: d, lane: true, flows: LaneFlows(nil)})
 		addCard(t, h, "t_1", messageCard)
 		until(t, "the card to be sent", func() bool { return cardState(h, "t_1").Phase == state.PhaseSent })
@@ -282,12 +314,8 @@ func TestLongReplyAndFailuresToComplete(t *testing.T) {
 		until(t, "the card to be done", func() bool { return boardCard(h, "t_1").Status == "done" })
 		h.eventually("the acknowledgement", func() bool { return len(d.acks) > 0 })
 
-		card := boardCard(h, "t_1")
-		if len(card.Attachments) != 1 || card.Attachments[0].Filename != "m1" || card.Attachments[0].Content != long {
-			t.Errorf("attachments %d, want one named m1 holding the reply", len(card.Attachments))
-		}
-		if strings.Contains(card.Result, long[:100]) || !strings.Contains(card.Runs[0].Summary, "attachment m1") {
-			t.Errorf("result %.60q summary %q, want a pointer to the attachment", card.Result, card.Runs[0].Summary)
+		if atts := boardCard(h, "t_1").Attachments; len(atts) != 1 || atts[0].Content != "answer" {
+			t.Errorf("attachments %+v, want one holding the reply", atts)
 		}
 	})
 	t.Run("permanent failure goes to the inbound half", func(t *testing.T) {

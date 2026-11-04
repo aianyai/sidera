@@ -38,6 +38,10 @@ var (
 	// ErrArgTooLong is wrapped by the Error that refuses a command line argument
 	// above MaxArgBytes before anything is run.
 	ErrArgTooLong = errors.New("kanban: command-line argument too long")
+	// ErrArgInvalid is wrapped by the Error that refuses a command line argument
+	// holding a NUL byte before anything is run: no operating system passes one, so
+	// starting hermes would fail with an error that says nothing about the argument.
+	ErrArgInvalid = errors.New("kanban: invalid command-line argument")
 	// ErrUnexpectedOutput is wrapped by the Error of a command that succeeded but
 	// printed something this client cannot decode, which is how a Hermes release
 	// that changed a shape shows up. It is Transient: the card state is untouched,

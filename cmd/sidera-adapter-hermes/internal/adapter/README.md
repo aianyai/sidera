@@ -56,9 +56,12 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   and after a record of the intent to claim it (`intendClaim`): a record in phase
   `claiming` is read at the start and on every tick (`reconcileClaiming`), so a crash
   between the claim and the rest of the record cannot leave a card running unseen.
-- **Remote text is never in a summary, a comment or a block reason**; the summary's first
-  line is what Hermes wakes the creator with. Block reasons that quote a card are cut
-  (`clip`).
+- **Remote text is never in a summary, a result, a comment or a block reason**, and
+  none of them names a path: on a completed card Hermes uploads the local files that
+  the summary or the result names, and wakes the creator with the first line of the
+  summary. A delegated card's reply is therefore always an attachment (`write`), and
+  the result points to it by a name derived from the message id, which the sender
+  chose. Block reasons that quote a card are cut (`clip`).
 - **The inbound half owns every message that matches no card the lane can complete**,
   and every ready card whose mode is `reply`; the delegation flows never claim those.
 - **A message to the inbound half is `Written` only once its card is created,

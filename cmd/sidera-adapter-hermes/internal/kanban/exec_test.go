@@ -78,6 +78,20 @@ func TestArgTooLongIsRefusedWithoutRunning(t *testing.T) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
+	// A NUL byte cannot be passed to a program; the error says so instead of the
+	// start failing with an error that names nothing.
+	for name, call := range map[string]func() error{
+		"complete result": func() error { return c.Complete(ctx, "t_1", Completion{Summary: "s", Result: "a\x00b"}) },
+		"comment":         func() error { return c.Comment(ctx, "t_1", "a\x00b") },
+		"block reason":    func() error { return c.Block(ctx, "t_1", BlockTransient, "a\x00b") },
+		"title":           func() error { _, err := c.Create(ctx, NewCard{Title: "a\x00b"}); return err },
+	} {
+		err := call()
+		var ke *Error
+		if !errors.Is(err, ErrArgInvalid) || !errors.As(err, &ke) || ke.Class != Permanent || ke.ExitCode != -1 {
+			t.Errorf("NUL in %s: err = %v", name, err)
+		}
+	}
 	// At the bound it is let through, and then fails because there is no hermes.
 	err = c.Comment(ctx, "t_1", strings.Repeat("x", MaxArgBytes))
 	var ke *Error

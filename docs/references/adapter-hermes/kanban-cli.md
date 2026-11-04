@@ -52,21 +52,40 @@ triage`. The cards the adapter creates carry its own `--created-by` and
 `--author` (default `sidera`); Hermes' defaults are `user` and the name of the
 profile that owns `HERMES_HOME`, which are not true of a lane.
 
-### Remote text is never an argument
+### Text from another agent is never an argument
 
-A single argument is limited to 128 KiB on Linux and a whole command line to
-about 32K characters on Windows, and on Windows a `.cmd` or `.bat` shim is run by
-`cmd.exe`, which interprets the metacharacters of every argument. A body that came
-from another agent can be any size and contain anything, so:
+Two rules keep text that another agent wrote off the command line.
+
+1. **Hermes uploads the files a completed card names.** When a card is completed,
+   the gateway looks in the event's summary and in the card's result for the paths
+   of local files (absolute, `~/` or a drive letter, with a deliverable extension
+   such as `.pdf`, `.txt`, `.md`, `.json`) and, for every one that exists and is not
+   on a short denylist, uploads the file to the chat of each subscriber. A reply
+   that carried a path would make Hermes send a file of this machine to a chat, and
+   that cannot be undone. So the arguments `--summary` and `--result`, and every
+   other argument (title, comment, block reason, metadata, attachment name), carry
+   only text the adapter wrote: no remote text, and no path. Remote text goes to a
+   card in two ways only: through standard input as the body of a created card
+   (`--body-file -`), or as an attachment (`Attach`) of a card to be completed, which
+   the result then points to by a name the adapter derived. The values the adapter
+   quotes are bounded and are not another agent's: aliases and card ids, the words of
+   an enumeration the node reports (a delivery state, a rejection reason), and the
+   fixed message of an error of the local node.
+2. **The operating system limits arguments.** A single argument is limited to 128
+   KiB on Linux and a whole command line to about 32K characters on Windows, and no
+   argument can hold a NUL byte. The client therefore refuses, before it runs
+   anything, an argument above `MaxArgBytes` (8 KiB) with an `Error` wrapping
+   `ErrArgTooLong`, and one holding a NUL with `ErrArgInvalid`, both class
+   permanent.
+
+The client enforces, in `run` (the one place hermes is started), what it can see: the
+size and the NUL. It cannot tell whose words a line holds;
+that the lines are the adapter's own is the callers' rule. The one flow that handled
+another agent's words in a completion, the reply to a delegated card, attaches them.
 
 - the body of a card goes through standard input (`--body-file -`);
-- every other argument (title, summary, result, metadata, comment, block reason,
-  attachment name) is bounded by `MaxArgBytes`, 8 KiB. An argument above it is
-  refused with an `Error` wrapping `ErrArgTooLong`, class permanent, before
-  anything is run;
 - long text is stored with `Attach`, which writes it to a file in a directory the
-  caller names, passes Hermes the path and removes the file; the summary then
-  holds a short line pointing at the attachment;
+  caller names, passes Hermes the path and removes the file;
 - values are passed as `--option=value`, and the title, comment text and block
   reason come after `--`, so text beginning with `-` is never read as an option.
 
@@ -152,11 +171,15 @@ which is for the caller to read as "already done".
   dashboard API exists only while a dashboard is running. The command line is the
   interface Hermes' own workers use and its flags are documented in `--help`.
 - **Standard input for bodies, a bound for the rest.** The alternatives were to
-  pass everything as arguments and chunk it, which fails on Windows shims whatever
-  the size, or to write every value to a file, which Hermes supports only for the
-  card body and attachments. The bound is deliberately small: it is far below both
+  pass everything as arguments and chunk it, which fails on Windows whatever the
+  size, or to write every value to a file, which Hermes supports only for the card
+  body and attachments. The bound is deliberately small: it is far below both
   limits and large enough for a summary line, a reason or a metadata object, and
   anything bigger is by nature a document that belongs in an attachment.
+- **No remote text in a summary or a result.** Fencing it would not help: Hermes
+  finds the paths in the text whatever surrounds them, and text that holds its own
+  fence closes ours. The only safe place for text from another agent is one Hermes
+  does not read for paths.
 - **`--option=value` and `--`.** Remote-derived text can begin with `-`, and
   `argparse` would read it as an option (`--summary -x` fails with "expected one
   argument").
@@ -192,7 +215,7 @@ which is for the caller to read as "already done".
   `TestClassifyRecordedErrors` (every recorded failure with its class; a new
   sample must be listed) and `TestClassifyUnrecorded`, `TestErrorMatching`,
   `TestCreateBodyThroughStdin` (a 256 KiB body, the explicit homes and the removed
-  worker variable, through a stand-in for hermes), `TestArgTooLongIsRefusedWithoutRunning`,
+  worker variable, through a stand-in for hermes), `TestArgTooLongIsRefusedWithoutRunning` (also the NUL rows),
   `TestTimeoutIsTransient`, `TestProbeAgainstRecordedOutputs`,
   `TestParseAndCheckVersion`, `TestCheckExecutable`, `TestCheckProfiles`.
 - Not confirmed: the client has run on macOS against Hermes 0.22.2 only. The
