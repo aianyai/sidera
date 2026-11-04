@@ -391,8 +391,10 @@ func (v *view) queue(recipient ident.EndpointID, key store.TargetKey, queued boo
 	v.queued[recipient][key] = true
 }
 
-// queuedIn lists the target records queued for the endpoint in the order they were
-// taken in: what recv has to hand out. The queue view of an endpoint holds its
+// queuedIn lists the target records queued for the endpoint by the instant each was
+// accepted, those accepted at the same instant in the order of the text of their
+// keys (the order queuedFor gives, which the stable sort keeps): what recv has to
+// hand out. The queue view of an endpoint holds its
 // control records too, because a closing endpoint closes them as well, but a control
 // signal is never handed to an agent.
 func (v *view) queuedIn(id ident.EndpointID) []store.InRecord {

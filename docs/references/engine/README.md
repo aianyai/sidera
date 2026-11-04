@@ -554,7 +554,8 @@ the recv leaves it out of the page and hands out the rest; a part of it asked fo
 is the empty page, as for a suspended message, because the message is still queued); judges
 every queued message again with the declarations as they are now (the second check);
 builds the page; and writes what the page changed in one `lease` transaction before it
-answers. The queue is the target records of the endpoint in the order they were taken in
+answers. The queue is the target records of the endpoint in the order of the instant each
+was accepted, those accepted at the same instant in the order of the text of their keys
 (`view.queuedIn`), those under a live lease first, and never a control record, though the
 view's queue of an endpoint holds those too: a control signal is not for an agent.
 
