@@ -101,9 +101,12 @@ func TestStartAnswersBeforeTheServerIsReachedAndLoadsTheSessionsWhenItIs(t *test
 			t.Fatalf("start = %+v, want every session unreachable", res)
 		}
 	}
-	if c := decode[adapterproto.AvailabilityParams](h.lastAvailability()).Conditions; len(c) != 1 || c[0].Condition != adapterproto.ConditionNativeUnavailable {
-		t.Fatalf("availability = %s, want native_unavailable", h.lastAvailability())
-	}
+	// The adapter sends the availability before it answers, but the harness handles
+	// notifications on a goroutine of its own, so the answer can be taken first.
+	h.waitNote(adapterproto.MethodAdapterAvailability, func(r json.RawMessage) bool {
+		c := decode[adapterproto.AvailabilityParams](r).Conditions
+		return len(c) == 1 && c[0].Condition == adapterproto.ConditionNativeUnavailable
+	})
 
 	close(h.mgr.gate)
 	h.waitNote(adapterproto.MethodTurnStarted, turnStartedOf("tu-running"))
