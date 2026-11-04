@@ -28,6 +28,9 @@ for `sidera adapter install` (see the reference for the three commands).
 - `directory` and `peers` are refused by the adapter, not the client, when the daemon
   did not declare `direct_endpoint_access`: the SDK reports it without sending anything
   and `notSupported` words it, so the client has one path for every failure.
+- `recv` prints a message with the page's `feedback` member as a channel notice
+  (`printMessage`); the console decides nothing from it, and the member reaches it only
+  because the kit declares the direct capability `feedback`.
 - `internal/console` holds the adapter's identity (`AdapterID`, and the release
   version from `internal/release`) once; the manifest and `initialize` both read it.
 - A change to the commands, the local protocol or the control channel updates the

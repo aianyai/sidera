@@ -77,6 +77,12 @@ before. A client that dies between the print and the acknowledgement leaves the
 page unacknowledged and the next `recv` hands it out again, marked as possibly shown
 before.
 
+A message that is the node's own channel feedback (the notice that a message the owner sent
+was refused, expired or went unanswered) is printed with `(channel notice)` on its first
+line, after the id: its sender is the node, not an agent, and there is nobody to reply to.
+The marker is the page's `feedback` member, which the daemon sends because the kit the
+console is built on declares that it decodes it.
+
 ### The control channel
 
 The channel is local to the machine and reachable by the owner alone. Its address

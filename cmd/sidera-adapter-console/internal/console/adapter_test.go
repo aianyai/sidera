@@ -345,6 +345,30 @@ func TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages(t *testing.T) {
 	}
 }
 
+// The node's own notice is told from an agent's message on its first line, with
+// the other markers of that line kept.
+func TestRecvMarksTheNodesOwnNotices(t *testing.T) {
+	d := &daemon{pages: []adapterproto.RecvPage{{Lease: lease, Messages: []adapterproto.PageMessage{
+		{ID: "m-1", From: "node-3/system", Feedback: true, Body: "refused"},
+		{ID: "m-2", From: "node-3/agent", Body: "hello"},
+		{ID: "m-3", From: "node-3/system", Feedback: true, PossiblyDuplicate: true, Body: "expired"},
+	}}}}
+	h := newHarness(t, d)
+	if code := h.run("recv"); code != exitOK {
+		t.Fatalf("recv: exit %d, stderr %q", code, h.errOut.String())
+	}
+	out := h.out.String()
+	for _, want := range []string{
+		"from node-3/system  id m-1  (channel notice)\nrefused\n",
+		"from node-3/agent  id m-2\nhello\n",
+		"from node-3/system  id m-3  (channel notice)  (possibly shown before)\nexpired\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output %q lacks %q", out, want)
+		}
+	}
+}
+
 func TestRecvWithNothingWaitingSaysSoAndAcknowledgesNothing(t *testing.T) {
 	d := &daemon{}
 	h := newHarness(t, d)

@@ -187,6 +187,9 @@ func (c *client) printMessage(m adapterproto.PageMessage) {
 	if m.Part != nil {
 		fmt.Fprintf(w, "  %s", m.Part.Label)
 	}
+	if m.Feedback {
+		fmt.Fprint(w, "  (channel notice)")
+	}
 	if m.PossiblyDuplicate {
 		fmt.Fprint(w, "  (possibly shown before)")
 	}

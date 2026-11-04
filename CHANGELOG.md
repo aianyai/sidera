@@ -18,7 +18,8 @@ protocol has a version of its own.
   not know, so a client that outlives an update is not stranded by a member a later release
   adds. An adapter receives the member only if it declares the new direct capability
   `feedback`, which the Go SDK kit declares itself; the protocol stays at version 1. To learn what
-  happened to a message, an adapter asks `endpoint.message_status`.
+  happened to a message, an adapter asks `endpoint.message_status`. The console's `recv`
+  prints such a message with `(channel notice)` on its first line.
 - **Direct endpoints can read the directory and the peer list and set their own declaration.**
   The adapter protocol gains `endpoint.directory`, `endpoint.peers` and `endpoint.declare`
   for a direct endpoint, behind the daemon capability `direct_endpoint_access` that
