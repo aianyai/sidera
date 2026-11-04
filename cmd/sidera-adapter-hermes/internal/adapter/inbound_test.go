@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/sdk/go/peer"
+
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban/kanbantest"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -133,4 +135,91 @@ func TestContinuation(t *testing.T) {
 			t.Errorf("card %+v, want a done card without parent subscribed to the conversation recorded with the endpoint", c)
 		}
 	})
+}
+
+const replyCard = `{"sidera":1,"mode":"reply","reply_to":"n_1","task":"looks fine"}`
+
+// A reply card answers a request: the task goes back to the sender from the endpoint
+// that received the request, as a reply to the original message, and the card is
+// completed. When the node no longer admits the reply (it forgot the message) the
+// same text goes once as a plain message that says which message it answers, with a
+// comment on the card; any other refusal blocks the card as a failed delivery; a card
+// from a profile the owner did not list is invalid and blocked as such.
+func TestReplyCard(t *testing.T) {
+	refusal := func(reason string) error {
+		return peer.NewError(adapterproto.CodeSendRefused, "refused").WithData(map[string]any{"reason": reason})
+	}
+	for _, tc := range []struct {
+		name       string
+		creators   []string
+		refuse     func(p adapterproto.SendParams) error
+		wantStatus string
+		wantKind   string
+		wantSends  int
+		wantPlain  bool
+	}{
+		{name: "a reply", wantStatus: "done", wantSends: 1},
+		{name: "the permission to reply ended", wantStatus: "done", wantSends: 2, wantPlain: true,
+			refuse: func(p adapterproto.SendParams) error {
+				if p.ReplyTo != "" {
+					return refusal("message_unknown")
+				}
+				return nil
+			}},
+		{name: "another refusal", wantStatus: "blocked", wantKind: "transient", wantSends: 1,
+			refuse: func(adapterproto.SendParams) error { return refusal("too_large") }},
+		{name: "a creator outside the list", creators: []string{"alice"}, wantStatus: "blocked", wantKind: "capability"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &daemon{directAccess: true}
+			if tc.refuse != nil {
+				d.sendError = func(_ int, p adapterproto.SendParams) (error, bool) {
+					err := tc.refuse(p)
+					return err, err == nil
+				}
+			}
+			d.serve("hermes", message("m1", "please review"), ready, false)
+			settings := map[string]any{}
+			if tc.creators != nil {
+				settings["creator_profiles"] = tc.creators
+			}
+			h := start(t, options{d: d, lane: true, flows: LaneFlows(NewInbound), settings: settings})
+			until(t, "the request card", func() bool { return len(inboxCards(h)) == 1 })
+			kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) {
+				b.Cards["r_1"] = &kanbantest.Card{ID: "r_1", Title: "answer", Body: replyCard, Assignee: "sidera", Status: "ready", CreatedBy: "hermes"}
+			})
+			until(t, "the reply card to be settled", func() bool { return boardCard(h, "r_1").Status != "ready" })
+
+			c := boardCard(h, "r_1")
+			if c.Status != tc.wantStatus || c.BlockKind != tc.wantKind {
+				t.Errorf("status %q kind %q, want %q %q", c.Status, c.BlockKind, tc.wantStatus, tc.wantKind)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if len(d.sends) != tc.wantSends {
+				t.Fatalf("%d sends, want %d: %+v", len(d.sends), tc.wantSends, d.sends)
+			}
+			if tc.wantSends == 0 {
+				return
+			}
+			first := d.sends[0]
+			if first.Endpoint != d.refs[InstanceKey] || first.To[0] != "nodeb/codex" || first.ReplyTo != "m1" ||
+				first.IdempotencyKey != "r_1:1" || first.AcceptBeforeS != 0 || first.Body != "looks fine" {
+				t.Errorf("first send %+v, want the task as a reply to m1 from the instance endpoint with key r_1:1", first)
+			}
+			if tc.wantPlain {
+				plain := d.sends[1]
+				if plain.ReplyTo != "" || plain.To[0] != "nodeb/codex" || plain.IdempotencyKey != "r_1:2" ||
+					plain.Body != "Reply to your message m1:\n\nlooks fine" {
+					t.Errorf("plain send %+v, want the task after a line naming m1, key r_1:2, no reply_to", plain)
+				}
+				if len(c.Comments) != 1 || !strings.Contains(c.Comments[0].Body, "expired") {
+					t.Errorf("comments %+v, want one saying the permission had expired", c.Comments)
+				}
+			}
+			if tc.wantStatus == "done" && (len(c.Runs) != 1 || !strings.HasPrefix(c.Runs[0].Summary, "Sent over Sidera to codex")) {
+				t.Errorf("runs %+v, want a summary written by the adapter", c.Runs)
+			}
+		})
+	}
 }

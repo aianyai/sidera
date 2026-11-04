@@ -25,7 +25,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `gate.go` | The check that Hermes can be used, and the availability report. |
 | `timers.go` | The timer loop: recovery once, then a tick. |
 | `laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go` | The lane's flows: shared plumbing and the `Inbound` seam; cards (plan, claim, send, settle, fail); replies; recovery, ticks and closing sessions. |
-| `inbound.go` | The inbound half: request cards made of messages, continuations of conversations. |
+| `inbound.go`, `answer.go` | The inbound half: request cards made of messages and continuations of conversations; reply cards sent back to the sender. |
 | `handlers.go`, `env.go` | The handler interfaces; `Env`, `Place`, `Send`. |
 | `manifest.go`, `program.go` | The manifest and the declared settings; the commands. |
 | `pause.go` | Backoff, `sleep` and the loop timings. |
@@ -66,6 +66,11 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   wakes only the subscribers that exist by then. The first line of the summary and the
   title are the adapter's words; the sender's text is only in the body, in a fence it
   cannot close.
+- **A reply card is not claimed** (`answer.go`): every step is resumed from its record
+  (`state.Reply`) when the poll lists the card again, so there is no claimed state for
+  a timer to watch. It is sent from the endpoint that received the request, with the
+  idempotency key of its persisted attempt; only a refusal with the reason
+  `message_unknown` turns the reply into a plain message, once.
 - The timings are fields (`timing`) so tests run in milliseconds; they are not settings.
 - Tests drive the real `App` over pipes against a stub daemon (`harness_test.go`) and
   use `kanban/kanbantest` as `hermes`.

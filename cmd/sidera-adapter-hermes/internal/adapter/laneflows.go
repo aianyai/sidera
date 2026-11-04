@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -112,6 +113,20 @@ func clip(s string) string {
 
 // isPermanent reports a failure of Hermes that will not pass.
 func isPermanent(err error) bool { return errors.Is(err, kanban.ErrPermanent) }
+
+// refusalReason is the reason the node gave for refusing a send (the data of a
+// send_refused error), or "" when the error is not that.
+func refusalReason(err error) adapterproto.SendRefusedReason {
+	var pe *peer.Error
+	if !errors.As(err, &pe) || pe.Code != adapterproto.CodeSendRefused {
+		return ""
+	}
+	var data adapterproto.SendRefusedData
+	if json.Unmarshal(pe.Data, &data) != nil {
+		return ""
+	}
+	return data.Reason
+}
 
 // refused reports a send that the node answered with a refusal that will not
 // change: the message certainly did not go. A busy node, a cancelled call and every

@@ -279,6 +279,8 @@ directory the daemon names in `initialize`). It holds:
 - the open remote sessions with their last use and when a close was last tried;
 - the request cards made of inbound messages, with the endpoint that received each
   message, its Sidera id and its sender;
+- the cards that answer a request, with the attempt to send, its start and the blocks
+  they have had;
 - the ids of processed inbound messages with the time each may be forgotten.
 
 A card also records whether the node reported its latest attempt delivered (the adapter
@@ -322,7 +324,7 @@ register the endpoint (`Env.Place`); write the intent to claim (a record in phas
 `claiming` that holds nothing but the card id); `claim --ttl` with the configured claim
 time; complete the record; send. An invalid card is claimed and blocked as `capability` with
 the reason; a card whose mode is `reply` is the inbound half's and is not claimed
-(its stand-in logs it once per card id and leaves it ready).
+(see [Reply cards](#reply-cards)).
 
 *A claim the adapter lost track of.* The intent record exists because a crash between
 the claim and the rest of the record would leave the card running under the adapter's
@@ -506,6 +508,56 @@ message a few hours later, so for most of that time an answer goes out as a plai
 message, which needs the sender's address and the id of the message it answers; Hermes
 clears the subscriptions of cards done and idle for 30 days, after which nobody could be
 woken about an answer anyway.
+
+### Reply cards
+
+A card whose mode is `reply` answers a request. The delegation flows list it, see its
+mode and leave it to the inbound half (`answer.go`), which validates it, sends its task
+to the sender of the request and completes it.
+
+**Validation.** As for any card, the creator list applies (a reply makes the node send
+a message) and the envelope must be well formed: `reply_to`, no `to`, no `preset`, a
+task. In addition `reply_to` must name a request card the adapter recorded. A card
+that fails is blocked as `capability` with the reason, and completed with it the
+second time (`lane.OnFailure`).
+
+**Sending.** The answer goes to the sender of the request, from the endpoint that
+received the request, with `reply_to` set to the Sidera message id of the request and
+through `Env.Send`, so never with a delivery deadline. The idempotency key is the card
+id and the persisted attempt number, as for a delegated card, and the attempt is written
+before the send. The endpoint is the one that received the message because the node
+admits a reply only from the endpoint the message was delivered to. A reply card that
+is listed again resumes from the record (`state.Reply`): an answer recorded as sent is
+only completed; an attempt under way is sent again with the same key within
+`adapterproto.SentKeyWindow` and, past it, not at all, and the card is blocked
+(`transient`, outcome unknown); a card its creator unblocked is a new attempt, with a
+new key. After the send the card is completed with the summary "Sent over Sidera to
+<sender>", whose first line is the adapter's.
+
+**The card is not claimed.** Hermes completes and blocks a card from `ready` as it does
+from `running`, and a reply card is settled within one poll. Everything the flow
+does is repeatable from its record, so a card the flow left halfway is simply listed
+again. A claim would add a state that nothing would watch: the flow has no timer, so a
+card claimed and then left by a crash or a failing Hermes would stay running for the
+whole claim time while the poll, which lists ready cards only, never showed it again.
+
+**When the permission to reply has ended.** The node keeps the record of a received
+message only for a while after it arrived (about 27 hours), and the recipient admits a
+reply as a reply only within 24 hours of the delivery. A send that names a message the
+node no longer holds is refused with `send_refused` and the reason `message_unknown`
+(`adapterproto.SendRefusedMessageUnknown`). The flow then sends the same text once as a plain message
+to the same address, as a new attempt (the next number, so a new key), with a first line
+that says which message it answers ("Reply to your message <id>:"), and comments on the
+card that the permission had expired. An answer that arrives late is better than none,
+and the line is what lets the sender tell which request it belongs to. The plain
+message is not sent when the refusal is any other: the card is blocked as `transient`
+with the node's reason, and a second failure completes it with the reason.
+
+**What is recorded, and for how long.** A request record (card, receiving endpoint,
+message id, sender) is written when the request card is made and kept for
+`state.RequestRetention` (30 days). A reply record (attempt, its start, whether it is
+the plain form, the message id, the blocks per category) is written with the first
+attempt and dropped `session_retention` after the card finished.
 
 ### Decisions
 

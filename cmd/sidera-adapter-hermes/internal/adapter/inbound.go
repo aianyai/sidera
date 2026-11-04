@@ -213,8 +213,3 @@ func fenceFor(text string) string {
 	}
 	return strings.Repeat("`", max(3, longest+1))
 }
-
-// HandleReplyCard is not handled yet: the card stays ready.
-func (in *inbound) HandleReplyCard(_ context.Context, c kanban.Card) {
-	in.env.Log.Warn("a reply card is not handled and stays ready", "card", c.ID)
-}

@@ -111,6 +111,9 @@ type options struct {
 	// ready is the fake Hermes' answer to listing the ready cards.
 	ready string
 	now   func() time.Time
+	// settings are added to the instance configuration, over the defaults of the
+	// tests.
+	settings map[string]any
 }
 
 func start(t *testing.T, o options) *harness {
@@ -273,15 +276,15 @@ func start(t *testing.T, o options) *harness {
 		listed = []adapterproto.DirectAttach{}
 	}
 	call(adapterproto.MethodAdapterStart, adapterproto.StartParams{
-		Node: "node-1", Config: configValues(exe, o.stateDir), Presets: []adapterproto.PresetConfig{},
+		Node: "node-1", Config: configValues(exe, o.stateDir, o.settings), Presets: []adapterproto.PresetConfig{},
 		Sessions: []adapterproto.SessionAttach{}, DirectEndpoints: listed,
 	}, &adapterproto.StartResult{})
 	return h
 }
 
-func configValues(hermes, home string) adapterproto.ConfigValues {
+func configValues(hermes, home string, extra map[string]any) adapterproto.ConfigValues {
 	v := adapterproto.ConfigValues{}
-	for k, x := range map[string]any{
+	settings := map[string]any{
 		"hermes_path":      hermes,
 		"hermes_home":      home,
 		"board":            "lane",
@@ -294,7 +297,11 @@ func configValues(hermes, home string) adapterproto.ConfigValues {
 		"max_endpoints":    4,
 		"display_name":     "Hermes (test)",
 		"no_reply_timeout": "1h",
-	} {
+	}
+	for k, x := range extra {
+		settings[k] = x
+	}
+	for k, x := range settings {
 		raw, _ := json.Marshal(x)
 		v[k] = raw
 	}

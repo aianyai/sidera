@@ -10,7 +10,7 @@ does I/O. The caller records the transition with `state.Store.Update`, then acts
 | `MatchReply` | Which card a received message answers (waiting, or blocked for no reply or a transient failure), or to read pending creations first. |
 | `ShouldQueue`, `NextQueued` | Whether a send waits behind another card on the same endpoint and peer; who goes next. |
 | `IdempotencyKey`, `OnReady` | The key of an attempt; what to do with a known card that is ready again. |
-| `OnFailure`, `BlockKindOf`, `NoReplyDue` | Block or complete a card that cannot go on; the Hermes block kind of a category; whether the wait has run out. |
+| `OnFailure`, `BlockKindOf`, `NoReplyDue` | Block or complete a card (or a reply card) that cannot go on, from its blocks so far; the Hermes block kind of a category; whether the wait has run out. |
 | `RouteFollowUp` | Where a follow-up that names no alias goes. |
 | `SessionsToClose` | Which remote sessions to ask to close now. |
 | `ParentFor` | The parent of an inbound continuation's request card; none for an endpoint that is not a conversation. |

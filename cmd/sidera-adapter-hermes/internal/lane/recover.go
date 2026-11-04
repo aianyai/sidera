@@ -77,9 +77,10 @@ const (
 	VerdictComplete
 )
 
-// OnFailure decides what to do when the card cannot go on for the reason.
-func OnFailure(c state.Card, r Reason) Verdict {
-	if c.Blocks[r.Category()] > 0 {
+// OnFailure decides what to do when a card cannot go on for the reason, given the
+// blocks it has had so far per category (state.Card.Blocks, state.Reply.Blocks).
+func OnFailure(blocks map[state.Category]int, r Reason) Verdict {
+	if blocks[r.Category()] > 0 {
 		return VerdictComplete
 	}
 	return VerdictBlock

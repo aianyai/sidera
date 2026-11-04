@@ -217,11 +217,11 @@ func TestBlockKindOf(t *testing.T) {
 }
 
 func TestOnFailure(t *testing.T) {
-	fresh := state.Card{}
-	blockedBefore := func(cat state.Category) state.Card { return state.Card{Blocks: map[state.Category]int{cat: 1}} }
+	var fresh map[state.Category]int
+	blockedBefore := func(cat state.Category) map[state.Category]int { return map[state.Category]int{cat: 1} }
 	cases := []struct {
 		name   string
-		card   state.Card
+		card   map[state.Category]int
 		reason Reason
 		want   Verdict
 	}{

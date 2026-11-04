@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/card"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/lane"
@@ -37,6 +38,22 @@ func (e *Env) Place(ctx context.Context, src lane.Source, target config.Target) 
 // endpoint included; it is false for a key that is not open.
 func (e *Env) EndpointRef(key string) (adapterproto.EndpointRef, bool) {
 	return e.endpoints.ref(key)
+}
+
+// validate checks a decoded card body against what this node serves: the creator
+// list, then the envelope against the alias table. It is the one place both halves
+// of the lane apply those rules; a reply card is validated here by the inbound half.
+func (e *Env) validate(env card.Envelope, createdBy string, hasParents bool) (card.Request, *card.InvalidError) {
+	err := card.CheckCreator(e.Config.CreatorProfiles, createdBy)
+	var req card.Request
+	if err == nil {
+		req, err = env.Validate(e.Config.Aliases, hasParents)
+	}
+	if err != nil {
+		// CheckCreator and Validate return nothing else.
+		return card.Request{}, err.(*card.InvalidError)
+	}
+	return req, nil
 }
 
 // Outgoing is a message to send. It has no delivery deadline on purpose: see Send.

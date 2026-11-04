@@ -178,6 +178,48 @@ type Request struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Reply is what the adapter keeps about a card that answers a request: which message
+// it sent, and how far it got, so that a card listed again is not sent twice. Its
+// phase is one of PhaseAttempting, PhaseSent, PhaseBlocked and PhaseFinished.
+type Reply struct {
+	CardID string `json:"card_id"`
+	Phase  Phase  `json:"phase"`
+	// Attempt is the number of the latest attempt to send, 0 before the first. It and
+	// AttemptAt are persisted before the send they describe; the idempotency key is
+	// built from the number.
+	Attempt   int       `json:"attempt"`
+	AttemptAt time.Time `json:"attempt_at"`
+	// Plain says the latest attempt is a plain message, not a reply: the node no
+	// longer admitted the reply to the original message.
+	Plain bool `json:"plain,omitempty"`
+	// MessageID is the channel's id of the message the latest attempt created.
+	MessageID  string           `json:"message_id,omitempty"`
+	Blocks     map[Category]int `json:"blocks,omitempty"`
+	FinishedAt time.Time        `json:"finished_at"`
+}
+
+// BeginAttempt records the start of attempt number n, in the form of a plain message
+// or of a reply. The record is written before the send, because the idempotency key
+// is built from the number.
+func (r *Reply) BeginAttempt(n int, plain bool, now time.Time) {
+	r.Attempt, r.AttemptAt, r.Plain, r.MessageID, r.Phase = n, now, plain, "", PhaseAttempting
+}
+
+// Sent records the message the attempt created.
+func (r *Reply) Sent(messageID string) { r.MessageID, r.Phase = messageID, PhaseSent }
+
+// Block records that Hermes now has the card blocked for the category.
+func (r *Reply) Block(cat Category) {
+	if r.Blocks == nil {
+		r.Blocks = map[Category]int{}
+	}
+	r.Blocks[cat]++
+	r.Phase = PhaseBlocked
+}
+
+// Finish records that the card is completed.
+func (r *Reply) Finish(now time.Time) { r.Phase, r.FinishedAt = PhaseFinished, now }
+
 // RequestRetention is how long a Request is kept. The node admits a reply as a reply
 // only for a day after the delivery and forgets the message a few hours later, so
 // past that an answer goes out as a plain message; the record is still needed then,
@@ -198,6 +240,8 @@ type Data struct {
 	Sessions  map[string]*Session  `json:"sessions"`
 	// Requests maps the id of a request card to the message it was made of.
 	Requests map[string]*Request `json:"requests"`
+	// Replies maps the id of a card that answers a request to how far it got.
+	Replies map[string]*Reply `json:"replies"`
 	// Processed maps the id of an inbound message to the time its record may be
 	// dropped. A message the channel redelivers is recognized by it.
 	Processed map[string]time.Time `json:"processed"`
@@ -210,6 +254,7 @@ func newData() Data {
 		Endpoints: map[string]*Endpoint{},
 		Sessions:  map[string]*Session{},
 		Requests:  map[string]*Request{},
+		Replies:   map[string]*Reply{},
 		Processed: map[string]time.Time{},
 	}
 }
@@ -237,8 +282,14 @@ func (d *Data) MarkProcessed(messageID string, now time.Time) {
 
 // Prune drops the records of cards that finished more than keep ago, except those
 // whose remote session is still open: a follow-up needs its parent's peer for as
-// long as the session lives. It drops the requests older than RequestRetention too.
+// long as the session lives. It drops the requests older than RequestRetention, and the
+// records of answers that finished more than keep ago, too.
 func (d *Data) Prune(now time.Time, keep time.Duration) {
+	for id, r := range d.Replies {
+		if r.Phase == PhaseFinished && now.Sub(r.FinishedAt) > keep {
+			delete(d.Replies, id)
+		}
+	}
 	for id, r := range d.Requests {
 		if now.Sub(r.CreatedAt) > RequestRetention {
 			delete(d.Requests, id)

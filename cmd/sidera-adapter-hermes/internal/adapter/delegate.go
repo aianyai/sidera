@@ -31,11 +31,7 @@ func (f *laneFlows) handleCard(ctx context.Context, c kanban.Card) (reply bool) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	d := f.env.State.View()
-	rec := d.Cards[c.ID]
-	if rec != nil && rec.Mode == card.ModeReply {
-		return true
-	}
-	act := lane.OnReady(rec, f.env.Now())
+	act := lane.OnReady(d.Cards[c.ID], f.env.Now())
 	switch act.Kind {
 	case lane.ActionIgnore:
 	case lane.ActionNew, lane.ActionRevalidate, lane.ActionSend:
@@ -261,18 +257,11 @@ func (f *laneFlows) request(d *kanban.Detail) (card.Request, *card.InvalidError)
 		// A reply card is the inbound half's, which validates it.
 		return card.Request{Mode: card.ModeReply}, nil
 	}
-	if err == nil {
-		err = card.CheckCreator(f.env.Config.CreatorProfiles, d.Card.CreatedBy)
-	}
-	var req card.Request
-	if err == nil {
-		req, err = env.Validate(f.env.Config.Aliases, len(d.Parents) > 0)
-	}
 	if err != nil {
-		// Decode, CheckCreator and Validate return nothing else.
+		// Decode returns nothing else.
 		return card.Request{}, err.(*card.InvalidError)
 	}
-	return req, nil
+	return f.env.validate(env, d.Card.CreatedBy, len(d.Parents) > 0)
 }
 
 // source finds the conversation or job a card comes from and makes sure its
@@ -509,7 +498,7 @@ func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, tex
 		return
 	}
 	cat := reason.Category()
-	if lane.OnFailure(*c, reason) == lane.VerdictBlock {
+	if lane.OnFailure(c.Blocks, reason) == lane.VerdictBlock {
 		err := f.env.Board.Block(ctx, id, lane.BlockKindOf(cat), clip(text))
 		switch {
 		case err == nil:
