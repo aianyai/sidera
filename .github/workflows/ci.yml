@@ -75,8 +75,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: go vet
-        run: go vet ./... ./sdk/go/...
       - name: go test
         run: go test -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
       # go test prints t.Log output and skip reasons only with -v or on failure.
@@ -185,10 +183,10 @@ jobs:
           go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
           go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
-  # The same checks again with the build tags that select binary-level crash
-  # points and the test clock, which the untagged job never compiles. vet also
-  # sees the acceptance tag, so the files it selects are type-checked on every
-  # platform; the tests behind that tag run in their own jobs, not here.
+  # The tests again with the build tags that select binary-level crash points
+  # and the test clock, which the untagged job never compiles. The tests behind
+  # the acceptance tag run in their own jobs, not here; the vet job type-checks
+  # the files of every tag.
   #
   # Only the packages whose test binary the two tags change are tested: any other
   # package builds the same test from the same files, so running it again would
@@ -216,8 +214,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
-      - name: go vet with tags
-        run: go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...
       - name: packages the tags change
         id: tagged
         run: |
@@ -349,13 +345,61 @@ jobs:
       - name: go test crash walk
         run: go test -count=1 -v -timeout "$TEST_TIMEOUT" -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
 
+  # go vet for every platform Sidera ships for, with and without the build tags,
+  # in one Linux job. vet reads source and type-checks it; it builds nothing for
+  # the platform and runs nothing. With no cgo file in the repository, vet with
+  # GOOS and GOARCH set (and CGO_ENABLED=0, as the release is built) selects
+  # exactly the files a vet run natively on that platform selects, so one Linux
+  # runner vets all six. That replaces a vet run in each of the test and tagged
+  # jobs, on the macOS and Windows runners among them, and also vets darwin/amd64
+  # and linux/arm64, which have no test job. The tag set adds the files behind
+  # the tags, which the vet without tags does not read.
+  #
+  # A cgo file would end this: a vet with CGO_ENABLED=0 skips it, so that
+  # platform's vet would have to go back to a native runner.
+  #
+  # A failing platform does not stop the loop, so that one platform's failure
+  # does not hide another's; the step fails at the end if any failed.
+  #
+  # The job keeps no cache (cache: false), for the reason given under
+  # linux-checks: it would save a nearly empty entry before the Linux test jobs
+  # could save theirs.
+  vet:
+    name: go vet (every platform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: go vet for every platform
+        run: |
+          failed=0
+          for platform in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "::group::$platform"
+            CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} go vet ./... ./sdk/go/... || {
+              echo "::error::go vet failed for $platform"
+              failed=1
+            }
+            CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/... || {
+              echo "::error::go vet with tags failed for $platform"
+              failed=1
+            }
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
   # The checks that need one runner each and no matrix, in one job: formatting,
   # sdk/go on its own, and the cross-compile with the release archives. GitHub
   # runs at most 20 jobs of the account at once, five of them on macOS. A push
   # started 22 jobs when these were three, so even a run alone had two jobs
   # waiting for a runner, and a run that overlapped another queued its jobs for
   # minutes. The three take about four minutes together, less than any of the
-  # test jobs, so one job costs the run no time and brings a push to 20 jobs.
+  # test jobs, so one job costs the run no time and keeps a push within those 20 jobs.
   # Every step after the first runs even when an earlier one failed, so that a
   # failure does not hide the verdict of the others.
   #

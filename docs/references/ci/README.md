@@ -23,10 +23,11 @@ job together run every test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
-| `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
+| `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `race` (shown as `race (<os>, <part>)`) | Linux, macOS, Windows, each in two parts, `node` and `rest` | first a step that lists the packages of the part from one `go list ./... ./sdk/go/...` and prints them (`node` is `internal/node` and every package under it, `rest` is every other package), then `go test -race -count=1 -timeout 30m [-skip …]` on that list; no Windows arm64, where Go has no race detector |
 | `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64; manual dispatch with `benchmarks` set only | the three single-sample benchmark commands below |
-| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
+| `vet` (shown as `go vet (every platform)`) | Linux | for each of darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64, with `CGO_ENABLED=0 GOOS=… GOARCH=…`: `go vet ./... ./sdk/go/...` and `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`; a failure prints an error naming the platform and the tag set and the loop goes on to the other platforms, then the step fails if any failed |
+| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `linux-checks` (shown as `gofmt, sdk/go and release archives`) | Linux | in this order, each step running even when an earlier one failed: `gofmt -l .` must print nothing; in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff`; `go build -trimpath ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64, one after another, failing on the first with the platform named; then `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, which also checks that both install guides quote the release public key, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
@@ -42,12 +43,13 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | `test-tags` | 4 | 40 | 30m per step |
 | `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
+| `vet` | 1 | 20 | none |
 | `linux-checks` | 1 | 30 | go default for the `sdk/go` tests, none for the rest |
 
-A push to `main` or a pull request starts 19 jobs, five of them on macOS (`test`,
+A push to `main` or a pull request starts 20 jobs, five of them on macOS (`test`,
 the two `race` parts, `test-tags` and `acceptance`); a manual dispatch adds the nine
-`crashwalk` jobs, 28 in all, seven of them on macOS, and one that sets `benchmarks`
-adds the four `bench` jobs, 32 in all, eight of them on macOS. GitHub runs at most 20 jobs of
+`crashwalk` jobs, 29 in all, seven of them on macOS, and one that sets `benchmarks`
+adds the four `bench` jobs, 33 in all, eight of them on macOS. GitHub runs at most 20 jobs of
 the account at once, and macOS jobs more tightly than the others: at most five macOS
 jobs at once across all workflows, so on a dispatch the two macOS crash-walk jobs
 wait for the shorter macOS jobs to finish. A push stays within the limit on its own; a run that starts while
@@ -73,11 +75,11 @@ pipe and helper-reexecution tests remain available without `acceptance`.
 | --- | ------- | ----------- |
 | `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags`, `acceptance` |
 | `testclock` | the test clock a binary reads from its environment | `test-tags`, `acceptance` |
-| `netacceptance` | the test of two real daemons, which pair with each other and exchange messages over libp2p; it changes nothing in the binaries and only keeps that test out of the regular `acceptance` run. The test needs `acceptance` too and is run by hand, with `go test -count=1 -tags acceptance,netacceptance -run TestTwoNodes ./cmd/sidera/internal/acceptance` | `go vet` in `test-tags` |
-| `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in `acceptance` and `crashwalk` |
+| `netacceptance` | the test of two real daemons, which pair with each other and exchange messages over libp2p; it changes nothing in the binaries and only keeps that test out of the regular `acceptance` run. The test needs `acceptance` too and is run by hand, with `go test -count=1 -tags acceptance,netacceptance -run TestTwoNodes ./cmd/sidera/internal/acceptance` | `go vet` in `vet` |
+| `acceptance` | the test files that drive built binaries | `go vet` in `vet`; their tests run only in `acceptance` and `crashwalk` |
 
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
-binaries and have their own jobs, limits and timeouts. `go vet` in `test-tags`
+binaries and have their own jobs, limits and timeouts. `go vet` in `vet`
 adds it so the files are at least type-checked on every platform.
 
 The tagged `go test` steps run only the packages whose test binary the tags
@@ -100,8 +102,8 @@ file generated for them is no source of difference. The list is not kept in the
 workflow, so a package that comes to depend on a tag is picked up without editing
 it. The script fails, and so does the job, when `go list` fails or when the list
 is empty: a tagged job that selects nothing would pass having tested nothing.
-`go vet` keeps running over every package, since it is cheap and type-checks each
-tagged file.
+`go vet` runs over every package, in the `vet` job, since it is cheap and
+type-checks each tagged file.
 
 The regular `acceptance` job enables all three outer test tags, so
 `TestTaggedProcessPrerequisites` executes alongside the other binary tests.
@@ -553,7 +555,7 @@ to the workflow.
   fall between them. The step fails on an empty part, since `go test` with no
   package would pass having tested nothing. The cost is three more runners per run.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
-  so `test` alone would never vet or run them. A separate job, not an extra
+  so `test` alone would never run them. A separate job, not an extra
   step, keeps each failure attributable to the build it came from and lets
   both builds run in parallel.
 - **Why the tagged job takes only some packages**: a test binary built from the
@@ -689,6 +691,20 @@ to the workflow.
   15 minutes, while a cache per job and platform would take 4 to 5 GB of the
   repository's 10 GB cache limit and costs 20 to 40 s to restore on Windows. So the jobs keep setup-go's one cache
   per operating system, which whichever job finishes first saves.
+- **One Linux job vets every platform**: `go vet` reads source and type-checks it,
+  and neither builds nor runs anything for the platform. The repository has no cgo
+  file (no `import "C"` in any Go file, no C source), so a vet with `GOOS` and `GOARCH`
+  set and `CGO_ENABLED=0` selects exactly the files that a vet run natively on that
+  platform selects, and one Linux runner vets all six platforms Sidera ships for.
+  That replaced eight vet runs, one in `test` and one in `test-tags` on each of four
+  platforms, six of them on macOS and Windows runners and 25 to 46 s each, and
+  added darwin/amd64 and linux/arm64, which no test job runs on and which were
+  never vetted. Each platform is vetted with and without the four tags, since the
+  tagged files are selected only with their tags. The loop does not stop at the
+  first failing platform, so one platform's failure does not hide another's. The
+  equivalence ends with the first cgo file: a vet with `CGO_ENABLED=0` skips it, so
+  that platform's vet has to go back to a native runner. The job sets `cache: false` for the reason given under
+  `linux-checks` below.
 - **`linux-checks` is one job, not three**: formatting, `sdk/go` without `go.work`
   and the cross-compile with the release archives used to be the jobs `format`,
   `sdk-standalone` and `build`. GitHub runs at most 20 jobs of the account at once,
@@ -698,7 +714,7 @@ to the workflow.
   240 to 320 s each while another run was in progress. The three take about 4
   minutes on one runner (gofmt 6 s, `sdk/go` 26 s, build and release 230 s), less
   than any of the test jobs, so one job costs the run no time and brings a push to
-  20 jobs (a dispatch to 29). Every step after the first check carries
+  20 jobs. Every step after the first check carries
   `if: ${{ !cancelled() }}`, so that a failure in one check does not skip the
   others and hide their verdicts: a formatting failure still shows whether the
   build passes. The timeout is 30 minutes: the old jobs' limits (10, 15 and 20)
@@ -818,7 +834,7 @@ From the repository root (zsh and bash alike; on Windows use Git Bash):
 
 ```sh
 gofmt -l .   # must print nothing
-go vet ./... ./sdk/go/...
+go vet ./... ./sdk/go/...   # CI vets all six platforms below
 go test -count=1 -timeout 30m ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m ./... ./sdk/go/...
 
@@ -827,7 +843,7 @@ go test -run '^$' -bench '^BenchmarkFilesystemWrites$' -benchtime=1x -count=1 -t
 go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
 go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
-# the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
+# the tagged jobs; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...
 # (these two run the packages the tags change, the way CI does)
 go test -count=1 -timeout 30m -tags crashtest,testclock $(scripts/tagged-test-packages.sh crashtest,testclock)
@@ -855,6 +871,8 @@ minisign -Vm "$dist/checksums.txt" -p "$key.pub"
 
 for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
   CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go build ./... ./sdk/go/... || echo "build failed: $p"
+  CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go vet ./... ./sdk/go/... || echo "vet failed: $p"
+  CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/... || echo "vet with tags failed: $p"
 done
 ```
 
