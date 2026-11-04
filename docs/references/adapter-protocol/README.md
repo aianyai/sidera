@@ -439,6 +439,16 @@ character is a Unicode code point, not a byte. The two constants are exported so
 that whoever stores or shows a name applies the bound the protocol states instead
 of copying the number.
 
+A display name also holds no character that a terminal acts on or that reorders
+text: no control character (U+0000 to U+001F, U+007F to U+009F), no line or
+paragraph separator (U+2028, U+2029) and no bidirectional formatting control
+(U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069). A name that has one
+is refused with `-32602`; it is never cleaned, because the node cannot know what
+the adapter meant. The rule is the `DisplayName` definition of the schema (a
+length and a pattern) and `adapterproto.ValidateDisplayName` in Go, which is the
+one rule for every place a display name is read, stored, forwarded or shown;
+`ValidateOptionalDisplayName` is the same rule for a name that may be absent.
+
 `MaxAckItems` exports the existing acknowledgement limit of 1024 entries. The
 adapter request and result validators, the observed-receive result, and other
 interfaces accepting these acknowledgement values use the same bound; exposing
@@ -512,6 +522,12 @@ what they took away:
   adapter say it would not conclude absence on a version it had not tested. A value
   that is no longer a known code is refused by validation like any other unknown one;
   an adapter that reads a record whose form it does not know answers `record_unreadable`.
+
+One rule was **tightened** in place, and this is a change that can refuse what was
+valid: a `display_name` with a control or bidirectional formatting character, which
+`endpoint.register` accepted before, is refused with `-32602`. It is done in place
+because no implementation outside this repository exists, and the adapters in it
+register plain names; no name that was ever registered by them is affected.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,

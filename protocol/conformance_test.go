@@ -434,15 +434,16 @@ func TestSchemaPatternsMatchGo(t *testing.T) {
 // newline at its end; the README tells other implementations to anchor fully.
 func TestPatternsRefuseATrailingNewline(t *testing.T) {
 	valid := map[string]string{
-		"AttemptID":  "6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f",
-		"LeaseRef":   "0123456789abcdef0123456789abcdef",
-		"Token":      "k3JpQ9vL2mXwR7tYbN5cZ8dHfG1sAeUo0iWxM4yTqBA",
-		"AdapterID":  "example",
-		"PresetName": "review.readonly",
-		"ConfigKey":  "project_dir",
-		"EnvName":    "SIDERA_TOKEN",
-		"ReasonWord": "too_many_recipients",
-		"SemVer":     "2.1.307-rc.1+build.5",
+		"AttemptID":   "6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f",
+		"LeaseRef":    "0123456789abcdef0123456789abcdef",
+		"Token":       "k3JpQ9vL2mXwR7tYbN5cZ8dHfG1sAeUo0iWxM4yTqBA",
+		"AdapterID":   "example",
+		"PresetName":  "review.readonly",
+		"DisplayName": "Owner console",
+		"ConfigKey":   "project_dir",
+		"EnvName":     "SIDERA_TOKEN",
+		"ReasonWord":  "too_many_recipients",
+		"SemVer":      "2.1.307-rc.1+build.5",
 	}
 	s := schemas(t)
 	for name, pattern := range adapterproto.Patterns() {

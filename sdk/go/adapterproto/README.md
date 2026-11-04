@@ -20,6 +20,7 @@ for what each message means and why the protocol is shaped this way.
 | `Decode(data, &msg)`, `Encode(msg)` | Strict decoding of any message type and validation before encoding |
 | `msg.Validate()` | The rules of one message, on every type |
 | `CancelRequestParams`, `MethodCancelRequest` | The params and name of `$/cancel_request`, which belong to the `peer` package together with the request id rule; listed here so the method table is complete |
+| `ValidateDisplayName(s)`, `ValidateOptionalDisplayName(s)`, `DisplayNamePattern`, `MaxDisplayName` | The one rule of a display name: 1 to 128 characters, none a control, line or paragraph separator or bidirectional formatting control; the optional form lets an empty name be |
 | `EnumTables()`, `Patterns()`, `ApplicationCodes()` | The vocabularies the schema is compared with |
 | `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
 | `CodeNodeBusy`, `BusyData`, `BusyReasons()` | The code of a request the node refused before any effect and that may be sent again later, its required data `{reason}` (any reason word is accepted) and the reasons this version of the node sends |

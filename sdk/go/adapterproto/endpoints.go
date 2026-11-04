@@ -28,7 +28,7 @@ type RegisterParams struct {
 func (p RegisterParams) Validate() error {
 	var c checker
 	c.field("key", strLen(p.Key, 1, MaxIdentLen))
-	c.field("display_name", strLen(p.DisplayName, 1, MaxDisplayName))
+	c.field("display_name", ValidateDisplayName(p.DisplayName))
 	if p.Description != "" {
 		c.field("description", strLen(p.Description, 1, MaxDescription))
 	}

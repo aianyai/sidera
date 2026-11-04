@@ -553,7 +553,7 @@
       "additionalProperties": false,
       "properties": {
         "key": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "display_name": { "$ref": "types.schema.json#/$defs/DisplayName" },
         "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
       }
     },

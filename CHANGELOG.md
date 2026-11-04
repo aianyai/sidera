@@ -17,6 +17,14 @@ protocol has a version of its own.
   `allow_attached`, which the command does with `--allow-attached`. Endpoints a node created,
   direct endpoints and endpoints that are closed already close as before. `sidera endpoint
   list` shows which endpoints are attached in its `ORIGIN` column.
+- **Adapter protocol and Go SDK: a display name holds no control or direction-changing
+  character.** `endpoint.register` refuses, with `-32602`, a `display_name` that has a control
+  character (U+0000 to U+001F, U+007F to U+009F), a line or paragraph separator (U+2028,
+  U+2029) or a bidirectional formatting control (U+061C, U+200E, U+200F, U+202A to U+202E,
+  U+2066 to U+2069). The protocol stays at version 1: no adapter that registered a plain
+  name is affected. The schema states the rule as the `DisplayName` definition, and the Go SDK
+  exports it as `adapterproto.ValidateDisplayName`, `ValidateOptionalDisplayName` and
+  `DisplayNamePattern`.
 
 ## [0.12.2] - 2026-11-04
 
