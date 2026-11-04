@@ -373,7 +373,9 @@ func kindOf(method string, adm *adapterreg.Admission) adapterreg.EndpointKind {
 	switch method {
 	case adapterproto.MethodEndpointRegister, adapterproto.MethodEndpointUnregister,
 		adapterproto.MethodEndpointSend, adapterproto.MethodEndpointRecv,
-		adapterproto.MethodEndpointAck, adapterproto.MethodEndpointMessageStatus:
+		adapterproto.MethodEndpointAck, adapterproto.MethodEndpointMessageStatus,
+		adapterproto.MethodEndpointDirectory, adapterproto.MethodEndpointPeers,
+		adapterproto.MethodEndpointDeclare:
 		return adapterreg.KindDirect
 	case adapterproto.MethodRecvObserved:
 		return adapterreg.KindSession
@@ -427,6 +429,30 @@ func (c *conn) dispatch(ctx context.Context, method string, raw json.RawMessage)
 			return nil, refusal(peer.CodeMethodNotFound)
 		}
 		return c.dispatchEndpoint(ctx, ec, method, raw)
+	case adapterproto.MethodEndpointDirectory:
+		dc := h.directory
+		if dc == nil {
+			return nil, refusal(peer.CodeMethodNotFound)
+		}
+		return serveRequest(c, method, raw, func(p *adapterproto.DirectoryParams) (adapterproto.Message, error) {
+			return dc.EndpointDirectory(ctx, c.inst, *p)
+		})
+	case adapterproto.MethodEndpointPeers:
+		dc := h.directory
+		if dc == nil {
+			return nil, refusal(peer.CodeMethodNotFound)
+		}
+		return serveRequest(c, method, raw, func(p *adapterproto.PeersParams) (adapterproto.Message, error) {
+			return dc.EndpointPeers(ctx, c.inst, *p)
+		})
+	case adapterproto.MethodEndpointDeclare:
+		dc := h.directory
+		if dc == nil {
+			return nil, refusal(peer.CodeMethodNotFound)
+		}
+		return serveRequest(c, method, raw, func(p *adapterproto.DeclareParams) (adapterproto.Message, error) {
+			return dc.EndpointDeclare(ctx, c.inst, *p)
+		})
 	case adapterproto.MethodRecvObserved:
 		oc := h.observed
 		if oc == nil {

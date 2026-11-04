@@ -144,8 +144,24 @@ func TestRequestsOfTheAdapterReachTheEngineAndItsErrorsReachTheAdapter(t *testin
 		codes["recv"] = callCode(t, a, adapterproto.MethodEndpointRecv, adapterproto.RecvParams{Endpoint: "ep-1"}, &res)
 		codes["ack"] = callCode(t, a, adapterproto.MethodEndpointAck, adapterproto.AckParams{Endpoint: "ep-1", Lease: "0123456789abcdef0123456789abcdef", Items: []adapterproto.PartRef{{MessageID: "m-2", Part: 1}}}, &res)
 		codes["status"] = callCode(t, a, adapterproto.MethodEndpointMessageStatus, adapterproto.MessageStatusParams{Endpoint: "ep-1", MessageID: "m-1"}, &res)
+		codes["directory"] = callCode(t, a, adapterproto.MethodEndpointDirectory, adapterproto.DirectoryParams{Endpoint: "ep-1"}, &res)
+		codes["peers"] = callCode(t, a, adapterproto.MethodEndpointPeers, adapterproto.PeersParams{Endpoint: "ep-1"}, &res)
+		codes["declare"] = callCode(t, a, adapterproto.MethodEndpointDeclare, adapterproto.DeclareParams{Endpoint: "ep-1", HiddenFromDirectory: ptr(true)}, &res)
 		codes["observed"] = callCode(t, a, adapterproto.MethodRecvObserved, adapterproto.RecvObservedParams{Endpoint: "s-1", Lease: "0123456789abcdef0123456789abcdef", Frontend: adapterproto.FrontendCLI, Observed: "text"}, &res)
 		return codes
+	}
+	// directAccessDeclared is what the daemon declared to the adapter in initialize.
+	directAccessDeclared := func(t *testing.T, a *scripted) bool {
+		t.Helper()
+		sent := a.paramsOf(adapterproto.MethodInitialize)
+		if len(sent) != 1 {
+			t.Fatalf("initialize was sent %d times", len(sent))
+		}
+		var p adapterproto.InitializeParams
+		if err := json.Unmarshal(sent[0], &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Capabilities.DirectEndpointAccess
 	}
 	t.Run("endpoint calls and observed calls without an engine that offers them are unknown methods", func(t *testing.T) {
 		r := newRig(t, rigOptions{})
@@ -161,12 +177,15 @@ func TestRequestsOfTheAdapterReachTheEngineAndItsErrorsReachTheAdapter(t *testin
 			t.Fatal(err)
 		}
 		r.ready("chat", 1)
+		if directAccessDeclared(t, a) {
+			t.Error("the daemon declared direct_endpoint_access with an engine that does not answer those methods")
+		}
 		for name, code := range endpointCalls(a) {
 			if code != peer.CodeMethodNotFound {
 				t.Errorf("%s: code %d, want -32601", name, code)
 			}
 		}
-		for _, kind := range []string{"send", "recv", "ack", "status", "observed"} {
+		for _, kind := range []string{"send", "recv", "ack", "status", "directory", "peers", "declare", "observed"} {
 			if got := r.eng.of(kind); len(got) != 0 {
 				t.Errorf("%s reached an engine that does not offer it", kind)
 			}
@@ -182,10 +201,14 @@ func TestRequestsOfTheAdapterReachTheEngineAndItsErrorsReachTheAdapter(t *testin
 				t.Errorf("%s: code %d, want a result", name, code)
 			}
 		}
-		for _, kind := range []string{"send", "recv", "ack", "status", "observed"} {
+		for _, kind := range []string{"send", "recv", "ack", "status", "directory", "peers", "declare", "observed"} {
 			if got := r.eng.of(kind); len(got) != 1 || got[0].Instance != "chat" {
 				t.Errorf("%s: the engine saw %+v", kind, got)
 			}
+		}
+		var declared adapterproto.DeclareResult
+		if err := a.call(adapterproto.MethodEndpointDeclare, adapterproto.DeclareParams{Endpoint: "ep-1", HiddenFromDirectory: ptr(true)}, &declared); err != nil || !declared.Declaration.HiddenFromDirectory {
+			t.Errorf("endpoint.declare = %+v, %v: the result of the engine did not reach the adapter", declared, err)
 		}
 		var sent adapterproto.SendResult
 		if err := a.call(adapterproto.MethodEndpointSend, adapterproto.SendParams{Endpoint: "ep-1", To: []adapterproto.Address{"bob/chat"}, ContentType: "text/plain", Body: "hi"}, &sent); err != nil || sent.MessageID != "m-1" {

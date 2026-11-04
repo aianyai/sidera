@@ -339,8 +339,11 @@ func TestAConnectionIsTakenOnInTheOrderInitializeAdmitStartProbe(t *testing.T) {
 		}
 		var raw map[string]json.RawMessage
 		_ = json.Unmarshal(a.paramsOf(adapterproto.MethodInitialize)[0], &raw)
-		if string(raw["capabilities"]) != "{}" {
-			t.Errorf("the daemon's capabilities = %s, want {}", raw["capabilities"])
+		// The engine of the rig answers the directory requests, so the daemon says so;
+		// the test of the requests of the adapter shows the capability absent for an engine
+		// that does not.
+		if string(raw["capabilities"]) != `{"direct_endpoint_access":true}` {
+			t.Errorf("the daemon's capabilities = %s, want direct_endpoint_access", raw["capabilities"])
 		}
 		var sp adapterproto.StartParams
 		if err := adapterproto.Decode(a.paramsOf(adapterproto.MethodAdapterStart)[0], &sp); err != nil {

@@ -96,7 +96,7 @@ func leakGuard(t *testing.T) {
 
 // event is one call the host made on the engine.
 type event struct {
-	Kind     string // admitted, started, probeTokens, probed, gone, notified, register, unregister, checkpoint, send, recv, ack, status, observed
+	Kind     string // admitted, started, probeTokens, probed, gone, notified, register, unregister, checkpoint, send, recv, ack, status, directory, peers, declare, observed
 	Instance string
 	Cause    adapterhost.GoneCause
 	Method   string               // of a notification
@@ -312,6 +312,21 @@ func (d *engineDouble) EndpointAck(_ context.Context, instance string, p adapter
 func (d *engineDouble) EndpointMessageStatus(_ context.Context, instance string, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	d.record(event{Kind: "status", Instance: instance, Params: p})
 	return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: "bob/chat", State: adapterproto.DeliveryDelivered}}}, nil
+}
+
+func (d *engineDouble) EndpointDirectory(_ context.Context, instance string, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	d.record(event{Kind: "directory", Instance: instance, Params: p})
+	return adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: []adapterproto.DirectoryEntry{}}, nil
+}
+
+func (d *engineDouble) EndpointPeers(_ context.Context, instance string, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	d.record(event{Kind: "peers", Instance: instance, Params: p})
+	return adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{}}, nil
+}
+
+func (d *engineDouble) EndpointDeclare(_ context.Context, instance string, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	d.record(event{Kind: "declare", Instance: instance, Params: p})
+	return adapterproto.DeclareResult{Declaration: adapterproto.Declaration{HiddenFromDirectory: true, AcceptFrom: []adapterproto.Address{}}}, nil
 }
 
 func (d *engineDouble) RecvObserved(_ context.Context, instance string, p adapterproto.RecvObservedParams) (adapterproto.RecvObservedResult, error) {
@@ -1053,3 +1068,5 @@ func testBinary() string {
 func zeroCounts(c adapterhost.ConnCounts) bool {
 	return !c.Connected && c.Handled == 0 && c.Buffered == 0 && c.Requests == 0 && len(c.Calls) == 0 && !c.Working
 }
+
+func ptr[T any](v T) *T { return &v }

@@ -32,7 +32,7 @@ type Env struct {
 	// Logs opens the log of each instance (adapter-<instance>.log).
 	Logs LogOpener
 	// Engine is what the host asks of the engine. If the value also implements
-	// EndpointCalls or ObservedCalls, the host answers those requests of the
-	// adapters through it.
+	// EndpointCalls, ObservedCalls or DirectoryCalls, the host answers those
+	// requests of the adapters through it.
 	Engine Engine
 }

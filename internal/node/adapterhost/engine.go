@@ -70,6 +70,20 @@ type EndpointCalls interface {
 	EndpointMessageStatus(ctx context.Context, instance string, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error)
 }
 
+// DirectoryCalls is the part of the adapter protocol that a direct endpoint
+// reads the directory and the nodes with, and sets its declaration with. An
+// engine that offers it answers endpoint.directory, endpoint.peers and
+// endpoint.declare through it, and the host tells every adapter in initialize
+// that the daemon serves them (direct_endpoint_access); for an engine that does
+// not, the capability is not declared and the methods are answered as unknown.
+// It is a part of its own because it serves the capability: the host must not
+// declare what the engine behind it cannot answer.
+type DirectoryCalls interface {
+	EndpointDirectory(ctx context.Context, instance string, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error)
+	EndpointPeers(ctx context.Context, instance string, p adapterproto.PeersParams) (adapterproto.PeersResult, error)
+	EndpointDeclare(ctx context.Context, instance string, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error)
+}
+
 // ObservedCalls is the part of the adapter protocol that acknowledges on the
 // agent's behalf. An engine that offers it answers recv.observed through it;
 // for one that does not, the method is answered as an unknown method.

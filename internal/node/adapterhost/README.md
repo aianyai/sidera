@@ -27,7 +27,7 @@ and its own log goes through the handle the daemon gives it.
 | `LockPath(home, instance)` | The file an instance's adapter locks: the one definition. |
 | `StateDir(home, instance)`, `StateDirIn(instance)` | The directory an instance's adapter keeps its state in, `adapter-state/<instance>`: the one definition, as an operating-system path and as a path inside the data directory. The host makes it owner-only before every launch, and refuses one that someone else can reach; the removal of the instance deletes it. |
 | `ExecLauncher` | The launcher that runs an adapter as a child process. |
-| `Engine`, `EndpointCalls`, `ObservedCalls` | What the host asks of the engine: the life of a connection, notifications, and the requests an adapter makes. The last two are optional parts the engine takes on as it learns to answer them. |
+| `Engine`, `EndpointCalls`, `DirectoryCalls`, `ObservedCalls` | What the host asks of the engine: the life of a connection, notifications, and the requests an adapter makes. The last three are optional parts the engine takes on as it learns to answer them; `DirectoryCalls` is also what the host declares to every adapter as `direct_endpoint_access`. |
 | `Notification`, `GoneCause` | A notification of the adapter as the engine receives it, and why an adapter is reported as gone. |
 | `Launcher`, `Process`, `Instance` | How an adapter instance is started and what the host holds of it. |
 | `Params`, `DefaultParams`, `OfflineAfterPingFailures` | The tunables, and the one decided rule: two pings in a row unanswered make an adapter offline. |
@@ -88,9 +88,9 @@ and its own log goes through the handle the daemon gives it.
   answered as it is, any other is `-32603`, whose text the peer logs and never
   sends. The host does not refuse requests for being too many: the handler waits
   on the engine and the peer's own queue refuses with `-32001`, which therefore
-  still means that the handler did not run. `EndpointCalls` and `ObservedCalls` are
+  still means that the handler did not run. `EndpointCalls`, `DirectoryCalls` and `ObservedCalls` are
   used when the engine given to `Start` implements them, and are `-32601`
-  otherwise. The production `apiwire.AdapterEngine` supplies both optional
+  otherwise. The production `apiwire.AdapterEngine` supplies all three optional
   interfaces and maps their errors before they reach this layer; endpoint
   ownership stays in the engine.
 - **Notifications** are decoded and validated; an invalid one is logged and

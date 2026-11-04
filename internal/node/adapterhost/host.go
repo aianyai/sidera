@@ -56,8 +56,9 @@ type Host struct {
 	mu        sync.Mutex
 	phase     phase
 	env       Env
-	endpoints EndpointCalls // nil: the engine does not answer endpoint requests
-	observed  ObservedCalls // nil: the engine does not answer recv.observed
+	endpoints EndpointCalls  // nil: the engine does not answer endpoint requests
+	observed  ObservedCalls  // nil: the engine does not answer recv.observed
+	directory DirectoryCalls // nil: the engine does not answer endpoint.directory, peers and declare
 	ctx       context.Context
 	cancel    context.CancelFunc
 	sups      map[string]*supervisor // by instance; the newest supervisor of each
@@ -145,6 +146,7 @@ func (h *Host) Start(ctx context.Context, env Env) error {
 	h.env = env
 	h.endpoints, _ = env.Engine.(EndpointCalls)
 	h.observed, _ = env.Engine.(ObservedCalls)
+	h.directory, _ = env.Engine.(DirectoryCalls)
 	h.ctx, h.cancel = context.WithCancel(context.WithoutCancel(ctx))
 	var ids []string
 	for id, in := range env.Source.Instances().Items {

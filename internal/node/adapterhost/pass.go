@@ -165,7 +165,7 @@ func (s *supervisor) initialize(c *conn, inst Instance) (adapterproto.Initialize
 		Protocol:     adapterproto.SupportedRange(),
 		Daemon:       adapterproto.DaemonInfo{Version: s.h.version},
 		Instance:     adapterproto.InstanceInfo{ID: s.id, LockPath: inst.LockPath, StateDir: inst.StateDir},
-		Capabilities: adapterproto.DaemonCapabilities{},
+		Capabilities: adapterproto.DaemonCapabilities{DirectEndpointAccess: s.h.directory != nil},
 	}
 	var init adapterproto.InitializeResult
 	if err := s.rpc(c, adapterproto.MethodInitialize, sent, &init, s.h.params.HandshakeTimeout); err != nil {

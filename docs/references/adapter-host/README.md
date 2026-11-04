@@ -41,8 +41,9 @@ host's clock (by default `adapterproto.HandshakeLimit`, the time the protocol gi
 adapter to answer, which the kit's deadline for `Start` and `Probe` is derived from):
 
 1. `initialize`: the protocol range the daemon supports, its version, the instance
-   id and the lock path, and no capabilities of its own. The answer is decoded
-   strictly, checked against the installed manifest (`adapterreg.CheckHandshake`) and
+   id and the lock path, and the capabilities of the daemon: `direct_endpoint_access`
+   when the engine given to `Start` implements `DirectoryCalls`, and none otherwise.
+   The answer is decoded strictly, checked against the installed manifest (`adapterreg.CheckHandshake`) and
    admitted (`adapterreg.Admit`). An answer `1011 instance_locked` ends the pass and
    is logged as another process holding the lock.
 2. `Engine.AdapterAdmitted`, which returns the parameters of `adapter.start`. Only
@@ -154,9 +155,13 @@ endpoint or its kind: the engine does and refuses with its own errors. Parameter
 are decoded strictly: `-32602`, and for a `checkpoint.put` whose `state` is beyond
 its limit `1006 checkpoint_too_large`. The engine answers `endpoint.register`,
 `endpoint.unregister` and `checkpoint.put` itself; `endpoint.send`, `endpoint.recv`,
-`endpoint.ack` and `endpoint.message_status` through `EndpointCalls`, and
-`recv.observed` through `ObservedCalls`, when the engine given to `Start`
-implements them, and as `-32601` when it does not.
+`endpoint.ack` and `endpoint.message_status` through `EndpointCalls`;
+`endpoint.directory`, `endpoint.peers` and `endpoint.declare` through
+`DirectoryCalls`; and `recv.observed` through `ObservedCalls`, when the engine given
+to `Start` implements them, and as `-32601` when it does not. The three of
+`DirectoryCalls` are asked as direct, like the other `endpoint.*` methods; the host
+declares `direct_endpoint_access` in `initialize` exactly when it will answer them, so
+an adapter learns it before it calls and not from a `-32601`.
 
 ### What an adapter is told when the engine refuses
 
