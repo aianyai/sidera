@@ -75,6 +75,11 @@ type Card struct {
 	Delivered bool `json:"delivered,omitempty"`
 
 	Phase Phase `json:"phase"`
+	// ReplyID is the Sidera id of the reply being written to the card as its
+	// completion, recorded before the completion is made. A card finished by a crash
+	// right after Hermes took the completion still names the reply, so the node's
+	// redelivery of that reply is recognised and not taken for a new message.
+	ReplyID string `json:"reply_id,omitempty"`
 	// BlockedFor is the category of the block in force, in PhaseBlocked.
 	BlockedFor Category `json:"blocked_for,omitempty"`
 	// Blocks counts the blocks so far per category.

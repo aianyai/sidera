@@ -55,7 +55,8 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   built from it); a block or completion is made first and the record follows, with the
   card read again when Hermes refuses a repeat (`fail`, `reconcileBlock`), and a reply
   replayed after the completion is recognised by the message id in the completed run's
-  metadata (`completedBy`).
+  metadata (`completedBy`), and by the id recorded on the card before the completion
+  (`state.Card.ReplyID`) when recovery has finished the card in the record first.
 - **A card is claimed after everything that only reads or can be repeated** (`take`),
   and after a record of the intent to claim it (`intendClaim`): a record in phase
   `claiming` is read at the start and on every tick (`reconcileClaiming`), so a crash

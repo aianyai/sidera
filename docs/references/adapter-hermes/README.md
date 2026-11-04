@@ -400,14 +400,21 @@ message that matches no card goes to the inbound half. For the card:
 1. `show` the card. Finished or archived by Hermes: the message is a new message of the
    conversation and goes to the inbound half, unless a run of the card carries this
    message's id in its metadata, in which case this very reply completed it and only
-   the acknowledgement was lost: the verdict is `Written`.
+   the acknowledgement was lost: the verdict is `Written`. The same message also
+   matches a card that the record shows finished when it names this message as its
+   reply (step 3): the card was completed and the adapter ended before it recorded the
+   message as processed, and the next start's recovery found the card done and
+   finished it in the record before the message came back. Without that match the
+   redelivered reply would answer no waiting card and become a card of the inbound
+   half, waking the conversation a second time with the same answer.
 2. The reply is written to a file under `<state dir>/attach/` and attached, always,
    under a name derived from the Sidera message id (`reply-<16 hex digits of the
    id's digest>.txt`), after `attachments` showed no file of that name (Hermes stores
    a second file of one name as `name (1).ext`, so a replay that attached again would
    leave the reply twice). The name is a digest and not the id because the id is
    chosen by the sender and may be any visible ASCII, a path among it.
-3. `complete` with a summary, a result and metadata holding the message id. The
+3. The message id is recorded on the card (`state.Card.ReplyID`), and then `complete`
+   with a summary, a result and metadata holding the message id. The
    summary ("Sidera reply from <alias>; the full text is in the attachment <name>")
    and the result ("The reply of <alias> is attached as <name>.") are the adapter's
    words and hold no remote text and no path. Why: on a completed card Hermes looks

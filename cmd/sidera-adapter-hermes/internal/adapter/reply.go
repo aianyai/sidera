@@ -65,11 +65,11 @@ func (f *laneFlows) reply(ctx context.Context, m Message) (v Verdict, inbound bo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	d := f.env.State.View()
-	match := lane.MatchReply(d.CardList(), m.To.Key, string(m.From), false)
+	match := lane.MatchReply(d.CardList(), m.To.Key, string(m.From), string(m.ID), false)
 	if match.Kind == lane.MatchReread {
 		f.refreshCreations(ctx, m.To.Key)
 		d = f.env.State.View()
-		match = lane.MatchReply(d.CardList(), m.To.Key, string(m.From), true)
+		match = lane.MatchReply(d.CardList(), m.To.Key, string(m.From), string(m.ID), true)
 	}
 	if match.Kind != lane.MatchCard {
 		return 0, true, nil
@@ -117,6 +117,13 @@ func (f *laneFlows) write(ctx context.Context, m Message, c state.Card) (Verdict
 		Summary:  fmt.Sprintf("Sidera reply from %s; the full text is in the attachment %s", who, name),
 		Result:   fmt.Sprintf("The reply of %s is attached as %s.", who, name),
 		Metadata: map[string]any{metaMessageID: string(m.ID), metaFrom: string(m.From), metaAttempt: c.Attempt},
+	}
+	// The reply is named on the record before the completion, so that a crash that
+	// follows the completion cannot make the node's redelivery of the reply look like
+	// a new message: the next start finds the card finished on the board, and the
+	// message is then recognised by this id (lane.MatchReply).
+	if err := f.update(c.ID, func(_ *state.Data, r *state.Card) { r.ReplyID = string(m.ID) }); err != nil {
+		return Retry, false, fmt.Errorf("recording the reply written to a card: %w", err)
 	}
 	if err := f.env.Board.Complete(ctx, c.ID, done); err != nil {
 		return f.failed(ctx, c.ID, err)

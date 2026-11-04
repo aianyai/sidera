@@ -192,6 +192,45 @@ func TestReplyForAFinishedCard(t *testing.T) {
 	}
 }
 
+// A crash after Hermes took the completion of a reply and before the adapter
+// recorded the message as processed: the next start finds the card done and ends it
+// in the record, and the node hands the reply out again. It must not become a card
+// of its own that wakes the conversation a second time. The record names the reply
+// before the completion, so the message is recognised whichever of recovery and
+// receiving comes first.
+func TestRedeliveredReplyOfAFinishedCardIsNotANewMessage(t *testing.T) {
+	d := &daemon{directAccess: true}
+	var release atomic.Bool
+	d.serve("orphan", message("m1", "the answer"), func() bool { return release.Load() }, false)
+	stateDir, hermesDir := t.TempDir(), t.TempDir()
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(nil), stateDir: stateDir, hermesDir: hermesDir})
+	addCard(t, h, "t_1", messageCard)
+	until(t, "the card to be sent", func() bool { return cardState(h, "t_1").Phase == state.PhaseSent })
+
+	// The crash: the reply was named on the record, Hermes took the completion.
+	if err := h.app.env.State.Update(func(d *state.Data) error { d.Cards["t_1"].ReplyID = "m1"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) {
+		b.Cards["t_1"].Status = "done"
+		b.Cards["t_1"].Runs = append(b.Cards["t_1"].Runs, kanbantest.Run{Outcome: "completed", Summary: "x", Metadata: map[string]any{"sidera_message_id": "m1"}})
+	})
+	h.stop()
+	d.mu.Lock()
+	ref := d.refs["orphan"]
+	d.mu.Unlock()
+
+	in := &recordingInbound{}
+	h2 := start(t, options{d: d, lane: true, flows: in.flows(), stateDir: stateDir, hermesDir: hermesDir,
+		listed: []adapterproto.DirectAttach{{Endpoint: ref, Key: "orphan"}}})
+	until(t, "recovery to end the card in the record", func() bool { return cardState(h2, "t_1").Phase == state.PhaseFinished })
+	release.Store(true)
+	h2.eventually("the acknowledgement", func() bool { return slices.Contains(d.acked(), "m1") })
+	if n := len(in.messages()); n != 0 {
+		t.Errorf("the inbound half got %d messages, want none: the reply was written already", n)
+	}
+}
+
 // An attempt resent within the window is the same message to the node, so no second
 // remote session is created; one that began longer ago than the window is not sent
 // again and its card is blocked as transient, for Hermes to decide.

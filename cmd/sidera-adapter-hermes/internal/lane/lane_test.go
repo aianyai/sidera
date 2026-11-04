@@ -116,7 +116,34 @@ func TestMatchReply(t *testing.T) {
 		{"oldest of two on one peer answers", []state.Card{card("a", "e", "p", state.PhaseSent), card("b", "e", "p", state.PhaseSent)}, "e", "p", false, Match{MatchCard, "a"}},
 	}
 	for _, tc := range cases {
-		if got := MatchReply(tc.cards, tc.endpoint, tc.from, tc.reread); got != tc.want {
+		if got := MatchReply(tc.cards, tc.endpoint, tc.from, "m-none", tc.reread); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A reply handed out again after its card was completed and finished in the record
+// finds the card, whoever else waits for the sender; a card that merely names a
+// reply it has not finished with, or another message's, does not.
+func TestMatchReplyFinishedByThisMessage(t *testing.T) {
+	finished := func(id, endpoint, replyID string, phase state.Phase) state.Card {
+		c := card(id, endpoint, "p", phase)
+		c.ReplyID = replyID
+		return c
+	}
+	waiting := card("w", "e", "p", state.PhaseSent)
+	cases := []struct {
+		name  string
+		cards []state.Card
+		want  Match
+	}{
+		{"finished by this message", []state.Card{waiting, finished("f", "e", "m1", state.PhaseFinished)}, Match{MatchCard, "f"}},
+		{"finished by another message", []state.Card{finished("f", "e", "m0", state.PhaseFinished), waiting}, Match{MatchCard, "w"}},
+		{"naming this message but not finished: the waiting rule decides", []state.Card{finished("f", "e", "m1", state.PhaseSent)}, Match{MatchCard, "f"}},
+		{"finished on another endpoint", []state.Card{finished("f", "e2", "m1", state.PhaseFinished)}, Match{Kind: MatchNone}},
+	}
+	for _, tc := range cases {
+		if got := MatchReply(tc.cards, "e", "p", "m1", false); got != tc.want {
 			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
 		}
 	}

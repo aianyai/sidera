@@ -8,7 +8,9 @@ type MatchKind int
 const (
 	// MatchNone: no card waits for this sender; the message is a new one.
 	MatchNone MatchKind = iota
-	// MatchCard: the message answers the card in Match.CardID.
+	// MatchCard: the message answers the card in Match.CardID, which is waiting for
+	// it, or is finished by an earlier hand-out of this very message (Card.ReplyID)
+	// and so is for the caller to read back from the board.
 	MatchCard
 	// MatchReread: a card waits on a session whose address is not known yet, and
 	// the message may come from it. The caller reads the control replies of the
@@ -41,7 +43,19 @@ type Match struct {
 // unblocked it, or claimed again by the adapter; Hermes completes it from any of
 // these without a release or a new claim (see the reference), so the caller
 // completes it with the reply as it would a waiting card.
-func MatchReply(cards []state.Card, endpoint, from string, reread bool) Match {
+//
+// A message whose id a finished card names as the reply it was completed with
+// (state.Card.ReplyID) matches that card first. It was handed out before; the
+// adapter completed the card and ended before it could record the message as
+// processed, and the card is finished in the record because the next start found
+// Hermes had finished it. The caller reads the card to learn whether this reply
+// finished it.
+func MatchReply(cards []state.Card, endpoint, from, messageID string, reread bool) Match {
+	for _, c := range cards {
+		if c.Endpoint == endpoint && c.Phase == state.PhaseFinished && c.ReplyID != "" && c.ReplyID == messageID {
+			return Match{Kind: MatchCard, CardID: c.ID}
+		}
+	}
 	unknownPeer := false
 	for _, c := range cards {
 		if c.Endpoint != endpoint || !c.AwaitsReply() {

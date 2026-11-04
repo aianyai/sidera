@@ -179,11 +179,15 @@ func (f *laneFlows) update(id string, fn func(d *state.Data, c *state.Card)) err
 }
 
 // finishLocal records that the card is over for the adapter, whether the adapter
-// completed it or found Hermes had, and then lets the card queued behind it go.
+// completed it or found Hermes had, and then lets the card queued behind it go. A
+// card that is finished already is left as it is.
 // The session it used counts as used now, which is what its close window runs from.
 func (f *laneFlows) finishLocal(ctx context.Context, id string) {
 	var endpoint, peerAddr string
 	if err := f.update(id, func(d *state.Data, c *state.Card) {
+		if c.Phase == state.PhaseFinished {
+			return
+		}
 		now := f.env.Now()
 		endpoint, peerAddr = c.Endpoint, c.Peer
 		c.Finish(now)
