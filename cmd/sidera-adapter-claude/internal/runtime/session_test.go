@@ -86,6 +86,66 @@ func TestDeliverAPromptToAnIdleSession(t *testing.T) {
 	}
 }
 
+// A turn process of the attempt writes its prompt and ends between a delivery's
+// reading of the session file and its look at the process table. The delivery must
+// not take the missing process and the missing prompt for a prompt that never
+// started: it looks at the processes first, so the process it saw running is a
+// writer and the delivery answers that the attempt is in flight.
+func TestAPromptWrittenWhileADeliveryReadsTheFileIsNotStartedAgain(t *testing.T) {
+	w := newWorld(t)
+	app, _ := newApp(t, w)
+	session := openSession(t, w, app)
+	w.onLaunch = nil
+	p := adapterproto.PromptDeliverParams{Endpoint: "session-1", Attempt: attempt2, Text: "more"}
+	if res, err := app.DeliverPrompt(ctxT(t), p); err != nil || res.Stage != adapterproto.PromptAccepted {
+		t.Fatalf("deliver: %+v %v", res, err)
+	}
+	// The monitor is stopped, so that only the delivery looks at the file.
+	s := app.session("session-1")
+	s.mu.Lock()
+	s.cancel()
+	s.mu.Unlock()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		s.mu.Lock()
+		monitoring := s.monitoring
+		s.mu.Unlock()
+		if !monitoring {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the monitor did not stop")
+		}
+	}
+
+	turnProcess := w.lastProc()
+	armed := true
+	w.mu.Lock()
+	listsBefore := w.lists
+	w.afterOpen = func(w *world, path string) {
+		// The file is read after the process table was listed; the open that only
+		// looks whether the file exists comes before the listing.
+		w.mu.Lock()
+		listed := w.lists > listsBefore
+		w.mu.Unlock()
+		if !armed || !listed || path != filepath.Join(recordDir, session+".jsonl") {
+			return
+		}
+		armed = false
+		// The turn process writes the prompt and ends just after the file was read.
+		w.appendRecord(path, userLine(session, attempt2))
+		w.exit(turnProcess, resultOK)
+	}
+	w.mu.Unlock()
+
+	res, err := app.DeliverPrompt(ctxT(t), p)
+	if armed {
+		t.Fatal("the delivery did not read the session file")
+	}
+	if err != nil || res.Stage != adapterproto.PromptAccepted || w.launchCount() != 2 {
+		t.Fatalf("repeat: %+v %v, %d launches", res, err, w.launchCount())
+	}
+}
+
 // A process table that cannot say whether the recorded turn process runs says
 // nothing about whether it does: every path that would start a process of a
 // session answers with an error (or the session unreachable) and starts nothing,

@@ -206,7 +206,9 @@ the answer carries `first_turn_ended`. An attempt that failed is answered `faile
 
 `prompt.deliver` is `1001` for an endpoint the adapter does not hold and `refused` with
 `session_lost` when the session file is gone. A prompt whose uuid is already in the record is
-answered `persisted` without starting anything; the same attempt with another text is `1005`. The
+answered `persisted` without starting anything, the same attempt with another text is `1005`, and
+the process table is read before the session file: a process seen as gone has written everything it
+will, so "no process and no prompt in the record" can only mean that the prompt never started. The
 session has one writer: while a turn process of it runs (the recorded one, or any process the
 process table shows with the session's uuid, each counted once) the prompt is `refused` as `busy`,
 and two such processes are `control_unknown`; a process that was started and never recorded is

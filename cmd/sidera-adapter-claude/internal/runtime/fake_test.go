@@ -68,8 +68,10 @@ type world struct {
 	inbox     []inboxWrite
 	inboxErr  error
 	lookupErr error
-	notes     []string // the notices about attached sessions, in order
-	avail     []adapterproto.AvailabilityParams
+	// lists counts the listings of the process table.
+	lists int
+	notes []string // the notices about attached sessions, in order
+	avail []adapterproto.AvailabilityParams
 }
 
 // inboxWrite is one write to an inbox socket.
@@ -277,6 +279,7 @@ func (w *world) Running(id proc.Identity) (bool, error) {
 func (w *world) List() ([]proc.Entry, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.lists++
 	var s []proc.Entry
 	for _, p := range w.procs {
 		if p.alive {
