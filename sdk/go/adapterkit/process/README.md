@@ -2,8 +2,8 @@
 
 What an adapter needs from the operating system to run a native agent runtime as a
 process of its own: start it so that it outlives the adapter, name it so that it is
-found again after a restart, list the processes of the adapter's user, and
-interrupt it the way Ctrl-C would. It does I/O, and it is the one package of the
+found again after a restart, list the processes of the adapter's user,
+interrupt it the way Ctrl-C would, and end it. It does I/O, and it is the one package of the
 SDK that reaches into the operating system, through `golang.org/x/sys`; adapters
 that import only `adapterkit` do not pull it in. The identities and the way a
 process is detached on each platform are specified in
@@ -23,6 +23,7 @@ file and in `Detachment.Caveat` then means the process that calls `Start`.
 | `HostDetachment()` | What `Start` achieves on this host, before anything has started; for a probe. |
 | `Lookup(pid)`, `Running(Identity)`, `List()` | The process table: one process, "does this identity still name a running process", and the user's processes with their arguments. |
 | `Interrupt(ctx, Identity)` | Ctrl-C: `SIGINT` on Unix; on Windows a helper process sends `CTRL_C_EVENT` to the console it attaches to, that of any process that has one (a process started interruptible has one of its own). |
+| `Terminate(ctx, Identity, grace)` | End the process, and on Unix the group it leads: `SIGTERM`, then `SIGKILL` after `grace`; on Windows `TerminateProcess` on the handle that checked the start. Returns once it is gone. |
 | `HandleHelperInvocation()` | The first statement of `main` of an adapter that calls `Interrupt`; `Interrupt` fails on every platform until it has been called. |
 | `Identity`, `Process` | PID and an opaque start key; the key is what `adapterproto.ProcessIdentity.StartKey` carries. |
 
@@ -55,6 +56,13 @@ file and in `Detachment.Caveat` then means the process that calls `Start`.
   `environ.Compose` of the adapter's own has them.
 - **Stdio are files.** A pipe would tie the process to the adapter. The caller
   closes its copies after `Start` returns.
+- **Ending is by identity too, and what cannot be asked about is not touched.**
+  `Terminate` signals only when `Running` shows the identity, returns a table error
+  as it is and `ErrNotRunning` for a process that is gone. Where `Running` errors
+  mean "do not start a second one", here they mean "do not end a process that may
+  be someone else's". It ends the whole group on Unix, so what the process started
+  in its group goes with it; what left the group does not. A `ctx` that is done
+  stops the polite wait and does not force.
 - **An adapter that calls `Interrupt` calls `HandleHelperInvocation` first in
   `main`.** On Windows the helper is the adapter's own executable started with
   `--sidera-adapterkit-helper`; without the call the helper would serve the adapter
@@ -77,6 +85,7 @@ file and in `Detachment.Caveat` then means the process that calls `Start`.
 | `identity.go`, `identity_{darwin,linux,windows,other}.go` | The types and errors, and the process table of each platform |
 | `start.go`, `start_unix.go`, `start_linux.go`, `start_darwin.go`, `start_windows.go`, `start_other.go` | `Spec`, `Start` and its shared flow; the session on macOS and Linux; the systemd scope probe and rule on Linux; creation flags, breakaway fallback and the job query on Windows; the `ErrUnsupported` stubs of every other platform |
 | `interrupt.go`, `interrupt_unix.go`, `interrupt_windows.go` | `Interrupt`: the identity check, `SIGINT`, the helper's sender |
+| `terminate.go`, `terminate_unix.go`, `terminate_windows.go`, `terminate_other.go` | `Terminate`: the shared contract, the signals and the wait on Unix, `TerminateProcess` on the opened handle on Windows, the `ErrUnsupported` stub |
 | `helper.go`, `helper_windows.go`, `helper_other.go` | `HandleHelperInvocation` and the Windows helper that attaches to the console |
 | `kernel32_windows.go` | The console and job calls `x/sys/windows` has no wrapper for |
 

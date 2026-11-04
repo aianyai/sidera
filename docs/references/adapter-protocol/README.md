@@ -1262,7 +1262,7 @@ reading platform-specific process tables, which stay in the adapter.
 
 Package `sdk/go/adapterkit/process` is what an adapter uses to run a native agent
 runtime as a process of its own on macOS, Linux and Windows. On any other
-platform the package compiles and `Start`, `Interrupt` and the process table fail
+platform the package compiles and `Start`, `Interrupt`, `Terminate` and the process table fail
 with `ErrUnsupported`, `Start` before anything is started; a process that cannot be
 named is never started.
 
@@ -1395,6 +1395,27 @@ the identity) and fails at once for an older one, and an `Interrupt` right after
 `Start` is delivered once the console is there. For a process that never had a
 console the failure therefore comes up to 5 s after its start.
 
+**Terminate.** `Terminate(ctx, identity, grace)` ends a process by its identity and
+signals nothing unless the process table shows that the identity names a running
+process: an error from the table is returned as it is and the process is left alone,
+because a process that cannot be identified is not one the adapter may end. It
+returns `ErrNotRunning` when the identity names no running process. On Unix a
+process that leads its own process group (every process `Start` makes does) is sent
+`SIGTERM` together with its group, then `SIGKILL` if it still runs after `grace`
+(the identity is read again before the force); a process that does not lead a group
+is signalled alone; a `grace` of zero or less goes straight to `SIGKILL`. As with
+`Interrupt`, the window between the check and the signal, in which the PID could be
+reused, is accepted. The wait is for the whole group, not the leader alone: a
+member that ignores `SIGTERM` after the leader has ended is sent `SIGKILL` once the
+grace is over (the group ID cannot name anything else while a member runs). On Windows there is no polite step: the process is opened
+once, its creation time is read from that handle and compared with the start key, and
+`TerminateProcess` is called on the same handle, so no other process can take the PID
+between the check and the end; `grace` is not used, and the group is not ended
+(Windows has none without a job of our own). `Terminate` returns once the process is
+gone, or with an error when it is not gone five seconds after it was forced. When
+`ctx` is done during the polite wait, `Terminate` stops waiting and returns
+`ctx.Err()` without forcing.
+
 ### Why
 
 - A PID alone is reused. The key is the platform's own start record, so that no
@@ -1408,6 +1429,12 @@ console the failure therefore comes up to 5 s after its start.
 - A helper executable and not a call in the adapter, because `AttachConsole` and
   `FreeConsole` change the console of the whole calling process. The adapter's
   own executable is used so that no second file has to be shipped.
+- `Terminate` is in the SDK and not in each adapter because every adapter with a
+  helper process that outlives it needs the same rule, "ending is also by identity,
+  and what cannot be asked about is not touched". `Running`'s distinction between
+  "not found" and "could not ask" decides here too, in the opposite direction from a
+  start: not being able to ask means not starting a second writer, and it means not
+  ending a process that may be somebody else's.
 - Rejected: `pidfd` (the window between check and signal is microseconds);
   killing a whole process tree (Windows has none without a job of our own, which
   conflicts with breakaway); a stateful launcher object (the facts are per
@@ -1416,9 +1443,12 @@ console the failure therefore comes up to 5 s after its start.
 ### Where
 
 - `sdk/go/adapterkit/process/` (`identity*.go`, `start*.go`, `interrupt*.go`,
-  `helper*.go`); its README lists the entry points.
+  `helper*.go`, `terminate*.go`); its README lists the entry points.
 - Tests: `process_test.go` (the contract on every platform: identity, `Start`,
-  `Interrupt`), `identity_test.go` (an error is never "not running", a refused
+  `Interrupt`), `terminate_test.go`, `terminate_unix_test.go` and
+  `terminate_unix_internal_test.go` (`Terminate`: the polite step first, the force
+  after the grace, the whole group, a stale key and a failing table leave the process
+  alone), `identity_test.go` (an error is never "not running", a refused
   process with another start is), `interrupt_test.go` (`Interrupt` without
   `HandleHelperInvocation`), `start_linux_test.go` (the scope rule, the fallback for
   an environment without the user manager, unit names, the executable check),

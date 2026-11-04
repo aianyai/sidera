@@ -8,6 +8,14 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **Go SDK: `process.Terminate`.** An adapter that runs a native process can end it by its
+  identity: `SIGTERM` to its process group and `SIGKILL` after a grace period on macOS and
+  Linux, `TerminateProcess` on the handle that checked the start on Windows. It signals only
+  a process the process table shows to be the one the identity names, and leaves the process
+  alone when the table cannot be read.
+
 ### Changed
 
 - **Adapter protocol and Go SDK: the time an adapter has to answer a handshake call is
