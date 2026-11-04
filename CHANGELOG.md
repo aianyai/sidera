@@ -135,6 +135,11 @@ protocol has a version of its own.
   handled. The sender got a timeout and sent again 30 seconds later, so nothing was lost, but
   a message was delayed and a directory query failed with `directory_unavailable`. The fix
   takes effect between two nodes that both run this release.
+- **A message to another node is no longer refused while the node closes the connection it
+  would use.** A connection that a node had decided to close (for a renewed certificate, or
+  because neither node needs it) could still be picked for a call in the moment before the
+  close, and the call failed and marked the member unreachable for ten seconds. Such a
+  connection is no longer used; the call connects again.
 - **A name with a line break or an escape sequence can no longer reach your terminal.** The
   names that `sidera directory` and `sidera me` print come from adapters and, now, from other
   nodes. The node applied only a length limit to them, so a name could forge extra lines or

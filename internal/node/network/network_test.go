@@ -572,16 +572,18 @@ type fakeConn struct {
 	id uint64
 }
 
-// TestMemberConnPrefersTheNewest picks among two member connections to a node.
+// TestMemberConnPrefersTheNewest picks among member connections to a node: the
+// newest one that is not closing, and none that is closing and idle, since the
+// node is about to close it.
 func TestMemberConnPrefersTheNewest(t *testing.T) {
 	n := &Network{conns: map[lnet.Conn]*connEntry{}}
 	node := newPeerNode(t, newClock(), 0x11, 0x91).id
-	add := func(seq uint64, closeIdle bool) *connEntry {
-		e := &connEntry{conn: &fakeConn{id: seq}, state: preauth.StateMember, node: node, seq: seq, closeIdle: closeIdle}
+	add := func(seq uint64, closeIdle bool, busy int) *connEntry {
+		e := &connEntry{conn: &fakeConn{id: seq}, state: preauth.StateMember, node: node, seq: seq, closeIdle: closeIdle, busy: busy}
 		n.conns[e.conn] = e
 		return e
 	}
-	older, newer, closing := add(1, false), add(2, false), add(3, true)
+	older, newer, closing, closingBusy := add(1, false, 0), add(2, false, 0), add(3, true, 0), add(4, true, 1)
 	if got := n.memberConn(node); got != newer {
 		t.Fatalf("got connection %d, want the newest that is not closing (2)", got.seq)
 	}
@@ -590,8 +592,47 @@ func TestMemberConnPrefersTheNewest(t *testing.T) {
 		t.Fatalf("got connection %d, want the older one that is not closing (1)", got.seq)
 	}
 	delete(n.conns, older.conn)
-	if got := n.memberConn(node); got != closing {
-		t.Fatal("a closing connection is still better than none")
+	if got := n.memberConn(node); got != closingBusy {
+		t.Fatalf("got %v, want the closing connection that is in use (4): it is closed only when it is idle", got)
+	}
+	delete(n.conns, closingBusy.conn)
+	if got := n.memberConn(node); got != nil {
+		t.Fatalf("got connection %d, want none: a closing connection that is idle is about to be closed", got.seq)
+	}
+	if n.acquire(closing) {
+		t.Fatal("a call took a closing connection that is idle")
+	}
+}
+
+// TestCallDoesNotUseAConnectionTheNodeIsClosing stands in the gap between the
+// node deciding to close a connection (under the lock) and the close itself
+// (outside it): the entry is marked and idle, and the connection beneath it is
+// already closed. A call that finds the entry in that gap must dial a new
+// connection, not fail on the closed one and have the member recorded as
+// unreachable.
+func TestCallDoesNotUseAConnectionTheNodeIsClosing(t *testing.T) {
+	a, b := pair(t, false, true, true, func(c *Config) { c.TickEvery = 24 * time.Hour })
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+		t.Fatal(err)
+	}
+	e := a.net.memberConn(b.id)
+	if e == nil {
+		t.Fatal("no connection after the first send")
+	}
+	e.conn.Close()
+	eventually(t, "the closed connection to leave the table", func() bool { return a.connCount() == 0 })
+	a.net.mu.Lock()
+	e.closeIdle = true
+	a.net.conns[e.conn] = e
+	a.net.mu.Unlock()
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+		t.Fatalf("send while the connection was closing = %v, want a new connection", err)
+	}
+	a.net.mu.Lock()
+	_, memo := a.net.unreachable[b.id]
+	a.net.mu.Unlock()
+	if memo {
+		t.Fatal("the member was recorded as unreachable")
 	}
 }
 

@@ -96,6 +96,13 @@ clock), touches no file and draws randomness only from the reader it is given (f
   cannot have seen the call; a read error after the request went out is
   `ErrTimeout`; a gated reset is read from the reset code on the read, never from a
   write error.
+- **A connection the node has decided to close is not used.** An entry with `closeIdle`
+  set and nothing in flight (`connEntry.closing`) is closing: the decision is taken under
+  `Network.mu` and the close follows outside it, so for that moment the connection is still
+  in the table. `acquire` refuses it and `nodeConnLocked` skips it, so a call dials a new
+  connection instead of failing on one the node itself ends (which would also memoize the
+  member as unreachable). An entry with `closeIdle` set and something in flight stays
+  usable until the last release closes it.
 - **A connection at fault is closed.** A call that timed out, or failed with an
   error a live connection does not give, closes its connection and, when it was
   the node's last member connection, memoizes the node as unreachable; of several

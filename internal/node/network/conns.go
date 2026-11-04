@@ -48,7 +48,10 @@ type connEntry struct {
 	peerSeen   record.SerialSeen
 	ownCert    record.Verified[record.NetworkKeyCertificate]
 	// busy counts the calls and handlers in flight on the connection;
-	// closeIdle asks for the connection to be closed as soon as none is.
+	// closeIdle asks for the connection to be closed as soon as none is. A
+	// connection with closeIdle set and none in flight is closing (see closing):
+	// the node has decided to close it, and the close itself follows outside the
+	// lock.
 	busy      int
 	closeIdle bool
 	// idleSince is when busy last fell to zero, or when the connection came up.
@@ -206,12 +209,21 @@ func (n *Network) closeAsync(c lnet.Conn) {
 	n.start(func() { c.Close() })
 }
 
+// closing reports whether the node has decided to close the connection and is
+// about to: it was asked to close when idle and nothing is in flight. The
+// decision is taken under Network.mu and the close follows outside it, so for
+// that moment the connection is still in the table but cannot be used; a call
+// that took it would fail on a connection the node itself ends. One that has
+// something in flight is not closing yet, and takes more until the last
+// one is released. Network.mu must be held.
+func (e *connEntry) closing() bool { return e.closeIdle && e.busy == 0 }
+
 // acquire marks a call or handler in flight on the connection. It fails when the
-// connection is no longer in the table.
+// connection is no longer in the table or is closing.
 func (n *Network) acquire(e *connEntry) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.conns[e.conn] != e {
+	if n.conns[e.conn] != e || e.closing() {
 		return false
 	}
 	e.busy++
@@ -243,9 +255,10 @@ func mayPair(s preauth.State) bool {
 }
 
 // nodeConn returns a live connection that this side judged to be a connection
-// to the node, in a state accept takes: the one not asked to close comes first,
-// and of those the one established last, since an older one may be left from
-// before the peer went away and came back.
+// to the node, in a state accept takes: a connection that is closing is never
+// returned, the one not asked to close comes first, and of those the one
+// established last, since an older one may be left from before the peer went away
+// and came back.
 func (n *Network) nodeConn(node ident.NodeID, accept func(preauth.State) bool) *connEntry {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -256,7 +269,7 @@ func (n *Network) nodeConn(node ident.NodeID, accept func(preauth.State) bool) *
 func (n *Network) nodeConnLocked(node ident.NodeID, accept func(preauth.State) bool) *connEntry {
 	var best *connEntry
 	for _, e := range n.conns {
-		if !accept(e.state) || e.node != node {
+		if !accept(e.state) || e.node != node || e.closing() {
 			continue
 		}
 		if best == nil {
