@@ -1896,7 +1896,8 @@ so that the double cannot drift from what it stands for.
   question as its reason.
 - **The records are tested on the in-memory file system and, for the cold start,
   on the real one of macOS.** Windows and Linux numbers and the Windows ordering
-  of renames are not exercised by CI: no job runs the benchmark or loses power.
+  of renames are not exercised by CI on a push: the benchmark runs only on a manual
+  dispatch that asks for it, and no job loses power.
 - **A cold page cache is not measured.**
 
 ## Where
