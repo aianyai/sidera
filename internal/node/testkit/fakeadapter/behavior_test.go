@@ -91,6 +91,35 @@ func TestRequestsAfterShutdownAreRefusedExceptPing(t *testing.T) {
 	}
 }
 
+// The fake reads shutdown as an adapter of another language does: an adapter that
+// declared shutdown_intent takes the intent and refuses one it does not define;
+// one that did not takes no members at all, so a host that sent it the intent is
+// found out.
+func TestShutdownIsReadByWhatTheAdapterDeclared(t *testing.T) {
+	cases := []struct {
+		name     string
+		declares bool
+		params   map[string]any
+		refused  bool
+	}{
+		{"declared, an intent", true, map[string]any{"intent": "retire"}, false},
+		{"declared, no members", true, map[string]any{}, false},
+		{"declared, an unknown intent", true, map[string]any{"intent": "pause"}, true},
+		{"not declared, no members", false, map[string]any{}, false},
+		{"not declared, an intent", false, map[string]any{"intent": "retire"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, rigOptions{manifest: func(o *fakeadapter.ManifestOptions) { o.ShutdownIntent = tc.declares }})
+			r.ready()
+			_, err := r.call(adapterproto.MethodShutdown, tc.params)
+			if tc.refused != (err != nil) || (err != nil && codeOf(err) != peer.CodeInvalidParams) {
+				t.Fatalf("shutdown: %v, want refused=%v with code %d", err, tc.refused, peer.CodeInvalidParams)
+			}
+		})
+	}
+}
+
 func TestInitializeRefusals(t *testing.T) {
 	good := func() map[string]any {
 		return map[string]any{

@@ -23,6 +23,9 @@ type Config struct {
 	Adapter adapterproto.AdapterInfo
 	// Capabilities are what the adapter declares in initialize. A request that
 	// needs a capability that is not declared is answered capability_not_declared.
+	// The kit declares shutdown_intent itself: it understands the intent of
+	// shutdown and hands it to Application.Shutdown, so an adapter never declares
+	// it nor reads the raw member.
 	Capabilities adapterproto.Capabilities
 	// App answers the requests the kit does not.
 	App Application
@@ -56,6 +59,7 @@ func ServeStdio(ctx context.Context, cfg Config) error {
 // error of ctx when ctx ended, and otherwise the reason the connection failed. The
 // instance lock, if it was taken, is released when Serve returns.
 func Serve(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) error {
+	cfg.Capabilities.ShutdownIntent = true
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -323,14 +327,22 @@ func (s *server) begin(ctx context.Context, p adapterproto.InitializeParams) (in
 	return version, nil
 }
 
-func (s *server) shutdown(ctx context.Context, _ json.RawMessage) (any, error) {
+func (s *server) shutdown(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err := s.admit(); err != nil {
+		return nil, err
+	}
+	var p adapterproto.ShutdownParams
+	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	s.shuttingDown = true
 	s.mu.Unlock()
-	s.cfg.App.Shutdown(ctx)
+	// A daemon that sends no intent (or one that does not know the member) ends
+	// the process for a replacement: the application is told so.
+	if err := s.cfg.App.Shutdown(ctx, adapterproto.ShutdownParams{Intent: p.Effective()}); err != nil {
+		return nil, err
+	}
 	return adapterproto.Empty{}, nil
 }
 

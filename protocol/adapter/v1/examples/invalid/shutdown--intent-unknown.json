@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "shutdown",
+  "note": "intent unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 9,
+    "method": "shutdown",
+    "params": {
+      "intent": "pause"
+    }
+  }
+}

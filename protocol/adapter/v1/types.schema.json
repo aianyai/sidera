@@ -124,6 +124,7 @@
     },
 
     "Frontend": { "type": "string", "enum": ["cli", "mcp"] },
+    "ShutdownIntent": { "type": "string", "enum": ["restart", "stop", "retire"], "description": "Why the daemon ends the adapter: restart (a new process of the same instance follows at once), stop (the daemon is ending; the instance stays enabled) or retire (the instance is disabled or removed)." },
     "ContainerKind": { "type": "string", "enum": ["systemd_unit", "process_group", "launchd_job", "windows_job", "scheduled_task", "none"] },
     "AuthState": { "type": "string", "enum": ["valid", "invalid", "unknown"] },
     "DependencyState": { "type": "string", "enum": ["ok", "missing", "wrong_version"] },
@@ -229,7 +230,8 @@
           "type": "object",
           "required": ["max_endpoints"],
           "properties": { "max_endpoints": { "type": "integer", "minimum": 1, "maximum": 1000 } }
-        }
+        },
+        "shutdown_intent": { "type": "boolean", "description": "The adapter understands the intent member of shutdown. Optional; absent means false." }
       }
     },
     "DaemonCapabilities": {

@@ -207,6 +207,11 @@ type Capabilities struct {
 	Runtime *RuntimeCapabilities `json:"runtime,omitempty"`
 	// Direct is absent when the adapter provides no direct endpoints.
 	Direct *DirectCapabilities `json:"direct,omitempty"`
+	// ShutdownIntent: the adapter understands the intent member of shutdown. The
+	// daemon sends the member only to an adapter that declared this; to any other
+	// it sends shutdown with no members, which it treats as restart. It is
+	// optional: an explicit false is accepted.
+	ShutdownIntent bool `json:"shutdown_intent,omitempty"`
 }
 
 // UnmarshalJSON decodes the declaration strictly, except that members it has no
@@ -757,6 +762,30 @@ func (p AvailabilityParams) Validate() error {
 	c.field("conditions", present(p.Conditions))
 	list(&c, "conditions", p.Conditions)
 	return c.err
+}
+
+// ShutdownParams are the parameters of shutdown. The daemon sends Intent only to
+// an adapter that declared the shutdown_intent capability, and an adapter that
+// receives none acts as for ShutdownRestart: Effective says which.
+type ShutdownParams struct {
+	Intent ShutdownIntent `json:"intent,omitempty"`
+}
+
+// Validate checks the intent when there is one.
+func (p ShutdownParams) Validate() error {
+	if p.Intent == "" {
+		return nil
+	}
+	return at("intent", enumOK(p.Intent, shutdownIntents))
+}
+
+// Effective is the intent to act on: the one sent, or ShutdownRestart when the
+// daemon sent none.
+func (p ShutdownParams) Effective() ShutdownIntent {
+	if p.Intent == "" {
+		return ShutdownRestart
+	}
+	return p.Intent
 }
 
 // Empty is the parameters or result of a method that carries none.

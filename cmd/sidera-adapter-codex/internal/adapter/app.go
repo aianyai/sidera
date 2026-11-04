@@ -235,9 +235,10 @@ func (a *App) Initialize(_ context.Context, conn *adapterkit.Conn, inst adapterp
 	return nil
 }
 
-// Shutdown ends the adapter's own work. The App Server is left running: it is
-// meant to outlive the adapter, so that turns go on while the adapter restarts.
-func (a *App) Shutdown(context.Context) {
+// Shutdown ends the adapter's own work. The App Server is left running whatever
+// the intent: it is meant to outlive the adapter, so that turns go on while the
+// adapter restarts.
+func (a *App) Shutdown(context.Context, adapterproto.ShutdownParams) error {
 	a.mu.Lock()
 	a.shutdownNow = true
 	client := a.client
@@ -246,6 +247,7 @@ func (a *App) Shutdown(context.Context) {
 	if client != nil {
 		_ = client.Close()
 	}
+	return nil
 }
 
 func (a *App) shuttingDown() bool {

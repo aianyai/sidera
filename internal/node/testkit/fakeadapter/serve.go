@@ -347,7 +347,16 @@ func (a *adapter) initialize(_ context.Context, raw json.RawMessage) (any, error
 	})
 }
 
-func (a *adapter) shutdown(_ context.Context, _ json.RawMessage) (any, error) {
+func (a *adapter) shutdown(_ context.Context, raw json.RawMessage) (any, error) {
+	// What the adapter declared decides how strictly the request is read, as it
+	// does for an adapter of another language.
+	var params adapterproto.Message = &adapterproto.Empty{}
+	if a.opts.ShutdownIntent {
+		params = &adapterproto.ShutdownParams{}
+	}
+	if err := adapterproto.Decode(raw, params); err != nil {
+		return nil, peer.NewError(peer.CodeInvalidParams, err.Error())
+	}
 	a.mu.Lock()
 	a.shuttingDown = true
 	a.mu.Unlock()

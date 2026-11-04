@@ -60,6 +60,13 @@ package does not build it:
   `adapterproto.HandshakeLimit` after the request arrived, because the daemon ends the
   connection of an adapter that has not answered by then. An application that has more
   to do than fits answers by the deadline and does the rest after the answer.
+- **The kit declares `shutdown_intent`.** `Serve` adds the capability to
+  `Config.Capabilities`, reads the `intent` of `shutdown` and hands it to
+  `Application.Shutdown`; a `shutdown` without one reaches the application as
+  `restart`, so `p.Intent` is never empty. An unknown intent is `-32602` and the
+  application is not told. The error `Shutdown` returns is the answer to the request
+  (build it with `peer.NewError` to choose the message the daemon logs); the adapter
+  is shutting down either way.
 - **Errors are the application's to choose.** A `*peer.Error` is answered as it is;
   any other error is `-32603` with a fixed message, as the peer does for every
   handler.

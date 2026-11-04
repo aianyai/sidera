@@ -33,6 +33,12 @@ type ManifestOptions struct {
 	ServerRequests bool                    `json:"server_requests,omitempty"`
 	Attach         bool                    `json:"attach,omitempty"`
 
+	// ShutdownIntent declares the shutdown_intent capability. An adapter that
+	// declares it decodes the intent of shutdown strictly; one that does not decodes
+	// shutdown as having no members, as an adapter of before the capability does, so
+	// a daemon that sent it an intent would be refused.
+	ShutdownIntent bool `json:"shutdown_intent,omitempty"`
+
 	// MaxDirectEndpoints is the direct endpoint limit.
 	MaxDirectEndpoints int `json:"max_direct_endpoints,omitempty"`
 
@@ -82,6 +88,7 @@ func DefaultManifestOptions() ManifestOptions {
 		AckOnBehalf: true,
 		Attach:      true,
 
+		ShutdownIntent:     true,
 		MaxDirectEndpoints: 10,
 		RecvWaitS:          map[adapterproto.Frontend]int{adapterproto.FrontendCLI: 20, adapterproto.FrontendMCP: 45},
 		Budgets: []manifest.Budget{
@@ -126,6 +133,7 @@ func (o ManifestOptions) Capabilities() adapterproto.Capabilities {
 	if o.Direct {
 		c.Direct = &adapterproto.DirectCapabilities{MaxEndpoints: o.MaxDirectEndpoints}
 	}
+	c.ShutdownIntent = o.ShutdownIntent
 	return c
 }
 

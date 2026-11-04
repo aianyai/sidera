@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "shutdown",
+  "note": "intent is sent as a value or left out",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 9,
+    "method": "shutdown",
+    "params": {
+      "intent": ""
+    }
+  }
+}

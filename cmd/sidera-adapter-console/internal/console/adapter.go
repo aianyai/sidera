@@ -136,7 +136,10 @@ func (a *adapter) registerOwner() {
 
 // Shutdown closes the control channel; the process ends when the daemon closes the
 // stream.
-func (a *adapter) Shutdown(context.Context) { a.close() }
+func (a *adapter) Shutdown(context.Context, adapterproto.ShutdownParams) error {
+	a.close()
+	return nil
+}
 
 func (a *adapter) close() {
 	a.cancel()

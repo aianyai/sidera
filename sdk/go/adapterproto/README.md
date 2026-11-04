@@ -38,8 +38,8 @@ for what each message means and why the protocol is shaped this way.
   `attached`), which is written as `true` or left out. A pointer field accepts any value of its type,
   zero included.
 - **Open capability declarations.** The one exception to the unknown-field rule:
-  `Capabilities`, `RuntimeCapabilities`, `DirectCapabilities` and
-  `DaemonCapabilities` ignore the members they have no field for, so a newer
+  `Capabilities` (`shutdown_intent` among its members), `RuntimeCapabilities`,
+  `DirectCapabilities` and `DaemonCapabilities` ignore the members they have no field for, so a newer
   peer can declare a capability that this version does not know. Their known
   members are decoded as strictly as everything else, and a repeated key is
   refused even inside an ignored member. Ignoring a capability means not using

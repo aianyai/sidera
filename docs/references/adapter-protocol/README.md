@@ -356,7 +356,7 @@ only says the request was not understood or not allowed.
 | `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`, `state_dir`), `capabilities` (the daemon's own, empty for now) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
 | `ping` | both | request | none | none |
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
-| `shutdown` | D to A | request | none | none |
+| `shutdown` | D to A | request | `intent?` (`restart`, `stop` or `retire`), sent only to an adapter that declared `shutdown_intent` | none |
 | `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions` (an entry of an attached session has `attached`, `wake?` and no `preset` or `tool_access`), `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
 | `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets`, `tool_probes` |
 | `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
@@ -380,6 +380,25 @@ only says the request was not understood or not allowed.
 | `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type?` (present exactly when `body` is not empty), `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
+
+**The intent of `shutdown`.** The daemon ends an adapter for three reasons, and the
+adapter needs to know which, because it may have started processes that outlive it:
+
+| Intent | The process ends because | What the adapter does with what outlives it |
+| ------ | ------------------------ | ------------------------------------------- |
+| `restart` | a new process of the same instance follows at once: the daemon restarts, `sidera update` replaces it, the configuration or the package of the instance changed | leaves it running: the next process takes it over |
+| `stop` | the daemon ends and does not say when it comes back; the instance stays enabled | leaves it running, or ends what is idle: the adapter's judgment |
+| `retire` | the instance is disabled or removed | ends it, and releases whatever uses the instance's state directory |
+
+The daemon sends `intent` only to an adapter that declared `shutdown_intent`; any other
+adapter receives `shutdown` with no members, as before. A `shutdown` without an intent is
+read as `restart`, which is what ending an adapter meant before the intent existed. An
+intent the protocol does not define is `-32602`. The result is still empty. An adapter that
+could not do what `retire` asks (a process it could not end) answers with an error whose
+message names it, and ends all the same: the daemon logs the error and does not retry.
+`adapterproto.ShutdownParams` carries the member, `Effective` gives the intent to act on,
+and the adapter kit declares the capability itself and hands `Application.Shutdown` an
+intent that is never empty.
 
 **The close of a session.** `session.close` releases the native session, and the
 daemon may ask again at any time: after the endpoint was closed in the channel, after the
@@ -492,7 +511,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Five
+reader of an earlier shape is deployed that the change could break. Six
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -514,7 +533,11 @@ have sent to a new version:
   alone would need no new version, but the new members of the session entry and the new
   methods would. The daemon sends none of them to an adapter that did not declare `attach`, and
   an older daemon never sees a declaration it would act on, so no deployed reader meets them; the
-  record is kept because rule 3 would otherwise have sent them to a new version.
+  record is kept because rule 3 would otherwise have sent them to a new version;
+- the member `intent` of `shutdown`, behind the capability `shutdown_intent`. The capability
+  alone would need no new version, but a new member of the parameters would. The daemon sends the
+  member only to an adapter that declared the capability, so an adapter that decodes `shutdown`
+  strictly never meets it, and an older daemon never sees a declaration it would act on.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -970,7 +993,8 @@ An adapter declares what it supports in the result of `initialize`:
 
 ```json
 {"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"], "attach": true},
- "direct": {"max_endpoints": 50}}
+ "direct": {"max_endpoints": 50},
+ "shutdown_intent": true}
 ```
 
 The declaration is an open object, as are `runtime` and `direct` inside it: a key
@@ -986,7 +1010,9 @@ adapter implements `session.interrupt`, calls `recv.observed`, and receives
 requests from its native runtime that it must answer and report. The fourth, `attach`, is
 optional (absent means false, so an adapter that predates it still completes the handshake)
 and says that the adapter implements attached sessions: `session.attach`, the attached entries
-of `adapter.start`, `session.detached`, and their prompt and turn semantics.
+of `adapter.start`, `session.detached`, and their prompt and turn semantics. `shutdown_intent`, a
+member of the declaration itself and also optional, says that the adapter reads the `intent` of
+`shutdown`.
 
 What an adapter declares is kept apart from what is currently usable. The
 declaration comes from `initialize` and the manifest and is recorded per

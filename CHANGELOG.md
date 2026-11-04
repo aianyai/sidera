@@ -15,6 +15,14 @@ protocol has a version of its own.
   Linux, `TerminateProcess` on the handle that checked the start on Windows. It signals only
   a process the process table shows to be the one the identity names, and leaves the process
   alone when the table cannot be read.
+- **Adapter protocol and Go SDK: `shutdown` says why the adapter ends.** The request carries an
+  `intent`: `restart` (a new process of the same instance follows), `stop` (the daemon is
+  ending; the instance stays enabled) or `retire` (the instance is disabled or removed). The
+  daemon sends it only to an adapter that declares the new capability `shutdown_intent`, so an
+  adapter that decodes `shutdown` strictly is not affected. The Go SDK declares the capability
+  itself, and `adapterkit.Application.Shutdown` now takes the intent and returns an error. The
+  protocol stays at version 1. This change only carries the intent; the adapters of this
+  release still treat every intent as `restart`.
 
 ### Changed
 

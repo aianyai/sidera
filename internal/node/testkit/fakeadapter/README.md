@@ -52,6 +52,11 @@ a `ProcessLauncher` in the program.
 - **Before initialize, only `initialize`, `ping` and `$/cancel_request` are
   answered**; anything else is `-32003`. After `shutdown`, only `ping`. A second
   `initialize` is `-32600`; no version in common is `-32022` with the two ranges.
+- **`shutdown` is read by what the adapter declared.** `ManifestOptions.ShutdownIntent`
+  (on by default) declares `shutdown_intent` and makes the adapter decode the intent
+  strictly; with it off the adapter decodes `shutdown` as having no members, as an
+  adapter of before the capability does, so a host that sent it the intent is refused
+  with `-32602`.
 - **The lock before the answer.** The adapter locks `instance.lock_path` before it
   answers `initialize` and answers `1011` when it cannot, so that a hung old process
   and its replacement never control sessions at once. The lock is the standard

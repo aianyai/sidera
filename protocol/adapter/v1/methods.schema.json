@@ -12,7 +12,7 @@
       "oneOf": [
         { "x-direction": "daemon_to_adapter", "x-result": "initialize.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "initialize" }, "params": { "$ref": "#/$defs/initialize.params" } } },
         { "x-direction": "both", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "ping" }, "params": { "$ref": "#/$defs/empty" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "shutdown" }, "params": { "$ref": "#/$defs/empty" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "shutdown" }, "params": { "$ref": "#/$defs/shutdown.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "adapter.start.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.start" }, "params": { "$ref": "#/$defs/adapter.start.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "adapter.probe.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.probe" }, "params": { "$ref": "#/$defs/adapter.probe.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "session.create.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.create" }, "params": { "$ref": "#/$defs/session.create.params" } } },
@@ -45,6 +45,12 @@
     },
 
     "empty": { "type": "object", "additionalProperties": false },
+    "shutdown.params": {
+      "description": "intent is sent only to an adapter that declared shutdown_intent in its capabilities; the other adapters receive an empty object, which they treat as restart.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "intent": { "$ref": "types.schema.json#/$defs/ShutdownIntent" } }
+    },
     "endpoint.only.params": {
       "type": "object",
       "required": ["endpoint"],

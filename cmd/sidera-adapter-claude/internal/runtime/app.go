@@ -184,8 +184,12 @@ func claudeDir(environ []string) string {
 	return filepath.Join(home, ".claude")
 }
 
-// Shutdown stops the monitors. The turn processes are detached and run on.
-func (a *App) Shutdown(context.Context) { a.stop() }
+// Shutdown stops the monitors. The turn processes are detached and run on,
+// whatever the intent.
+func (a *App) Shutdown(context.Context, adapterproto.ShutdownParams) error {
+	a.stop()
+	return nil
+}
 
 func (a *App) turnsDir(instance adapterproto.InstanceInfo) string {
 	return filepath.Join(instance.StateDir, "turns")

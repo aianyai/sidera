@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,15 +27,17 @@ const (
 type stub struct {
 	adapterkit.Base
 
-	mu        sync.Mutex
-	conn      *adapterkit.Conn
-	instance  adapterproto.InstanceInfo
-	initErr   error
-	shutdowns int
-	created   []adapterproto.SessionCreateParams
-	attached  []adapterproto.SessionAttachParams
-	started   []adapterproto.StartParams
-	badResult bool
+	mu          sync.Mutex
+	conn        *adapterkit.Conn
+	instance    adapterproto.InstanceInfo
+	initErr     error
+	shutdowns   int
+	intents     []adapterproto.ShutdownIntent
+	shutdownErr error
+	created     []adapterproto.SessionCreateParams
+	attached    []adapterproto.SessionAttachParams
+	started     []adapterproto.StartParams
+	badResult   bool
 }
 
 func (s *stub) Initialize(_ context.Context, conn *adapterkit.Conn, in adapterproto.InstanceInfo) error {
@@ -44,10 +47,12 @@ func (s *stub) Initialize(_ context.Context, conn *adapterkit.Conn, in adapterpr
 	return s.initErr
 }
 
-func (s *stub) Shutdown(context.Context) {
+func (s *stub) Shutdown(_ context.Context, p adapterproto.ShutdownParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.shutdowns++
+	s.intents = append(s.intents, p.Intent)
+	return s.shutdownErr
 }
 
 func (s *stub) CreateSession(_ context.Context, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
@@ -171,6 +176,65 @@ func (s *side) initialize(lock string) error {
 	s.t.Helper()
 	var res adapterproto.InitializeResult
 	return s.call(adapterproto.MethodInitialize, initParams(lock), &res)
+}
+
+// The kit declares shutdown_intent itself, and hands the application the intent the
+// daemon sent, or restart when it sent none (a daemon that does not know the
+// member, or an adapter that did not declare it). An error of the application is
+// the answer to shutdown.
+func TestShutdownHandsTheApplicationItsIntent(t *testing.T) {
+	cases := []struct {
+		name   string
+		params any
+		want   adapterproto.ShutdownIntent
+	}{
+		{"no members", adapterproto.Empty{}, adapterproto.ShutdownRestart},
+		{"restart", adapterproto.ShutdownParams{Intent: adapterproto.ShutdownRestart}, adapterproto.ShutdownRestart},
+		{"stop", adapterproto.ShutdownParams{Intent: adapterproto.ShutdownStop}, adapterproto.ShutdownStop},
+		{"retire", adapterproto.ShutdownParams{Intent: adapterproto.ShutdownRetire}, adapterproto.ShutdownRetire},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := &stub{}
+			s := serveOn(t, config(app, runtimeCaps()))
+			var init adapterproto.InitializeResult
+			if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &init); err != nil {
+				t.Fatal(err)
+			}
+			if !init.Capabilities.ShutdownIntent {
+				t.Error("the kit did not declare shutdown_intent")
+			}
+			if err := s.call(adapterproto.MethodShutdown, tc.params, &adapterproto.Empty{}); err != nil {
+				t.Fatal(err)
+			}
+			if len(app.intents) != 1 || app.intents[0] != tc.want {
+				t.Errorf("the application was handed %v, want [%s]", app.intents, tc.want)
+			}
+		})
+	}
+}
+
+// An intent the protocol does not define is invalid params, and the adapter keeps
+// serving; an error of the application is the answer, and the adapter ends anyway.
+func TestShutdownRefusesAnUnknownIntentAndAnswersTheApplicationsError(t *testing.T) {
+	app := &stub{shutdownErr: peer.NewError(peer.CodeInternalError, "a process was left")}
+	s := serveOn(t, config(app, runtimeCaps()))
+	if err := s.initialize(filepath.Join(t.TempDir(), "lock")); err != nil {
+		t.Fatal(err)
+	}
+	var raw json.RawMessage
+	if got := codeOf(t, s.call(adapterproto.MethodShutdown, map[string]string{"intent": "pause"}, &raw)); got != peer.CodeInvalidParams {
+		t.Errorf("an unknown intent: code %d, want %d", got, peer.CodeInvalidParams)
+	}
+	if app.shutdowns != 0 {
+		t.Error("the application was told to shut down by a request that was refused")
+	}
+	if err := s.call(adapterproto.MethodShutdown, adapterproto.ShutdownParams{Intent: adapterproto.ShutdownRetire}, &raw); err == nil || !strings.Contains(err.Error(), "a process was left") {
+		t.Errorf("shutdown answered %v, want the error of the application", err)
+	}
+	if got := codeOf(t, s.call(adapterproto.MethodSessionCreate, createParams(), &raw)); got != peer.CodeShuttingDown {
+		t.Errorf("after a shutdown the application failed: code %d, want %d", got, peer.CodeShuttingDown)
+	}
 }
 
 // Before initialize only initialize, ping and the cancel notification are served:

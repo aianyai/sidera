@@ -38,6 +38,30 @@ var containerKinds = []ContainerKind{ContainerSystemdUnit, ContainerProcessGroup
 // Valid reports whether k is a known container kind.
 func (k ContainerKind) Valid() bool { return slices.Contains(containerKinds, k) }
 
+// ShutdownIntent says why the daemon ends an adapter, so that the adapter can
+// decide what to do with the processes it started and that outlive it.
+type ShutdownIntent string
+
+const (
+	// ShutdownRestart: the process is replaced at once by a new one of the same
+	// instance, which stays enabled. The adapter leaves everything that outlives
+	// it running.
+	ShutdownRestart ShutdownIntent = "restart"
+	// ShutdownStop: the daemon is ending and does not say when it comes back;
+	// the instance stays enabled. What outlives the adapter may be left running or
+	// ended, as the adapter judges by whether it is busy.
+	ShutdownStop ShutdownIntent = "stop"
+	// ShutdownRetire: the instance is disabled or removed. The adapter ends what
+	// it started and what outlives it, and releases whatever uses the instance's
+	// state directory, which the daemon may delete afterwards.
+	ShutdownRetire ShutdownIntent = "retire"
+)
+
+var shutdownIntents = []ShutdownIntent{ShutdownRestart, ShutdownStop, ShutdownRetire}
+
+// Valid reports whether i is a known intent.
+func (i ShutdownIntent) Valid() bool { return slices.Contains(shutdownIntents, i) }
+
 // AuthState is what a probe found about the runtime's credentials.
 type AuthState string
 
@@ -532,6 +556,7 @@ func (s ControlSignal) Valid() bool { return slices.Contains(controlSignals, s) 
 func EnumTables() map[string][]string {
 	return map[string][]string{
 		"Frontend":              strs(frontends),
+		"ShutdownIntent":        strs(shutdownIntents),
 		"ContainerKind":         strs(containerKinds),
 		"AuthState":             strs(authStates),
 		"DependencyState":       strs(dependencyStates),

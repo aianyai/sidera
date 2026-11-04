@@ -31,7 +31,11 @@ type Application interface {
 	// Shutdown is called when the daemon asks the adapter to end, after the kit has
 	// begun to refuse every request but ping and before it answers shutdown. The
 	// adapter stops its work and returns; the process ends when the stream closes.
-	Shutdown(ctx context.Context)
+	// p.Intent is never empty: it says why the process ends (restart when the
+	// daemon did not say), and with it what to do with a process the adapter
+	// started that outlives it. An error is the answer to shutdown, which the
+	// daemon logs; the adapter ends either way.
+	Shutdown(ctx context.Context, p adapterproto.ShutdownParams) error
 
 	// Start takes the adapter on: it attaches the sessions and the direct endpoints
 	// the daemon lists. The context ends 2 seconds before adapterproto.HandshakeLimit
@@ -77,7 +81,7 @@ var _ Application = Base{}
 func (Base) Initialize(context.Context, *Conn, adapterproto.InstanceInfo) error { return nil }
 
 // Shutdown does nothing.
-func (Base) Shutdown(context.Context) {}
+func (Base) Shutdown(context.Context, adapterproto.ShutdownParams) error { return nil }
 
 // Start answers that the adapter holds none of the sessions it is asked to take
 // back, which is true of an adapter that has none.

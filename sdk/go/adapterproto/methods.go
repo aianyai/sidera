@@ -136,7 +136,7 @@ func Methods() []MethodInfo {
 		request[InitializeParams, InitializeResult](MethodInitialize, DaemonToAdapter),
 		request[Empty, Empty](MethodPing, Both),
 		notification[CancelRequestParams](MethodCancelRequest, Both),
-		request[Empty, Empty](MethodShutdown, DaemonToAdapter),
+		request[ShutdownParams, Empty](MethodShutdown, DaemonToAdapter),
 		request[StartParams, StartResult](MethodAdapterStart, DaemonToAdapter),
 		request[ProbeParams, ProbeResult](MethodAdapterProbe, DaemonToAdapter),
 		notification[AvailabilityParams](MethodAdapterAvailability, AdapterToDaemon),
