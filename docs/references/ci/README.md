@@ -734,23 +734,34 @@ the plain run takes less than a twentieth of the CPU time. The walks of the
 engine took 3.4 s before and 1.9 s after, with two crash states per point instead of
 four or five.
 
-### Pending verification
+### Observed job times
 
-Nothing in the two jobs above has run on a hosted runner: the workflow is
-checked locally with `actionlint`, and each command was run on macOS against a
-stand-in package, which proved that the flags, the `-skip` and `-run` split, the
-guard and both environment variables work together. Until a run on `main` shows
-otherwise these are not verified, and each is pending verification by CI on
-`main`: that the four Windows shards fit in 60 minutes and the others in 45;
-the time of a rerun on each platform and so whether the shard counts are right;
-that the five macOS jobs of a run start together; that a dispatch
-that leaves `inputs.crashwalk` out takes `full`. The foreground-process acceptance
-package exists and its focused tests run locally. A complete binary catalog walk
-and its hosted timings must be verified separately; focused tests do not establish the full-walk budget.
+Over the 50 runs of 2026-11-02 to 2026-11-04, before the race run and the
+benchmarks had jobs of their own and before the tagged job was narrowed, a
+successful push to `main` took 1981 s (median of 11) from start to end. Its
+longest job was `test` on Windows x64, median 1860 s, whose race run (about
+950 s), benchmarks (550 to 700 s), plain run (about 210 s) and vet (about 44 s)
+ran one after another; the tagged job took 1149 s there. Setting up a job (the
+runner, the checkout and setup-go) took 2 to 15 s on Linux and macOS and 30 to
+45 s on Windows, and a job waited a median of 2 s for a runner, with bursts of
+several minutes when runs overlapped. The crash-walk shards of a full walk took
+medians of 250 to 280 s on Linux, 350 to 400 s on Windows x64 and 610 to 660 s on
+macOS, well inside their 45- and 60-minute limits, so the shard counts leave room.
+The Windows arm64 jobs ran in every one of those runs.
 
-The Windows arm64 jobs (`test`, `bench`, `test-tags` and `acceptance` on `windows-11-arm`) have
-not run yet either: the packages build and vet for windows/arm64 on a development
-machine, and nothing has run the tests on that platform until CI does.
+Two dispatched runs of the present layout (2026-11-04, crash walk `smoke`) took
+998 s and 1022 s; in the first, another run held runners at the same time and
+jobs waited up to 500 s. Their longest jobs were `race` on Windows x64 (976 s and
+1017 s) and `bench` on Windows x64 (882 s and 966 s) and on Windows arm64 (726 s
+and 782 s). `test-tags` with its race run took 180 to 560 s, against 900 to
+1150 s when it tested every package. A run now lasts about as long as the longer
+of the two Windows x64 jobs: the race run spreads about 2 700 package-seconds over
+four processors, and the benchmarks are one cold-start scan of 200,000 files.
+Each could be split further only by adding jobs beyond the 20 that run at once.
+
+The foreground-process acceptance package exists and its focused tests run
+locally. A complete binary catalog walk and its hosted timings must be verified
+separately; focused tests do not establish the full-walk budget.
 
 ## Where
 
