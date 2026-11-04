@@ -233,8 +233,10 @@ type Reply struct {
 	Plain bool `json:"plain,omitempty"`
 	// MessageID is the channel's id of the message the latest attempt created.
 	MessageID string `json:"message_id,omitempty"`
-	// RequestCard is the request card the message answers, which says where the
-	// answer went and which endpoint sent it. Set with MessageID.
+	// RequestCard is the request card the answer is for, which says where it goes and
+	// which endpoint sends it. Set with the first attempt, or with the failure that
+	// ended the card before one, once the request is known (an invalid card names
+	// none); Answered says when the request counts as dealt with.
 	RequestCard string `json:"request_card,omitempty"`
 	// SentAt is when the message was sent. The node's notice about a failed delivery
 	// is looked for only within adapterproto.SentKeyWindow of it (Watched).
@@ -265,6 +267,21 @@ func (r *Reply) Sent(requestCard, messageID string, now time.Time) {
 // node may have forgotten the message, and a notice then explains nothing about it.
 func (r Reply) Watched(now time.Time) bool {
 	return r.MessageID != "" && !r.Reported && now.Sub(r.SentAt) <= adapterproto.SentKeyWindow
+}
+
+// Name records the request the card is for; "" leaves what is recorded.
+func (r *Reply) Name(requestCard string) {
+	if requestCard != "" {
+		r.RequestCard = requestCard
+	}
+}
+
+// Answered reports whether the request the card was to answer needs nothing more from
+// the adapter: the answer is sent, or the card is over (completed with a failure, or
+// by its creator, who then gave the answer up). A blocked or attempting card still
+// owes it.
+func (r Reply) Answered() bool {
+	return r.RequestCard != "" && (r.Phase == PhaseSent || r.Phase == PhaseFinished)
 }
 
 // Block records that Hermes now has the card blocked for the category.

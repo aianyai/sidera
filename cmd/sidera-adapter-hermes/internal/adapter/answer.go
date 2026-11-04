@@ -33,7 +33,7 @@ func (in *inbound) HandleReplyCard(ctx context.Context, c kanban.Card) {
 	}
 	req, inv := in.checkReply(d, c)
 	if inv != nil {
-		in.fail(ctx, c.ID, lane.ReasonInvalidCard, inv.Reason)
+		in.fail(ctx, c.ID, lane.ReasonInvalidCard, inv.Reason, "")
 		return
 	}
 	in.answer(ctx, c.ID, req.Task, *d.Requests[req.ReplyTo], act)
@@ -70,17 +70,17 @@ func (in *inbound) answer(ctx context.Context, id, text string, orig state.Reque
 		in.complete(ctx, id, orig)
 		return
 	case lane.ReplyOutcomeUnknown:
-		in.fail(ctx, id, lane.ReasonOutcomeUnknown, "The adapter cannot tell whether the answer was sent; it was too long ago to send it again.")
+		in.fail(ctx, id, lane.ReasonOutcomeUnknown, "The adapter cannot tell whether the answer was sent; it was too long ago to send it again.", orig.CardID)
 		return
 	}
 	attempt, plain := act.Attempt, act.Plain
 	from, ok := in.env.EndpointRef(orig.Endpoint)
 	if !ok {
-		in.fail(ctx, id, lane.ReasonDeliveryFailed, "The endpoint that received the request is closed, so the answer cannot be sent from it.")
+		in.fail(ctx, id, lane.ReasonDeliveryFailed, "The endpoint that received the request is closed, so the answer cannot be sent from it.", orig.CardID)
 		return
 	}
 	for {
-		if !in.begin(id, attempt, plain) {
+		if !in.begin(id, orig.CardID, attempt, plain) {
 			return
 		}
 		out := Outgoing{From: from, To: adapterproto.Address(orig.Sender), Body: text,
@@ -104,7 +104,7 @@ func (in *inbound) answer(ctx context.Context, id, text string, orig state.Reque
 			in.comment(ctx, id, commentReplyLapsed)
 			attempt, plain = attempt+1, true
 		case refused(err):
-			in.fail(ctx, id, lane.ReasonDeliveryFailed, clip(fmt.Sprintf("The answer was refused: %v", err)))
+			in.fail(ctx, id, lane.ReasonDeliveryFailed, clip(fmt.Sprintf("The answer was refused: %v", err)), orig.CardID)
 			return
 		default:
 			// Not known to have failed: the poll lists the card again and the same
@@ -117,11 +117,14 @@ func (in *inbound) answer(ctx context.Context, id, text string, orig state.Reque
 
 // begin writes the start of the attempt unless it is the attempt already recorded as
 // under way, whose start must stay. It reports whether the record is written.
-func (in *inbound) begin(id string, attempt int, plain bool) bool {
+func (in *inbound) begin(id, requestCard string, attempt int, plain bool) bool {
 	if r := in.env.State.View().Replies[id]; r != nil && r.Phase == state.PhaseAttempting && r.Attempt == attempt && r.Plain == plain {
 		return true
 	}
-	if err := in.update(id, func(r *state.Reply) { r.BeginAttempt(attempt, plain, in.env.Now()) }); err != nil {
+	if err := in.update(id, func(r *state.Reply) {
+		r.BeginAttempt(attempt, plain, in.env.Now())
+		r.Name(requestCard)
+	}); err != nil {
 		in.env.Log.Error("recording an attempt to answer; nothing is sent", "card", id, "error", err)
 		return false
 	}
@@ -153,7 +156,8 @@ func (in *inbound) complete(ctx context.Context, id string, orig state.Request) 
 
 // fail ends what the card was doing, once per cause (endFailed). A failure of Hermes
 // that may pass leaves the card as it is: it is listed again while it is ready.
-func (in *inbound) fail(ctx context.Context, id string, reason lane.Reason, text string) {
+// requestCard is the request the card answers, "" when the card does not identify one.
+func (in *inbound) fail(ctx context.Context, id string, reason lane.Reason, text, requestCard string) {
 	var blocks map[state.Category]int
 	if r := in.env.State.View().Replies[id]; r != nil {
 		blocks = r.Blocks
@@ -168,11 +172,11 @@ func (in *inbound) fail(ctx context.Context, id string, reason lane.Reason, text
 		in.env.Log.Warn("completing a reply card; it is tried again", "card", id, "error", err)
 		return
 	case blocked:
-		if err := in.update(id, func(r *state.Reply) { r.Block(cat) }); err != nil {
+		if err := in.update(id, func(r *state.Reply) { r.Block(cat); r.Name(requestCard) }); err != nil {
 			in.env.Log.Error("recording a blocked reply card", "card", id, "error", err)
 		}
 	default:
-		if err := in.update(id, func(r *state.Reply) { r.Finish(in.env.Now()) }); err != nil {
+		if err := in.update(id, func(r *state.Reply) { r.Finish(in.env.Now()); r.Name(requestCard) }); err != nil {
 			in.env.Log.Error("recording a finished reply card", "card", id, "error", err)
 		}
 	}

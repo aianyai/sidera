@@ -142,8 +142,8 @@ func endFailed(ctx context.Context, board *kanban.Client, id string, blocks map[
 	return false, board.Complete(ctx, id, kanban.Completion{Summary: failureSummary(cat, replyCard), Result: clip(text)})
 }
 
-// maxReason bounds the text of a block reason or a comment that may quote a bit of
-// what a card or a peer said.
+// maxReason bounds the length of a block reason or a comment. None of them quotes a
+// card or a peer, so the bound only keeps the text of a daemon error short.
 const maxReason = 1024
 
 // clip cuts s to maxReason bytes on a character boundary.

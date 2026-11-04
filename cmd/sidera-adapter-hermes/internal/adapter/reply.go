@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/lane"
@@ -55,7 +56,8 @@ func (f *laneFlows) HandleMessage(ctx context.Context, m Message) (Verdict, erro
 // first, and a notice that finds nothing in flight would otherwise be relayed to the
 // conversation as a card of its own, waking it a second time about the failure the
 // blocked card already told it. Such a failure explains the first notice handled
-// after it (state.Endpoint.FailedAt, NoticedAt).
+// after it (state.Endpoint.FailedAt, NoticedAt), and only while the failure is recent
+// (noticeFollowsWithin).
 func (f *laneFlows) notice(ctx context.Context, m Message) (Verdict, error) {
 	f.mu.Lock()
 	ended, err := f.settleEndpoint(ctx, m.To.Key)
@@ -96,12 +98,23 @@ func (f *laneFlows) noteEndpoint(endpoint string, fn func(e *state.Endpoint)) {
 	}
 }
 
+// noticeFollowsWithin is how long after a card ended for a failed delivery the node's
+// notice about it can still arrive, and so how long that failure may explain a notice.
+// The node merges the notices of a sender endpoint for a minute and sends at most ten
+// notices in ten minutes, holding the rest (docs/references/delivery); a notice is
+// therefore due within about eleven minutes of the status that failed the card. The
+// bound is generous: a notice that arrives later is explained by nothing and is
+// relayed, which costs one card, while a marker that never expired would swallow a
+// notice about something else.
+const noticeFollowsWithin = 30 * time.Minute
+
 // failureNotNoticed reports whether a card of the endpoint ended for a failed
-// delivery since the last notice about the endpoint was handled. The caller holds mu.
+// delivery, recently, since the last notice about the endpoint was handled: the one
+// notice it explains. The caller holds mu.
 func (f *laneFlows) failureNotNoticed(endpoint string) bool {
 	d := f.env.State.View()
 	e, ok := d.Endpoints[endpoint]
-	return ok && e.FailedAt.After(e.NoticedAt)
+	return ok && e.FailedAt.After(e.NoticedAt) && f.env.Now().Sub(e.FailedAt) < noticeFollowsWithin
 }
 
 // reply matches the message to a card and writes it there. inbound says the

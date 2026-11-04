@@ -2,6 +2,7 @@ package lane
 
 import (
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
@@ -85,19 +86,19 @@ type Route struct {
 // RouteFollowUp finds where a follow-up that names no alias goes: to the peer of
 // its first parent that has one, from the endpoint that parent used, because a
 // remote session answers only the endpoint that created it. The alias the parent
-// was sent under must still be in the alias table: the table is the allow-list of
-// what a card can make this node do, and a follow-up reaches the peer through the
-// parent without naming it. When that peer is a remote session the adapter has
+// was sent under must still be in the alias table, name the node the parent went to
+// and allow messages: the table is the allow-list of what a card can make this node
+// do, and a follow-up reaches the peer through the parent without naming it. When that peer is a remote session the adapter has
 // since closed, the follow-up cannot go on and the reason is ReasonSessionClosed;
-// when its alias was removed, ReasonAliasRemoved; when no parent has a peer to
+// when its alias was removed or changed, ReasonAliasChanged; when no parent has a peer to
 // continue, ReasonInvalidCard.
 func RouteFollowUp(parents []state.Card, sessions []state.Session, aliases config.Aliases) (Route, Reason, bool) {
 	for _, p := range parents {
 		if p.Peer == "" {
 			continue
 		}
-		if _, ok := aliases.Lookup(p.Alias); !ok {
-			return Route{}, ReasonAliasRemoved, false
+		if a, ok := aliases.Lookup(p.Alias); !ok || !aliasServes(a, p) {
+			return Route{}, ReasonAliasChanged, false
 		}
 		if p.Session && !slices.ContainsFunc(sessions, func(s state.Session) bool { return s.Address == p.Peer }) {
 			return Route{}, ReasonSessionClosed, false
@@ -105,4 +106,19 @@ func RouteFollowUp(parents []state.Card, sessions []state.Session, aliases confi
 		return Route{Endpoint: p.Endpoint, Peer: p.Peer, Session: p.Session, Alias: p.Alias}, 0, true
 	}
 	return Route{}, ReasonInvalidCard, false
+}
+
+// aliasServes reports whether the alias still lets a message go where the parent
+// went: it allows messages and names the address the parent was sent to, or for a
+// remote session (whose address is the endpoint of a session on that node) the node.
+func aliasServes(a config.Alias, parent state.Card) bool {
+	if !a.Allows(config.ModeMessage) {
+		return false
+	}
+	if !parent.Session {
+		return string(a.Address) == parent.Peer
+	}
+	node, _, _ := strings.Cut(parent.Peer, "/")
+	aliasNode, _, _ := strings.Cut(string(a.Address), "/")
+	return node == aliasNode
 }

@@ -512,3 +512,31 @@ func TestCardClaimedBeforeACrashIsFoundAgain(t *testing.T) {
 		})
 	}
 }
+
+// A reply card the adapter blocked and its creator then completed instead of
+// unblocking is ended in the record within minutes, and its request no longer counts
+// as unanswered: the endpoint that received it is free to be retired.
+func TestBlockedReplyCardCompletedByHermesAnswersItsRequest(t *testing.T) {
+	clk := newClock()
+	d := &daemon{directAccess: true}
+	d.sendError = func(int, adapterproto.SendParams) (error, bool) {
+		return peer.NewError(adapterproto.CodeSendRefused, "refused").WithData(map[string]any{"reason": "too_large"}), false
+	}
+	d.serve("hermes", message("m1", "please review"), ready, false)
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(NewInbound), now: clk.now})
+	until(t, "the request card", func() bool { return len(inboxCards(h)) == 1 })
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) {
+		b.Cards["r_1"] = &kanbantest.Card{ID: "r_1", Title: "answer", Body: replyCard, Assignee: "sidera", Status: "ready", CreatedBy: "hermes"}
+	})
+	until(t, "the reply card to be blocked", func() bool { return boardCard(h, "r_1").Status == "blocked" })
+	if r := h.app.env.State.View().Replies["r_1"]; r == nil || r.Phase != state.PhaseBlocked || r.Answered() {
+		t.Fatalf("reply record %+v, want blocked and its request unanswered", r)
+	}
+
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) { b.Cards["r_1"].Status = "done" })
+	clk.advance(blockedCheckInterval + time.Minute)
+	until(t, "the reply card to be finished in the record", func() bool {
+		r := h.app.env.State.View().Replies["r_1"]
+		return r != nil && r.Phase == state.PhaseFinished && r.Answered()
+	})
+}

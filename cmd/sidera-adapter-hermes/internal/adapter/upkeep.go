@@ -2,6 +2,8 @@ package adapter
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/lane"
@@ -73,9 +75,10 @@ func (f *laneFlows) Tick(ctx context.Context) {
 	}
 }
 
-// reconcileBlocked reads the blocked cards every blockedCheckInterval and ends in the
-// record those Hermes has completed or archived, which frees their remote sessions
-// and endpoints. A failure of Hermes that may pass is left to the next round; a card
+// reconcileBlocked reads the blocked cards, delegated and reply alike, every
+// blockedCheckInterval and ends in the record those Hermes has completed or archived,
+// which frees their remote sessions and endpoints, and for a reply card the request it
+// was to answer. A failure of Hermes that may pass is left to the next round; a card
 // that is ready again is the poll's.
 func (f *laneFlows) reconcileBlocked(ctx context.Context) {
 	now := f.env.Now()
@@ -85,17 +88,39 @@ func (f *laneFlows) reconcileBlocked(ctx context.Context) {
 	f.blockedCheckedAt = now
 	d := f.env.State.View()
 	for _, c := range d.CardList() {
-		if c.Phase != state.PhaseBlocked || ctx.Err() != nil {
-			continue
-		}
-		detail, err := f.env.Board.Show(ctx, c.ID)
-		switch {
-		case err == nil && terminal(detail.Card.Status), err != nil && isPermanent(err):
+		if c.Phase == state.PhaseBlocked && f.finishedOnBoard(ctx, c.ID) {
 			f.finishLocal(ctx, c.ID)
-		case err != nil:
-			f.env.Log.Warn("reading a blocked card", "card", c.ID, "error", err)
 		}
 	}
+	for _, id := range slices.Sorted(maps.Keys(d.Replies)) {
+		if d.Replies[id].Phase == state.PhaseBlocked && f.finishedOnBoard(ctx, id) {
+			if err := f.env.State.Update(func(d *state.Data) error {
+				if r, ok := d.Replies[id]; ok {
+					r.Finish(f.env.Now())
+				}
+				return nil
+			}); err != nil {
+				f.env.Log.Error("recording a finished reply card", "card", id, "error", err)
+			}
+		}
+	}
+}
+
+// finishedOnBoard reports whether Hermes has completed or archived the card, or no
+// longer knows it. A failure that may pass is logged and answers no.
+func (f *laneFlows) finishedOnBoard(ctx context.Context, id string) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	detail, err := f.env.Board.Show(ctx, id)
+	switch {
+	case err == nil:
+		return terminal(detail.Card.Status)
+	case isPermanent(err):
+		return true
+	}
+	f.env.Log.Warn("reading a blocked card", "card", id, "error", err)
+	return false
 }
 
 // closeSessions reads what became of the closes asked earlier, then asks for the

@@ -32,15 +32,16 @@ const (
 	ReasonSessionClosed
 	// ReasonNoReply: the peer did not answer in time.
 	ReasonNoReply
-	// ReasonAliasRemoved: the alias a follow-up reaches its peer through is no
-	// longer in the alias table.
-	ReasonAliasRemoved
+	// ReasonAliasChanged: the alias a follow-up reaches its peer through is no
+	// longer in the alias table, or no longer names the address the parent went to
+	// or no longer allows messages.
+	ReasonAliasChanged
 )
 
 // Category is the category the reason is counted in.
 func (r Reason) Category() state.Category {
 	switch r {
-	case ReasonInvalidCard, ReasonAliasRemoved:
+	case ReasonInvalidCard, ReasonAliasChanged:
 		return state.CategoryInvalidCard
 	case ReasonNoReply:
 		return state.CategoryNoReply

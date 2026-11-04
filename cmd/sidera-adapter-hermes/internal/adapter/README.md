@@ -66,7 +66,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   the summary or the result names, and wakes the creator with the first line of the
   summary. A delegated card's reply is therefore always an attachment (`write`), and
   the result points to it by a name derived from the message id, which the sender
-  chose. Block reasons that quote a card are cut (`clip`).
+  chose. No reason quotes a card or a peer; `clip` only bounds their length.
 - **The inbound half owns every message that matches no card the lane can complete**,
   and every ready card whose mode is `reply`; the delegation flows never claim those.
 - **A message to the inbound half is `Written` only once its card is created,
@@ -79,7 +79,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   cards in flight on its endpoint (`settleEndpoint`, through `settle`, the code the tick
   uses), then reports an answer that did not arrive, once (`reportLostAnswers`,
   `state.Reply.Reported`), and only when neither changed anything, and no card of the endpoint ended for a
-  failed delivery since the last notice (`state.Endpoint.FailedAt`, `NoticedAt`), is relayed as a card
+  failed delivery in the last half hour that no notice has explained yet (`state.Endpoint.FailedAt`, `NoticedAt`, `noticeFollowsWithin`), is relayed as a card
   titled "Sidera channel notice" (`HandleNotice`). It is `Written` only once the cards
   it needed are written; a failure of Hermes that may pass is a `Retry`.
 - **A reply card is not claimed** (`answer.go`): every step is resumed from its record
@@ -87,9 +87,10 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   a timer to watch. It is sent from the endpoint that received the request, with the
   idempotency key of its persisted attempt; only a refusal with the reason
   `message_unknown` turns the reply into a plain message, once.
-- **A blocked card is read every few minutes** (`reconcileBlocked`): Hermes may complete or
-  archive it without the adapter being told, and the card would hold its remote session
-  and endpoint until a restart.
+- **A blocked card is read every few minutes** (`reconcileBlocked`), delegated and reply
+  cards alike: Hermes may complete or archive it without the adapter being told, and the
+  card would hold its remote session, and the endpoint of the request it was to answer
+  (`state.Reply.Answered`), until a restart.
 - The timings are fields (`timing`) so tests run in milliseconds; they are not settings.
 - Tests drive the real `App` over pipes against a stub daemon (`harness_test.go`) and
   use `kanban/kanbantest` as `hermes`.

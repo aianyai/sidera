@@ -73,7 +73,7 @@ func (u InUse) busy() map[string]bool {
 	}
 	answered := map[string]bool{}
 	for _, r := range u.Replies {
-		if r.RequestCard != "" {
+		if r.Answered() {
 			answered[r.RequestCard] = true
 		}
 		if r.Watched(u.Now) {

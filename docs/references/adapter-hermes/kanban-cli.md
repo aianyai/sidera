@@ -69,11 +69,15 @@ Two rules keep text that another agent wrote off the command line.
    (`--body-file -`), or as an attachment (`Attach`) of a card to be completed, which
    the result then points to by a name the adapter derived. The values the adapter
    quotes are bounded and are not another agent's: aliases and card ids, the words of
-   an enumeration the node reports (a delivery state, a rejection reason), and the
-   fixed message of an error of the local node. The reasons the adapter gives for a
+   an enumeration the node reports (a delivery state, a rejection reason), the fixed
+   message of an error of the local node, and the address of a sender where no alias
+   stands for it (in a title or a summary, and as `sidera_from` in metadata). An
+   address is `node1.../ep1...`, and the daemon hands out only addresses it has parsed:
+   bech32m text, whose alphabet has no `/`, `~`, `\` or `.`, so whatever endpoint part
+   the remote node chose it cannot begin as a path or end in a file extension. The reasons the adapter gives for a
    card it cannot serve name the field that is wrong and do not repeat what the card
    holds, since the agent that wrote the card may have read text from another machine.
-   The one value of a peer that travels as an argument is a message id, in the
+   The other value of a peer that travels as an argument is a message id, in the
    metadata of a completion and in an idempotency key: at most 128 bytes of visible
    ASCII, which the envelope decoder enforces, so no NUL, and Hermes reads only the
    `artifacts` member of metadata for paths, which the adapter never sets.

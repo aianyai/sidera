@@ -286,8 +286,8 @@ func followUpText(r lane.Reason) string {
 	switch r {
 	case lane.ReasonSessionClosed:
 		return "The remote session of the earlier card is closed. Create a new_session card to start another one."
-	case lane.ReasonAliasRemoved:
-		return "The alias the earlier card was sent to is no longer in this node's alias table."
+	case lane.ReasonAliasChanged:
+		return "The alias the earlier card was sent to is no longer in this node's alias table, or no longer names the same address or allows messages."
 	}
 	return `This follow-up has no "to" and none of its parent cards was sent to a peer.`
 }
@@ -542,7 +542,8 @@ func (f *laneFlows) settleEndpoint(ctx context.Context, key string) (ended bool,
 func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.MessageStatusResult) (ended bool, err error) {
 	r := res.ControlReply.Create
 	if r.Outcome == adapterproto.CreateReplyFailed {
-		f.noteDeliveryFailure(c.Endpoint)
+		// Not a failed delivery: the control signal was delivered, through its committed
+		// reply, so the node sends no notice that a marker could be waiting for.
 		return true, f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, fmt.Sprintf("The remote session could not be created (%s).", r.Reason))
 	}
 	addr := sessionAddress(res.Recipients, r.SessionEndpoint)

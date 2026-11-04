@@ -215,3 +215,45 @@ func TestNoticeThatNothingExplainsIsRelayed(t *testing.T) {
 		})
 	}
 }
+
+// A failure explains the one notice that follows it, and only while that notice can
+// still be on its way. A session the node could not create is no failed delivery (the
+// signal was delivered, through its committed reply) and the node sends no notice for
+// it; a failed delivery whose notice never came is forgotten with time. Either would
+// otherwise swallow a notice about something else.
+func TestFailureThatNoNoticeFollowsDoesNotSwallowALaterNotice(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		card  string
+		after time.Duration
+		reply func(sent adapterproto.SendParams) adapterproto.MessageStatusResult
+	}{
+		{"session creation failed", sessionCard, 0, func(sent adapterproto.SendParams) adapterproto.MessageStatusResult {
+			return adapterproto.MessageStatusResult{
+				Recipients: []adapterproto.RecipientStatus{{To: sent.To[0], State: adapterproto.DeliveryDelivered}},
+				ControlReply: &adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate,
+					Create: &adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonNativeError}}}
+		}},
+		{"rejected, notice long after", messageCard, noticeFollowsWithin + time.Minute, func(sent adapterproto.SendParams) adapterproto.MessageStatusResult {
+			return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{
+				{To: sent.To[0], State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectEndpointMissing}}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var released atomic.Bool
+			clk := newClock()
+			d := &daemon{directAccess: true, statusAnswer: tc.reply}
+			d.serveInOrder("orphan", step{notice("n1", systemSender, "Something else happened."), released.Load})
+			h := start(t, options{d: d, lane: true, flows: LaneFlows(NewInbound), now: clk.now})
+			addCard(t, h, "t_1", tc.card)
+			until(t, "the card to be blocked", func() bool { return boardCard(h, "t_1").Status == "blocked" })
+
+			clk.advance(tc.after)
+			released.Store(true)
+			h.eventually("the notice to be acknowledged", func() bool { return slices.Contains(d.acked(), "n1") })
+			if n := len(inboxCards(h)); n != 1 {
+				t.Errorf("%d cards made of the notice, want it relayed", n)
+			}
+		})
+	}
+}

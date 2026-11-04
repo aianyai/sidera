@@ -266,7 +266,7 @@ func TestBlockKindOf(t *testing.T) {
 		{ReasonOutcomeUnknown, kanban.BlockTransient},
 		{ReasonSessionClosed, kanban.BlockTransient},
 		{ReasonNoReply, kanban.BlockNeedsInput},
-		{ReasonAliasRemoved, kanban.BlockCapability},
+		{ReasonAliasChanged, kanban.BlockCapability},
 	}
 	for _, tc := range cases {
 		if got := BlockKindOf(tc.reason.Category()); got != tc.want || !got.Valid() {
@@ -371,20 +371,27 @@ func TestSessionsToClose(t *testing.T) {
 }
 
 func TestRouteFollowUp(t *testing.T) {
-	open := []state.Session{{Address: "sess-1"}}
-	table := config.Aliases{"codex": {Name: "codex"}}
+	open := []state.Session{{Address: "nodeb/sess-1"}}
+	table := config.Aliases{
+		"codex":    {Name: "codex", Address: "nodeb/codex", Modes: []string{config.ModeMessage}},
+		"readonly": {Name: "readonly", Address: "nodeb/codex", Modes: []string{config.ModeNewSession}, Presets: []string{"p"}},
+		"moved":    {Name: "moved", Address: "nodec/codex", Modes: []string{config.ModeMessage}},
+	}
 	cases := []struct {
 		name    string
 		parents []state.Card
 		want    Route
 		reason  Reason
 	}{
-		{"a remote session that is still open", []state.Card{{Endpoint: "e", Peer: "sess-1", Session: true, Alias: "codex"}}, Route{Endpoint: "e", Peer: "sess-1", Session: true, Alias: "codex"}, 0},
-		{"a remote session that was closed", []state.Card{{Endpoint: "e", Peer: "sess-2", Session: true, Alias: "codex"}}, Route{}, ReasonSessionClosed},
-		{"a fixed address needs no session", []state.Card{{Endpoint: "e", Peer: "fixed", Alias: "codex"}}, Route{Endpoint: "e", Peer: "fixed", Alias: "codex"}, 0},
-		{"the first parent that has a peer", []state.Card{{Endpoint: "e"}, {Endpoint: "e2", Peer: "fixed", Alias: "codex"}}, Route{Endpoint: "e2", Peer: "fixed", Alias: "codex"}, 0},
-		{"the alias was removed from the table", []state.Card{{Endpoint: "e", Peer: "fixed", Alias: "gone"}}, Route{}, ReasonAliasRemoved},
-		{"the alias was removed, whatever became of its session", []state.Card{{Endpoint: "e", Peer: "sess-2", Session: true, Alias: "gone"}}, Route{}, ReasonAliasRemoved},
+		{"a remote session that is still open", []state.Card{{Endpoint: "e", Peer: "nodeb/sess-1", Session: true, Alias: "codex"}}, Route{Endpoint: "e", Peer: "nodeb/sess-1", Session: true, Alias: "codex"}, 0},
+		{"a remote session that was closed", []state.Card{{Endpoint: "e", Peer: "nodeb/sess-2", Session: true, Alias: "codex"}}, Route{}, ReasonSessionClosed},
+		{"a fixed address needs no session", []state.Card{{Endpoint: "e", Peer: "nodeb/codex", Alias: "codex"}}, Route{Endpoint: "e", Peer: "nodeb/codex", Alias: "codex"}, 0},
+		{"the first parent that has a peer", []state.Card{{Endpoint: "e"}, {Endpoint: "e2", Peer: "nodeb/codex", Alias: "codex"}}, Route{Endpoint: "e2", Peer: "nodeb/codex", Alias: "codex"}, 0},
+		{"the alias was removed from the table", []state.Card{{Endpoint: "e", Peer: "nodeb/codex", Alias: "gone"}}, Route{}, ReasonAliasChanged},
+		{"the alias was removed, whatever became of its session", []state.Card{{Endpoint: "e", Peer: "nodeb/sess-2", Session: true, Alias: "gone"}}, Route{}, ReasonAliasChanged},
+		{"the alias names another address now", []state.Card{{Endpoint: "e", Peer: "nodeb/codex", Alias: "moved"}}, Route{}, ReasonAliasChanged},
+		{"the alias names another node now, whatever its session", []state.Card{{Endpoint: "e", Peer: "nodeb/sess-1", Session: true, Alias: "moved"}}, Route{}, ReasonAliasChanged},
+		{"the alias no longer allows messages", []state.Card{{Endpoint: "e", Peer: "nodeb/codex", Alias: "readonly"}}, Route{}, ReasonAliasChanged},
 		{"no parent has a peer", []state.Card{{Endpoint: "e"}}, Route{}, ReasonInvalidCard},
 		{"no parent known", nil, Route{}, ReasonInvalidCard},
 	}
@@ -424,11 +431,15 @@ func TestPlaceEndpoint(t *testing.T) {
 		{"full: one that received a request nobody answered yet is kept", "new", full, nil, nil,
 			[]state.Request{{CardID: "r", Endpoint: "b"}}, nil, Placement{Key: "new", Retire: "c"}},
 		{"full: an answered request does not keep it", "new", full, nil, nil,
-			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r"}}, Placement{Key: "new", Retire: "b"}},
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", Phase: state.PhaseSent}}, Placement{Key: "new", Retire: "b"}},
+		{"full: a reply card its creator finished does not keep it", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", Phase: state.PhaseFinished}}, Placement{Key: "new", Retire: "b"}},
+		{"full: a reply card still blocked keeps it", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", Phase: state.PhaseBlocked}}, Placement{Key: "new", Retire: "c"}},
 		{"full: an answer the node may still report on keeps the endpoint it was sent from", "new", full, nil, nil,
-			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", MessageID: "m", SentAt: ago(time.Minute)}}, Placement{Key: "new", Retire: "c"}},
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", Phase: state.PhaseSent, MessageID: "m", SentAt: ago(time.Minute)}}, Placement{Key: "new", Retire: "c"}},
 		{"full: an answer past the window does not", "new", full, nil, nil,
-			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", MessageID: "m", SentAt: ago(adapterproto.SentKeyWindow + time.Minute)}}, Placement{Key: "new", Retire: "b"}},
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", Phase: state.PhaseSent, MessageID: "m", SentAt: ago(adapterproto.SentKeyWindow + time.Minute)}}, Placement{Key: "new", Retire: "b"}},
 		{"full and nothing can go: send from the orphan", "new", full, nil, []state.Card{busy("a"), busy("b"), busy("c")}, nil, nil, Placement{Key: OrphanKey}},
 	}
 	for _, tc := range cases {

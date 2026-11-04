@@ -131,8 +131,12 @@ from its creator; no request that arrived on it is unanswered, since the answer 
 sent from the endpoint that received the request and may come in a later turn; and no
 answer sent from it is still watched (`state.Reply.Watched`), since the node's notice
 about a failed delivery of the answer comes to the endpoint it was sent from. A request
-is answered once a reply record names it, and is forgotten after `RequestRetention`
-whether answered or not. The same key opens the same address again, so retiring loses
+is answered once its answer is sent or its reply card is over (`state.Reply.Answered`),
+and is forgotten after `RequestRetention` (30 days) whether answered or not. So a
+request nobody answers keeps its conversation endpoint for those 30 days, and with
+`max_endpoints` of them reached nothing can be retired to make room: new conversations
+are then sent from the orphan endpoint (below) until a request is answered or its
+record is forgotten. The same key opens the same address again, so retiring loses
 nothing but messages sent in the meantime. `orphan` is never retired.
 
 **Capacity** (`lane.PlaceEndpoint`). The adapter holds at most `max_endpoints`; two
@@ -456,10 +460,12 @@ is usable, under the same pause rule as the other loops: it moves every card on
 (`advance`: send what is due, resend an interrupted attempt or declare its outcome
 unknown, read what became of a message, block a card whose wait ran out), closes
 remote sessions and forgets finished records after `session_retention`. Every five
-minutes it also reads the cards it has blocked (`reconcileBlocked`) and ends in the
-record those Hermes has completed or archived meanwhile: a person or an agent may
-complete a blocked card instead of unblocking it, and nothing else tells the adapter,
-which would hold the card's remote session and its endpoint for as long as it runs. The
+minutes it also reads the cards it has blocked (`reconcileBlocked`), delegated and
+reply cards alike, and ends in the record those Hermes has completed or archived
+meanwhile: a person or an agent may complete a blocked card instead of unblocking it,
+and nothing else tells the adapter, which would hold the card's remote session and its
+endpoint for as long as it runs, or the endpoint that received the request a reply card
+was to answer, since the request counts as answered once its reply card is over. The
 interval is a command per blocked card and the news is not urgent, since a session is
 kept for an hour at least.
 
@@ -578,9 +584,16 @@ follow, in this order, each for the endpoint that received the notice:
    ended for a failed delivery (`state.Endpoint.FailedAt`) explains the first notice
    handled on the endpoint after it (`NoticedAt` is when one was last handled), so that
    a notice that finds nothing in flight is not relayed to the conversation, which the
-   blocked card has already woken about the same failure. One notice explains all the
-   failures before it; the notice of a second failure that follows within the same
-   interval is relayed, which wakes the conversation once more and loses nothing.
+   blocked card has already woken about the same failure. The mark is made only where a
+   notice follows: a session the node could not create is no failed delivery (the signal
+   was delivered, through its committed reply) and the node sends nothing for it. A mark
+   explains one notice, and only for 30 minutes (`noticeFollowsWithin`): the node merges
+   the notices of an endpoint for a minute and holds those over its cap of ten in ten
+   minutes, so a notice is due within about eleven minutes of the failure, and one that
+   comes later, or a mark no notice used, must not swallow a notice about something
+   else. One notice explains all the failures before it; the notice of a second failure
+   that follows within the same interval is relayed, which wakes the conversation once
+   more and loses nothing.
 2. **Answers that did not arrive are reported** (`inbound.reportLostAnswers`). A reply
    card is completed as soon as its answer is sent, so a failure of the answer afterwards
    has no card to land on. The reply record keeps the Sidera message id of the answer, the
@@ -657,8 +670,10 @@ with the node's reason, and a second failure completes it with the reason.
 **What is recorded, and for how long.** A request record (card, receiving endpoint,
 message id, sender) is written when the request card is made and kept for
 `state.RequestRetention` (30 days). A reply record (attempt, its start, whether it is
-the plain form, the message id, the blocks per category) is written with the first
-attempt and dropped `session_retention` after the card finished.
+the plain form, the message id, the request card it is for, the blocks per category) is
+written with the first attempt, or with the failure that ended the card before one, and
+dropped `session_retention` after the card finished. A reply card that does not identify
+a request (it is invalid) leaves none.
 
 ### The Skill and setup
 
@@ -865,10 +880,12 @@ and a second failure completes it with the reason.
 **A follow-up's route** (`RouteFollowUp`). A message card that names no alias goes to
 the peer of its first parent that has one, from the endpoint that parent used. If that
 peer is a remote session the adapter has closed, the reason is session closed; if the
-alias the parent was sent to is no longer in the alias table, the card is invalid (the
-table is the allow-list of what a card can make this node do, and a follow-up reaches
-the peer through its parent without naming it); if no parent has a peer, the card is
-invalid.
+alias the parent was sent to is no longer in the alias table, no longer names the address
+the parent was sent to (for a remote session, its node) or no longer allows `message`,
+the card is invalid, blocked as `capability` with a reason that names none of those
+values (the table is the allow-list of what a card can make this node do, and a
+follow-up reaches the peer through its parent without naming it); if no parent has a
+peer, the card is invalid.
 
 **Closing remote sessions** (`SessionsToClose`). Each `new_session` leaves a session
 endpoint on the other node, which the node's own cap on endpoints would eventually
