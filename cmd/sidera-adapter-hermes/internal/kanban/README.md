@@ -35,6 +35,15 @@ without the adapter around it.
 - **A field the adapter relies on that is missing from the JSON is an error**;
   fields it does not read are ignored.
 
+## Tests without Hermes
+
+`kanbantest` is a stand-in for the `hermes` program: the test binary doubles as
+hermes (`kanbantest.MaybeRun` in `TestMain`, `kanbantest.Executable` for the path
+to give the client) and answers from the recordings in `testdata/`. Its `board` mode
+also answers listing the ready cards and fails like a locked database while a file
+in its control directory says so. The adapter's tests use it as well, so there is one
+fake and it follows the samples.
+
 ## Re-recording the samples
 
 `testdata/` holds real outputs of the supported Hermes. After a Hermes upgrade,
