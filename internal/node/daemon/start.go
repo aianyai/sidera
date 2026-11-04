@@ -426,7 +426,7 @@ func (d *Daemon) stepAdapters(ctx context.Context) error {
 	if h := d.cfg.AdapterHost; h != nil {
 		env := d.env()
 		err := h.Start(ctx, adapterhost.Env{
-			Home: d.home, Source: env.Config, Logs: env.Logs, Engine: apiwire.AdapterEngine(d.engine),
+			Home: d.home, Source: env.Config, Logs: env.Logs, Engine: apiwire.AdapterEngine(d.engine), Log: d.log,
 		})
 		if err != nil {
 			return err

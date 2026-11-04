@@ -24,9 +24,6 @@ type Config struct {
 	// waits for an adapter to end, the handshake limits. nil is clock.System(): in
 	// the daemon these are real-time waits; a test passes a fake and moves it.
 	Clock clock.Clock
-	// Log receives what the host did and why; nil discards it. It never receives a
-	// message body, a token or a key.
-	Log *slog.Logger
 }
 
 // Errors of Start.
@@ -78,16 +75,13 @@ func New(c Config) (*Host, error) {
 		launcher: c.Launcher,
 		params:   c.Params.withDefaults(),
 		clk:      c.Clock,
-		log:      c.Log,
 		version:  daemonVersion(),
 		sups:     map[string]*supervisor{},
 	}
 	if h.clk == nil {
 		h.clk = clock.System()
 	}
-	if h.log == nil {
-		h.log = slog.New(slog.DiscardHandler)
-	}
+	h.log = slog.New(slog.DiscardHandler)
 	return h, nil
 }
 
@@ -144,6 +138,9 @@ func (h *Host) Start(ctx context.Context, env Env) error {
 	}
 	h.phase = phaseRunning
 	h.env = env
+	if env.Log != nil {
+		h.log = env.Log
+	}
 	h.endpoints, _ = env.Engine.(EndpointCalls)
 	h.observed, _ = env.Engine.(ObservedCalls)
 	h.directory, _ = env.Engine.(DirectoryCalls)

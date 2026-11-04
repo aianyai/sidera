@@ -203,6 +203,7 @@ func (s *supervisor) release() {
 func (s *supervisor) startWaitExpired() {
 	s.stopTimer(s.startTimer)
 	s.startTimer = nil
+	s.log.Warn("the adapter did not start within the start wait; it is reported offline and the attempt goes on", "wait", s.h.params.StartWait.String())
 	s.report(GoneStartFailed)
 	s.release()
 }

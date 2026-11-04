@@ -28,7 +28,8 @@ func (s *supervisor) pass() (stable bool, err error) {
 			s.release()
 			return false, err
 		}
-		s.log.Warn("the adapter was not taken on", "err", err)
+		// Once for each attempt: the backoff between attempts bounds how often.
+		s.log.Warn("the adapter was not taken on", "cause", causeOf(err).String(), "err", err)
 		s.report(causeOf(err))
 		s.release()
 		return false, nil

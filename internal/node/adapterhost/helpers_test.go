@@ -896,7 +896,7 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 	if ro.params != (adapterhost.Params{}) {
 		params = ro.params
 	}
-	h, err := adapterhost.New(adapterhost.Config{Launcher: r.lau, Params: params, Clock: r.clk, Log: slog.New(r.records)})
+	h, err := adapterhost.New(adapterhost.Config{Launcher: r.lau, Params: params, Clock: r.clk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -911,7 +911,7 @@ func (r *rig) env(basic bool) adapterhost.Env {
 	if basic {
 		eng = basicEngine{r.eng}
 	}
-	return adapterhost.Env{Home: r.home, Source: r.src, Logs: r.logs, Engine: eng}
+	return adapterhost.Env{Home: r.home, Source: r.src, Logs: r.logs, Engine: eng, Log: slog.New(r.records)}
 }
 
 // start starts the host and fails the test if Start fails.

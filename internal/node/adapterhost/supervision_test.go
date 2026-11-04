@@ -870,6 +870,12 @@ func TestAPackageThatCannotRunIsReportedWithWhyAndTheOtherInstancesGoOn(t *testi
 			if got := r.goneCauses("fine"); len(got) != 0 {
 				t.Errorf("fine was reported %v", got)
 			}
+			if !r.records.contains("the adapter was not taken on cause=" + tc.want.String()) {
+				t.Errorf("the failed start was not logged with its cause %s: %v", tc.want, r.records.msgs)
+			}
+			if tc.launch != nil && !r.records.contains(tc.launch.Error()) {
+				t.Errorf("the failed start was logged without its error %q: %v", tc.launch, r.records.msgs)
+			}
 			if got := launchesOf(r.lau, "broken"); got != tc.launches {
 				t.Errorf("broken was launched %d times, want %d", got, tc.launches)
 			}

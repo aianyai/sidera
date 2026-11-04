@@ -466,7 +466,7 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 		// The host runs on the test clock: its pings, its backoff and its waits for a
 		// process to end are moved by Advance, and nothing in it waits for real time.
 		p.host, err = adapterhost.New(adapterhost.Config{
-			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.clk, Log: slog.New(p.log),
+			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.clk,
 		})
 		if err != nil {
 			return fmt.Errorf("adapterhost.New: %w", err)
@@ -495,7 +495,7 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 	}
 	p.eng.Start()
 	if p.host != nil {
-		env := adapterhost.Env{Home: h.adapterHome, Source: cfg, Logs: newLogs(h.t), Engine: apiwire.AdapterEngine(p.eng)}
+		env := adapterhost.Env{Home: h.adapterHome, Source: cfg, Logs: newLogs(h.t), Engine: apiwire.AdapterEngine(p.eng), Log: slog.New(p.log)}
 		if err := p.host.Start(ctx, env); err != nil {
 			return fmt.Errorf("starting the adapter host: %w", err)
 		}

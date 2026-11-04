@@ -64,6 +64,14 @@ engine as `GoneStartFailed`: the process did not start, its answers were wrong, 
 was refused admission, it held no lock or the engine could not take it. A probe the
 adapter fails (an error, a result that is not valid) is logged and nothing more.
 
+Each failed attempt is logged once, as a warning of the daemon's log (`Env.Log`; the
+daemon passes its own, which the host cannot be given earlier because the daemon is
+built after it) with its cause and the error that ended it, for instance that the state
+directory is not private to its owner: the engine's own line says only which cause the
+instance is offline with. The backoff between attempts bounds how often the line
+repeats. A start that has not answered when `Params.StartWait` passes is logged too,
+before the instance is reported offline.
+
 A start that fails because the installed package cannot run is reported with a
 cause of its own, so that the owner is told why and not only that the instance is
 offline (`GoneCause.PackageFault`). Before launching, the host judges the package

@@ -1,6 +1,8 @@
 package adapterhost
 
 import (
+	"log/slog"
+
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/logfile"
 )
@@ -35,4 +37,9 @@ type Env struct {
 	// EndpointCalls, ObservedCalls or DirectoryCalls, the host answers those
 	// requests of the adapters through it.
 	Engine Engine
+	// Log receives what the host did and why, among it the error that ended each
+	// attempt to start an instance; nil discards it. It never receives a message
+	// body, a token or a key. It is part of Env, not of Config, because the daemon
+	// that owns the log is built after the host is.
+	Log *slog.Logger
 }
