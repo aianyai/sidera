@@ -27,7 +27,8 @@ func (in *inbound) HandleReplyCard(ctx context.Context, c kanban.Card) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	d := in.env.State.View()
-	if r := d.Replies[c.ID]; r != nil && r.Phase == state.PhaseFinished {
+	act := lane.OnReplyCard(d.Replies[c.ID], in.env.Now())
+	if act.Kind == lane.ReplyIgnore {
 		return
 	}
 	req, inv := in.checkReply(d, c)
@@ -35,7 +36,7 @@ func (in *inbound) HandleReplyCard(ctx context.Context, c kanban.Card) {
 		in.fail(ctx, c.ID, lane.ReasonInvalidCard, inv.Reason)
 		return
 	}
-	in.answer(ctx, c.ID, req.Task, *d.Requests[req.ReplyTo])
+	in.answer(ctx, c.ID, req.Task, *d.Requests[req.ReplyTo], act)
 }
 
 // checkReply validates a reply card: the creator list and the envelope as for any
@@ -57,29 +58,23 @@ func (in *inbound) checkReply(d state.Data, c kanban.Card) (card.Request, *card.
 	return req, nil
 }
 
-// answer sends the text to the sender of the request and completes the card. The
-// attempt is written down before the send: the idempotency key is built from its
-// number, and recovery decides from its start whether the same message may still be
-// sent. A card listed again goes on from the record: sent goes straight to the
-// completion, an attempt in progress is sent again under the same key, a card its
-// creator unblocked is a new attempt.
-func (in *inbound) answer(ctx context.Context, id, text string, orig state.Request) {
-	attempt, plain := 1, false
-	if r := in.env.State.View().Replies[id]; r != nil {
-		switch r.Phase {
-		case state.PhaseSent:
-			in.complete(ctx, id, orig)
-			return
-		case state.PhaseAttempting:
-			if in.env.Now().Sub(r.AttemptAt) > adapterproto.SentKeyWindow {
-				in.fail(ctx, id, lane.ReasonOutcomeUnknown, "The adapter cannot tell whether the answer was sent; it was too long ago to send it again.")
-				return
-			}
-			attempt, plain = r.Attempt, r.Plain
-		case state.PhaseBlocked:
-			attempt = r.Attempt + 1
-		}
+// answer sends the text to the sender of the request and completes the card, as
+// lane.OnReplyCard says from the record of the card's answer. The attempt is written
+// down before the send: the idempotency key is built from its number, and the
+// record's start decides whether the same message may still be sent. A card listed
+// again goes on from the record: sent goes straight to the completion, an attempt in
+// progress is sent again under the same key, a card its creator unblocked is a new
+// attempt.
+func (in *inbound) answer(ctx context.Context, id, text string, orig state.Request, act lane.ReplyAction) {
+	switch act.Kind {
+	case lane.ReplyComplete:
+		in.complete(ctx, id, orig)
+		return
+	case lane.ReplyOutcomeUnknown:
+		in.fail(ctx, id, lane.ReasonOutcomeUnknown, "The adapter cannot tell whether the answer was sent; it was too long ago to send it again.")
+		return
 	}
+	attempt, plain := act.Attempt, act.Plain
 	from, ok := in.env.EndpointRef(orig.Endpoint)
 	if !ok {
 		in.fail(ctx, id, lane.ReasonDeliveryFailed, "The endpoint that received the request is closed, so the answer cannot be sent from it.")
@@ -157,38 +152,30 @@ func (in *inbound) complete(ctx context.Context, id string, orig state.Request) 
 	}
 }
 
-// fail ends what the card was doing, once per cause: the first time it is blocked so
-// that its creator decides, the second time it is completed with the reason, since
-// Hermes sends a card blocked twice for one kind to a state in which nobody is woken
-// (lane.OnFailure).
+// fail ends what the card was doing, once per cause (endFailed). A failure of Hermes
+// that may pass leaves the card as it is: it is listed again while it is ready.
 func (in *inbound) fail(ctx context.Context, id string, reason lane.Reason, text string) {
 	var blocks map[state.Category]int
 	if r := in.env.State.View().Replies[id]; r != nil {
 		blocks = r.Blocks
 	}
+	blocked, err := endFailed(ctx, in.env.Board, id, blocks, reason, text, "", true)
 	cat := reason.Category()
-	if lane.OnFailure(blocks, reason) == lane.VerdictBlock {
-		err := in.env.Board.Block(ctx, id, lane.BlockKindOf(cat), clip(text))
-		if err != nil {
-			in.env.Log.Warn("blocking a reply card; it is looked at again if it is still ready", "card", id, "error", err)
-			return
-		}
+	switch {
+	case err != nil && blocked:
+		in.env.Log.Warn("blocking a reply card; it is looked at again if it is still ready", "card", id, "error", err)
+		return
+	case err != nil && !isPermanent(err):
+		in.env.Log.Warn("completing a reply card; it is tried again", "card", id, "error", err)
+		return
+	case blocked:
 		if err := in.update(id, func(r *state.Reply) { r.Block(cat) }); err != nil {
 			in.env.Log.Error("recording a blocked reply card", "card", id, "error", err)
 		}
-		return
-	}
-	summary := summaryReplyFailed
-	if cat == state.CategoryInvalidCard {
-		summary = summaryInvalid
-	}
-	err := in.env.Board.Complete(ctx, id, kanban.Completion{Summary: summary, Result: clip(text)})
-	if err != nil && !isPermanent(err) {
-		in.env.Log.Warn("completing a reply card; it is tried again", "card", id, "error", err)
-		return
-	}
-	if err := in.update(id, func(r *state.Reply) { r.Finish(in.env.Now()) }); err != nil {
-		in.env.Log.Error("recording a finished reply card", "card", id, "error", err)
+	default:
+		if err := in.update(id, func(r *state.Reply) { r.Finish(in.env.Now()) }); err != nil {
+			in.env.Log.Error("recording a finished reply card", "card", id, "error", err)
+		}
 	}
 }
 

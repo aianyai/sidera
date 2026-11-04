@@ -105,6 +105,40 @@ const (
 	commentUnconfirm  = "The remote session may exist but was not confirmed ready; still waiting for its reply."
 )
 
+// failureSummary is the summary a card that cannot go on is completed with. Its
+// first line is what Hermes wakes the creator with, so it is the adapter's.
+func failureSummary(cat state.Category, replyCard bool) string {
+	switch {
+	case cat == state.CategoryInvalidCard:
+		return summaryInvalid
+	case replyCard:
+		return summaryReplyFailed
+	case cat == state.CategoryNoReply:
+		return summaryNoReply
+	}
+	return summaryNoDelivery
+}
+
+// endFailed ends what a card that cannot go on was doing, once per cause, for a
+// delegated card and a reply card alike: the first time it is blocked so that its
+// creator decides, the second time it is completed with the reason, since Hermes
+// sends a card blocked twice for one kind to a state in which nobody is woken
+// (lane.OnFailure). blocks are the blocks the card has had; text is the reason, and
+// completionText replaces it when the card is completed and the second time has
+// something else to say. blocked says which of the two was tried, and the error
+// is Hermes' answer to it. Recording the outcome is the caller's.
+func endFailed(ctx context.Context, board *kanban.Client, id string, blocks map[state.Category]int,
+	reason lane.Reason, text, completionText string, replyCard bool) (blocked bool, err error) {
+	cat := reason.Category()
+	if lane.OnFailure(blocks, reason) == lane.VerdictBlock {
+		return true, board.Block(ctx, id, lane.BlockKindOf(cat), clip(text))
+	}
+	if completionText != "" {
+		text = completionText
+	}
+	return false, board.Complete(ctx, id, kanban.Completion{Summary: failureSummary(cat, replyCard), Result: clip(text)})
+}
+
 // maxReason bounds the text of a block reason or a comment that may quote a bit of
 // what a card or a peer said.
 const maxReason = 1024

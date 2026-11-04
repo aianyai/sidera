@@ -82,7 +82,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   titled "Sidera channel notice" (`HandleNotice`). It is `Written` only once the cards
   it needed are written; a failure of Hermes that may pass is a `Retry`.
 - **A reply card is not claimed** (`answer.go`): every step is resumed from its record
-  (`state.Reply`) when the poll lists the card again, so there is no claimed state for
+  (`state.Reply`, `lane.OnReplyCard`) when the poll lists the card again, so there is no claimed state for
   a timer to watch. It is sent from the endpoint that received the request, with the
   idempotency key of its persisted attempt; only a refusal with the reason
   `message_unknown` turns the reply into a plain message, once.

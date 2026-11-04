@@ -122,6 +122,20 @@ type Action struct {
 	ResetTimer bool
 }
 
+// AttemptExpired reports whether an attempt begun at the time is too old to be sent
+// again: the node recognizes a repeated send by its idempotency key only for
+// adapterproto.SentKeyWindow, and a repeat past it might be a second message, a
+// second remote session in the case of a creation. It is the one home of the rule
+// for every card the adapter sends, delegated or reply.
+//
+// The window is the SDK's, not a setting: a copied value would drift silently
+// when the protocol timing changes. It holds only while the adapter's sends name
+// no accept_before_s, so the node's default deadline applies; a send that names
+// one must not rely on it, and the window has to be re-derived from that deadline.
+func AttemptExpired(begun, now time.Time) bool {
+	return now.Sub(begun) > adapterproto.SentKeyWindow
+}
+
 // OnReady decides what to do with a card the board lists as ready. A nil card is
 // one the adapter has no record of. A known card is ready again because its
 // creator unblocked it, or because its claim lapsed or was released, and the
@@ -139,11 +153,6 @@ type Action struct {
 //     adapterproto.SentKeyWindow: then it is not repeated, because a repeat might
 //     create a second remote session, and the outcome is unknown;
 //   - sent: it already is; go on waiting, timer as it was.
-//
-// The window is the SDK's, not a setting: a copied value would drift silently
-// when the protocol timing changes. It holds only while the adapter's sends name
-// no accept_before_s, so the node's default deadline applies; a send that names
-// one must not rely on it, and the window has to be re-derived from that deadline.
 func OnReady(c *state.Card, now time.Time) Action {
 	switch {
 	case c == nil, c.Phase == state.PhaseClaiming:
@@ -156,11 +165,63 @@ func OnReady(c *state.Card, now time.Time) Action {
 		return Action{Kind: ActionKeepWaiting, ResetTimer: true}
 	case c.Phase == state.PhaseBlocked, c.Phase == state.PhaseNew:
 		return Action{Kind: ActionSend, Attempt: c.Attempt + 1}
-	case c.Phase == state.PhaseAttempting && now.Sub(c.AttemptAt) > adapterproto.SentKeyWindow:
+	case c.Phase == state.PhaseAttempting && AttemptExpired(c.AttemptAt, now):
 		return Action{Kind: ActionOutcomeUnknown}
 	case c.Phase == state.PhaseAttempting:
 		return Action{Kind: ActionSend, Attempt: c.Attempt}
 	default:
 		return Action{Kind: ActionKeepWaiting}
+	}
+}
+
+// ReplyActionKind is what to do with a reply card seen again.
+type ReplyActionKind int
+
+const (
+	// ReplyIgnore: the answer is over; nothing to do.
+	ReplyIgnore ReplyActionKind = iota + 1
+	// ReplySend: send the answer with the attempt number given, as a plain message
+	// when Plain.
+	ReplySend
+	// ReplyComplete: the answer is sent; complete the card and send nothing.
+	ReplyComplete
+	// ReplyOutcomeUnknown: the attempt was begun too long ago to repeat; treat the
+	// outcome as unknown (ReasonOutcomeUnknown).
+	ReplyOutcomeUnknown
+)
+
+// ReplyAction is the answer of OnReplyCard.
+type ReplyAction struct {
+	Kind    ReplyActionKind
+	Attempt int
+	Plain   bool
+}
+
+// OnReplyCard decides what to do with a reply card the board lists as ready, from
+// the record of its answer (nil when none was begun). A reply card is not claimed,
+// so it is listed again at every poll until it is completed or blocked, and the
+// record says how far it got, as OnReady does for a delegated card:
+//
+//   - no record: send the first attempt;
+//   - sent: the answer left, only the completion is left;
+//   - blocked: the creator unblocked it, which asks for a new attempt, as a reply;
+//   - attempting: send again with the same number and form, so the node recognizes
+//     the message, unless the attempt began longer ago than AttemptExpired allows,
+//     and then the outcome is unknown;
+//   - finished: nothing to do.
+func OnReplyCard(r *state.Reply, now time.Time) ReplyAction {
+	switch {
+	case r == nil:
+		return ReplyAction{Kind: ReplySend, Attempt: 1}
+	case r.Phase == state.PhaseFinished:
+		return ReplyAction{Kind: ReplyIgnore}
+	case r.Phase == state.PhaseSent:
+		return ReplyAction{Kind: ReplyComplete}
+	case r.Phase == state.PhaseBlocked:
+		return ReplyAction{Kind: ReplySend, Attempt: r.Attempt + 1}
+	case AttemptExpired(r.AttemptAt, now):
+		return ReplyAction{Kind: ReplyOutcomeUnknown}
+	default:
+		return ReplyAction{Kind: ReplySend, Attempt: r.Attempt, Plain: r.Plain}
 	}
 }

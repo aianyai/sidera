@@ -149,6 +149,36 @@ func TestMatchReplyFinishedByThisMessage(t *testing.T) {
 	}
 }
 
+func TestOnReplyCard(t *testing.T) {
+	window := adapterproto.SentKeyWindow
+	mk := func(phase state.Phase, mut func(*state.Reply)) *state.Reply {
+		r := &state.Reply{CardID: "r", Phase: phase, Attempt: 2, AttemptAt: ago(time.Hour)}
+		if mut != nil {
+			mut(r)
+		}
+		return r
+	}
+	cases := []struct {
+		name string
+		rec  *state.Reply
+		want ReplyAction
+	}{
+		{"no record: the first attempt", nil, ReplyAction{Kind: ReplySend, Attempt: 1}},
+		{"finished", mk(state.PhaseFinished, nil), ReplyAction{Kind: ReplyIgnore}},
+		{"sent: only the completion is left", mk(state.PhaseSent, nil), ReplyAction{Kind: ReplyComplete}},
+		{"unblocked: a new attempt, as a reply", mk(state.PhaseBlocked, func(r *state.Reply) { r.Plain = true }), ReplyAction{Kind: ReplySend, Attempt: 3}},
+		{"attempt inside the window keeps its number", mk(state.PhaseAttempting, nil), ReplyAction{Kind: ReplySend, Attempt: 2}},
+		{"attempt inside the window keeps its form", mk(state.PhaseAttempting, func(r *state.Reply) { r.Plain = true }), ReplyAction{Kind: ReplySend, Attempt: 2, Plain: true}},
+		{"attempt exactly at the window", mk(state.PhaseAttempting, func(r *state.Reply) { r.AttemptAt = ago(window) }), ReplyAction{Kind: ReplySend, Attempt: 2}},
+		{"attempt past the window is not repeated", mk(state.PhaseAttempting, func(r *state.Reply) { r.AttemptAt = ago(window + time.Second) }), ReplyAction{Kind: ReplyOutcomeUnknown}},
+	}
+	for _, tc := range cases {
+		if got := OnReplyCard(tc.rec, t0); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestQueue(t *testing.T) {
 	cards := []state.Card{
 		card("a", "e", "p", state.PhaseSent),

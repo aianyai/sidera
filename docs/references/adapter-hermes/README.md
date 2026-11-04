@@ -601,11 +601,12 @@ through `Env.Send`, so never with a delivery deadline. The idempotency key is th
 id and the persisted attempt number, as for a delegated card, and the attempt is written
 before the send. The endpoint is the one that received the message because the node
 admits a reply only from the endpoint the message was delivered to. A reply card that
-is listed again resumes from the record (`state.Reply`): an answer recorded as sent is
-only completed; an attempt under way is sent again with the same key within
-`adapterproto.SentKeyWindow` and, past it, not at all, and the card is blocked
-(`transient`, outcome unknown); a card its creator unblocked is a new attempt, with a
-new key. After the send the card is completed with the summary "Sent over Sidera to
+is listed again resumes from the record (`state.Reply`), as `lane.OnReplyCard` decides,
+beside `OnReady` and with the same rule for the window (`lane.AttemptExpired`): an answer
+recorded as sent is only completed; an attempt under way is sent again with the same
+key and in the same form within `adapterproto.SentKeyWindow` and, past it, not at all,
+and the card is blocked (`transient`, outcome unknown); a card its creator unblocked is
+a new attempt, with a new key. After the send the card is completed with the summary "Sent over Sidera to
 <sender>", whose first line is the adapter's.
 
 **The card is not claimed.** Hermes completes and blocks a card from `ready` as it does
@@ -797,6 +798,17 @@ released:
 | Attempt begun, within the window | Send with the same attempt number |
 | Attempt begun, past the window | Outcome unknown |
 | Sent | Keep waiting; the timer as it was |
+
+A reply card that is listed again is resumed the same way (`OnReplyCard`):
+
+| The record says | Action |
+| --------------- | ------ |
+| None | Send the first attempt |
+| Finished | Ignore |
+| Sent | Only complete the card |
+| Blocked | Send as the next attempt number, as a reply |
+| Attempt begun, within the window | Send with the same attempt number and the same form |
+| Attempt begun, past the window | Outcome unknown |
 
 **A card that cannot go on** (`OnFailure`). The reasons are an invalid card,
 delivery failed, outcome unknown, remote session closed and no reply (`no reply` is

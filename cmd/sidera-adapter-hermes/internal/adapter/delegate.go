@@ -525,42 +525,31 @@ func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.
 	return false, nil
 }
 
-// fail ends what the card was doing, once per cause: the first time the card is
-// blocked so that its creator decides, the second time it is completed with the
-// reason, since Hermes would send a card blocked twice for one kind to a state in
-// which nobody is woken (lane.OnFailure). The error is a failure of Hermes that may
-// pass: the card is then not ended and the caller sees to it again.
+// fail ends what the card was doing, once per cause (endFailed). The error is a
+// failure of Hermes that may pass: the card is then not ended and the caller sees to
+// it again.
 func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, text string) error {
 	c, ok := f.env.State.View().Cards[id]
 	if !ok {
 		return nil
 	}
 	cat := reason.Category()
-	if lane.OnFailure(c.Blocks, reason) == lane.VerdictBlock {
-		err := f.env.Board.Block(ctx, id, lane.BlockKindOf(cat), clip(text))
-		switch {
-		case err == nil:
-			_ = f.update(id, func(_ *state.Data, r *state.Card) { r.Block(cat) })
-		case isPermanent(err):
-			f.reconcileBlock(ctx, id, cat, err)
-		default:
-			f.env.Log.Warn("blocking a card; it is tried again", "card", id, "error", err)
-			return err
-		}
-		return nil
+	again := ""
+	if cat == state.CategoryNoReply {
+		again = "The peer still did not reply after " + f.env.Config.NoReplyTimeout.String() + "."
 	}
-	summary := summaryNoDelivery
-	switch cat {
-	case state.CategoryNoReply:
-		summary, text = summaryNoReply, "The peer still did not reply after "+f.env.Config.NoReplyTimeout.String()+"."
-	case state.CategoryInvalidCard:
-		summary = summaryInvalid
-	}
-	err := f.env.Board.Complete(ctx, id, kanban.Completion{Summary: summary, Result: clip(text)})
+	blocked, err := endFailed(ctx, f.env.Board, id, c.Blocks, reason, text, again, false)
 	switch {
-	case err == nil, isPermanent(err):
+	case err == nil && blocked:
+		_ = f.update(id, func(_ *state.Data, r *state.Card) { r.Block(cat) })
+	case err == nil, isPermanent(err) && !blocked:
 		// A card Hermes refuses to complete is terminal or not ours any more.
 		f.finishLocal(ctx, id)
+	case isPermanent(err):
+		f.reconcileBlock(ctx, id, cat, err)
+	case blocked:
+		f.env.Log.Warn("blocking a card; it is tried again", "card", id, "error", err)
+		return err
 	default:
 		f.env.Log.Warn("completing a card; it is tried again", "card", id, "error", err)
 		return err
