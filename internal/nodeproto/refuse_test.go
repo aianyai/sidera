@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	ma "github.com/multiformats/go-multiaddr"
+
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
@@ -168,6 +170,40 @@ func TestDecodeDirectoryAnswerRefuses(t *testing.T) {
 	})
 }
 
+func TestDecodeDialBackRequestRefuses(t *testing.T) {
+	runRefusals(t, DecodeDialBackRequest, []refusal{
+		{"empty input", nil, record.ErrMalformed},
+		{"input over the request limit", bytes.Repeat([]byte{0}, limit(ProtocolDialBack).Request+1), record.ErrOversize},
+		{"a field, though the request carries nothing", w.mapOf(w.uint(1), w.uint(0)), record.ErrMalformed},
+		{"trailing bytes", []byte{0xa0, 0}, record.ErrMalformed},
+	})
+}
+
+func TestDecodeDialBackAnswerRefuses(t *testing.T) {
+	ok, reached := w.uint(1), w.uint(1)
+	addr := w.bstr(ma.StringCast("/ip4/127.0.0.1/tcp/7744").Bytes())
+	runRefusals(t, DecodeDialBackAnswer, []refusal{
+		{"empty input", nil, record.ErrMalformed},
+		{"input over the answer limit", bytes.Repeat([]byte{0}, limit(ProtocolDialBack).Answer+1), record.ErrOversize},
+		{"an outcome above failed", w.mapOf(w.uint(1), w.uint(4)), ErrInvalid},
+		{"a refusal with no reason", w.mapOf(w.uint(1), w.uint(2)), ErrInvalid},
+		{"a reason on an ok answer", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(2), w.uint(4), w.tstr("x")), ErrInvalid},
+		{"a result on a refused answer", w.mapOf(w.uint(1), w.uint(2), w.uint(2), reached, w.uint(4), w.tstr("busy")), ErrInvalid},
+		{"an address on a failed answer", w.mapOf(w.uint(1), w.uint(3), w.uint(3), addr), ErrInvalid},
+		{"an ok answer with no result", w.mapOf(w.uint(1), ok), ErrInvalid},
+		{"a result above no address", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(4)), ErrInvalid},
+		{"a result that wraps to a valid one in eight bits", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(257)), ErrInvalid},
+		{"reached with no address", w.mapOf(w.uint(1), ok, w.uint(2), reached), ErrInvalid},
+		{"an address on not reached", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(2), w.uint(3), addr), ErrInvalid},
+		{"an address on no address", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(3), w.uint(3), addr), ErrInvalid},
+		{"an address that is not a multiaddr", w.mapOf(w.uint(1), ok, w.uint(2), reached, w.uint(3), w.bstr([]byte{0xff, 0xff})), ErrInvalid},
+		{"an address over the longest", w.mapOf(w.uint(1), ok, w.uint(2), reached, w.uint(3), w.bstr(make([]byte, MaxAddressLen+1))), ErrInvalid},
+		{"an empty address written out", w.mapOf(w.uint(1), ok, w.uint(2), reached, w.uint(3), w.bstr(nil)), record.ErrNotCanonical},
+		{"keys out of canonical order", w.mapOf(w.uint(2), reached, w.uint(1), ok, w.uint(3), addr), record.ErrNotCanonical},
+		{"an unknown field", w.mapOf(w.uint(1), ok, w.uint(2), w.uint(3), w.uint(5), w.uint(0)), record.ErrMalformed},
+	})
+}
+
 // A message the package writes is a message the package reads: Encode refuses
 // what the decoder would, so a node never sends a message every peer refuses.
 func TestEncodeRefusesWhatDecodeRefuses(t *testing.T) {
@@ -186,6 +222,8 @@ func TestEncodeRefusesWhatDecodeRefuses(t *testing.T) {
 		{"a pull request with no recipient", PullRequest{Message: "m"}.Encode, ErrInvalid},
 		{"a pull answer that lists a recipient twice", PullAnswer{Outcome: OutcomeOK, NoRecord: []ident.EndpointID{ep1, ep1}}.Encode, ErrInvalid},
 		{"a directory request with a negative limit", DirectoryRequest{Sender: ep1, Limit: -1}.Encode, ErrInvalid},
+		{"a dial-back answer reached with no address", DialBackAnswer{Outcome: OutcomeOK, Result: DialBackReached}.Encode, ErrInvalid},
+		{"a dial-back answer with an unset result", DialBackAnswer{Outcome: OutcomeOK}.Encode, ErrInvalid},
 		{"a directory entry of an unset kind", DirectoryAnswer{Outcome: OutcomeOK, Entries: []DirectoryEntry{{Endpoint: ep1}}}.Encode, ErrInvalid},
 	} {
 		t.Run(row.rule, func(t *testing.T) {

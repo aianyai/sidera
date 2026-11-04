@@ -141,6 +141,17 @@ func outcomeError(o nodeproto.Outcome, reason string) error {
 //     the stream broke: ErrTimeout;
 //   - the caller's own context ended: its error, as it is.
 func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, req []byte) ([]byte, error) {
+	e, err := n.connect(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	return n.callOn(ctx, e, target, proto, req)
+}
+
+// callOn is call on a connection already chosen: the one this side judged a
+// member's connection to the target. A call that needs a connection that is up
+// already, and does not dial one, is made with it.
+func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID, proto string, req []byte) ([]byte, error) {
 	limit, ok := nodeproto.LimitOf(proto)
 	if !ok {
 		return nil, fmt.Errorf("network: %s is not a node protocol", proto)
@@ -148,10 +159,6 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	framed, err := nodeproto.AppendFrame(nil, req, limit.Request)
 	if err != nil {
 		return nil, fmt.Errorf("network: request: %w", err)
-	}
-	e, err := n.connect(ctx, target)
-	if err != nil {
-		return nil, err
 	}
 	if !n.acquire(e) {
 		return nil, fmt.Errorf("%w: the connection ended", transport.ErrUnreachable)
@@ -168,7 +175,9 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 		if connectionFault(cctx, err) {
 			n.dropConn(e, target)
 		}
-		return nil, fmt.Errorf("%w: %v", transport.ErrUnreachable, err)
+		// The cause stays in the chain: a caller may need to tell a peer that does
+		// not serve the protocol (msmux.ErrNotSupported) from one that is gone.
+		return nil, fmt.Errorf("%w: %w", transport.ErrUnreachable, err)
 	}
 	stop := context.AfterFunc(cctx, func() { s.Reset() })
 	defer stop()
@@ -246,7 +255,7 @@ func noAnswer(ctx context.Context, s lnet.Stream, err error) error {
 
 // runSend handles a send request: it hands the envelope to the engine and
 // answers with the receipt.
-func runSend(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+func runSend(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodeSendRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -261,7 +270,7 @@ func runSend(ctx context.Context, node Node, from transport.Origin, raw []byte) 
 }
 
 // runPull handles a pull request and answers with the reports and the no-record endpoints.
-func runPull(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+func runPull(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodePullRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -276,7 +285,7 @@ func runPull(ctx context.Context, node Node, from transport.Origin, raw []byte) 
 }
 
 // runDirectory handles a directory request and answers with a page.
-func runDirectory(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+func runDirectory(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodeDirectoryRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -317,12 +326,14 @@ func answerFor(node Node, err error, encode func(nodeproto.Outcome, string) ([]b
 
 // callFunc is what a server of a member protocol does with a decoded-by-nobody
 // request: it decodes it, runs it as a request from the node that was called
-// and encodes the answer. A request that does not decode is an errInvalidRequest.
-type callFunc func(ctx context.Context, node Node, from transport.Origin, request []byte) ([]byte, error)
+// and encodes the answer. It is given the connection the request came over, for
+// a protocol whose answer depends on the connection and not only on the node.
+// A request that does not decode is an errInvalidRequest.
+type callFunc func(ctx context.Context, node Node, e *connEntry, from transport.Origin, request []byte) ([]byte, error)
 
 // handleCall registers the server of a member protocol under every identifier
-// it is spoken under, the current one and the legacy one. All three servers are
-// served by serveCall, so what a stream is held for is decided once.
+// it is spoken under, the current one and the legacy one if it has one. All the
+// servers are served by serveCall, so what a stream is held for is decided once.
 func (n *Network) handleCall(current string, run callFunc) {
 	for _, proto := range nodeproto.Offer(current) {
 		n.handle(proto, func(ctx context.Context, s lnet.Stream, e *connEntry) {
@@ -378,7 +389,7 @@ func (n *Network) serveCall(ctx context.Context, s lnet.Stream, e *connEntry, pr
 	n.mu.Lock()
 	from := e.node
 	n.mu.Unlock()
-	answer, err := run(ctx, node, transport.RemoteOrigin(from), raw)
+	answer, err := run(ctx, node, e, transport.RemoteOrigin(from), raw)
 	if err != nil {
 		var invalid errInvalidRequest
 		if errors.As(err, &invalid) {

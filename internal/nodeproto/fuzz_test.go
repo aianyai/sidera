@@ -51,3 +51,11 @@ func FuzzDecodeDirectoryRequest(f *testing.F) {
 func FuzzDecodeDirectoryAnswer(f *testing.F) {
 	fuzzDecoder(f, DecodeDirectoryAnswer, goldenDirectoryAnswer)
 }
+
+func FuzzDecodeDialBackRequest(f *testing.F) {
+	fuzzDecoder(f, DecodeDialBackRequest, goldenDialBackRequest)
+}
+
+func FuzzDecodeDialBackAnswer(f *testing.F) {
+	fuzzDecoder(f, DecodeDialBackAnswer, goldenDialBackReached, goldenDialBackNoAddress, goldenDialBackBusy)
+}

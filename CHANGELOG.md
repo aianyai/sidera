@@ -18,6 +18,13 @@ protocol has a version of its own.
 
 ### Changed
 
+- **A node can ask another member whether it can dial it back.** The new node-to-node
+  protocol `/sidera/dial-back/1.0.0` lets a node ask a member over a connection they already
+  have; the member dials the node on the addresses its own address book holds for it, from
+  a new connection that shares nothing with the listening port, and answers whether it got
+  through. It changes nothing for you yet: it is the question that lets a later release
+  decide which connections a node has to keep. A node of an earlier release does not serve
+  it and is reported as unable to answer.
 - **Adapter protocol and Go SDK: the time an adapter has to answer a handshake call is
   one constant.** The 20 seconds the daemon waits for `initialize`, `adapter.start` and
   `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,

@@ -35,6 +35,7 @@ clock), touches no file and takes no randomness of its own.
 | `Network.PairingFetch(ctx, node, addrs, frame)` | One frame out, one frame back (no half-close before it), then the stream closed, within the fetch timeout from the stream's opening; returns the answer and the `PairingPeer` of the connection. |
 | `PairingPeer`, `PairingStream` | The facts of a pairing connection (both parties, protocol, the accepted remote certificate with its record and serial state), and the engine's queue-backed end of a stream: `Send` never blocks, `Close` half-closes the stream once the queue is written; the stream, its handler and the connection's busy count stay until the peer ends its side. |
 | `Node.PairingOpened`, `PairingFrame`, `PairingClosed` | The target's side of a pairing stream, and the frames and ends of both sides. |
+| `Network.askDialBack(ctx, node)` | Asks a member, on the member connection that is up to it, whether it can dial this node back: reached (with the address), not reached, no address, or cannot ask (the member does not serve the protocol). It dials nothing, and has no caller yet outside the tests. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback (each logs the first failure of a run of failed calls to a node and the first success after it, `callhealth.go`); whether a member connection to a node is up. |
 | `NewRouter(self, loopback, remote)`, `Router` | The transport the engine calls: this node's calls to the loopback, every other node's to the remote client. |
 
@@ -65,10 +66,18 @@ clock), touches no file and takes no randomness of its own.
   call do not half-close before they have read the answer. Only a 1.0.0 stream (the
   legacy identifiers, served for nodes before 2.0.0) is released as soon as it is
   answered.
-- **A member protocol is registered under both identifiers, by `handleCall`.** All
-  three servers go through `serveCall`, which takes the form from the identifier the
+- **A member protocol is registered under every identifier it has, by `handleCall`.** All
+  the servers go through `serveCall`, which takes the form from the identifier the
   stream negotiated; the client proposes the current identifier and then the legacy
-  one (`nodeproto.Offer`) and takes the form of the one the stream got.
+  one if there is one (`nodeproto.Offer`) and takes the form of the one the stream got.
+  A server is given the connection the request came over, for an answer that depends on
+  the connection and not only on the node.
+- **A dial-back is made only by the dial-back dialer, and only on the address book's
+  addresses.** The host's own swarm would return the connection the asker already made
+  or leave from the listening port, and either makes the answer "reached" whatever a
+  firewall does with a cold inbound connection. The request names no address; the
+  addresses are `bookWritten` for the asker's peer, without relay addresses. At most
+  four askers are dialed back at once and one at a time each.
 - **The exchange runs on the connection, not through the host.** The host picks
   the best connection to a peer, which is not necessarily the one being judged.
 - **A member's certificate reaches the engine first.** The connection becomes a
@@ -117,6 +126,6 @@ clock), touches no file and takes no randomness of its own.
 
 ## Where the tests are
 
-`network_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
+`network_test.go`, `member_test.go`, `dialback_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
 each with its own fake engine and a static snapshot, and the fake clock where time
 matters. `docs/references/network/README.md` lists what each test shows.

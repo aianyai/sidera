@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	ma "github.com/multiformats/go-multiaddr"
+
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/record"
@@ -133,6 +135,9 @@ func TestOfferedIdentifiers(t *testing.T) {
 			t.Errorf("%s: limits %+v and %+v differ", current, a, b)
 		}
 	}
+	if offered := Offer(ProtocolDialBack); len(offered) != 1 || offered[0] != ProtocolDialBack || IsLegacy(ProtocolDialBack) {
+		t.Errorf("%s is offered as %v", ProtocolDialBack, offered)
+	}
 	for _, other := range []string{LegacyProtocolSend, "/sidera/pairing/1.0.0"} {
 		if Offer(other) != nil {
 			t.Errorf("%s is offered", other)
@@ -168,6 +173,26 @@ func TestLargestMessagesFit(t *testing.T) {
 		}
 		if _, err := AppendFrame(nil, b, limit(ProtocolDirectory).Answer); err != nil {
 			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolDirectory).Answer, err)
+		}
+	})
+	t.Run("dial-back answer with the longest address and a reason", func(t *testing.T) {
+		// A multiaddr of MaxAddressLen bytes: a dns name filling the rest of it.
+		name := strings.Repeat("a", MaxAddressLen-4)
+		long, err := ma.NewMultiaddr("/dns/" + name)
+		if err != nil || len(long.Bytes()) > MaxAddressLen {
+			t.Fatalf("test address: %d bytes, %v", len(long.Bytes()), err)
+		}
+		b, err := DialBackAnswer{Outcome: OutcomeOK, Result: DialBackReached, Address: long}.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := AppendFrame(nil, b, limit(ProtocolDialBack).Answer); err != nil {
+			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolDialBack).Answer, err)
+		}
+		if b, err = (DialBackAnswer{Outcome: OutcomeRefused, Reason: strings.Repeat("a", MaxReasonLen)}).Encode(); err != nil {
+			t.Fatal(err)
+		} else if _, err := AppendFrame(nil, b, limit(ProtocolDialBack).Answer); err != nil {
+			t.Errorf("%d bytes over the limit: %v", len(b), err)
 		}
 	})
 	t.Run("send answer with a report per recipient and a control reply", func(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	ma "github.com/multiformats/go-multiaddr"
+
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
@@ -25,6 +27,10 @@ const (
 	goldenPullRequest       = "a201636d2d310282500102030405060708090a0b0c0d0e0f10502122232425262728292a2b2c2d2e2f30"
 	goldenPullAnswerOK      = "a3010102815874a30161740241010381a201a201010258201111111111111111111111111111111111111111111111111111111111111111025840222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222220381502122232425262728292a2b2c2d2e2f30"
 	goldenDirectoryRequest  = "a3017823657031717970717870713971637273737a673270767871367273307a716561723773740263616263031864"
+	goldenDialBackRequest   = "a0"
+	goldenDialBackReached   = "a3010102010348047f000001061e40"
+	goldenDialBackNoAddress = "a201010203"
+	goldenDialBackBusy      = "a20102046462757379"
 	goldenDirectoryAnswer   = "a301010281a501500102030405060708090a0b0c0d0e0f10026664697265637403644e616d65046005826c6d6573736167652e73656e646373656503626e78"
 )
 
@@ -91,6 +97,34 @@ func TestGoldenMessages(t *testing.T) {
 				Endpoint: ep1, Kind: adapterreg.KindDirect, DisplayName: "Name",
 				Actions: []authz.Action{authz.ActionMessageSend, authz.ActionSee},
 			}}},
+		},
+		{
+			"dial-back request: {}",
+			goldenDialBackRequest,
+			DialBackRequest{}.Encode,
+			func(b []byte) (any, error) { return DecodeDialBackRequest(b) },
+			DialBackRequest{},
+		},
+		{
+			"dial-back answer reached: {1: 1, 2: 1, 3: multiaddr bytes}",
+			goldenDialBackReached,
+			DialBackAnswer{Outcome: OutcomeOK, Result: DialBackReached, Address: ma.StringCast("/ip4/127.0.0.1/tcp/7744")}.Encode,
+			func(b []byte) (any, error) { return DecodeDialBackAnswer(b) },
+			DialBackAnswer{Outcome: OutcomeOK, Result: DialBackReached, Address: ma.StringCast("/ip4/127.0.0.1/tcp/7744")},
+		},
+		{
+			"dial-back answer no address: {1: 1, 2: 3}",
+			goldenDialBackNoAddress,
+			DialBackAnswer{Outcome: OutcomeOK, Result: DialBackNoAddress}.Encode,
+			func(b []byte) (any, error) { return DecodeDialBackAnswer(b) },
+			DialBackAnswer{Outcome: OutcomeOK, Result: DialBackNoAddress},
+		},
+		{
+			"dial-back answer refused: {1: 2, 4: reason}",
+			goldenDialBackBusy,
+			DialBackAnswer{Outcome: OutcomeRefused, Reason: ReasonDialBackBusy}.Encode,
+			func(b []byte) (any, error) { return DecodeDialBackAnswer(b) },
+			DialBackAnswer{Outcome: OutcomeRefused, Reason: ReasonDialBackBusy},
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {

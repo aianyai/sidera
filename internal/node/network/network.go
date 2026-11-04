@@ -119,7 +119,9 @@ type Network struct {
 
 	lib     *libp2pHost
 	limiter *peerLimiter
-	node    atomic.Pointer[nodeHolder]
+	// dialBacks is the set of askers this node is dialing back for.
+	dialBacks dialBackSlots
+	node      atomic.Pointer[nodeHolder]
 
 	mu          sync.Mutex // guards everything below
 	closed      bool

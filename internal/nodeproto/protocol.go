@@ -23,6 +23,10 @@ const (
 	ProtocolPull = "/sidera/pull/2.0.0"
 	// ProtocolDirectory asks for a page of the endpoints a node shows the asker.
 	ProtocolDirectory = "/sidera/directory/2.0.0"
+	// ProtocolDialBack asks a member whether it can dial the asker back on the
+	// addresses it holds for it. It was framed from its first version and has no
+	// legacy identifier.
+	ProtocolDialBack = "/sidera/dial-back/1.0.0"
 )
 
 // The identifiers a node before 2.0.0 speaks, kept so that nodes upgraded one
@@ -50,20 +54,22 @@ var legacyOf = map[string]string{
 // stable order.
 func Protocols() []string {
 	return []string{
-		ProtocolSend, ProtocolPull, ProtocolDirectory,
+		ProtocolSend, ProtocolPull, ProtocolDirectory, ProtocolDialBack,
 		LegacyProtocolSend, LegacyProtocolPull, LegacyProtocolDirectory,
 	}
 }
 
 // Offer returns the identifiers a client proposes for a call to a protocol, in
-// the order of preference: the current identifier, then the legacy one. It is
-// nil for an identifier that is not a current one.
+// the order of preference: the current identifier, then the legacy one if the
+// protocol has one. It is nil for an identifier that is not a current one.
 func Offer(protocol string) []string {
-	legacy, ok := legacyOf[protocol]
-	if !ok {
-		return nil
+	if legacy, ok := legacyOf[protocol]; ok {
+		return []string{protocol, legacy}
 	}
-	return []string{protocol, legacy}
+	if protocol == ProtocolDialBack {
+		return []string{protocol}
+	}
+	return nil
 }
 
 // IsLegacy reports whether the identifier is one of the legacy ones, whose
@@ -113,10 +119,15 @@ const (
 	// maxPullRequest holds a message identifier and a list of endpoint
 	// identifiers.
 	maxPullRequest = 2048
+	// maxDialBackRequest holds the empty map the request is.
+	maxDialBackRequest = 16
+	// maxDialBackAnswer holds an outcome, a result, a multiaddr of at most
+	// MaxAddressLen bytes and a reason.
+	maxDialBackAnswer = 512
 )
 
 // LimitOf returns the byte limits of a protocol, the same for its current and
-// its legacy identifier, and false for an identifier that is not one of this
+// its legacy identifier (if it has one), and false for an identifier that is not one of this
 // package's. On a framed stream the limit bounds the payload of the frame.
 //
 // A send request holds one envelope. A send or pull answer holds a report per
@@ -131,6 +142,8 @@ func LimitOf(protocol string) (Limit, bool) {
 		return Limit{Request: maxPullRequest, Answer: records + answerSlack}, true
 	case ProtocolDirectory, LegacyProtocolDirectory:
 		return Limit{Request: maxDirectoryRequest, Answer: MaxDirectoryPage*maxDirectoryEntry + answerSlack + MaxCursorLen}, true
+	case ProtocolDialBack:
+		return Limit{Request: maxDialBackRequest, Answer: maxDialBackAnswer}, true
 	}
 	return Limit{}, false
 }
