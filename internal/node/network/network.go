@@ -5,12 +5,14 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	ic "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/event"
 	lnet "github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
@@ -68,6 +70,9 @@ type Config struct {
 	// Clock is the time of every deadline of the accounting and of the facts of
 	// a decision. Timeouts of calls are contexts and run on the real clock.
 	Clock clock.Clock
+	// Rand is the randomness of the wait before a dial that keeps a connection
+	// to a member; it must be safe for concurrent use.
+	Rand io.Reader
 	// Params are the numbers of the connection accounting.
 	Params preauth.Params
 	// Log receives what the network layer says; nil discards it.
@@ -137,7 +142,10 @@ type Network struct {
 	dialPeers   map[ident.NodeID][]peer.ID
 	bookWritten map[peer.ID][]ma.Multiaddr // what the address book wrote to the peerstore, per peer
 	unreachable map[ident.NodeID]time.Time
-	callStreaks map[ident.NodeID]*callStreak // the run of failed calls to a node, until a call succeeds
+	callStreaks map[ident.NodeID]*callStreak  // the run of failed calls to a node, until a call succeeds
+	reach       map[ident.NodeID]*reachRecord // whether each member can dial this node (reach.go)
+	keeps       map[ident.NodeID]*keepDial    // the dials that keep a connection to a member (keep.go)
+	keepsActive int                           // how many of them are in flight
 }
 
 type nodeHolder struct{ node Node }
@@ -151,6 +159,9 @@ func New(cfg Config) (*Network, error) {
 	}
 	if cfg.Clock == nil {
 		return nil, errors.New("network: no clock")
+	}
+	if cfg.Rand == nil {
+		return nil, errors.New("network: no source of randomness")
 	}
 	acct, err := preauth.NewAccounting(cfg.Params)
 	if err != nil {
@@ -180,6 +191,8 @@ func New(cfg Config) (*Network, error) {
 		bookWritten: map[peer.ID][]ma.Multiaddr{},
 		unreachable: map[ident.NodeID]time.Time{},
 		callStreaks: map[ident.NodeID]*callStreak{},
+		reach:       map[ident.NodeID]*reachRecord{},
+		keeps:       map[ident.NodeID]*keepDial{},
 	}
 	n.ctx, n.cancel = context.WithCancel(context.Background())
 	n.limiter = newPeerLimiter(n.clock.Now)
@@ -198,8 +211,15 @@ func New(cfg Config) (*Network, error) {
 		ConnectedF:    func(_ lnet.Network, c lnet.Conn) { n.connected(c) },
 		DisconnectedF: func(_ lnet.Network, c lnet.Conn) { n.disconnected(c) },
 	})
+	addrs, err := n.lib.host.EventBus().Subscribe(new(event.EvtLocalAddressesUpdated))
+	if err != nil {
+		n.lib.close()
+		n.cancel()
+		return nil, fmt.Errorf("network: local address events: %w", err)
+	}
 	n.registerHandlers()
 	n.start(n.tickLoop)
+	n.start(func() { n.watchLocalAddresses(addrs) })
 	return n, nil
 }
 

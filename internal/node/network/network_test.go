@@ -503,7 +503,7 @@ func TestNodeThatCameBackIsReachedWhenTheMemoRunsOut(t *testing.T) {
 		t.Fatalf("a call to a node that is down: %v, want ErrUnreachable", err)
 	}
 
-	back, err := New(Config{Key: b.netKey, Clock: b.clk, Log: slog.New(slog.NewTextHandler(b.log, nil))})
+	back, err := New(Config{Key: b.netKey, Clock: b.clk, Rand: &countingReader{}, Log: slog.New(slog.NewTextHandler(b.log, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +599,19 @@ func TestMemberConnPrefersTheNewest(t *testing.T) {
 // node's own certificate and shows that the connection is closed when idle and
 // the next call presents the new certificate.
 func TestRenewedCertificateIsExchangedOnANewConnection(t *testing.T) {
-	a, b := pair(t, false, true, true, nil)
+	// The hour the test lets pass would run the tick, and the members would ask
+	// each other whether they can dial back (each dialing the other) while the
+	// renewal closes the connection. That is not what the test is about, and it
+	// leaves the far end of the closed connection open now and then: the library
+	// closes a TCP connection with linger 0, which sends a single RST that is not
+	// retransmitted, and when it coincides with the dial-back connection being
+	// handshaken and reset on the same listening port, the peer's kernel was
+	// observed (macOS loopback, 35 runs in 300, none in 300 with a FIN close)
+	// never to process it. The product tolerates such a half-open connection (the
+	// next call fails on it and clears it, and the yamux keepalive clears it
+	// within about 30 seconds), but this test waits for both ends to see the
+	// close.
+	a, b := pair(t, false, true, true, func(c *Config) { c.TickEvery = 24 * time.Hour })
 	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
 		t.Fatal(err)
 	}

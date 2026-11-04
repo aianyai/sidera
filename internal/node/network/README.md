@@ -17,14 +17,14 @@ names it), and the networking library. It imports neither `engine`
 nor `daemon`: it defines `Node`, which the engine implements, and `Router`, which
 the engine calls through its own interface. It reads time only through the
 injected clock (calls and dials are bounded by contexts, which run on the real
-clock), touches no file and takes no randomness of its own.
+clock), touches no file and draws randomness only from the reader it is given (for the wait before a dial that keeps a connection).
 
 ## Entry points
 
 | Name | Purpose |
 | ---- | ------- |
-| `New(Config)`, `Network.Close` | Build the host (it listens on nothing) and start the connection checks; close the listeners and every connection and wait for every goroutine the package started. |
-| `Config`, `DefaultParams` | The network key, the clock, the accounting parameters (zero means `DefaultParams`), the log, and the timeouts (4 s to connect, 10 s per call, the pairing protocol's fetch timeout, 10 s unreachable memo, 1 s tick). |
+| `New(Config)`, `Network.Close` | Build the host (it listens on nothing) and start the connection checks and the watch on the host's address events; close the listeners and every connection and wait for every goroutine the package started. |
+| `Config`, `DefaultParams` | The network key, the clock, the accounting parameters (zero means `DefaultParams`), the source of randomness, the log, and the timeouts (4 s to connect, 10 s per call, the pairing protocol's fetch timeout, 10 s unreachable memo, 1 s tick). |
 | `Network.SetNode(Node)`, `Node` | The engine's side: `transport.Handler`, `NotePeerCertificate` (a member's certificate before its connection becomes a member's) and `RefusalReason` (the name of a refusal, for the answer). |
 | `Network.Listen(addrs)`, `ListenAddrs`, `PeerID` | Open the listeners (the address is in the error when one cannot open); where they are open; the identifier a contact line names after `/p2p/`. |
 | `Network.SetMembership(Membership)` | The snapshot of the node's own certificate, the facts of a decision and the held certificates; decides live connections again and closes those that no longer keep, and those of a non-member that is now a member (once idle, forgetting the node's unreachable memo). |
@@ -35,7 +35,7 @@ clock), touches no file and takes no randomness of its own.
 | `Network.PairingFetch(ctx, node, addrs, frame)` | One frame out, one frame back (no half-close before it), then the stream closed, within the fetch timeout from the stream's opening; returns the answer and the `PairingPeer` of the connection. |
 | `PairingPeer`, `PairingStream` | The facts of a pairing connection (both parties, protocol, the accepted remote certificate with its record and serial state), and the engine's queue-backed end of a stream: `Send` never blocks, `Close` half-closes the stream once the queue is written; the stream, its handler and the connection's busy count stay until the peer ends its side. |
 | `Node.PairingOpened`, `PairingFrame`, `PairingClosed` | The target's side of a pairing stream, and the frames and ends of both sides. |
-| `Network.askDialBack(ctx, node)` | Asks a member, on the member connection that is up to it, whether it can dial this node back: reached (with the address), not reached, no address, or cannot ask (the member does not serve the protocol). It dials nothing, and has no caller yet outside the tests. |
+| `Network.askDialBack(ctx, node)` | Asks a member, on the member connection that is up to it, whether it can dial this node back: reached (with the address), not reached, no address, or cannot ask (the member does not serve the protocol). It dials nothing; its caller is the tick (`askMembers`, `reach.go`), which records the answers. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback (each logs the first failure of a run of failed calls to a node and the first success after it, `callhealth.go`); whether a member connection to a node is up. |
 | `NewRouter(self, loopback, remote)`, `Router` | The transport the engine calls: this node's calls to the loopback, every other node's to the remote client. |
 
@@ -99,10 +99,20 @@ clock), touches no file and takes no randomness of its own.
 - **A connection at fault is closed.** A call that timed out, or failed with an
   error a live connection does not give, closes its connection and, when it was
   the node's last member connection, memoizes the node as unreachable; of several
-  member connections the newest is used. The unreachable memo is the only dial
-  backoff, so dials bypass the library's own.
-- **Timers are the clock's.** The accounting's deadlines and the unreachable memo
-  use the injected clock; a test advances it. A timer only wakes the loop; the
+  member connections the newest is used. The dials of calls are paced by the
+  unreachable memo and the dials that keep a connection to a member by their own wait
+  (`retryBackoff`), so every dial bypasses the library's backoff.
+- **A connection is kept to the members that cannot be relied on to dial this node, and
+  to no other.** `reach.go` records, per member and in memory, whether it can dial this
+  node (unknown, reachable, unreachable; one answer decides; an hour; reset when the
+  node's addresses change), and `keep.go` dials, on the tick, each member with an
+  address and a record that is not reachable when no member connection to it is up: at
+  most one dial per member and eight in all, 5, 10, 20, 40 then 60 seconds apart after
+  failures, through `dialWithin` like a call and without the unreachable memo or the
+  engine's worker. A member that does not serve the question counts as unknown.
+- **Timers are the clock's.** The accounting's deadlines, the unreachable memo, the
+  answers' age and the waits between dials and questions use the injected clock; a
+  test advances it. A timer only wakes the loop; the
   accounting's `Overdue` is the truth.
 
 ## What the caller must guarantee
@@ -126,6 +136,6 @@ clock), touches no file and takes no randomness of its own.
 
 ## Where the tests are
 
-`network_test.go`, `member_test.go`, `dialback_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
+`network_test.go`, `member_test.go`, `dialback_test.go`, `keep_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
 each with its own fake engine and a static snapshot, and the fake clock where time
 matters. `docs/references/network/README.md` lists what each test shows.

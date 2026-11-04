@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/binary"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,6 +246,7 @@ func (p *peerNode) start(quic bool, tune func(*Config)) {
 	cfg := Config{
 		Key:   p.netKey,
 		Clock: p.clk,
+		Rand:  &countingReader{},
 		Log:   slog.New(slog.NewTextHandler(p.log, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 	if tune != nil {
@@ -408,4 +412,13 @@ func (p *peerNode) connCount() int {
 	p.net.mu.Lock()
 	defer p.net.mu.Unlock()
 	return len(p.net.conns)
+}
+
+// countingReader is a source of randomness that tests can rely on not to repeat:
+// the hash of a counter.
+type countingReader struct{ n atomic.Uint64 }
+
+func (r *countingReader) Read(b []byte) (int, error) {
+	sum := sha256.Sum256(binary.BigEndian.AppendUint64(nil, r.n.Add(1)))
+	return copy(b, sum[:]), nil
 }

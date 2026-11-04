@@ -241,6 +241,11 @@ func mayPair(s preauth.State) bool {
 func (n *Network) nodeConn(node ident.NodeID, accept func(preauth.State) bool) *connEntry {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	return n.nodeConnLocked(node, accept)
+}
+
+// nodeConnLocked is nodeConn with Network.mu held.
+func (n *Network) nodeConnLocked(node ident.NodeID, accept func(preauth.State) bool) *connEntry {
 	var best *connEntry
 	for _, e := range n.conns {
 		if !accept(e.state) || e.node != node {
@@ -288,8 +293,9 @@ func (n *Network) memberConn(node ident.NodeID) *connEntry { return n.nodeConn(n
 func (n *Network) Connected(node ident.NodeID) bool { return n.memberConn(node) != nil }
 
 // tickLoop is the wake-up of the accounting: every tick closes the connections
-// that are overdue and sweeps what never came up. A timer only wakes the loop;
-// the accounting's Overdue is the truth.
+// that are overdue and sweeps what never came up, and sees to the members'
+// reachability and the connections kept to them (see tickMembers). A timer only
+// wakes the loop; the accounting's Overdue is the truth.
 func (n *Network) tickLoop() {
 	t := n.clock.NewTimer(n.cfg.TickEvery)
 	defer t.Stop()
@@ -324,6 +330,8 @@ func (n *Network) tick() {
 		}
 	}
 	n.mu.Unlock()
+
+	n.tickMembers(now)
 
 	n.limiter.prune(func(p peer.ID) bool {
 		n.mu.Lock()

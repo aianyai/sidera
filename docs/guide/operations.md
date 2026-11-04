@@ -261,17 +261,14 @@ release before 0.12.0 are upgraded with these steps.
    - neither: the adapter was not installed before.
 
 5. Check: `sidera adapter list` (probes `passed`, except Codex as the notes above
-   say), then reconnect the nodes. A restart of the daemon drops its connections to
-   other nodes, and a connection is opened only when something needs it. Send one
-   message from each node, for example from the console:
-
-   ```sh
-   sidera-adapter-console send --to <other-node-id>/<its-console-endpoint> --body reconnect
-   ```
-
-   Read the console address of a node with `sidera-adapter-console whoami` on that
-   node. The other side then runs `sidera-adapter-console recv`. Afterwards
-   `sidera network show` lists the peers with `connected true`.
+   say), then check the connections. A restarted daemon dials the nodes it holds an
+   address for as it starts, and keeps retrying (after 5, 10, 20 and 40 seconds, then
+   every minute) the ones it cannot reach and the ones that cannot dial it, so nothing
+   needs to be sent. Give it a minute, then run `sidera network show` on each node: the
+   peers are listed with `connected true`. A peer that stays
+   `connected false` is down, or neither side holds an address the other can be reached
+   on; `logs/daemon.log` says at info level why the first dial failed, with the error
+   of each address.
 
 To upgrade Codex or Claude Code themselves, upgrade them as usual. On Windows,
 restart the daemon once (`sidera daemon restart`) so that it finds the new Codex release.

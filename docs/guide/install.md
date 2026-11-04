@@ -373,8 +373,11 @@ because its port is taken cannot be reconfigured by a command: free the port (se
 [Troubleshooting](operations.md#troubleshooting)).
 
 A node that blocks inbound connections can still dial out, and the other node
-can then send back over that connection for as long as it lasts. Open the port on
-every machine so that either side can connect. If one side cannot yet, see [Troubleshooting](operations.md#troubleshooting).
+can then send back over that connection for as long as it lasts. Every node asks the
+nodes it is connected to whether they can dial it, and keeps a connection to those that
+cannot, so such a node connects again by itself after either side restarts, provided it
+holds their addresses. Open the port on every machine so that either side can connect.
+If one side cannot yet, see [Troubleshooting](operations.md#troubleshooting).
 
 Open the port to your local network only, not to every address.
 

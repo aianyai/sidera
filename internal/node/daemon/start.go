@@ -281,7 +281,7 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 // so a step that fails later closes it with the rest.
 func (d *Daemon) startNetwork(e *engine.Engine) error {
 	self := d.keys.Node()
-	net, err := network.New(network.Config{Key: d.keys.NetworkPrivateKey(), Clock: d.cfg.Clock, Log: d.log})
+	net, err := network.New(network.Config{Key: d.keys.NetworkPrivateKey(), Clock: d.cfg.Clock, Rand: d.cfg.Rand, Log: d.log})
 	if err != nil {
 		return err
 	}

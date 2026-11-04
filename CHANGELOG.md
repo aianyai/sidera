@@ -46,9 +46,22 @@ protocol has a version of its own.
   protocol `/sidera/dial-back/1.0.0` lets a node ask a member over a connection they already
   have; the member dials the node on the addresses its own address book holds for it, from
   a new connection that shares nothing with the listening port, and answers whether it got
-  through. It changes nothing for you yet: it is the question that lets a later release
-  decide which connections a node has to keep. A node of an earlier release does not serve
-  it and is reported as unable to answer.
+  through. A node uses the answers to decide which connections it has to keep (see
+  below). A node of an earlier release does not serve it and is reported as unable to
+  answer.
+- **A node keeps a connection only to the members that cannot dial it, and connects again
+  by itself after a restart.** Until now a connection was made only when something had to
+  be sent, so a node that blocks inbound connections, or whose peer was restarted, had no
+  connection until it sent something itself, and the upgrade steps had you send a message
+  from each node. Now every node asks the members it is connected to whether they can dial
+  it. A member that can is dialed when something needs it, as before; one that cannot (it
+  holds no address for the node, or its address does not connect), one that does not
+  answer the question (an earlier release), and one that has not been asked yet are kept:
+  the node dials them when it starts, again 5, 10, 20 and 40 seconds after a failed dial
+  and then every minute, and again at once when the connection is lost. The answers are
+  asked again after an hour and when the node's own addresses change. The log now says,
+  at info level, when a member can or cannot dial the node, when the first dial to a kept
+  member fails (with the error of each address) and when its connection is back.
 - **Adapter protocol and Go SDK: the time an adapter has to answer a handshake call is
   one constant.** The 20 seconds the daemon waits for `initialize`, `adapter.start` and
   `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,
