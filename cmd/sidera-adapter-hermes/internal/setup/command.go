@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/internal/datahome"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -165,7 +166,7 @@ func run(o options, env Env) error {
 // Hermes is the one way to learn it without repeating how Hermes lays profiles out.
 func profileSkillDir(ctx context.Context, cfg config.Config, profile string) (string, error) {
 	cmd := exec.CommandContext(ctx, cfg.HermesPath, "-p", profile, "config", "path")
-	cmd.Env = hermesEnv(os.Environ(), cfg)
+	cmd.Env = hermesChildEnv(cfg)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("hermes -p %s config path: %w", profile, err)
@@ -295,7 +296,7 @@ func apply(ctx context.Context, cfg config.Config, steps []Step, env Env) error 
 			continue
 		}
 		cmd := exec.CommandContext(ctx, cfg.HermesPath, s.Args...)
-		cmd.Env = hermesEnv(os.Environ(), cfg)
+		cmd.Env = hermesChildEnv(cfg)
 		// No standard input: the commands ask nothing, and one given the owner's input
 		// would read the answers to the questions that follow.
 		cmd.Stdout, cmd.Stderr = env.Stdout, env.Stderr
@@ -306,21 +307,10 @@ func apply(ctx context.Context, cfg config.Config, steps []Step, env Env) error 
 	return nil
 }
 
-// hermesEnv is the environment the adapter gives every Hermes process: the owner's
-// shell may point at another home, and the adapter works on the one it was configured
-// with.
-func hermesEnv(parent []string, cfg config.Config) []string {
-	env := make([]string, 0, len(parent)+2)
-	for _, kv := range parent {
-		name, _, _ := strings.Cut(kv, "=")
-		if u := strings.ToUpper(name); u == "HERMES_HOME" || u == "HERMES_KANBAN_HOME" {
-			continue
-		}
-		env = append(env, kv)
-	}
-	env = append(env, "HERMES_HOME="+cfg.HermesHome)
-	if cfg.KanbanHome != "" {
-		env = append(env, "HERMES_KANBAN_HOME="+cfg.KanbanHome)
-	}
-	return env
+// hermesChildEnv is the environment of every Hermes process `setup` starts: the
+// adapter's own (kanban.ChildEnv, the one home of that rule), so that the owner's
+// shell, which may point at another home or pin a profile, never decides which
+// installation is changed.
+func hermesChildEnv(cfg config.Config) []string {
+	return kanban.ChildEnv(os.Environ(), kanban.Config{Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome})
 }

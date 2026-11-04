@@ -73,12 +73,12 @@ func New(cfg Config) (*Client, error) {
 	return &Client{cfg: cfg, goos: runtime.GOOS}, nil
 }
 
-// childEnv is the environment of a hermes child: the parent's, without the
-// variables that would redirect or scope the call (a Kanban worker's task and run,
-// a board override, the profile pin), plus the explicit HERMES_HOME and
-// HERMES_KANBAN_HOME. The busy timeout is the one Kanban variable that stays: it
-// is an operator's tuning knob, not routing.
-func childEnv(parent []string, cfg Config) []string {
+// ChildEnv is the environment of any hermes child of the adapter, the client's and
+// `setup`'s alike: the parent's, without the variables that would redirect or scope
+// the call (a Kanban worker's task and run, a board override, the profile pin), plus
+// the explicit HERMES_HOME and HERMES_KANBAN_HOME of cfg. The busy timeout is the one
+// Kanban variable that stays: it is an operator's tuning knob, not routing.
+func ChildEnv(parent []string, cfg Config) []string {
 	env := make([]string, 0, len(parent)+2)
 	for _, kv := range parent {
 		name, _, _ := strings.Cut(kv, "=")
@@ -142,7 +142,7 @@ func (c *Client) run(ctx context.Context, op string, stdin []byte, argv []string
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, executable, argv...)
-	cmd.Env = childEnv(os.Environ(), c.cfg)
+	cmd.Env = ChildEnv(os.Environ(), c.cfg)
 	cmd.WaitDelay = killDelay
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)

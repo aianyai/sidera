@@ -20,6 +20,9 @@ why `--apply` does only what it does are in
   a profile's `skills` directory (a temporary file and a rename).
 - **Nothing is restarted.** The output tells the owner to restart the gateways.
 - **The Skill never contains an address.** A card names an alias.
+- **A Hermes command gets the environment of the adapter's own** (`kanban.ChildEnv`): the
+  owner's shell may point at another home or pin a profile, and `setup` changes the
+  installation the configuration names.
 - **A Hermes command gets no standard input.** The questions of `--apply` are read from it,
   and a child given the same stream would take the answers meant for the next question.
 - The text of the Skill describes what the adapter does (`adapter` and `card`): a change

@@ -28,7 +28,7 @@ without the adapter around it.
   NUL byte; whose words a line holds is for the callers to keep.
 - **`HERMES_HOME` is always set explicitly** in the child environment, and the
   Kanban variables the service may have inherited (`HERMES_KANBAN_TASK`,
-  `HERMES_KANBAN_BOARD`, ...) are removed (`childEnv`).
+  `HERMES_KANBAN_BOARD`, ...) are removed (`ChildEnv`, which `setup` uses for its own Hermes commands too).
 - **`--board <slug>` precedes the subcommand** and is on every call; the current
   board of Hermes is never used.
 - **Values that may begin with `-`** are passed as `--option=value`, and free text

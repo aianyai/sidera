@@ -735,8 +735,10 @@ of profiles stays Hermes's. A run replaces the file of the same name.
 *`--apply`.* Without it `setup` only prints, apart from writing the Skill into the
 state directory and asking Hermes where a profile lives. With it each step is shown and
 asked (`y/N`; anything but yes skips it), then done: Hermes's own commands, run with
-`HERMES_HOME` and `HERMES_KANBAN_HOME` from the configuration and without standard
-input, and the file placement. A failing step stops the run. Hermes reports a refusal of
+`HERMES_HOME` and `HERMES_KANBAN_HOME` from the configuration, the profile pin and the
+Kanban worker variables of the owner's shell removed (the environment the adapter gives
+its own Hermes commands, `kanban.ChildEnv`), and without standard input, and the file
+placement. A failing step stops the run. Hermes reports a refusal of
 `tools enable` (such as an unknown platform) on standard output and exits 0, so the
 output shown is the only report of it. `--config -` is refused with `--apply`, which asks
 on standard input.

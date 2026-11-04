@@ -1,7 +1,7 @@
 // Command sidera-adapter-hermes is the Hermes adapter: it makes a Hermes Agent
 // Kanban board a lane to other nodes. `serve` is the adapter the daemon starts;
-// `package` and `version` are for the person who builds and installs it. See
-// internal/adapter.
+// `package` and `version` are for the person who builds and installs it, and `setup`
+// prepares the Hermes it serves (the Skill and the steps). See internal/adapter.
 package main
 
 import (
