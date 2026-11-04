@@ -660,7 +660,8 @@ node is not told.
   session.interrupt`. The answer is `stopped` once the turn has ended, `requested`
   when it is still running after about 10 seconds (its end is still reported), and
   `not_running` when no turn runs. What the turn already did stays done. Closing a
-  Codex session that is in the middle of a turn is not confirmed until the turn ends.
+  Codex session that is in the middle of a turn is answered `close_unconfirmed` and the
+  session stays open: interrupt first, then close.
 - A `send` from an agent session takes one recipient. The console's `send` takes a
   comma-separated list.
 - A Codex session whose sandbox is `read-only` or `workspace-write` uses the MCP

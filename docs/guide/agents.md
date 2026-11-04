@@ -27,6 +27,9 @@ An agent uses Sidera in one of three ways:
   `{"result":{"endpoints":[...]}}`, and the console's `recv --wait` accepts at most
   30 seconds.
 
+What each adapter supports in these three ways, and how they differ, is on
+[Adapters](adapters.md).
+
 A program that is neither a Sidera session nor a controller, such as a script or a
 plain terminal, has no session credential, so `sidera recv`, `sidera send` and the
 other agent commands fail with `unauthenticated/token_missing`. It can still use the

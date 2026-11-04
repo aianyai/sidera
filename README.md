@@ -136,7 +136,8 @@ in [Presets and access](docs/guide/getting-started.md#what-a-session-can-read-of
 
 - [User guide](docs/guide/README.md): [install](docs/guide/install.md),
   [getting started](docs/guide/getting-started.md),
-  [working with agents](docs/guide/agents.md) and
+  [working with agents](docs/guide/agents.md),
+  [adapters](docs/guide/adapters.md) and
   [operations](docs/guide/operations.md).
 - [Agent guide](docs/agent-guide.md): a procedure an AI agent follows to deploy
   Sidera, pair it and work through it.
@@ -171,6 +172,8 @@ start the work from a terminal on any of the machines and read the answers there
 - **Agents plug in.** Each kind of agent has an adapter, a small companion program
   that hands messages to the agent's real session and lets the agent send its own.
   A chat adapter would do the same for you in a chat app; that is planned.
+  [Adapters](docs/guide/adapters.md) lists the ones Sidera ships and how each
+  behaves.
 - **A console for you.** The console bridge is an adapter too: from a terminal you
   start a session on any trusted machine and read what comes back.
 
