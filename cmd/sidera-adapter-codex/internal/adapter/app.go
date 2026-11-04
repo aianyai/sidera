@@ -26,6 +26,10 @@ import (
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
+// endServerTimeout bounds the ending of the App Server at shutdown, inside the time
+// the daemon allows an adapter to answer shutdown.
+const endServerTimeout = 15 * time.Second
+
 // ClientVersion is the version the adapter reports to the App Server as its own:
 // the release's.
 func ClientVersion() string { return release.Version() }
@@ -39,6 +43,9 @@ type ServerManager interface {
 	// Terminate ends the server, when it can be shown to be one this adapter
 	// started; see server.Server.Terminate.
 	Terminate(ctx context.Context) error
+	// RemoveWorkDir deletes the working directory the server runs in, after the
+	// server has ended.
+	RemoveWorkDir() error
 }
 
 // Options holds what a test replaces. The zero value is the real thing.
@@ -235,10 +242,29 @@ func (a *App) Initialize(_ context.Context, conn *adapterkit.Conn, inst adapterp
 	return nil
 }
 
-// Shutdown ends the adapter's own work. The App Server is left running whatever
-// the intent: it is meant to outlive the adapter, so that turns go on while the
-// adapter restarts.
-func (a *App) Shutdown(context.Context, adapterproto.ShutdownParams) error {
+// Shutdown ends the adapter's own work and, by the intent, the App Server:
+//
+//   - restart: the server is kept. It is meant to outlive the adapter, so that a
+//     turn goes on while the daemon or the adapter restarts or is replaced.
+//   - stop: the server is ended when no session uses it, and kept when one does
+//     or when that cannot be told (see endIdleServer).
+//   - retire: the instance is disabled or removed, so the server is ended whatever
+//     it is doing, and the working directory the adapter made for it is deleted. The
+//     adapter need not have been started: the daemon asks an adapter that is not
+//     running to initialize and retire, and the server is found by the state file.
+//
+// The answer is sent when the server is gone, so that the state directory the daemon
+// deletes next holds nothing that is still in use.
+func (a *App) Shutdown(ctx context.Context, p adapterproto.ShutdownParams) error {
+	intent := p.Effective()
+	endServer := false
+	switch intent {
+	case adapterproto.ShutdownStop:
+		endServer = a.endIdleServer()
+	case adapterproto.ShutdownRetire:
+		endServer = true
+	}
+
 	a.mu.Lock()
 	a.shutdownNow = true
 	client := a.client
@@ -246,6 +272,74 @@ func (a *App) Shutdown(context.Context, adapterproto.ShutdownParams) error {
 	a.stop()
 	if client != nil {
 		_ = client.Close()
+	}
+	if !endServer {
+		return nil
+	}
+	// A connection that was being opened has seen the end of the adapter's context;
+	// waiting for it, and for the mutex ensureClient refuses to leave once the
+	// adapter is shutting down, means no server is started behind the one ended here.
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	return a.endServer(ctx, intent)
+}
+
+// endIdleServer decides whether a daemon that is stopping may take the App Server
+// with it, and says so. The replacement gate is taken exclusively without waiting
+// and stays taken when the answer is yes, so that no turn starts in the server
+// that is about to end; it is the replacement's own check: every session known
+// to be loaded and idle in an open connection. A gate that is taken, an adapter
+// that was not started or has no connection, and any session that is not known to
+// be idle keep the server, which then serves the next start of the instance.
+func (a *App) endIdleServer() bool {
+	if !a.replaceGate.TryLock() {
+		a.log.Info("the App Server was kept at stop: an operation is using it")
+		return false
+	}
+	a.mu.Lock()
+	started := a.started
+	a.mu.Unlock()
+	why := ""
+	switch {
+	case !started:
+		why = "the adapter was not started, so the sessions are not known"
+	case a.liveClient() == nil:
+		why = "there is no connection, so the sessions are not known"
+	default:
+		why = a.busyReason()
+	}
+	if why != "" {
+		a.replaceGate.Unlock()
+		a.log.Info("the App Server was kept at stop: it is not known to be idle", "busy", why)
+		return false
+	}
+	return true
+}
+
+// endServer ends the App Server of this instance and, for a retired instance,
+// deletes the working directory it ran in. A server that cannot be ended is an
+// error and its directory stays, because it still runs there.
+func (a *App) endServer(ctx context.Context, intent adapterproto.ShutdownIntent) error {
+	a.mu.Lock()
+	srv := a.srv
+	a.mu.Unlock()
+	if srv == nil {
+		// No adapter.start: nothing but the state directory is known.
+		srv = a.opts.NewServer(server.Config{StateDir: a.inst.StateDir, Environ: a.opts.Environ, Logger: a.log})
+	}
+	ctx, cancel := context.WithTimeout(ctx, endServerTimeout)
+	defer cancel()
+	a.log.Info("ending the App Server", "intent", string(intent))
+	// The error is the answer to shutdown, which the daemon logs: the message is
+	// what tells the owner why the server runs on.
+	if err := srv.Terminate(ctx); err != nil {
+		return peer.NewError(peer.CodeInternalError, "the App Server was left running: "+err.Error())
+	}
+	if intent != adapterproto.ShutdownRetire {
+		return nil
+	}
+	if err := srv.RemoveWorkDir(); err != nil {
+		return peer.NewError(peer.CodeInternalError, err.Error())
 	}
 	return nil
 }

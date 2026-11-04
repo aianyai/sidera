@@ -113,6 +113,40 @@ func TestStartRunsTheServerInADirectoryOfItsOwn(t *testing.T) {
 	}
 }
 
+// Deleting the working directory takes the instance's own and nothing else: not the
+// directory of another instance, and not the cache directory of the adapter that
+// holds them. Deleting one that is not there is not an error.
+func TestRemoveWorkDirDeletesOnlyTheInstancesOwn(t *testing.T) {
+	cache := t.TempDir()
+	home := shortTempDir(t)
+	newServer := func(name string) *Server {
+		srv := New(Config{Program: "codex", StateDir: filepath.Join(home, "adapter-state", name)})
+		srv.userCacheDir = func() (string, error) { return cache, nil }
+		return srv
+	}
+	mine, other := newServer("codex"), newServer("codex-2")
+	var dirs [2]string
+	for i, srv := range []*Server{mine, other} {
+		dir, err := srv.workDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dirs[i] = dir
+	}
+
+	for range 2 {
+		if err := mine.RemoveWorkDir(); err != nil {
+			t.Fatalf("RemoveWorkDir: %v", err)
+		}
+	}
+	if _, err := os.Stat(dirs[0]); !os.IsNotExist(err) {
+		t.Errorf("the instance's directory is still there (stat: %v)", err)
+	}
+	if _, err := os.Stat(dirs[1]); err != nil {
+		t.Errorf("the directory of another instance: %v", err)
+	}
+}
+
 // A server that answers but was not started by this process is reported as
 // exposed when its record says it ran in the state directory: an earlier adapter
 // started every server there and recorded no working directory.

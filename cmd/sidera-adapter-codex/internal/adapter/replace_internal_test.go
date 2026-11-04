@@ -50,3 +50,55 @@ func TestBusyReason(t *testing.T) {
 		})
 	}
 }
+
+// A daemon that is stopping takes the App Server with it only when it can be shown
+// that nothing uses it: the replacement gate is free, the adapter has been started
+// and holds an open connection, and every session is idle. When the answer is yes
+// the gate stays taken, so that no turn starts in the server that is about to end;
+// when it is no the gate is given back.
+func TestEndIdleServer(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		started    bool
+		connected  bool
+		gateTaken  bool
+		turnActive bool
+		end        bool
+	}{
+		{"idle", true, true, false, false, true},
+		{"a turn runs", true, true, false, true, false},
+		{"an operation holds the gate", true, true, true, false, false},
+		{"not started", false, true, false, false, false},
+		{"no connection", true, false, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := New(Options{})
+			a.started = tc.started
+			if tc.connected {
+				a.client = &appserver.Client{}
+			}
+			s := newSession("ep", "dev", "th", nil)
+			if tc.turnActive {
+				s.activeTurn = "tu"
+			}
+			a.sessions[s.endpoint] = s
+			if tc.gateTaken {
+				a.replaceGate.RLock()
+			}
+
+			if got := a.endIdleServer(); got != tc.end {
+				t.Fatalf("endIdleServer = %v, want %v", got, tc.end)
+			}
+			free := true
+			if tc.gateTaken {
+				a.replaceGate.RUnlock()
+			}
+			if !a.replaceGate.TryLock() {
+				free = false
+			}
+			if free == tc.end {
+				t.Fatalf("the gate is free: %v after an answer of %v, want it taken exactly when the server ends", free, tc.end)
+			}
+		})
+	}
+}

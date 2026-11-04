@@ -232,8 +232,8 @@ sidera daemon
 `sidera daemon stop`; `sidera daemon restart` starts it again in place. The node's own log is
 in `~/.sidera/logs/` (on Windows `%LOCALAPPDATA%\Sidera\logs\`). Sidera does not start itself at boot and does not install a
 background service yet; the options below keep it running after you close the
-terminal. Stopping the daemon leaves the Codex App Server that the Codex adapter
-keeps running; see [Stop the daemon](operations.md#stop-the-daemon-and-the-codex-app-server).
+terminal. Stopping the daemon ends the Codex App Server of the Codex adapter unless a
+Codex session is running a turn in it; see [Stop the daemon](operations.md#stop-the-daemon-and-the-codex-app-server).
 
 Start the daemon from your home directory, not from a directory that you may delete
 later, such as a git worktree.

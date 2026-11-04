@@ -12,6 +12,10 @@ import (
 // dialTimeout bounds one attempt to reach the App Server, a start of it included.
 const dialTimeout = 30 * time.Second
 
+// errShuttingDown is returned by calls that need the App Server once shutdown was
+// asked for.
+var errShuttingDown = errors.New("adapter: the adapter is shutting down")
+
 // errNotStarted is returned by calls that need the App Server before adapter.start
 // said where it is.
 var errNotStarted = errors.New("adapter: adapter.start has not been served")
@@ -44,12 +48,23 @@ func (a *App) ensureClient(ctx context.Context) (*appserver.Client, error) {
 	if c := a.liveClient(); c != nil {
 		return c, nil
 	}
+	if a.shuttingDown() {
+		// Shutdown may be ending the server; a connection opened now would start one.
+		return nil, errShuttingDown
+	}
 	a.mu.Lock()
 	srv := a.srv
 	a.mu.Unlock()
 	if srv == nil {
 		return nil, errNotStarted
 	}
+	// Opening a connection can start the server and take far longer than the time
+	// Shutdown has. Whoever asked, the opening ends with the adapter, so that
+	// Shutdown, which waits for connMu, never waits for a request's own deadline
+	// and no server is started behind the one it ends.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(a.bgCtx, cancel)()
 	ep, err := srv.Connect(ctx)
 	if err != nil {
 		return nil, err

@@ -347,14 +347,26 @@ type fakeManager struct {
 	exposure string
 	// gate, when set, holds Connect until it is closed.
 	gate chan struct{}
+	// refuseUntilAsked, once set with refuseConnectsUnlessRequested, fails every
+	// Connect whose ctx has a deadline (the ones the adapter makes for itself all
+	// carry one) and holds one that has none (a request's) until its ctx ends,
+	// telling requested that it holds.
+	refuseUntilAsked bool
+	requested        chan struct{}
 
 	mu         sync.Mutex
+	connects   int // how many times Connect was called
 	terminated int
 	// terminate is what Terminate does besides counting; nil does nothing.
 	terminate func() error
+	// events lists, in order, "terminate" and "remove-workdir" as they happened.
+	events []string
 }
 
 func (m *fakeManager) Connect(ctx context.Context) (appserver.Endpoint, error) {
+	m.mu.Lock()
+	m.connects++
+	m.mu.Unlock()
 	if m.gate != nil {
 		select {
 		case <-m.gate:
@@ -362,19 +374,60 @@ func (m *fakeManager) Connect(ctx context.Context) (appserver.Endpoint, error) {
 			return appserver.Endpoint{}, ctx.Err()
 		}
 	}
+	m.mu.Lock()
+	refuse, requested := m.refuseUntilAsked, m.requested
+	m.mu.Unlock()
+	if refuse {
+		if _, bounded := ctx.Deadline(); bounded {
+			return appserver.Endpoint{}, errors.New("the server is not reachable")
+		}
+		close(requested)
+		<-ctx.Done()
+		return appserver.Endpoint{}, ctx.Err()
+	}
 	return m.ep, m.err
 }
+
+// refuseConnectsUnlessRequested makes every Connect the adapter makes for itself fail
+// and holds the first one a request makes; the channel closes when it is held.
+func (m *fakeManager) refuseConnectsUnlessRequested() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refuseUntilAsked, m.requested = true, make(chan struct{})
+	return m.requested
+}
 func (m *fakeManager) Exposure() string { return m.exposure }
+
+func (m *fakeManager) RemoveWorkDir() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, "remove-workdir")
+	return nil
+}
 
 func (m *fakeManager) Terminate(context.Context) error {
 	m.mu.Lock()
 	m.terminated++
+	m.events = append(m.events, "terminate")
 	f := m.terminate
 	m.mu.Unlock()
 	if f == nil {
 		return nil
 	}
 	return f()
+}
+
+// history lists what was done to the server and its directory, in order.
+func (m *fakeManager) history() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.events...)
+}
+
+func (m *fakeManager) connectCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.connects
 }
 
 func (m *fakeManager) terminations() int {
@@ -393,6 +446,7 @@ type harness struct {
 	dir    string
 
 	mu          sync.Mutex
+	serverCfgs  []server.Config // the configuration of every manager the adapter made
 	notes       []note
 	checkpoints []adapterproto.CheckpointPutParams
 	changed     chan struct{}
@@ -418,7 +472,12 @@ func newHarnessWith(t *testing.T, codex *fakeCodex, mutate func(*adapter.Options
 		h.mgr.ep = codex.srv.Endpoint
 	}
 	opts := adapter.Options{
-		NewServer:    func(server.Config) adapter.ServerManager { return h.mgr },
+		NewServer: func(c server.Config) adapter.ServerManager {
+			h.mu.Lock()
+			h.serverCfgs = append(h.serverCfgs, c)
+			h.mu.Unlock()
+			return h.mgr
+		},
 		CodexVersion: func(context.Context, string) (string, error) { return "0.164.0", nil },
 		LookPath:     func(name string) (string, error) { return filepath.Join(dir, "bin", name), nil },
 		MCPWait:      300 * time.Millisecond,

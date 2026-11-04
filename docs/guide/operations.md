@@ -444,12 +444,21 @@ see why it did not run.
 
 ## Stop the daemon and the Codex App Server
 
-`sidera daemon stop` ends the daemon and the adapters it started. It leaves the
-Codex App Server running: the Codex adapter starts it detached on purpose, so that a
-turn that is running survives a restart of the daemon. The server lives in the
-adapter's state directory, `~/.sidera/adapter-state/codex/`. Before you delete a data
-directory (or leave a node for good), stop the daemon and end its server too, or it
-stays behind with nothing to use it. Ending it ends any turn that runs in it.
+`sidera daemon stop` ends the daemon and the adapters it started. The Codex adapter
+starts its App Server detached on purpose, so that a turn that is running survives a
+restart of the daemon (`sidera daemon restart`, `sidera update`), and it keeps the server
+for that. When the daemon stops, the adapter ends the server if no Codex session it manages
+is running a turn, and leaves it running otherwise (the reason is in
+`logs/adapter-codex.log`); a server that is left serves the next start of the node. The
+server lives in the adapter's state directory, `~/.sidera/adapter-state/codex/`.
+
+Disabling the instance (`sidera adapter disable codex`) ends the server whatever it is
+doing, which ends any turn that runs in it, and deletes the directory the adapter made
+for it under your user cache directory. Removing a disabled instance then deletes its
+state directory. So a node that is left through `adapter disable` and `adapter remove`
+leaves no server behind. Before you delete a data directory by hand (or leave a node for good
+without those commands), stop the daemon and make sure the server has ended, or it stays
+behind with nothing to use it. Ending it ends any turn that runs in it.
 
 - macOS and Linux: find the process whose command line names the socket in that
   directory, and end it. Your own Codex may run an App Server of its own; touch only

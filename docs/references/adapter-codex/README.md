@@ -128,6 +128,7 @@ on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LocalAppData%` on Windows)
 SHA-256 of its absolute path, so the instances of two Sidera homes never share one. A restart
 of the same instance uses the same directory. The start fails, with a message that says so,
 when there is no user cache directory. Nothing is ever put in it, and nothing reads it.
+The adapter deletes it when the instance is disabled or removed (see "When the adapter ends").
 
 Codex derives a sandbox's writable roots from a working directory, and the server's own is
 the one it falls back to (measured on 0.166, and in its source):
@@ -173,8 +174,43 @@ there is no record or the recorded process has ended. A server that did not beco
 reachable within the start timeout is ended the same way, but by the identity the start
 returned, not by the state file, which may not have been written (the process that was
 just started is killed directly in the one case that its key could not be read). The
-adapter's own shutdown does not stop the server. On Windows only the process itself
-is ended, not what it started.
+adapter's shutdown ends the server by the intent it is given (below). On Windows only the
+process itself is ended, not what it started.
+
+**When the adapter ends.** The server is meant to outlive the adapter, so what happens to it
+depends on why the adapter ends, which the daemon says in the intent of `shutdown`:
+
+| Intent | The server | The working directory |
+| ------ | ---------- | --------------------- |
+| `restart` (the daemon restarts, `sidera update`, a changed configuration or package) | kept: a turn that runs goes on and the next adapter finds the server by the state file | kept |
+| `stop` (the daemon ends) | ended only when it is shown to be idle, kept otherwise | kept |
+| `retire` (the instance is disabled or removed) | ended whatever it is doing; a turn that runs ends with it | deleted |
+
+An adapter that is killed, crashes or loses its connection to the daemon gets no
+`shutdown`, so the server stays, as for a restart.
+
+- **`stop` is the replacement's idleness test.** The adapter takes the replacement gate
+  exclusively without waiting and applies the same strict test of idleness (above), and
+  also needs the adapter to have been started and its connection to be open: otherwise the
+  sessions are not known. A gate that is taken (an operation is using the server) or any
+  session that is not known to be idle keeps the server; the reason is logged. When the
+  server is ended the gate stays taken, so that no turn starts in it. A server that is kept
+  serves the next start of the instance, or ends at the instance's `retire`.
+- **`retire` does not need `adapter.start`.** The daemon retires an instance whose adapter
+  is not running by starting the adapter once, only to `initialize` and `shutdown`. The
+  adapter then knows only its state directory, and finds the server by the state file
+  there, as `Terminate` does.
+- **The order.** The adapter answers `shutdown` once the server has ended, and only then
+  deletes the working directory, so a server that cannot be ended keeps the directory it
+  runs in: the answer is an error naming the reason, which the daemon logs, and the adapter
+  ends all the same. Because the answer comes after the server ended, the state directory
+  that the daemon deletes next (when the instance is removed) holds nothing that is still
+  in use. After `shutdown` began, no connection to the server is opened, so the reconnect
+  loop and a late request cannot start a server behind the one that was ended.
+- **The working directory** is deleted with `Server.RemoveWorkDir`, which takes only this
+  instance's directory (its name carries the hash of the state directory), not the cache
+  directory of the adapter that holds the others. The state directory's files (the log,
+  the state file, the token) are left for the daemon to delete with the instance.
 
 **Versions.** `adapter.probe` reports the version of the `codex` program
 (`codex --version`). The server's own version is in the user agent it answers

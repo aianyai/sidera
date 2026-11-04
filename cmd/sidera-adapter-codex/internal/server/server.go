@@ -484,6 +484,18 @@ func (s *Server) program() (string, error) {
 // directory would give it everything. The adapter's threads and commands all
 // name their own cwd, the preset's.
 func (s *Server) workDir() (string, error) {
+	dir, err := s.workDirPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("cannot make the directory to run the App Server in: %v", err)
+	}
+	return dir, nil
+}
+
+// workDirPath is where workDir puts the working directory.
+func (s *Server) workDirPath() (string, error) {
 	cache, err := s.userCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("no directory to run the App Server in: %v", err)
@@ -495,11 +507,23 @@ func (s *Server) workDir() (string, error) {
 	// The instance's name says whose directory it is; the hash of the whole path
 	// keeps the instances of two Sidera homes apart.
 	sum := sha256.Sum256([]byte(stateDir))
-	dir := filepath.Join(cache, workDirParent, filepath.Base(stateDir)+"-"+hex.EncodeToString(sum[:4]))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("cannot make the directory to run the App Server in: %v", err)
+	return filepath.Join(cache, workDirParent, filepath.Base(stateDir)+"-"+hex.EncodeToString(sum[:4])), nil
+}
+
+// RemoveWorkDir deletes the working directory the server runs in. It is the
+// last thing an instance that is disabled or removed leaves outside its state
+// directory, and the caller ends the server first: a directory taken from under
+// a server that runs is not what the server was started in. A directory that
+// is not there is not an error.
+func (s *Server) RemoveWorkDir() error {
+	dir, err := s.workDirPath()
+	if err != nil {
+		return err
 	}
-	return dir, nil
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("server: delete the App Server's working directory: %w", err)
+	}
+	return nil
 }
 
 // exitStatus says how a process ended, from the error of waiting for it.

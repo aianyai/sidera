@@ -26,7 +26,9 @@ protocol has a version of its own.
   adapter why it ends: `restart` when it restarts, `stop` when it ends, `retire` when the
   instance is disabled. When an instance is disabled while its adapter is not running (it
   is waiting to be started again after a failure), the daemon starts the adapter once only
-  so that it can release what it started.
+  so that it can release what it started. The Codex adapter now ends its App Server then,
+  whatever it is doing, and deletes the directory it made for it under your user cache
+  directory.
 - **Removing an instance deletes its state directory.** `sidera adapter remove` used to leave
   `~/.sidera/adapter-state/<instance>/` for you to delete. The daemon now waits for the
   adapter to have ended, then deletes the directory with the instance. On Windows the removal
@@ -35,6 +37,10 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Stopping the daemon ends the Codex App Server when no Codex session is running a turn.**
+  `sidera daemon stop` used to leave the server running always. The Codex adapter now ends it
+  when every session it manages is idle, and keeps it when one runs a turn, as it does when
+  the daemon restarts or `sidera update` replaces it, so that a turn survives those.
 - **A node can ask another member whether it can dial it back.** The new node-to-node
   protocol `/sidera/dial-back/1.0.0` lets a node ask a member over a connection they already
   have; the member dials the node on the addresses its own address book holds for it, from
