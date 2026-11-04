@@ -20,6 +20,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | ----- | -------- | ---------- |
 | 0 | contract packages in `internal/` (this tree excluded), `sdk/go/...` | the standard library, each other, approved third-party dependencies |
 | 1 | `fsx`, `clock` | layer 0, the standard library, `golang.org/x/sys`; `fsx` may import `clock` only to obtain the real clock |
+| 1 | `childproc` | the standard library, `golang.org/x/sys/windows`: the creation flags of a console program the daemon starts as its child |
 | 1 | `daemonerr` | the standard library only: daemon error declarations shared with the wire mapper; no lifecycle or wire policy |
 | 1, test support | `fsx/fsxtest`, `clock/clocktest` | their parent package, layer 0 |
 | 2 | `txn` | `fsx` |

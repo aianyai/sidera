@@ -220,6 +220,32 @@ starts the program, so that the new daemon takes the lock and the sockets over:
 If `ErrEngineNotStopped` or a fatal failure of the disk ended the daemon, the process ends
 as for a stop and starts nothing.
 
+### Programs the daemon starts
+
+`childproc.Windowless(cmd)` is for every console program the daemon starts as its
+child (the adapters, the restart check). On Windows it gives the program a console of
+its own that has no window (`CREATE_NO_WINDOW`: the process has a console,
+`GetConsoleWindow` is 0, and Windows Terminal is not handed anything to show), and a
+program that program starts with a plain `exec.Command` shares that console, so it has
+no window either. Elsewhere the call does nothing. The flag is added to the creation
+flags of the command and the rest of its `SysProcAttr` is kept, so the call comes
+after anything that assigns `SysProcAttr`. The daemon that a restart starts in its
+place is the one exception: `adapterkit/process` starts it detached, on purpose (see
+"Restart").
+
+The rule is needed because a daemon may have no console. A process without a console
+that starts a console program gives it a new visible console, and with Windows
+Terminal as the default terminal that console becomes a window; closing it ends the
+program, and the supervisor starts it again in a new one. A daemon has no console when
+it is restarted by `sidera update` or `sidera daemon restart` (the new process is
+started detached), when it runs as a service and when it is started through WMI.
+
+The Windows test of the package (`internal/node/childproc`) is the only place that
+shows this. It starts the test binary with no console, as the daemon a restart starts
+has none, and has that process start a child with `Windowless` and the child start a
+grandchild with a plain `exec.Command`; both must have a console and no window for it.
+That holds whatever console the test process itself has.
+
 ### init
 
 `daemon.Init` makes the data directory in one transaction (`init`) under the
@@ -712,6 +738,15 @@ reach the socket can obtain the credential of an endpoint of this node.
   the result and stopping.
 - **A fingerprint of the canonical params, in the interface.** The engine takes the
   value and never reads a request, so one rule decides when two requests are one.
+- **`CREATE_NO_WINDOW` at the start of the program, one function.** It is the only
+  choice measured to give a program a console without a window that what it starts
+  shares. Rejected: `DETACHED_PROCESS` (the program has no console, so each console
+  program it starts gets a window, and the problem moves one level down); a hidden
+  console for the daemon itself (`AllocConsole` makes a visible window, and the
+  variant without one needs Windows 11 24H2); starting the restarted daemon with the
+  flag (it covers the restart only, not a service or WMI, and changes what
+  `adapterkit/process.Start` promises); a `SysProcAttr` at each call site (one rule in
+  two places, and the next call site forgets it).
 - **A new package for the words of the wire** (`apiwire`) rather than strings in the
   engine: the engine says what happened in types, and every interface and client maps
   through one table, so a reason has one pair of words everywhere.
@@ -721,7 +756,9 @@ reach the socket can obtain the credential of an endpoint of this node.
 - Code: `internal/node/daemon` (`daemon.go`, `start.go`, `stop.go`, `init.go`,
   `home.go`, `table.go`, `logging.go`, `periodic.go`), `internal/node/manageapi`
   (`manageapi.go`, `methods.go`), `internal/node/apiwire`, `internal/node/logfile`,
-  `internal/node/engine/manage.go`.
+  `internal/node/engine/manage.go`, `internal/node/childproc` (`Windowless`).
+- Test of the window rule (`internal/node/childproc`, Windows only):
+  `TestWindowlessChildAndGrandchildHaveAConsoleWithoutAWindow`.
 - Tests of the adapter host's wiring (`adapters_test.go`):
   `TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem`,
   `TestAnInstanceThatCannotBeStartedIsJudgedOfflineAndTheStartGoesOn`,
