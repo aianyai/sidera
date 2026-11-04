@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -106,6 +109,113 @@ func (a adapterEngine) EndpointMessageStatus(ctx context.Context, instance strin
 	return res, messageLookupError(err)
 }
 
+// EndpointDirectory reads a page as the direct endpoint. A read that got no page
+// is a result, not an error: the request was well formed, and what it found out is
+// a fact about the node asked.
+func (a adapterEngine) EndpointDirectory(ctx context.Context, instance string, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	q := engine.DirectoryQuery{Cursor: p.Cursor, Limit: p.Limit}
+	if p.Node != "" {
+		node, err := ident.ParseNodeID(p.Node)
+		if err != nil {
+			return adapterproto.DirectoryResult{}, peer.NewError(peer.CodeInvalidParams, "a value of the request is not acceptable: node")
+		}
+		q.Node = node
+	}
+	page, err := a.e.Directory(ctx, engine.ByAdapter(instance, p.Endpoint), q)
+	if err != nil {
+		return directoryOutcome(err)
+	}
+	res := adapterproto.DirectoryResult{
+		Outcome:    adapterproto.DirectoryOK,
+		Endpoints:  make([]adapterproto.DirectoryEntry, len(page.Endpoints)),
+		NextCursor: page.NextCursor,
+	}
+	for i, ep := range page.Endpoints {
+		accepts := make([]adapterproto.EndpointAction, len(ep.Accepts))
+		for j, act := range ep.Accepts {
+			accepts[j] = adapterproto.EndpointAction(act.String())
+		}
+		res.Endpoints[i] = adapterproto.DirectoryEntry{
+			Address: adapterproto.Address(ep.Address.String()), Kind: adapterproto.EndpointKind(ep.Kind.String()),
+			DisplayName: ep.DisplayName, Description: ep.Description, Accepts: accepts,
+		}
+	}
+	return res, nil
+}
+
+// directoryOutcome is what a directory read that got no page is answered with.
+// The engine reports a refusal of the node asked and a refusal of this node in the
+// same words, so the two are told apart by the reason: a directory that could not
+// be reached in time is unavailable, and the reasons a node asked can name besides
+// the states of this node (starting, its clock set back, back pressure, which
+// keep the table's mapping for every request) are a refusal. A cursor the engine
+// refused with its own detail is misuse by the adapter; one the node asked refused
+// arrives without the detail, which no remote refusal carries, and is a refusal.
+func directoryOutcome(err error) (adapterproto.DirectoryResult, error) {
+	var ref *engine.Refusal
+	if !errors.As(err, &ref) {
+		return adapterproto.DirectoryResult{}, err
+	}
+	switch {
+	case ref.Reason == engine.ReasonDirectoryUnavailable:
+		return adapterproto.DirectoryResult{
+			Outcome: adapterproto.DirectoryUnavailable, Reason: adapterproto.DirectoryReasonUnavailable,
+			Endpoints: []adapterproto.DirectoryEntry{},
+		}, nil
+	case ref.Reason == engine.ReasonInvalidArgument && ref.Detail == 0, ref.Reason == engine.ReasonShuttingDown:
+		return adapterproto.DirectoryResult{
+			Outcome: adapterproto.DirectoryRefused, Reason: adapterproto.DirectoryReason(ref.Reason.String()),
+			Endpoints: []adapterproto.DirectoryEntry{},
+		}, nil
+	}
+	return adapterproto.DirectoryResult{}, adapterError(err)
+}
+
+func (a adapterEngine) EndpointPeers(ctx context.Context, instance string, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	nodes, err := a.e.Peers(ctx, engine.ByAdapter(instance, p.Endpoint))
+	if err != nil {
+		return adapterproto.PeersResult{}, adapterError(err)
+	}
+	res := adapterproto.PeersResult{Nodes: make([]adapterproto.PeerNode, len(nodes))}
+	for i, n := range nodes {
+		res.Nodes[i] = adapterproto.PeerNode{
+			Node: n.Node.String(), Self: n.Trust == engine.PeerTrustSelf,
+			Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected,
+		}
+	}
+	return res, nil
+}
+
+func (a adapterEngine) EndpointDeclare(ctx context.Context, instance string, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	patch := engine.DeclarationPatch{
+		Paused: p.Paused, RefuseMultiRecipient: p.RefuseMultiRecipient,
+		RestrictSenders: p.RestrictSenders, HiddenFromDirectory: p.HiddenFromDirectory,
+	}
+	if p.AcceptFrom != nil {
+		list := make([]ident.Address, len(*p.AcceptFrom))
+		for i, text := range *p.AcceptFrom {
+			addr, err := ident.ParseAddress(string(text))
+			if err != nil {
+				return adapterproto.DeclareResult{}, peer.NewError(peer.CodeInvalidParams, fmt.Sprintf("a value of the request is not acceptable: accept_from[%d]", i))
+			}
+			list[i] = addr
+		}
+		patch.AcceptFrom = &list
+	}
+	d, err := a.e.Declare(ctx, engine.ByAdapter(instance, p.Endpoint), patch)
+	if err != nil {
+		return adapterproto.DeclareResult{}, adapterError(err)
+	}
+	res := adapterproto.DeclareResult{Declaration: adapterproto.Declaration{
+		Paused: d.Paused, RefuseMultiRecipient: d.RefuseMultiRecipient, RestrictSenders: d.RestrictSenders,
+		AcceptFrom: make([]adapterproto.Address, len(d.AcceptFrom)), HiddenFromDirectory: d.HiddenFromDirectory,
+	}}
+	for i, addr := range d.AcceptFrom {
+		res.Declaration.AcceptFrom[i] = adapterproto.Address(addr.String())
+	}
+	return res, nil
+}
+
 // messageLookupError is the error of a method that names a message the endpoint
 // may not have: an unknown message is a normal answer there, and the same fixed
 // one whether the message does not exist or belongs to another endpoint, so the
@@ -171,9 +281,16 @@ var adapterCodes = map[engine.Reason]adapterCode{
 		}
 		return map[string]any{"limit": r.Limit.String()}
 	}},
-	engine.ReasonLeaseUnknown:    {code: adapterproto.CodeLeaseUnknown, message: "the endpoint was handed no page under this lease"},
-	engine.ReasonInvalidArgument: {code: peer.CodeInvalidParams, message: "a value of the request is not acceptable"},
-	engine.ReasonShuttingDown:    {code: peer.CodeShuttingDown, message: "the node is stopping"},
+	engine.ReasonLeaseUnknown: {code: adapterproto.CodeLeaseUnknown, message: "the endpoint was handed no page under this lease"},
+	// A refusal with a detail the protocol lists as a reason of invalid params
+	// (a cursor, an empty patch, a list of senders) says it in the data.
+	engine.ReasonInvalidArgument: {code: peer.CodeInvalidParams, message: "a value of the request is not acceptable", data: func(r *engine.Refusal) map[string]any {
+		if r.Detail == 0 || !slices.Contains(adapterproto.ParamsReasons(), r.Detail.String()) {
+			return nil
+		}
+		return map[string]any{"reason": r.Detail.String()}
+	}},
+	engine.ReasonShuttingDown: {code: peer.CodeShuttingDown, message: "the node is stopping"},
 
 	// The adapter is told nothing it could act on: an instance the engine does not
 	// know is the daemon's to sort out, and a caller that is not an endpoint or an

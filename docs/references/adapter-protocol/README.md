@@ -872,7 +872,10 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
   to read at all because of its own state (starting, or its clock set back) is not a result
   but the existing `1012` `node_busy`, as for every other `endpoint.*` request. A cursor the
   node does not accept is `-32602` with `data.reason` `cursor_invalid`: the adapter started
-  or continued a listing wrongly, and starts it again.
+  or continued a listing wrongly, and starts it again. A cursor that another node refused
+  is not reported so, because a refusal that comes over the network carries its reason and
+  no detail: it is a `refused` result with reason `invalid_argument`, and the adapter starts the
+  listing again as well.
 - `endpoint.peers` lists this node first (`self` true, `trust` `self`), then every node it
   trusts directly (`trust` `direct`), in the order of their names. `connected` is whether a
   connection to the node is up now; it is read without waiting and says nothing about

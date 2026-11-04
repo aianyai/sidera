@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -108,7 +109,66 @@ func TestTheEngineBehindTheHostOffersNoOptionalPartThatItDoesNotMap(t *testing.T
 	if _, ok := e.(adapterhost.EndpointCalls); !ok {
 		t.Error("the engine behind the host does not offer mapped EndpointCalls")
 	}
+	if _, ok := e.(adapterhost.DirectoryCalls); !ok {
+		t.Error("the engine behind the host does not offer mapped DirectoryCalls")
+	}
 }
+
+// The three requests of a direct endpoint that read the directory and the nodes
+// and set its declaration are made as that endpoint of the connection's instance:
+// a hidden endpoint leaves the directory, the nodes are listed, and an endpoint
+// of another instance is not one the connection can speak as.
+func TestADirectEndpointReadsTheDirectoryAndSetsItsDeclarationAsItself(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	e := apiwire.AdapterEngine(h.Engine())
+	dc := e.(adapterhost.DirectoryCalls)
+	ctx := h.Ctx()
+	register := func(key string) adapterproto.EndpointRef {
+		res, err := e.RegisterDirect(ctx, harness.Instance, adapterproto.RegisterParams{Key: key, DisplayName: "Name of " + key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Endpoint
+	}
+	reader, other := register("reader"), register("other")
+	names := func() []string {
+		page, err := dc.EndpointDirectory(ctx, harness.Instance, adapterproto.DirectoryParams{Endpoint: reader})
+		if err != nil || page.Outcome != adapterproto.DirectoryOK || page.NextCursor != "" {
+			t.Fatalf("EndpointDirectory = %+v, %v", page, err)
+		}
+		var out []string
+		for _, entry := range page.Endpoints {
+			if entry.Kind != adapterproto.EndpointDirect || entry.Description != "" || len(entry.Accepts) == 0 {
+				t.Errorf("entry %+v is not a direct endpoint without a description that accepts something", entry)
+			}
+			out = append(out, entry.DisplayName)
+		}
+		return out
+	}
+	if got := names(); !slices.Contains(got, "Name of other") {
+		t.Fatalf("the directory lists %v, want the endpoint \"other\" in it", got)
+	}
+
+	decl, err := dc.EndpointDeclare(ctx, harness.Instance, adapterproto.DeclareParams{Endpoint: other, HiddenFromDirectory: ptr(true)})
+	if err != nil || !decl.Declaration.HiddenFromDirectory || decl.Declaration.AcceptFrom == nil {
+		t.Fatalf("EndpointDeclare = %+v, %v", decl, err)
+	}
+	if got := names(); slices.Contains(got, "Name of other") {
+		t.Errorf("the directory lists %v after the endpoint hid itself", got)
+	}
+
+	peers, err := dc.EndpointPeers(ctx, harness.Instance, adapterproto.PeersParams{Endpoint: reader})
+	if err != nil || len(peers.Nodes) != 1 || !peers.Nodes[0].Self || peers.Nodes[0].Trust != adapterproto.PeerSelf || !peers.Nodes[0].Connected {
+		t.Fatalf("EndpointPeers = %+v, %v, want this node alone", peers, err)
+	}
+
+	_, err = dc.EndpointPeers(ctx, "another-instance", adapterproto.PeersParams{Endpoint: reader})
+	if pe := wireError(t, err); pe.Code != adapterproto.CodeUnknownEndpoint {
+		t.Errorf("an endpoint of another instance: code %d, want %d", pe.Code, adapterproto.CodeUnknownEndpoint)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
 
 // recv.observed is an optional part the wrapper maps: a refusal of the engine
 // reaches the adapter as the code the protocol names for it.

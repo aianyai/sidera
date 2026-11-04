@@ -182,6 +182,13 @@ it hands a `*peer.Error` on as it is.
 | instance unknown, unauthenticated, operation identifier reused, storage fatal | `-32603` internal_error | nothing an adapter could act on; a fatal failure of the disk is a request whose outcome is not known, which is what `-32603` says |
 | node queue full, storage full, storage unavailable, clock rollback, loop busy, recovering | `1012` node_busy | `data`: `{"reason":"<name>"}`, the engine's name for the reason; see below |
 
+A refusal with a detail the protocol lists as a reason of invalid params is `-32602`
+with `data.reason` set to it (`cursor_invalid`, `empty_patch`, `too_many_senders`,
+`duplicate_sender`). A directory read that got no page is not an error:
+`endpoint.directory` answers `unavailable` (reason `directory_unavailable`) for a target
+that could not be reached in time, and `refused` with the reason word unchanged for a bare
+`invalid_argument` and for `shutting_down`; the other refusals keep the rows above.
+
 The production `apiwire.AdapterEngine` also implements `EndpointCalls`, so
 `endpoint.send`, `endpoint.recv`, `endpoint.ack` and `endpoint.message_status`
 reach the engine through this same host. Each operation binds `ByAdapter` to the

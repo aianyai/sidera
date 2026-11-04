@@ -1,6 +1,7 @@
 package apiwire
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -282,5 +283,99 @@ func TestMessageLookupErrorIsTheFixedAnswerForAnUnknownMessage(t *testing.T) {
 	plain := errors.New("unknown storage failure")
 	if messageLookupError(plain) != plain || messageLookupError(nil) != nil {
 		t.Fatal("unknown error or success changed")
+	}
+}
+
+// A refusal that carries a detail the protocol lists as a reason of invalid params
+// says it in the data, and one that does not stays as the table has it. The words
+// the protocol lists are exactly the details the engine can send.
+func TestAnInvalidArgumentWithAListedDetailSaysItInTheData(t *testing.T) {
+	for _, tc := range []struct {
+		detail engine.Detail
+		data   string
+	}{
+		{engine.DetailCursorInvalid, `{"reason":"cursor_invalid"}`},
+		{engine.DetailEmptyPatch, `{"reason":"empty_patch"}`},
+		{engine.DetailTooManySenders, `{"reason":"too_many_senders"}`},
+		{engine.DetailDuplicateSender, `{"reason":"duplicate_sender"}`},
+		{engine.DetailNodeMismatch, ""},
+		{0, ""},
+	} {
+		t.Run(tc.detail.String(), func(t *testing.T) {
+			pe := asPeerError(t, adapterError(&engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "x", Detail: tc.detail}))
+			if pe.Code != peer.CodeInvalidParams || string(pe.Data) != tc.data {
+				t.Errorf("code %d data %q, want -32602 %q", pe.Code, pe.Data, tc.data)
+			}
+			if err := adapterproto.ErrorObject(*pe).Validate(); err != nil {
+				t.Errorf("the protocol refuses the error it is answered with: %v", err)
+			}
+		})
+	}
+	sent := map[string]bool{}
+	for _, d := range engine.Details() {
+		if pe := asPeerError(t, adapterError(&engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: d})); pe.Data != nil {
+			sent[d.String()] = true
+		}
+	}
+	listed := map[string]bool{}
+	for _, w := range adapterproto.ParamsReasons() {
+		listed[w] = true
+	}
+	if !reflect.DeepEqual(sent, listed) {
+		t.Errorf("the details sent in the data are %v, the protocol lists %v", sent, listed)
+	}
+}
+
+// A directory read that got no page is a result for the adapter, not an error:
+// unavailable for a directory that could not be reached, refused with the word
+// of the refusal for what a node asked says no to, and the table's error for the
+// states of this node.
+func TestADirectoryReadThatGotNoPageIsAResult(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		outcome adapterproto.DirectoryOutcome
+		reason  adapterproto.DirectoryReason
+		code    int
+	}{
+		{"a directory that could not be reached", &engine.Refusal{Reason: engine.ReasonDirectoryUnavailable}, adapterproto.DirectoryUnavailable, "directory_unavailable", 0},
+		{"a refusal of another node without a detail", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "cursor"}, adapterproto.DirectoryRefused, "invalid_argument", 0},
+		{"a node that is stopping", &engine.Refusal{Reason: engine.ReasonShuttingDown}, adapterproto.DirectoryRefused, "shutting_down", 0},
+		{"a cursor this node refused", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "cursor", Detail: engine.DetailCursorInvalid}, "", "", -32602},
+		{"this node starting", &engine.Refusal{Reason: engine.ReasonRecovering}, "", "", 1012},
+		{"this node's clock set back", &engine.Refusal{Reason: engine.ReasonClockRollback}, "", "", 1012},
+		{"an endpoint that is not the connection's", &engine.Refusal{Reason: engine.ReasonEndpointUnknown}, "", "", 1001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := directoryOutcome(tc.err)
+			if tc.code != 0 {
+				if pe := asPeerError(t, err); pe.Code != tc.code {
+					t.Errorf("code %d, want %d", pe.Code, tc.code)
+				}
+				return
+			}
+			if err != nil || res.Outcome != tc.outcome || res.Reason != tc.reason || res.Endpoints == nil || res.NextCursor != "" {
+				t.Errorf("result %+v, error %v, want %s with reason %s", res, err, tc.outcome, tc.reason)
+			}
+			if err := res.Validate(); err != nil {
+				t.Errorf("the protocol refuses the result: %v", err)
+			}
+		})
+	}
+	plain := errors.New("the disk said no")
+	if _, err := directoryOutcome(plain); err != plain {
+		t.Errorf("a plain error became %v", err)
+	}
+}
+
+// An entry of accept_from that is not an address is misuse of the parameters, as
+// every other address the adapter writes is: -32602 naming the entry, with no
+// reason in the data. The form of an address is judged where it is read.
+func TestADeclarationWithAnEntryThatIsNoAddressIsInvalidParams(t *testing.T) {
+	entries := []adapterproto.Address{"not an address"}
+	_, err := adapterEngine{}.EndpointDeclare(context.Background(), "inst", adapterproto.DeclareParams{AcceptFrom: &entries})
+	pe := asPeerError(t, err)
+	if pe.Code != peer.CodeInvalidParams || !strings.HasSuffix(pe.Message, ": accept_from[0]") || pe.Data != nil {
+		t.Errorf("code %d message %q data %q, want -32602 naming accept_from[0] and no data", pe.Code, pe.Message, pe.Data)
 	}
 }
