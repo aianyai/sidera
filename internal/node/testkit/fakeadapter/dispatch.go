@@ -37,6 +37,9 @@ const (
 	KnobDirectAck           = "direct.ack"
 	KnobDirectSend          = "direct.send"
 	KnobDirectMessageStatus = "direct.message-status"
+	KnobDirectDirectory     = "direct.directory"
+	KnobDirectPeers         = "direct.peers"
+	KnobDirectDeclare       = "direct.declare"
 	KnobDirectUnregister    = "direct.unregister"
 )
 
@@ -363,6 +366,24 @@ func (k *Knobs) Dispatch(ctx context.Context, name string, args json.RawMessage)
 			return invalid(err)
 		}
 		return answerOf(k.MessageStatus(ctx, p))
+	case KnobDirectDirectory:
+		var p adapterproto.DirectoryParams
+		if err := adapterproto.Decode(args, &p); err != nil {
+			return invalid(err)
+		}
+		return answerOf(k.Directory(ctx, p))
+	case KnobDirectPeers:
+		var p adapterproto.PeersParams
+		if err := adapterproto.Decode(args, &p); err != nil {
+			return invalid(err)
+		}
+		return answerOf(k.Peers(ctx, p))
+	case KnobDirectDeclare:
+		var p adapterproto.DeclareParams
+		if err := adapterproto.Decode(args, &p); err != nil {
+			return invalid(err)
+		}
+		return answerOf(k.Declare(ctx, p))
 	case KnobDirectUnregister:
 		var p adapterproto.UnregisterParams
 		if err := adapterproto.Decode(args, &p); err != nil {
@@ -509,6 +530,27 @@ func (r RemoteKnobs) Send(ctx context.Context, p adapterproto.SendParams) (adapt
 func (r RemoteKnobs) MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	var res adapterproto.MessageStatusResult
 	err := r.Do(ctx, KnobDirectMessageStatus, p, &res)
+	return res, err
+}
+
+// Directory reads a page of the directory as a direct endpoint.
+func (r RemoteKnobs) Directory(ctx context.Context, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	var res adapterproto.DirectoryResult
+	err := r.Do(ctx, KnobDirectDirectory, p, &res)
+	return res, err
+}
+
+// Peers lists the nodes a direct endpoint can address.
+func (r RemoteKnobs) Peers(ctx context.Context, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	var res adapterproto.PeersResult
+	err := r.Do(ctx, KnobDirectPeers, p, &res)
+	return res, err
+}
+
+// Declare changes the declaration of a direct endpoint.
+func (r RemoteKnobs) Declare(ctx context.Context, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	var res adapterproto.DeclareResult
+	err := r.Do(ctx, KnobDirectDeclare, p, &res)
 	return res, err
 }
 

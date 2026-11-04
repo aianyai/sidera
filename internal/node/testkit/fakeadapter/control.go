@@ -51,6 +51,9 @@ type Controller interface {
 	Ack(ctx context.Context, p adapterproto.AckParams) (adapterproto.AckResult, error)
 	Send(ctx context.Context, p adapterproto.SendParams) (adapterproto.SendResult, error)
 	MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error)
+	Directory(ctx context.Context, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error)
+	Peers(ctx context.Context, p adapterproto.PeersParams) (adapterproto.PeersResult, error)
+	Declare(ctx context.Context, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error)
 	Unregister(ctx context.Context, p adapterproto.UnregisterParams) error
 }
 
@@ -170,6 +173,18 @@ func (c localController) Send(ctx context.Context, p adapterproto.SendParams) (a
 
 func (c localController) MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	return c.k.MessageStatus(ctx, p)
+}
+
+func (c localController) Directory(ctx context.Context, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	return c.k.Directory(ctx, p)
+}
+
+func (c localController) Peers(ctx context.Context, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	return c.k.Peers(ctx, p)
+}
+
+func (c localController) Declare(ctx context.Context, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	return c.k.Declare(ctx, p)
 }
 
 func (c localController) Unregister(ctx context.Context, p adapterproto.UnregisterParams) error {

@@ -586,7 +586,7 @@ func (k *Knobs) NativeRequest(ctx context.Context, endpoint adapterproto.Endpoin
 	})
 }
 
-// Register, Recv, Ack, Send, MessageStatus and Unregister are what a chat bridge
+// Register, Recv, Ack, Send, MessageStatus, Directory, Peers, Declare and Unregister are what a chat bridge
 // does with a direct endpoint: the adapter calls the daemon's endpoint methods and
 // returns what it answered. The adapter must have declared direct endpoints.
 
@@ -622,6 +622,27 @@ func (k *Knobs) Send(ctx context.Context, p adapterproto.SendParams) (adapterpro
 func (k *Knobs) MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	var res adapterproto.MessageStatusResult
 	err := k.direct(ctx, "message-status", adapterproto.MethodEndpointMessageStatus, p, &res)
+	return res, err
+}
+
+// Directory reads a page of the directory as a direct endpoint.
+func (k *Knobs) Directory(ctx context.Context, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	var res adapterproto.DirectoryResult
+	err := k.direct(ctx, "directory", adapterproto.MethodEndpointDirectory, p, &res)
+	return res, err
+}
+
+// Peers lists the nodes a direct endpoint can address.
+func (k *Knobs) Peers(ctx context.Context, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	var res adapterproto.PeersResult
+	err := k.direct(ctx, "peers", adapterproto.MethodEndpointPeers, p, &res)
+	return res, err
+}
+
+// Declare changes the declaration of a direct endpoint.
+func (k *Knobs) Declare(ctx context.Context, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	var res adapterproto.DeclareResult
+	err := k.direct(ctx, "declare", adapterproto.MethodEndpointDeclare, p, &res)
 	return res, err
 }
 

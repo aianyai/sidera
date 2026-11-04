@@ -129,7 +129,7 @@ setting. A kind a request does not take is refused when it is set.
 result faithfully, cut short (with the manifest's truncation notice) or replaced
 (with its replacement notice). `Availability`, `Persist`, `NativeRequest`, `Ping`
 and the direct methods (`Register`, `Recv`, `Ack`, `Send`, `MessageStatus`,
-`Unregister`), and `CheckpointPut` send what the name says and return the daemon's answer. `Held`,
+`Directory`, `Peers`, `Declare`, `Unregister`), and `CheckpointPut` send what the name says and return the daemon's answer. `Held`,
 `NotificationsSent` and `Outstanding` tell a fixture which unanswered requests are
 expected and how many notifications the daemon must have handled before the system
 counts as quiet. `Held` is a multiset of request identities, one per held

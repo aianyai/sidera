@@ -3,6 +3,7 @@ package apiwire_test
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -356,5 +357,42 @@ func TestDirectProtocolRefusalsLeaveMessagesAndAcknowledgementsUnchanged(t *test
 	}
 	if !reflect.DeepEqual(messageSnapshot(t, h), before) {
 		t.Fatal("rejected reply changed persisted messages or acknowledgements")
+	}
+}
+
+// A direct endpoint of an adapter reads the directory, the nodes and sets its own
+// declaration through the real host: the capability is declared at initialize,
+// the requests reach the engine as that endpoint, and an endpoint that hid itself
+// is gone from the directory another endpoint reads.
+func TestADirectEndpointHidesItselfAndReadsTheDirectoryAndPeersThroughTheHost(t *testing.T) {
+	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{}})
+	a, b := h.MustDirect("a"), h.MustDirect("b")
+	ctl := directController(t, h, harness.Instance)
+	refA, refB := directRef(t, a), directRef(t, b)
+	listed := func() []string {
+		t.Helper()
+		page, err := ctl.Directory(h.Ctx(), adapterproto.DirectoryParams{Endpoint: refA})
+		if err != nil || page.Outcome != adapterproto.DirectoryOK {
+			t.Fatalf("Directory = %+v, %v", page, err)
+		}
+		var out []string
+		for _, e := range page.Endpoints {
+			out = append(out, string(e.Address))
+		}
+		return out
+	}
+	if got := listed(); !slices.Contains(got, b) {
+		t.Fatalf("the directory lists %v, want %s in it", got, b)
+	}
+	decl, err := ctl.Declare(h.Ctx(), adapterproto.DeclareParams{Endpoint: refB, HiddenFromDirectory: &[]bool{true}[0]})
+	if err != nil || !decl.Declaration.HiddenFromDirectory {
+		t.Fatalf("Declare = %+v, %v", decl, err)
+	}
+	if got := listed(); slices.Contains(got, b) {
+		t.Errorf("the directory lists %v after %s hid itself", got, b)
+	}
+	peers, err := ctl.Peers(h.Ctx(), adapterproto.PeersParams{Endpoint: refA})
+	if err != nil || len(peers.Nodes) != 1 || !peers.Nodes[0].Self {
+		t.Fatalf("Peers = %+v, %v, want this node alone", peers, err)
 	}
 }

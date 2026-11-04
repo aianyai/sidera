@@ -175,8 +175,8 @@ of an invalid-params error, the results of a directory read that got no page, an
 protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the
 requests that answer a refusal through a real engine, a stopping engine, the three
 explicitly mapped optional interfaces (`EndpointCalls`, `DirectoryCalls` and
-`ObservedCalls`), a direct endpoint reading the directory and setting its declaration,
-and `recv.observed` refusals. `direct_test.go`: complete direct send, control and reply
+`ObservedCalls`), and `recv.observed` refusals. `direct_test.go`: a direct endpoint that hides itself and
+reads the directory and the nodes, complete direct send, control and reply
 fields, replay and conflict, endpoint ownership, reply routing, lease and part
 refusals, and nondisclosing status errors through the real host, with persisted
 messages and acknowledgements checked after refusals. `apiwire_test.go`: every
