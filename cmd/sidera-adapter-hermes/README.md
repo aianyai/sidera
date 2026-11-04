@@ -6,13 +6,18 @@ comes back to the card. What the lane is, the card format, the endpoint model an
 the rules the adapter follows are in
 [`docs/references/adapter-hermes/`](../../docs/references/adapter-hermes/README.md).
 
-This directory holds the packages below; the adapter program that wires them is not
-part of this directory yet.
+`main.go` is the program: `serve` is the adapter the daemon starts, `package` writes
+an installable package and `version` prints the build. Everything else is in the
+packages below. The program receives messages and polls the board and hands both to
+two handler interfaces (`adapter.MessageHandler`, `adapter.CardHandler`); the flows
+that act on them are not part of this directory yet, and until they are the program
+logs what it reads and acknowledges nothing.
 
 ## Layout
 
 | Path | Holds |
 | ---- | ----- |
+| `internal/adapter/` | The adapter program: the `Application`, the direct endpoints, the receive loop, the board poll loop, the probe, the manifest and the package. The handler interfaces the flows implement. |
 | `internal/config/` | The instance configuration and its checks; the alias allow-list. |
 | `internal/card/` | The card envelope, strict decoding, validation against the aliases, the assignee rule, the creator check. |
 | `internal/kanban/` | The client of the board: runs `hermes kanban --json`, decodes the answers, classifies failures, names the block kinds and checks the Hermes release. Described in [`kanban-cli`](../../docs/references/adapter-hermes/kanban-cli.md). |

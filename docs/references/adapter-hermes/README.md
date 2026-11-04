@@ -5,11 +5,12 @@ card assigned to `sidera`, a Sidera adapter on the same machine picks it up, han
 the task to an agent on another node and writes the answer back to the card. This
 document describes the part of `cmd/sidera-adapter-hermes/` that is committed: the
 instance configuration, the card and its validation, the endpoint model, the state
-directory and the decisions the adapter makes over them. They are pure functions
-and local persistence. The client of the board, which runs `hermes kanban` and
-decodes what it prints, has a document of its own: [kanban-cli](kanban-cli.md). The
-program that reads the board, talks to the daemon and carries the decisions out is
-not in the directory yet, and this document grows with it.
+directory, the decisions the adapter makes over them, and the program that talks to
+the daemon, receives messages and polls the board. The client of the board, which
+runs `hermes kanban` and decodes what it prints, has a document of its own:
+[kanban-cli](kanban-cli.md). What the program does with a message or a card it has
+read (delegating a card, completing one with a reply, turning a message into a
+request card) is not in the directory yet, and this document grows with it.
 
 The adapter imports only the `sdk/go` module, as a third-party adapter would.
 
@@ -44,7 +45,9 @@ at once.
 | `max_endpoints` | Endpoints held, the instance endpoint and the orphan endpoint included (4 to 256) | 64 |
 | `max_open_sessions` | Remote sessions kept open | 32 |
 
-Durations are Go durations (`90m`, `168h`).
+Durations are Go durations (`90m`, `168h`). The package manifest declares these
+settings with the same keys and defaults, so `sidera adapter enable` and `config`
+can set them; a test decodes the declared defaults, so the two cannot differ.
 
 Two timings are not settings: how long an attempt can be sent again as the same
 message, and how long the id of a processed inbound message is remembered. They follow
@@ -129,6 +132,133 @@ registered, or is `orphan`, uses it. A new key takes a free slot; when none is f
 the conversation endpoint idle longest that can be retired is retired; when none can
 be, the card is sent from the orphan endpoint and the placement carries a reason for a
 comment on the card. The reserved orphan slot is why that always works.
+
+### The program
+
+`sidera-adapter-hermes` has three commands: `serve`, which the daemon starts,
+`package --goos --goarch --binary --out`, which writes a package for
+`sidera adapter install`, and `version`.
+
+**Manifest.** The adapter declares only direct endpoints, up to 256 (the upper bound
+of `max_endpoints`; the node's own cap on endpoints applies as well), and no runtime
+and no presets: it creates and drives no Hermes process. It requires the `hermes`
+program and declares the settings above.
+
+**Start.** `adapter.start` is answered at once. The configuration is decoded, the state
+directory (`instance.state_dir`) opened, the board client built and the endpoints the
+daemon lists adopted (below); then the loops start. Every call to the daemon that
+needs it running (registering and hiding endpoints, reading, acknowledging) happens
+from the loops, after the answer: the daemon holds an `endpoint.*` request until it is
+running, and waiting for one inside the answer would stall the daemon's own start
+until the handshake times out. Registration is retried with a growing pause.
+
+**The daemon capability.** The adapter needs `direct_endpoint_access`: without it a
+conversation endpoint could not be hidden from the directory and the adapter could
+not tell a sender where Hermes is. On a daemon that does not declare it, `start`
+attaches nothing and starts no loop, and the probe reports the dependency `daemon` as
+missing with the reason (this daemon cannot give a direct endpoint the directory and
+its own declaration; update the node).
+
+**Probe.** The dependency `daemon` (the capability) and the dependency `hermes`,
+which is the client's check: the program resolves and is not a Windows batch shim,
+its version is in the supported range, `hermes kanban` runs, the board exists, and no
+Hermes profile is named `sidera`, `sidera-inbox` or `sidera:*`.
+
+**Shutdown.** The loops are stopped, whatever the intent. The adapter starts no process
+that outlives it (a Hermes command ends with its call, or is killed with its
+context), so the intent changes nothing the adapter does; the state needs no cleanup,
+since every transition was written before it was acted on.
+
+**Availability.** Before every round of reading and of polling the adapter runs a
+cheap command that needs the board (listing the boards). When it fails, the loop does
+not touch Sidera or the board, the daemon is told with `adapter.availability`
+(condition `dependency_missing`, the cause in the detail) and the loop tries again
+after a pause that doubles from one second to two minutes. A success clears the
+condition. Only the change is reported.
+
+### Endpoints in the program
+
+The instance endpoint, key `hermes`, is registered after start, with the name from
+`display_name` and visible in the directory. A message to it is a new request. It is
+not recorded in the state: registering the same key returns the same endpoint.
+
+A conversation endpoint is registered the first time a card of its source sends
+(`Env.Place`, over `lane.PlaceEndpoint`), and the shared orphan endpoint likewise. The
+record of key and endpoint reference is written to the state before the endpoint is
+used, and the endpoint is declared hidden from the directory right after it is
+registered (`endpoint.declare`, `hidden_from_directory`), so the only address a
+stranger learns is the one Hermes sent from. A placement that retires an endpoint to
+make room writes the removal first and closes the endpoint second; the endpoint that
+stays open after a failed close is listed by the daemon at the next start and recorded
+again. A retired key opens the same endpoint when it is registered again.
+
+**After a restart** `adapter.start` lists the direct endpoints that are open. They are
+taken as the truth: a listed endpoint the state does not know (the process ended
+between registering and recording) is recorded; one whose reference differs is
+corrected; a recorded endpoint that is not listed is forgotten and registered again on
+its next use. The recorded endpoints are declared hidden again after start, since the
+process may have ended between registering and declaring.
+
+**Idle retirement.** Every ten minutes `lane.IdleEndpoints` names the conversation
+endpoints unused for `endpoint_idle` with no unfinished card and no open remote
+session; each is recorded as removed and closed with `endpoint.unregister`. The time
+of use is the last card placed on the endpoint or message read from it.
+
+### Receiving
+
+One loop reads all the adapter's endpoints. A round reads the endpoints a
+`endpoint.pending` notification named, or all of them when the poll is due (every 30
+seconds, and in the first round): the notification is best effort. A read never
+waits (`wait_s` 0): the adapter reads several endpoints from one loop, and a waiting
+read holds one of the connection's concurrent requests for every endpoint.
+
+Rules, and why:
+
+- **Not reading when the card cannot be written.** A lease arises only on a read, and
+  every lease that expires without an acknowledgement is one of the message's
+  redeliveries; after the third the sender is told the delivery's outcome is unknown.
+  A loop that does not read while Hermes is unusable leaves the messages in the node's
+  durable queue and uses none of them up.
+- **A message is acknowledged only when it is written.** The acknowledgement is what
+  tells the sender the message arrived. The message handler decides, with one of three
+  verdicts. `Written`: the id is recorded as processed and the message acknowledged.
+  `Retry`: a failure of Hermes that may pass; the message is not acknowledged and
+  receiving pauses with growing pauses (one second to two minutes). `Skip`: a failure
+  that will not pass and that the handler could not route anywhere; the message is not
+  acknowledged and the next message is handled. Its lease runs out, it is handed out
+  again up to three times, and the sender is then told the outcome is unknown. A
+  message that was not written is never acknowledged, since that would be a false
+  report of delivery.
+- **A message cut into parts is handled when every part is in hand.** The parts are
+  read in order from the first (a page that starts at another part is left, loudly),
+  put together, and handled once; each part is acknowledged with the lease of the page
+  it came on.
+- **A processed message is not handled again.** An id recorded as processed (kept for
+  `adapterproto.ReceivedRedeliveryWindow` from its first receipt) is acknowledged
+  without the handler. The id is recorded before the acknowledgement is sent, so a lost
+  acknowledgement is a redelivery that is answered by the table.
+- A message that was handled may be handed to the handler again (a lease that ran out
+  after the card was written and before the id was recorded), so a handler's effects
+  are repeatable.
+
+Until the flows that write cards land, the program's handler logs each message and
+returns `Skip`, so nothing is acknowledged that was not written.
+
+### Polling the board
+
+Every `poll_interval` the adapter lists the ready cards, keeps those whose assignee
+matches the lane (`card.MatchesAssignee`) and hands each to the card handler. It
+claims nothing: the same card is listed again until the handler claims it. The loop
+pauses under the same rule as receiving when Hermes cannot be used.
+
+### Sending
+
+Every send goes through `Env.Send`, which never sets `accept_before_s`.
+`adapterproto.SentKeyWindow`, the time during which an idempotency key is certainly
+still held and so a resend is recognised, is computed from the node's default delivery
+deadline. A send that names another deadline has another key lifetime, and the rule
+that an attempt older than the window is not sent again would be wrong for it. A
+send that needs a deadline has to derive the window from it first.
 
 ### The state directory
 
@@ -306,7 +436,8 @@ and the caller subscribes the notify fields recorded with the endpoint.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/` |
+| The program: commands, manifest, endpoints, receiving, polling, probe | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
+| Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |
 | State directory | `cmd/sidera-adapter-hermes/internal/state` | `state_test.go` |
