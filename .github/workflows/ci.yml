@@ -25,15 +25,19 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request supersedes that request's older run. Every
-# other run (push to main, manual dispatch) is its own group, named by its run
+# A newer push to a pull request supersedes that request's older run, and so
+# does a manual dispatch on a branch other than main: a newer dispatch of the
+# same branch supersedes its older run. Every
+# other run (push to main, dispatch on main) is its own group, named by its run
 # id, so runs on main never cancel, replace or wait for one another and each
 # commit keeps its own verdict. A group holds one running and one pending run,
 # and a newer pending run replaces the older one, so sharing a group per branch
 # would drop the verdict of a commit pushed while another is still running.
+# The condition is written out twice, in the group and in cancel-in-progress,
+# because an expression cannot be shared between them; keep the two identical.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') }}
 
 jobs:
   format:

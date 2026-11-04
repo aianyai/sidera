@@ -162,9 +162,10 @@ is for running again, after a failure, with the fast part of the walk:
 gh workflow run ci.yml --ref main -f crashwalk=smoke
 ```
 
-Dispatch is used on `main` only. The local default is the other way round: a
-walk run without the variable takes `smoke`, so that a walk on a development
-machine is fast unless it asks for `full`.
+A second dispatch on a branch other than `main` cancels that branch's run still
+in progress (see "Concurrency" below). The local default differs from the dispatch default: a walk run
+without the variable takes `smoke`, so that a walk on a development machine is
+fast unless it asks for `full`.
 
 The package-local walks of `internal/node/store`, `internal/node/engine`,
 `internal/node/config`, `internal/node/keys` and `internal/node/daemon` retain
@@ -560,9 +561,14 @@ to the workflow.
   (`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, or `/tags` for a lightweight
   tag) and replace both the SHA and the comment.
 - **Concurrency**: a new push to a pull request cancels that request's older
-  run. Every other run, whether a push to `main` or a manual dispatch, is its
-  own concurrency group, named by its run id, so no run on `main` cancels,
-  replaces or waits for another and every commit on `main` has its verdict.
+  run, and a manual dispatch on a branch other than `main` cancels the older
+  in-progress run of that ref in the same way, since the newer dispatch supersedes
+  it. Every other run, whether a
+  push to `main` or a dispatch on `main`, is its own concurrency group, named by
+  its run id, so no run on `main` cancels, replaces or waits for another and every
+  commit on `main` has its verdict. The condition (a pull request, or a dispatch
+  whose ref is not `refs/heads/main`) is the same expression in `group` and in
+  `cancel-in-progress`; they must stay identical.
   A concurrency group allows one running and one pending run, and a newer
   pending run cancels the older one (GitHub's `queue` setting, default
   `single`). Grouping `main` by branch would therefore drop the run of any
@@ -570,7 +576,7 @@ to the workflow.
   waiting; so would a manual re-run started right after a push. The price is
   that two pushes close together run side by side on separate runners. The
   alternative `queue: max` keeps runs in order but cannot be combined with
-  `cancel-in-progress: true`, which pull requests need, and with
+  `cancel-in-progress: true`, which pull requests and branch dispatches need, and with
   `cancel-in-progress` given as an expression the documentation leaves the
   combination undefined.
 - **A script for the notices, not a licence tool**: the build list is what `go list
