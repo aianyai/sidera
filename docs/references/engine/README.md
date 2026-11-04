@@ -341,7 +341,9 @@ draws randomness only in the loop. The worker, which is a goroutine the engine o
 `Quiesce` counts, opens the directory through `Deps.OpenPackage`, copies it next to the
 versions of its adapter with every file and directory synced (`config.StageAdapter`),
 checks that the manifest of the **copy** is, byte for byte, the one it read first, and
-that it lists this machine's platform (`adapterreg.RunsOn`); a source whose manifest
+that it lists this machine's platform (`adapterreg.RunsOn`, otherwise `platform_unsupported`)
+and declares a protocol version this node speaks (`adapterreg.SharedProtocol`, otherwise
+`protocol_unsupported`); a source whose manifest
 changes while it is copied is refused as an invalid change (`config_invalid`, with the
 manifest as the field), so the check and the install cannot disagree and nothing is left on the disk. A directory
 or file of the package that cannot be read is refused as `invalid_argument` with the

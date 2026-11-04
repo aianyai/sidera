@@ -28,7 +28,8 @@ not frame, send or store anything.
 | `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
 | `Admission.Check(kind, method)` | The error code to answer a call the adapter made with (`0` when it is acceptable): method not found (unknown, or a method only the daemon may call), wrong endpoint kind, or a capability not declared. |
-| `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
+| `SharedProtocol(daemon, manifest)` | The protocol versions the daemon's range and the manifest's range share, and whether there is one: the one judge of whether a package speaks a protocol this node speaks, used by the installation and by the handshake. |
+| `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges (`SharedProtocol`). |
 | `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`; `accepted` returns zero because the attempt has no outcome yet. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
 | `BlockedCause(handoff.Cause)` | The cause of a blocked delivery as the delivery rules record and tell it. |

@@ -413,19 +413,35 @@ type HandshakeError struct{ Reason HandshakeReason }
 
 func (e *HandshakeError) Error() string { return "adapterreg: initialize result: " + e.Reason.String() }
 
+// SharedProtocol returns the protocol versions the daemon, which speaks the range
+// daemon, and the package, whose manifest declares the range it implements, can
+// both use, and false when there is none. It is the one judge of whether a package
+// speaks a protocol this node does: the installation refuses a package that has no
+// shared version, and the handshake accepts only a version inside it.
+func SharedProtocol(daemon adapterproto.Range, m manifest.Manifest) (adapterproto.Range, bool) {
+	shared := adapterproto.Range{Min: max(daemon.Min, m.Protocol.Min), Max: min(daemon.Max, m.Protocol.Max)}
+	if shared.Min > shared.Max {
+		return adapterproto.Range{}, false
+	}
+	return shared, true
+}
+
 // CheckHandshake checks an initialize result against the request the daemon sent
 // and the manifest of the adapter it started: the adapter reports the id and the
-// version the manifest declares, and the protocol version it chose lies in the
-// range the daemon asked for and in the range the manifest declares.
+// version the manifest declares, and the protocol version it chose is one both
+// sides speak (SharedProtocol): it lies in the range the daemon asked for and in the
+// range the manifest declares.
 func CheckHandshake(sent adapterproto.Range, res adapterproto.InitializeResult, m manifest.Manifest) error {
 	switch {
 	case res.Adapter.ID != m.ID:
 		return &HandshakeError{HandshakeAdapterMismatch}
 	case res.Adapter.Version != m.Version:
 		return &HandshakeError{HandshakeVersionMismatch}
-	case !sent.Contains(res.ProtocolVersion):
-		return &HandshakeError{HandshakeProtocolOutsideRequest}
-	case !m.Protocol.Contains(res.ProtocolVersion):
+	}
+	if shared, ok := SharedProtocol(sent, m); !ok || !shared.Contains(res.ProtocolVersion) {
+		if !sent.Contains(res.ProtocolVersion) {
+			return &HandshakeError{HandshakeProtocolOutsideRequest}
+		}
 		return &HandshakeError{HandshakeProtocolOutsideManifest}
 	}
 	return nil

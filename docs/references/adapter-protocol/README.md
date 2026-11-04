@@ -1062,7 +1062,11 @@ each front end gets the same parts), the receive wait per agent front
 end (`Admission.RecvWait`: the manifest's limit, or `adapterreg.DefaultRecvWait`,
 8 seconds; it does not apply to direct endpoints) and the compiled markers.
 `CheckHandshake` additionally requires that the adapter reports the manifest's id
-and version and a protocol version in both the requested and the manifest range.
+and version and a protocol version in both the requested and the manifest range,
+which is the range `adapterreg.SharedProtocol` returns. The installation uses the
+same function: a package whose manifest range has no version in common with
+`adapterproto.SupportedRange()` is refused when it is installed
+(`refused/protocol_unsupported`), because it would be refused at every handshake.
 
 **Mappings.** The daemon turns what an adapter reports into the values the
 contract packages take. `internal/adapterreg` holds the mapping for every row
@@ -1122,7 +1126,7 @@ except the observations that are plain calls (marked "call"):
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
   `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestBlockedCause`, `TestStatusConditions`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
-  `TestCloseReply`, `TestCheckHandshake`.
+  `TestCloseReply`, `TestCheckHandshake`, `TestAPackageSpeaksTheProtocolWhenTheRangesShareAVersion`.
 
 ## Control signals
 
@@ -1461,7 +1465,10 @@ which this field does not govern: the adapter chooses that wait in `wait_s`.
 `platforms` is what the installation judges: a package whose list does not hold the
 operating system and architecture of the machine is refused when it is installed
 (`adapterreg.RunsOn`), because it would otherwise be installed and fail to start,
-which the owner would meet only as an instance that never comes online.
+which the owner would meet only as an instance that never comes online. `protocol` is
+judged the same way (`adapterreg.SharedProtocol`): a range that shares no version with
+the ones this node speaks is refused when it is installed, so that installing it over a
+running instance cannot send that instance into a restart loop.
 
 The manifest lists no tested versions of the native runtime, and the daemon neither
 judges nor blocks a version: the runtimes upgrade several times a day, so a list

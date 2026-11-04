@@ -363,6 +363,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryConflict, "install_in_progress", "this installation is still in progress; ask for its result with the same operation identifier when it is done")
 	case engine.ReasonPlatformUnsupported:
 		return New(CategoryRefused, "platform_unsupported", "the package does not run on this platform")
+	case engine.ReasonProtocolUnsupported:
+		return New(CategoryRefused, "protocol_unsupported", "the package does not speak an adapter protocol version this node speaks")
 	case engine.ReasonProbeTokenUsed:
 		return New(CategoryUnauthenticated, "probe_token_used", "the probe token was presented before and is good once")
 	case engine.ReasonProbeTokenExpired:

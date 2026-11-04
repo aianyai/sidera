@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"math"
 	"path"
@@ -112,6 +113,19 @@ func foreignManifest(t testing.TB, version string) string {
 	swapped := regexp.MustCompile(`"os":\s*"`+runtime.GOOS+`"`).ReplaceAllString(text, `"os": "`+otherOS()+`"`)
 	if swapped == text {
 		t.Fatalf("the manifest names no platform %q:\n%s", runtime.GOOS, text)
+	}
+	return swapped
+}
+
+// futureProtocolManifest is the manifest of relay for protocol versions above
+// the ones the node speaks.
+func futureProtocolManifest(t testing.TB, version string) string {
+	t.Helper()
+	text := manifestFile(t, relayOptions(version))
+	future := fmt.Sprintf(`"protocol": {"min": %d, "max": %d}`, adapterproto.ProtocolMax+1, adapterproto.ProtocolMax+2)
+	swapped := regexp.MustCompile(`"protocol":\s*\{[^}]*\}`).ReplaceAllString(text, future)
+	if swapped == text {
+		t.Fatalf("the manifest names no protocol range:\n%s", text)
 	}
 	return swapped
 }
@@ -465,6 +479,8 @@ func TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree(t *testing.T) {
 			}},
 		{"a manifest for another platform", packageDisk(t, map[string]string{"sidera-adapter.json": foreignManifest(t, "1.0.0"), o.Program: "x"}),
 			func(t *testing.T, err error) { wantReason(t, err, engine.ReasonPlatformUnsupported) }},
+		{"a manifest for protocol versions the node does not speak", packageDisk(t, map[string]string{"sidera-adapter.json": futureProtocolManifest(t, "1.0.0"), o.Program: "x"}),
+			func(t *testing.T, err error) { wantReason(t, err, engine.ReasonProtocolUnsupported) }},
 		{"a package without its program", packageDisk(t, map[string]string{"sidera-adapter.json": manifestFile(t, o)}),
 			func(t *testing.T, err error) {
 				if got := changeReason(t, err); got != config.ChangeInvalid {

@@ -43,8 +43,8 @@ type AdapterInstalled struct {
 // (an upgrade), or the same version with other contents (a rebuilt package that kept
 // its version). The package is copied outside the loop into a directory next to the
 // versions of its adapter, and
-// the copy is what is parsed and checked (the manifest, and that the package runs
-// on this platform), so that what is installed is what was checked and not what the
+// the copy is what is parsed and checked (the manifest, that the package runs
+// on this platform, and that it speaks a protocol version this node speaks), so that what is installed is what was checked and not what the
 // source may have become; the loop only renames the copy into place and makes it
 // current. A request that was done before is answered without reading the package.
 // A package that replaces one that enabled instances run is installed under a
@@ -104,6 +104,10 @@ func (e *Engine) stagePackage(source string, rnd io.Reader) (config.Staged, erro
 	if !adapterreg.RunsOn(staged.Manifest, runtime.GOOS, runtime.GOARCH) {
 		e.unstage(staged)
 		return config.Staged{}, refuse(ReasonPlatformUnsupported)
+	}
+	if _, ok := adapterreg.SharedProtocol(adapterproto.SupportedRange(), staged.Manifest); !ok {
+		e.unstage(staged)
+		return config.Staged{}, refuse(ReasonProtocolUnsupported)
 	}
 	return staged, nil
 }

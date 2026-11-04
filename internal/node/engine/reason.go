@@ -82,6 +82,11 @@ const (
 	// ReasonPlatformUnsupported: the package does not list the platform of this
 	// machine, so it would be installed and then fail to start.
 	ReasonPlatformUnsupported
+	// ReasonProtocolUnsupported: the adapter protocol versions the package
+	// implements and the ones this node speaks have no version in common, so the
+	// package would be installed and then be refused at every handshake, which an
+	// installation over a running instance would turn into a restart loop.
+	ReasonProtocolUnsupported
 	// ReasonProbeTokenUsed: the probe token was presented before; it is good once.
 	ReasonProbeTokenUsed
 	// ReasonProbeTokenExpired: the probe token was issued more than
@@ -163,6 +168,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonIdentityRetired:      "identity_retired",
 	ReasonInstallInProgress:    "install_in_progress",
 	ReasonPlatformUnsupported:  "platform_unsupported",
+	ReasonProtocolUnsupported:  "protocol_unsupported",
 	ReasonProbeTokenUsed:       "probe_token_used",
 	ReasonProbeTokenExpired:    "probe_token_expired",
 	ReasonInstallRepeated:      "install_repeated",

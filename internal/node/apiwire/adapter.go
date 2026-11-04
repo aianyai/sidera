@@ -196,6 +196,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonInstallInProgress:   internalCode,
 	engine.ReasonInstallRepeated:     internalCode,
 	engine.ReasonPlatformUnsupported: internalCode,
+	engine.ReasonProtocolUnsupported: internalCode,
 	engine.ReasonProbeTokenUsed:      internalCode,
 	engine.ReasonProbeTokenExpired:   internalCode,
 	// The owner's operations on trust are not an adapter's.

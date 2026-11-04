@@ -63,6 +63,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonInstallInProgress:    {"conflict", "install_in_progress"},
 	engine.ReasonInstallRepeated:      {"conflict", "install_in_progress"},
 	engine.ReasonPlatformUnsupported:  {"refused", "platform_unsupported"},
+	engine.ReasonProtocolUnsupported:  {"refused", "protocol_unsupported"},
 	engine.ReasonProbeTokenUsed:       {"unauthenticated", "probe_token_used"},
 	engine.ReasonProbeTokenExpired:    {"unauthenticated", "probe_token_expired"},
 	engine.ReasonDirectoryUnavailable: {"unavailable", "directory_unavailable"},

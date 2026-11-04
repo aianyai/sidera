@@ -43,6 +43,12 @@ protocol has a version of its own.
   its credentials again, and an attached session attaches again and gets a new endpoint. The
   controller name `sidera` gives a session leaves the directory name out when the directory's
   name has such a character.
+- **Installing an adapter package for an adapter protocol this node does not speak is refused.**
+  `sidera adapter install` used to accept a package whose manifest declares protocol versions
+  that share none with the ones the node speaks, and an instance running the previous version
+  was then restarted into a crash loop (the old package had to be installed again). The
+  installation now answers `refused/protocol_unsupported` and changes nothing, as it does for a
+  package that does not run on this platform.
 
 ## [0.12.2] - 2026-11-04
 
