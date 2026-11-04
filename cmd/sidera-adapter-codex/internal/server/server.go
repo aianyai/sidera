@@ -431,6 +431,7 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	if started.Detachment.Caveat != "" {
 		s.log.Info("how the App Server is detached", "detail", started.Detachment.Caveat)
 	}
+	previous, readErr := os.ReadFile(filepath.Join(s.cfg.StateDir, stateFileName))
 	s.writeState(started, ep, workDir)
 
 	deadline := time.NewTimer(s.cfg.StartTimeout)
@@ -440,6 +441,7 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	for {
 		select {
 		case <-exited:
+			s.restoreState(previous, readErr == nil)
 			return ep, fmt.Errorf("%w: it exited (%s) before it was reachable; an earlier App Server may hold the socket, see %s",
 				ErrStartFailed, exitStatus(exitErr), logName)
 		case <-ctx.Done():
@@ -554,6 +556,30 @@ func (s *Server) writeState(started process.Started, ep appserver.Endpoint, work
 		StartedNS: startedNS, WorkDir: workDir,
 	}); err != nil {
 		s.log.Warn("cannot write the state file", "error", err)
+	}
+}
+
+// restoreState puts back the state file as it was before a start wrote its own,
+// for a server that ended before it was reachable. Such a server lost the socket
+// to an earlier one, still running, and stop, retire and replace find a server
+// only through this file: left naming the dead process, it would hide the earlier
+// one. With no earlier file there is nothing to put back and the new one goes.
+func (s *Server) restoreState(previous []byte, existed bool) {
+	path := filepath.Join(s.cfg.StateDir, stateFileName)
+	if !existed {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			s.log.Warn("cannot remove the state file of the App Server that ended", "error", err)
+		}
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, previous, 0o600); err != nil {
+		s.log.Warn("cannot put back the state file", "error", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		s.log.Warn("cannot put back the state file", "error", err)
 	}
 }
 
