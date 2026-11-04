@@ -46,9 +46,9 @@ concurrency:
 
 jobs:
   # The checks that decide whether the code is right, on every platform a node
-  # runs on. The steps that take long run as jobs of their own (race, bench), so
-  # that they run side by side on separate machines and a run takes about as
-  # long as its longest step and not the sum of them.
+  # runs on. The steps that take long run as jobs of their own (race, race-tags,
+  # bench), so that they run side by side on separate machines and a run takes
+  # about as long as its longest step and not the sum of them.
   #
   # go test stops a package after 10 minutes unless told otherwise; the explicit
   # limit leaves the job's own timeout room for setup and a readable failure.
@@ -84,6 +84,35 @@ jobs:
       # tests that log or skip must be added here.
       - name: go test -v (platform packages)
         run: go test -count=1 -v -timeout 30m -skip "$SKIP_TESTS" ./internal/node/fsx ./internal/node/ipc
+      # The tests again with the build tags that select binary-level crash points
+      # and the test clock, which the untagged run never compiles. The tests behind
+      # the acceptance tag run in their own jobs, not here; the vet job type-checks
+      # the files of every tag.
+      #
+      # Only the packages whose test binary the two tags change are tested: any other
+      # package builds the same test from the same files, so running it again would
+      # repeat the verdict of the run above. scripts/tagged-test-packages.sh reads
+      # the list from go list, so a package that comes to depend on one of the tags
+      # is picked up without editing this file.
+      #
+      # The tagged plain run is a step of this job, and its race run is the
+      # race-tags job. When both were one job, its plain and race runs went one
+      # after the other and it was the longest job of a run on Linux; now the plain
+      # runs share one job and the race runs are jobs of their own.
+      - name: packages the tags change
+        id: tagged
+        run: |
+          packages=$(scripts/tagged-test-packages.sh crashtest,testclock)
+          echo "$packages"
+          echo "packages=$(echo "$packages" | tr '\n' ' ')" >>"$GITHUB_OUTPUT"
+      # $PACKAGES, the packages the previous step printed, is a list of words on
+      # purpose.
+      - name: go test with tags
+        env:
+          PACKAGES: ${{ steps.tagged.outputs.packages }}
+        run: |
+          # shellcheck disable=SC2086
+          go test -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" $PACKAGES
 
   # The race detector needs cgo and a C compiler, which the Linux, macOS and
   # Windows x64 hosted images ship, and Go does not support it on windows/arm64,
@@ -183,24 +212,20 @@ jobs:
           go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
           go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
-  # The tests again with the build tags that select binary-level crash points
-  # and the test clock, which the untagged job never compiles. The tests behind
-  # the acceptance tag run in their own jobs, not here; the vet job type-checks
-  # the files of every tag.
-  #
-  # Only the packages whose test binary the two tags change are tested: any other
-  # package builds the same test from the same files, so running it again would
-  # repeat the verdict of the test job. scripts/tagged-test-packages.sh reads the
-  # list from go list, so a package that comes to depend on one of the tags is
-  # picked up without editing this file.
-  test-tags:
-    name: test with tags (${{ matrix.os }})
+  # The race run of the packages the build tags change (see the tagged steps of
+  # the test job for the tags and for why only those packages). It is a job of its
+  # own because it took about 460 s on Linux, more than the plain runs of the
+  # test job together, and it was the longest job of a run while it shared a job
+  # with the tagged plain run. The race detector is not supported on windows/arm64,
+  # so there is no job for that platform.
+  race-tags:
+    name: race with tags (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
@@ -222,14 +247,7 @@ jobs:
           echo "packages=$(echo "$packages" | tr '\n' ' ')" >>"$GITHUB_OUTPUT"
       # $PACKAGES, the packages the previous step printed, is a list of words on
       # purpose.
-      - name: go test with tags
-        env:
-          PACKAGES: ${{ steps.tagged.outputs.packages }}
-        run: |
-          # shellcheck disable=SC2086
-          go test -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" $PACKAGES
       - name: go test -race with tags
-        if: matrix.os != 'windows-11-arm'
         env:
           PACKAGES: ${{ steps.tagged.outputs.packages }}
         run: |
@@ -237,8 +255,8 @@ jobs:
           go test -race -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" $PACKAGES
 
   # The tests that drive built binaries, one job per platform. Their files carry
-  # the acceptance tag, which no other job runs tests with (test-tags only vets
-  # it), so they have their own job, limit and timeout. The outer test also needs
+  # the acceptance tag, which no other job runs tests with (the vet job only
+  # vets it), so they have their own job, limit and timeout. The outer test also needs
   # crashtest,testclock to run the tagged process prerequisite regression; child
   # builds select their own tags, so the plain child stays untagged. The crash
   # walk is left to the crash-walk jobs, which run on demand; the walk and these
@@ -286,7 +304,7 @@ jobs:
   # release or after a change to recovery code, and not on every push.
   #
   # It does not use the race detector on any platform. Race detection belongs
-  # where it finds races at the lowest layer: the race steps of the test jobs
+  # where it finds races at the lowest layer: the race and race-tags jobs
   # and the Linux acceptance job drive the same concurrent code. The walk
   # checks crash consistency, and rerunning thousands of real-process crashes
   # under the race detector would only repeat that check at about four times
