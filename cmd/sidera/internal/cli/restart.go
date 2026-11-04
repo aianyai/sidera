@@ -71,6 +71,11 @@ func restartDaemon(ctx context.Context, node caller, random io.Reader, req resta
 	}
 	raw, err := callResending(ctx, node, "daemon.restart", manageapi.Request{OperationID: id, Params: params})
 	if err != nil {
+		if apiwire.FromError(err).Code == apiwire.CodeMethodUnknown {
+			// A daemon from before 0.12.0 has no such method and cannot be asked to restart.
+			return restartResult{}, &failure{"the running daemon predates `daemon restart` and cannot be restarted this way: " +
+				"stop it with `sidera daemon stop` and start it the way it was started"}
+		}
 		return restartResult{}, err
 	}
 	var answer struct {

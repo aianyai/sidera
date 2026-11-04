@@ -202,6 +202,24 @@ func TestRestartingTheDaemon(t *testing.T) {
 		}
 	})
 
+	t.Run("a daemon without the method is told to be stopped and started", func(t *testing.T) {
+		unknown := apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method")
+		node := &scriptedNode{restart: []func() (json.RawMessage, error){failed(unknown)}}
+		_, err := restartDaemon(context.Background(), node, random(), restartRequest{Wait: time.Minute, Sleep: noSleep}, nil)
+		var f *failure
+		if !errors.As(err, &f) {
+			t.Fatalf("error %v, want a failure", err)
+		}
+		for _, word := range []string{"predates `daemon restart`", "sidera daemon stop", "started"} {
+			if !strings.Contains(f.message, word) {
+				t.Errorf("the failure %q does not say %q", f.message, word)
+			}
+		}
+		if node.statusCalls != 0 || len(node.restartCalls) != 1 {
+			t.Errorf("%d requests and %d reads, want one request and no wait", len(node.restartCalls), node.statusCalls)
+		}
+	})
+
 	t.Run("a wait of zero returns the answer", func(t *testing.T) {
 		node := &scriptedNode{restart: []func() (json.RawMessage, error){answered(restartAnswer(id, false, "old"))}}
 		got, err := restartDaemon(context.Background(), node, random(), restartRequest{Sleep: noSleep}, nil)
