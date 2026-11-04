@@ -13,6 +13,12 @@ import (
 type Phase string
 
 const (
+	// PhaseClaiming: the adapter is about to claim the card on the board, or has
+	// claimed it and not yet written the rest of the record. The record exists so
+	// that a crash between the claim and the write leaves a trace: the card is
+	// running under this adapter's claim for the whole claim time, and nothing
+	// else would ever list it again.
+	PhaseClaiming Phase = "claiming"
 	// PhaseNew: claimed, nothing sent, no attempt begun. A card that waits its turn
 	// behind another one is here.
 	PhaseNew Phase = "new"
@@ -124,6 +130,7 @@ func (c *Card) Block(cat Category) {
 
 // Unblock records that Hermes released the card again and the adapter took it
 // back before anything is sent: it waits for its turn like a card just claimed.
+// A card whose claim was only intended (PhaseClaiming) is claimed the same way.
 func (c *Card) Unblock() { c.Phase, c.BlockedFor = PhaseNew, "" }
 
 // Finish records that the card is completed.

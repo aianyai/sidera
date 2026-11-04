@@ -51,7 +51,10 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   card read again when Hermes refuses a repeat (`fail`, `reconcileBlock`), and a reply
   replayed after the completion is recognised by the message id in the completed run's
   metadata (`completedBy`).
-- **A card is claimed after everything that only reads or can be repeated** (`take`).
+- **A card is claimed after everything that only reads or can be repeated** (`take`),
+  and after a record of the intent to claim it (`intendClaim`): a record in phase
+  `claiming` is read at the start and on every tick (`reconcileClaiming`), so a crash
+  between the claim and the rest of the record cannot leave a card running unseen.
 - **Remote text is never in a summary, a comment or a block reason**; the summary's first
   line is what Hermes wakes the creator with. Block reasons that quote a card are cut
   (`clip`).

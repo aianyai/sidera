@@ -92,7 +92,9 @@ type failure struct {
 //
 // The claim comes after everything that only reads or can be repeated: a card
 // claimed and then left on a transient failure would stay claimed, unrecorded, for
-// the whole claim time.
+// the whole claim time. For the same reason a record of the intent is written just
+// before the claim (intendClaim), so that a crash between the claim and the rest of
+// the record is found at the next start.
 func (f *laneFlows) take(ctx context.Context, id string) (reply bool) {
 	p, err := f.plan(ctx, id)
 	if err != nil {
@@ -104,19 +106,84 @@ func (f *laneFlows) take(ctx context.Context, id string) (reply bool) {
 	if p.reply {
 		return true
 	}
-	if !f.claim(ctx, id) {
+	if !f.intendClaim(id) || !f.claim(ctx, id) {
 		return false
 	}
+	f.begin(ctx, id, p)
+	return false
+}
+
+// intendClaim writes the record of a card the adapter does not know yet before the
+// card is claimed. A claim that is made and then forgotten by a crash leaves the
+// card running for the whole claim time, listed by nobody; the record is how the
+// next start finds it (reconcileClaiming). It reports whether the record is
+// written, and the card is not claimed when it is not.
+func (f *laneFlows) intendClaim(id string) bool {
+	err := f.env.State.Update(func(d *state.Data) error {
+		if _, ok := d.Cards[id]; !ok {
+			d.Cards[id] = &state.Card{ID: id, Phase: state.PhaseClaiming, ClaimedAt: f.env.Now()}
+		}
+		return nil
+	})
+	if err != nil {
+		f.env.Log.Error("recording that a card is about to be claimed; it is not claimed", "card", id, "error", err)
+	}
+	return err == nil
+}
+
+// begin starts a card the adapter has claimed: it completes the record, tells the
+// creator where the card was placed, and sends it or fails it.
+func (f *laneFlows) begin(ctx context.Context, id string, p *plan) {
 	f.adopt(id, p)
 	if p.placeNote != "" {
 		f.comment(ctx, id, p.placeNote)
 	}
 	if p.failure != nil {
 		f.fail(ctx, id, p.failure.reason, p.failure.text)
-		return false
+		return
 	}
 	f.advance(ctx, id)
-	return false
+}
+
+// reconcileClaiming settles a record that was written before a claim, at a start
+// and on every tick. A card the board shows running was claimed by this adapter
+// (nothing else claims a card of this lane): it is adopted as if the claim had just
+// been made. A card still ready was not claimed, and the poll takes it again. Any
+// other card is not the adapter's, and the record is dropped. The returned error
+// is a failure of Hermes that may pass.
+func (f *laneFlows) reconcileClaiming(ctx context.Context, id string) error {
+	detail, err := f.env.Board.Show(ctx, id)
+	switch {
+	case err != nil && !isPermanent(err):
+		return err
+	case err != nil:
+		f.forgetCard(id)
+	case detail.Card.Status == kanban.StatusReady:
+	case detail.Card.Status != kanban.StatusRunning:
+		f.forgetCard(id)
+	default:
+		p, err := f.plan(ctx, id)
+		switch {
+		case err != nil && !isPermanent(err):
+			return err
+		case err != nil || p.reply:
+			f.env.Log.Warn("a card claimed by this adapter cannot be served; it stays claimed", "card", id, "error", err)
+			f.forgetCard(id)
+		default:
+			f.begin(ctx, id, p)
+		}
+	}
+	return nil
+}
+
+// forgetCard drops the record of a card the adapter does not hold.
+func (f *laneFlows) forgetCard(id string) {
+	if err := f.env.State.Update(func(d *state.Data) error {
+		delete(d.Cards, id)
+		return nil
+	}); err != nil {
+		f.env.Log.Error("forgetting a card", "card", id, "error", err)
+	}
 }
 
 // plan reads the card and decides where it goes. The returned error is a failure of
@@ -242,7 +309,7 @@ func (f *laneFlows) source(ctx context.Context, id string, c kanban.Card) (lane.
 	return src, home, nil
 }
 
-// adopt writes the record of a claimed card. A card the adapter knew keeps its
+// adopt completes the record of a claimed card (intendClaim wrote its start). A card the adapter knew keeps its
 // attempt number and its counts of blocks, which is what keeps a retried card from
 // being blocked a second time for the same cause.
 func (f *laneFlows) adopt(id string, p *plan) {
@@ -257,7 +324,7 @@ func (f *laneFlows) adopt(id string, p *plan) {
 		if len(p.parents) > 0 {
 			c.Parent = p.parents[0]
 		}
-		if c.Phase == state.PhaseBlocked {
+		if c.Phase == state.PhaseBlocked || c.Phase == state.PhaseClaiming {
 			c.Unblock()
 		}
 		return nil

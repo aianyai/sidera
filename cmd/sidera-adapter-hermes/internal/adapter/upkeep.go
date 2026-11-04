@@ -20,6 +20,12 @@ func (f *laneFlows) Recover(ctx context.Context) error {
 		if !c.Unfinished() {
 			continue
 		}
+		if c.Phase == state.PhaseClaiming {
+			if err := f.reconcileClaiming(ctx, c.ID); err != nil {
+				return err
+			}
+			continue
+		}
 		detail, err := f.env.Board.Show(ctx, c.ID)
 		switch {
 		case err == nil && terminal(detail.Card.Status), err != nil && isPermanent(err):
@@ -39,6 +45,10 @@ func (f *laneFlows) Tick(ctx context.Context) {
 	d := f.env.State.View()
 	for _, c := range d.CardList() {
 		switch c.Phase {
+		case state.PhaseClaiming:
+			if err := f.reconcileClaiming(ctx, c.ID); err != nil {
+				f.env.Log.Warn("reading a card whose claim was intended", "card", c.ID, "error", err)
+			}
 		case state.PhaseNew, state.PhaseAttempting, state.PhaseSent:
 			f.advance(ctx, c.ID)
 		}

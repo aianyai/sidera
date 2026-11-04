@@ -95,7 +95,8 @@ func NoReplyDue(c state.Card, now time.Time, timeout time.Duration) bool {
 type ActionKind int
 
 const (
-	// ActionNew: the card is not known; handle it as a new one.
+	// ActionNew: the card is not known, or its claim was only intended and never
+	// confirmed; handle it as a new one.
 	ActionNew ActionKind = iota + 1
 	// ActionIgnore: the card is finished here; nothing to do.
 	ActionIgnore
@@ -125,6 +126,8 @@ type Action struct {
 // creator unblocked it, or because its claim lapsed or was released, and the
 // record says which:
 //
+//   - claiming: the record was written before the claim and nothing after it, so
+//     the card is taken again like a new one;
 //   - blocked as invalid: the creator may have fixed the card, so read it again;
 //   - blocked for no reply: wait again without sending, with the timer reset;
 //   - blocked as transient (failed, outcome unknown, session closed): the creator
@@ -142,7 +145,7 @@ type Action struct {
 // one must not rely on it, and the window has to be re-derived from that deadline.
 func OnReady(c *state.Card, now time.Time) Action {
 	switch {
-	case c == nil:
+	case c == nil, c.Phase == state.PhaseClaiming:
 		return Action{Kind: ActionNew}
 	case c.Phase == state.PhaseFinished:
 		return Action{Kind: ActionIgnore}

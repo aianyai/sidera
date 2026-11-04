@@ -339,3 +339,48 @@ func TestNewSessionLifecycle(t *testing.T) {
 		t.Errorf("last send %+v, want session.close to the session from the endpoint that created it", closing)
 	}
 }
+
+// A crash between claiming a card and writing the rest of its record leaves the
+// card running under the adapter's claim, and the poll lists only ready cards. The
+// record written before the claim is how the next start finds it: a card that
+// shows running is adopted and sent, one still ready is claimed and sent as any
+// new card.
+func TestCardClaimedBeforeACrashIsFoundAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     string
+		wantClaims int
+	}{
+		{"the claim was made", "running", 0},
+		{"the claim was not made", "ready", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir, hermesDir := t.TempDir(), t.TempDir()
+			store, err := state.Open(stateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Update(func(d *state.Data) error {
+				d.Cards["t_1"] = &state.Card{ID: "t_1", Phase: state.PhaseClaiming, ClaimedAt: newClock().now()}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			kanbantest.Update(t, hermesDir, func(b *kanbantest.Board) {
+				b.Cards["t_1"] = &kanbantest.Card{ID: "t_1", Title: "t", Body: messageCard, Assignee: "sidera", Status: tc.status, CreatedBy: "hermes"}
+			})
+
+			d := &daemon{directAccess: true}
+			h := start(t, options{d: d, lane: true, flows: LaneFlows(nil), stateDir: stateDir, hermesDir: hermesDir})
+			until(t, "the card to be sent", func() bool { return cardState(h, "t_1").Phase == state.PhaseSent })
+			if n := commandCount(h, "claim"); n != tc.wantClaims {
+				t.Errorf("the card was claimed %d times, want %d", n, tc.wantClaims)
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if len(d.sends) != 1 || d.sends[0].IdempotencyKey != "t_1:1" {
+				t.Errorf("sends %+v, want the task once with the key t_1:1", d.sends)
+			}
+		})
+	}
+}

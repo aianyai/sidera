@@ -291,7 +291,7 @@ guarantees that a failure is reported to the sender, and the rare loss of the la
 transitions appears there as a delivery of unknown outcome. A file the adapter cannot
 read, or of another version, makes `Open` fail.
 
-A card's phase is `new` (claimed, nothing sent), `attempting` (attempt number and
+A card's phase is `claiming` (the intent to claim is written; see below), `new` (claimed, nothing sent), `attempting` (attempt number and
 start persisted, the send may or may not have happened), `sent` (the message id is
 known; waiting for the reply), `blocked` or `finished`. Whether a card holds its peer
 (`Waiting`) is true in `attempting` and `sent` only: a blocked card does not, or one
@@ -315,10 +315,23 @@ recorded and started. A known card goes by `OnReady`. Everything that only reads
 can be repeated comes before the claim: a card claimed and then left on a transient
 failure would stay claimed, unrecorded, for the whole claim time, and the poll would
 never show it again. So the order is: read the card; resolve the source (below);
-register the endpoint (`Env.Place`); `claim --ttl` with the configured claim time;
-write the record; send. An invalid card is claimed and blocked as `capability` with
+register the endpoint (`Env.Place`); write the intent to claim (a record in phase
+`claiming` that holds nothing but the card id); `claim --ttl` with the configured claim
+time; complete the record; send. An invalid card is claimed and blocked as `capability` with
 the reason; a card whose mode is `reply` is the inbound half's and is not claimed
 (its stand-in logs it once per card id and leaves it ready).
+
+*A claim the adapter lost track of.* The intent record exists because a crash between
+the claim and the rest of the record would leave the card running under the adapter's
+claim for the whole claim time (seven days by default) while the poll, which lists only
+ready cards, never shows it again: the card would sit there unnoticed. At a start, and
+on every tick for as long as a record is in that phase, the card is read. Running: the
+adapter claimed it (nothing else claims a card of this lane), so it is placed and
+started as if the claim had just been made. Still ready: the claim never happened, and
+the poll takes the card like a new one. Anything else, or a card Hermes no longer
+knows: the record is dropped. Only a card the adapter did not know is covered; a known
+card that comes back and is claimed again keeps its earlier record until the record
+is completed.
 
 *Source.* The first row of `notify-list` names the conversation (profile, platform,
 chat, thread). A card with none is subscribed to the home target (`notify-subscribe`)
