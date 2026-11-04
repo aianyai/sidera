@@ -135,6 +135,7 @@ type Network struct {
 	dialPeers   map[ident.NodeID][]peer.ID
 	bookWritten map[peer.ID][]ma.Multiaddr // what the address book wrote to the peerstore, per peer
 	unreachable map[ident.NodeID]time.Time
+	callStreaks map[ident.NodeID]*callStreak // the run of failed calls to a node, until a call succeeds
 }
 
 type nodeHolder struct{ node Node }
@@ -176,6 +177,7 @@ func New(cfg Config) (*Network, error) {
 		dialPeers:   map[ident.NodeID][]peer.ID{},
 		bookWritten: map[peer.ID][]ma.Multiaddr{},
 		unreachable: map[ident.NodeID]time.Time{},
+		callStreaks: map[ident.NodeID]*callStreak{},
 	}
 	n.ctx, n.cancel = context.WithCancel(context.Background())
 	n.limiter = newPeerLimiter(n.clock.Now)

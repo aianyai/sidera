@@ -30,7 +30,8 @@ var gatedByPeer = &lnet.StreamError{ErrorCode: lnet.StreamGated, Remote: true}
 // see the call, ErrTimeout when it may have, Refused when it refused with a
 // reason, a plain error when it could not handle the call, and the caller's own
 // context error as it is.
-func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (_ transport.Receipt, err error) {
+	defer func() { n.noteCall(ctx, target, "send", err) }()
 	req, err := nodeproto.SendRequest{Sender: sender, Envelope: data}.Encode()
 	if err != nil {
 		return transport.Receipt{}, fmt.Errorf("network: send request: %w", err)
@@ -52,7 +53,8 @@ func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.En
 // Pull asks the target node for the current reports of a message to the
 // recipients of the request. The answer came over a connection the target's key
 // authenticated, which is what lets its NoRecord stand.
-func (n *Network) Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (transport.PullAnswer, error) {
+func (n *Network) Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (_ transport.PullAnswer, err error) {
+	defer func() { n.noteCall(ctx, target, "pull", err) }()
 	raw, err := nodeproto.PullRequest{Message: req.Message, Recipients: req.Recipients}.Encode()
 	if err != nil {
 		return transport.PullAnswer{}, fmt.Errorf("network: pull request: %w", err)
@@ -73,7 +75,8 @@ func (n *Network) Pull(ctx context.Context, target ident.NodeID, req transport.P
 
 // QueryDirectory asks the target node for a page of the endpoints it shows the
 // sender. An entry names no node on the wire: it is the node that was called.
-func (n *Network) QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error) {
+func (n *Network) QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req transport.DirectoryRequest) (_ transport.DirectoryPage, err error) {
+	defer func() { n.noteCall(ctx, target, "directory", err) }()
 	raw, err := nodeproto.DirectoryRequest{Sender: sender, Cursor: req.Cursor, Limit: req.Limit}.Encode()
 	if err != nil {
 		return transport.DirectoryPage{}, fmt.Errorf("network: directory request: %w", err)

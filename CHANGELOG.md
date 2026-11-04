@@ -38,6 +38,12 @@ protocol has a version of its own.
   record an earlier version wrote is recognised when its start time equals the process's
   exactly, and the key is then added; otherwise the adapter treats the process as one it
   cannot prove is its own and leaves it alone.
+- **The log says when calls to a node start failing and when they work again.** The first
+  call to a node that fails, after calls worked, is logged at info level with its kind
+  (`unreachable`, `timeout`, `refused` with the reason, `failed`) and where it stopped, such as
+  the error of each address dialed; the first call that works again is logged with how many
+  failed and for how long. Until now the reason was written only at debug level, so a node that
+  stopped answering left nothing to read at the default level.
 - **Closing an attached session now needs `--allow-attached`.** `sidera endpoint close`
   used to close the endpoint of a controller session a person is using exactly as it closes
   any other, so a cleanup that closed endpoints by address could end it by mistake. The
