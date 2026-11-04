@@ -70,7 +70,13 @@ Two rules keep text that another agent wrote off the command line.
    the result then points to by a name the adapter derived. The values the adapter
    quotes are bounded and are not another agent's: aliases and card ids, the words of
    an enumeration the node reports (a delivery state, a rejection reason), and the
-   fixed message of an error of the local node.
+   fixed message of an error of the local node. The reasons the adapter gives for a
+   card it cannot serve name the field that is wrong and do not repeat what the card
+   holds, since the agent that wrote the card may have read text from another machine.
+   The one value of a peer that travels as an argument is a message id, in the
+   metadata of a completion and in an idempotency key: at most 128 bytes of visible
+   ASCII, which the envelope decoder enforces, so no NUL, and Hermes reads only the
+   `artifacts` member of metadata for paths, which the adapter never sets.
 2. **The operating system limits arguments.** A single argument is limited to 128
    KiB on Linux and a whole command line to about 32K characters on Windows, and no
    argument can hold a NUL byte. The client therefore refuses, before it runs

@@ -52,8 +52,7 @@ func (in *inbound) checkReply(d state.Data, c kanban.Card) (card.Request, *card.
 		return card.Request{}, inv
 	}
 	if _, ok := d.Requests[req.ReplyTo]; !ok {
-		return card.Request{}, &card.InvalidError{Reason: fmt.Sprintf(
-			"reply_to %q is not a request card this node made of a message, or its record has expired", req.ReplyTo)}
+		return card.Request{}, &card.InvalidError{Reason: "reply_to is not a request card this node made of a message, or its record has expired"}
 	}
 	return req, nil
 }

@@ -32,8 +32,10 @@ const (
 const laneName = "sidera"
 
 // InvalidError is the reason a card cannot be served. The adapter writes it in a
-// comment on the card, so it says what to change and never repeats card content
-// beyond the field it names.
+// block reason and, the second time, in the result of the completed card, where
+// Hermes looks for the paths of local files to upload. So it says what to change and
+// never repeats what the card holds: the card may have been written by an agent that
+// read text from another machine.
 type InvalidError struct{ Reason string }
 
 func (e *InvalidError) Error() string { return e.Reason }
@@ -69,7 +71,7 @@ func Decode(body string) (Envelope, error) {
 	dec.DisallowUnknownFields()
 	var e Envelope
 	if err := dec.Decode(&e); err != nil {
-		return Envelope{}, invalid("the card body is not a valid envelope: %v", err)
+		return Envelope{}, invalid("the card body is not one JSON object with the members sidera, to, mode, preset, reply_to and task, of the types the Skill gives")
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return Envelope{}, invalid("the card body has more than one JSON value")
@@ -108,7 +110,7 @@ func (e Envelope) Validate(aliases config.Aliases, hasParents bool) (Request, er
 		return e.validateReply(r)
 	case ModeNewSession, ModeMessage:
 	default:
-		return Request{}, invalid(`"mode" must be one of %v, got %q`, []string{ModeNewSession, ModeMessage, ModeReply}, e.Mode)
+		return Request{}, invalid(`"mode" must be one of %v`, []string{ModeNewSession, ModeMessage, ModeReply})
 	}
 	if e.ReplyTo != "" {
 		return Request{}, invalid(`"reply_to" belongs to mode "reply"`)
@@ -124,13 +126,13 @@ func (e Envelope) Validate(aliases config.Aliases, hasParents bool) (Request, er
 	}
 	alias, ok := aliases.Lookup(e.To)
 	if !ok {
-		return Request{}, invalid("%q is not an alias this node serves", e.To)
+		return Request{}, invalid(`"to" is not an alias this node serves`)
 	}
 	if !alias.Allows(e.Mode) {
 		return Request{}, invalid("alias %q does not allow mode %q", alias.Name, e.Mode)
 	}
 	if e.Mode == ModeNewSession && !alias.AllowsPreset(e.Preset) {
-		return Request{}, invalid("alias %q does not allow preset %q (allowed: %s)", alias.Name, e.Preset, strings.Join(alias.Presets, ", "))
+		return Request{}, invalid("alias %q does not allow the preset on the card (allowed: %s)", alias.Name, strings.Join(alias.Presets, ", "))
 	}
 	r.Alias, r.Address = alias.Name, alias.Address
 	return r, nil
@@ -158,5 +160,5 @@ func CheckCreator(allowed []string, createdBy string) error {
 	if len(allowed) == 0 || slices.Contains(allowed, strings.ToLower(createdBy)) {
 		return nil
 	}
-	return invalid("cards created by profile %q are not served by this node", createdBy)
+	return invalid("cards created by this profile are not served by this node")
 }
