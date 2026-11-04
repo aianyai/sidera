@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 )
@@ -265,6 +266,7 @@ func TestBlockKindOf(t *testing.T) {
 		{ReasonOutcomeUnknown, kanban.BlockTransient},
 		{ReasonSessionClosed, kanban.BlockTransient},
 		{ReasonNoReply, kanban.BlockNeedsInput},
+		{ReasonAliasRemoved, kanban.BlockCapability},
 	}
 	for _, tc := range cases {
 		if got := BlockKindOf(tc.reason.Category()); got != tc.want || !got.Valid() {
@@ -370,6 +372,7 @@ func TestSessionsToClose(t *testing.T) {
 
 func TestRouteFollowUp(t *testing.T) {
 	open := []state.Session{{Address: "sess-1"}}
+	table := config.Aliases{"codex": {Name: "codex"}}
 	cases := []struct {
 		name    string
 		parents []state.Card
@@ -377,14 +380,16 @@ func TestRouteFollowUp(t *testing.T) {
 		reason  Reason
 	}{
 		{"a remote session that is still open", []state.Card{{Endpoint: "e", Peer: "sess-1", Session: true, Alias: "codex"}}, Route{Endpoint: "e", Peer: "sess-1", Session: true, Alias: "codex"}, 0},
-		{"a remote session that was closed", []state.Card{{Endpoint: "e", Peer: "sess-2", Session: true}}, Route{}, ReasonSessionClosed},
-		{"a fixed address needs no session", []state.Card{{Endpoint: "e", Peer: "fixed"}}, Route{Endpoint: "e", Peer: "fixed"}, 0},
-		{"the first parent that has a peer", []state.Card{{Endpoint: "e"}, {Endpoint: "e2", Peer: "fixed"}}, Route{Endpoint: "e2", Peer: "fixed"}, 0},
+		{"a remote session that was closed", []state.Card{{Endpoint: "e", Peer: "sess-2", Session: true, Alias: "codex"}}, Route{}, ReasonSessionClosed},
+		{"a fixed address needs no session", []state.Card{{Endpoint: "e", Peer: "fixed", Alias: "codex"}}, Route{Endpoint: "e", Peer: "fixed", Alias: "codex"}, 0},
+		{"the first parent that has a peer", []state.Card{{Endpoint: "e"}, {Endpoint: "e2", Peer: "fixed", Alias: "codex"}}, Route{Endpoint: "e2", Peer: "fixed", Alias: "codex"}, 0},
+		{"the alias was removed from the table", []state.Card{{Endpoint: "e", Peer: "fixed", Alias: "gone"}}, Route{}, ReasonAliasRemoved},
+		{"the alias was removed, whatever became of its session", []state.Card{{Endpoint: "e", Peer: "sess-2", Session: true, Alias: "gone"}}, Route{}, ReasonAliasRemoved},
 		{"no parent has a peer", []state.Card{{Endpoint: "e"}}, Route{}, ReasonInvalidCard},
 		{"no parent known", nil, Route{}, ReasonInvalidCard},
 	}
 	for _, tc := range cases {
-		got, reason, ok := RouteFollowUp(tc.parents, open)
+		got, reason, ok := RouteFollowUp(tc.parents, open, table)
 		if got != tc.want || reason != tc.reason || ok != (tc.reason == 0) {
 			t.Errorf("%s: got %+v %v %v", tc.name, got, reason, ok)
 		}

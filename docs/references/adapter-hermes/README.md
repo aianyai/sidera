@@ -860,8 +860,11 @@ and a second failure completes it with the reason.
 
 **A follow-up's route** (`RouteFollowUp`). A message card that names no alias goes to
 the peer of its first parent that has one, from the endpoint that parent used. If that
-peer is a remote session the adapter has closed, the reason is session closed; if no
-parent has a peer, the card is invalid.
+peer is a remote session the adapter has closed, the reason is session closed; if the
+alias the parent was sent to is no longer in the alias table, the card is invalid (the
+table is the allow-list of what a card can make this node do, and a follow-up reaches
+the peer through its parent without naming it); if no parent has a peer, the card is
+invalid.
 
 **Closing remote sessions** (`SessionsToClose`). Each `new_session` leaves a session
 endpoint on the other node, which the node's own cap on endpoints would eventually

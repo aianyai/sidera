@@ -4,6 +4,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 )
 
@@ -83,14 +84,20 @@ type Route struct {
 
 // RouteFollowUp finds where a follow-up that names no alias goes: to the peer of
 // its first parent that has one, from the endpoint that parent used, because a
-// remote session answers only the endpoint that created it. When that peer is a
-// remote session the adapter has since closed, the follow-up cannot go on and the
-// reason is ReasonSessionClosed; when no parent has a peer to continue, it is
-// ReasonInvalidCard.
-func RouteFollowUp(parents []state.Card, sessions []state.Session) (Route, Reason, bool) {
+// remote session answers only the endpoint that created it. The alias the parent
+// was sent under must still be in the alias table: the table is the allow-list of
+// what a card can make this node do, and a follow-up reaches the peer through the
+// parent without naming it. When that peer is a remote session the adapter has
+// since closed, the follow-up cannot go on and the reason is ReasonSessionClosed;
+// when its alias was removed, ReasonAliasRemoved; when no parent has a peer to
+// continue, ReasonInvalidCard.
+func RouteFollowUp(parents []state.Card, sessions []state.Session, aliases config.Aliases) (Route, Reason, bool) {
 	for _, p := range parents {
 		if p.Peer == "" {
 			continue
+		}
+		if _, ok := aliases.Lookup(p.Alias); !ok {
+			return Route{}, ReasonAliasRemoved, false
 		}
 		if p.Session && !slices.ContainsFunc(sessions, func(s state.Session) bool { return s.Address == p.Peer }) {
 			return Route{}, ReasonSessionClosed, false

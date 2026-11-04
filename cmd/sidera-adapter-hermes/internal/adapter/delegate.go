@@ -250,7 +250,7 @@ func (f *laneFlows) plan(ctx context.Context, id string) (*plan, error) {
 				parents = append(parents, *rec)
 			}
 		}
-		r, reason, ok := lane.RouteFollowUp(parents, d.SessionList())
+		r, reason, ok := lane.RouteFollowUp(parents, d.SessionList(), f.env.Config.Aliases)
 		if !ok {
 			p.failure = &failure{reason, followUpText(reason)}
 			return p, nil
@@ -283,8 +283,11 @@ func (f *laneFlows) plan(ctx context.Context, id string) (*plan, error) {
 }
 
 func followUpText(r lane.Reason) string {
-	if r == lane.ReasonSessionClosed {
+	switch r {
+	case lane.ReasonSessionClosed:
 		return "The remote session of the earlier card is closed. Create a new_session card to start another one."
+	case lane.ReasonAliasRemoved:
+		return "The alias the earlier card was sent to is no longer in this node's alias table."
 	}
 	return `This follow-up has no "to" and none of its parent cards was sent to a peer.`
 }
