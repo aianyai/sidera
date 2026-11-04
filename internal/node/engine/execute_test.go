@@ -44,7 +44,7 @@ func encodeStop() ([]byte, error) { return []byte(`{"stopping":true}`), nil }
 func closeCommand(b byte, content string, id ident.EndpointID) engine.ManagementCommand {
 	return engine.ManagementCommand{
 		Key: requestKey(b), Fingerprint: fingerprintOf(content), Name: "endpoints.close",
-		Operation: engine.CloseEndpointOp(id, encodeClose),
+		Operation: engine.CloseEndpointOp(id, false, encodeClose),
 	}
 }
 

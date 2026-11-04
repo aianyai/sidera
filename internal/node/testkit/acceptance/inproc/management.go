@@ -66,7 +66,7 @@ func newManagementOps() recipes.ManagementOps {
 				return recipes.ManagementOutcome{}, err
 			}
 			node := e.(*harness.H).Engine()
-			return runManagement(e, node, q, "endpoints.close", address, engine.CloseEndpointOp(id, func(v engine.CloseOutcome) ([]byte, error) {
+			return runManagement(e, node, q, "endpoints.close", address, engine.CloseEndpointOp(id, false, func(v engine.CloseOutcome) ([]byte, error) {
 				return json.Marshal(recipes.ManagementOutcome{Value: v.String()})
 			}))
 		},

@@ -78,6 +78,8 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonAttachUnsupported:    {"refused", "attach_unsupported"},
 	engine.ReasonNativeSessionCreated: {"refused", "native_session_created"},
 	engine.ReasonSessionNotAttached:   {"not_found", "session_not_attached"},
+	// Closing an endpoint a person is using needs the owner's say so.
+	engine.ReasonAttachedCloseNotAllowed: {"refused", "attached_close_not_allowed"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {

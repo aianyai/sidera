@@ -216,7 +216,7 @@ func TestAuthorizationPrecedesReadingTheBody(t *testing.T) {
 // the engine is never asked.
 func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
 	direct := func(context.Context, engine.ManageService) (any, error) { return struct{}{}, nil }
-	closeIt := engine.CloseEndpointOp(endpointOf(1), nil)
+	closeIt := engine.CloseEndpointOp(endpointOf(1), false, nil)
 	setNode := engine.SetNodeSettingsOp([]byte(`{}`), nil)
 	for _, tc := range []struct {
 		name string

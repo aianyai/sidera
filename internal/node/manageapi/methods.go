@@ -218,12 +218,15 @@ func stateName(s store.EndpointStatus) string {
 
 // endpoints.close: close one endpoint of this node. A session endpoint, a direct
 // endpoint and a runtime endpoint each get the answer the engine gives; an address
-// of another node is no endpoint of this one.
+// of another node is no endpoint of this one. An attached session, which a person is
+// using, is closed only when the request sets allow_attached.
 var endpointsClose = &method{
 	name: "endpoints.close", op: admin.Operation{Kind: admin.OpManageEndpointSession},
 	plan: func(s *Server, raw json.RawMessage) (*plan, error) {
 		var p struct {
 			Endpoint string `json:"endpoint"`
+			// AllowAttached must be true to close a session a person opened and is using.
+			AllowAttached bool `json:"allow_attached,omitempty"`
 		}
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
@@ -236,7 +239,7 @@ var endpointsClose = &method{
 			return nil, apiwire.EndpointUnknown()
 		}
 		p.Endpoint = addr.String()
-		op := engine.CloseEndpointOp(addr.Endpoint, func(o engine.CloseOutcome) ([]byte, error) {
+		op := engine.CloseEndpointOp(addr.Endpoint, p.AllowAttached, func(o engine.CloseOutcome) ([]byte, error) {
 			return json.Marshal(struct {
 				Endpoint string `json:"endpoint"`
 				Outcome  string `json:"outcome"`

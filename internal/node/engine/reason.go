@@ -131,6 +131,10 @@ const (
 	// person opened (AttachRequest.FindOnly) met no open attached endpoint for it, and
 	// made none.
 	ReasonSessionNotAttached
+	// ReasonAttachedCloseNotAllowed: the owner's request to close an endpoint met a
+	// session a person opened and is using, and did not say it means that one. Nothing
+	// was closed.
+	ReasonAttachedCloseNotAllowed
 
 	reasonEnd
 )
@@ -173,6 +177,8 @@ var reasonNames = [reasonEnd]string{
 	ReasonAttachUnsupported:    "attach_unsupported",
 	ReasonNativeSessionCreated: "native_session_created",
 	ReasonSessionNotAttached:   "session_not_attached",
+
+	ReasonAttachedCloseNotAllowed: "attached_close_not_allowed",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

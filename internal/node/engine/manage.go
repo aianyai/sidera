@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -256,17 +257,22 @@ func (v *view) addConfigResults(ops []config.Operation) {
 }
 
 // CloseEndpointOp is the operation that closes an endpoint at the owner's
-// request. encode makes the result from what the close did, so the words of the
-// wire stay with the interface; it runs in the loop and must not wait. The head
-// record of the closing and the result are written in one transaction, in every
-// outcome, an endpoint that was closed already included.
-func CloseEndpointOp(endpoint ident.EndpointID, encode func(CloseOutcome) ([]byte, error)) Operation {
-	return &closeEndpointOp{endpoint: endpoint, encode: encode}
+// request. An open endpoint of a session a person opened and is using (an attached
+// one) is closed only when allowAttached says the request means it; otherwise the
+// request is refused with ReasonAttachedCloseNotAllowed and nothing changes. The rule
+// is the operation's, so that every interface of the owner's has it. encode makes
+// the result from what the close did, so the words of the wire stay with the
+// interface; it runs in the loop and must not wait. The head record of the closing
+// and the result are written in one transaction, in every outcome, an endpoint that
+// was closed already included.
+func CloseEndpointOp(endpoint ident.EndpointID, allowAttached bool, encode func(CloseOutcome) ([]byte, error)) Operation {
+	return &closeEndpointOp{endpoint: endpoint, allowAttached: allowAttached, encode: encode}
 }
 
 type closeEndpointOp struct {
-	endpoint ident.EndpointID
-	encode   func(CloseOutcome) ([]byte, error)
+	endpoint      ident.EndpointID
+	allowAttached bool
+	encode        func(CloseOutcome) ([]byte, error)
 }
 
 func (o *closeEndpointOp) Admin() admin.Operation {
@@ -274,6 +280,11 @@ func (o *closeEndpointOp) Admin() admin.Operation {
 }
 func (o *closeEndpointOp) ends() Ending { return EndingNone }
 func (o *closeEndpointOp) run(e *Engine, x *opRun) ([]byte, error) {
+	if st := e.view.endpoints[o.endpoint]; st != nil && !o.allowAttached &&
+		st.rec.Kind == adapterreg.KindSession && st.rec.Origin() == adapterreg.OriginAttached &&
+		st.rec.Status != store.EndpointClosed {
+		return nil, refuse(ReasonAttachedCloseNotAllowed)
+	}
 	_, result, err := e.closeEndpoint(x.now, o.endpoint, &closeVia{x: x, encode: o.encode})
 	return result, err
 }

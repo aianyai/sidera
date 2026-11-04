@@ -513,6 +513,52 @@ func TestClosingAnAttachedSessionDetachesItAndNeverClosesTheSession(t *testing.T
 	}
 }
 
+// The owner's request to close an endpoint refuses a session a person is using unless
+// it says it means that one: a cleanup that closes endpoints by address must not end
+// the controller session of a person. A refused request changes nothing, and a close
+// that was asked for closes it as before. An endpoint that is closed already needs no
+// consent, since nothing is done to it.
+func TestTheOwnersCloseOfAnAttachedSessionNeedsTheOptIn(t *testing.T) {
+	_, e, d := attachRig(t, true)
+	d.answerAttach(attachedAnswer, nil)
+	res, err := e.AttachSession(ctx, attachChat("native-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := res.Endpoint.Endpoint
+	closeAs := func(b byte, allowAttached bool) (engine.StoredResult, error) {
+		return e.Execute(ctx, engine.ManagementCommand{
+			Key: requestKey(b), Fingerprint: fingerprintOf(fmt.Sprint("close attached ", allowAttached)), Name: "endpoints.close",
+			Operation: engine.CloseEndpointOp(id, allowAttached, encodeClose),
+		})
+	}
+
+	_, err = closeAs(41, false)
+	wantReason(t, err, engine.ReasonAttachedCloseNotAllowed)
+	settle(t, e)
+	if got := viewOf(t, e, id).Status; got != store.EndpointOpen {
+		t.Errorf("after the refusal the endpoint is %v, want open", got)
+	}
+	if got := d.sentDetaches(); len(got) != 0 {
+		t.Errorf("the adapter was told %+v after a refused close", got)
+	}
+
+	// The refusal stored nothing, so the same identifier closes it with the opt-in.
+	done, err := closeAs(41, true)
+	if err != nil || string(done.Result) != `{"outcome":"closed"}` {
+		t.Fatalf("the close with the opt-in: %s, %v; want closed", done.Result, err)
+	}
+	settle(t, e)
+	if got := viewOf(t, e, id).Status; got != store.EndpointClosed {
+		t.Errorf("after the close the endpoint is %v, want closed", got)
+	}
+
+	again, err := closeAs(42, false)
+	if err != nil || string(again.Result) != `{"outcome":"already_closed"}` {
+		t.Errorf("closing it once more without the opt-in: %s, %v; want already_closed", again.Result, err)
+	}
+}
+
 // The wake information does not outlive the process, but the endpoint does: one that is
 // closed after a restart, before the session attaches again, is still told to the
 // adapter as detached.
