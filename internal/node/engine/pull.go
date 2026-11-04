@@ -529,18 +529,7 @@ func (e *Engine) handoutAuthorization(now time.Time, st *endpointState, in store
 		return e.derivedHandoutAuthorization(now, in)
 	}
 	action, _ := envelope.KindMessage.Action()
-	var size int64
-	if in.Body != nil {
-		size = int64(in.Body.Len)
-	}
-	// Local is the node's own transport: another node cannot present this node's
-	// identifier.
-	v := e.evaluate(now, authCheck{
-		stage: authz.StageRecv, local: in.Key.SenderNode == e.d.Node,
-		sender: authz.Sender{Node: in.Key.SenderNode, Endpoint: in.Key.Sender}, action: action,
-		target: authz.Target{Kind: authz.TargetEndpoint, Endpoint: in.Key.Recipient}, bodySize: size,
-		reply: in.ReplyDecision.Granted(), decl: st.decl,
-	})
+	v := e.evaluate(now, e.handoutCheck(in, action, authz.Target{Kind: authz.TargetEndpoint, Endpoint: in.Key.Recipient}, st.decl))
 	auth := delivery.IntakeAuthorization(v).Kind
 	if auth == 0 {
 		return 0, fmt.Errorf("the check of message %s gave no verdict", in.Key.Message)

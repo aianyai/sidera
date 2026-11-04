@@ -562,7 +562,13 @@ view's queue of an endpoint holds those too: a control signal is not for an agen
 The second check is the authorization rules asked at the moment the body would be handed
 out (`evaluate`, the one place the engine asks them, for intake as for the hand-out): a
 local sender is judged by the declarations of the endpoint alone and any other by the
-node's rules, with this node's trust in the sender's node (see "Trust and peers"). A message the rules still
+node's rules, with this node's trust in the sender's node (see "Trust and peers"). A
+record keeps the node its message came from and not the origin it came over, so
+`handoutCheck`, the one place the hand-out builds its check (an ordinary message and the
+delivery of an initial message alike), reads a sender on this node from the sender's node.
+That is the origin's fact because intake refuses a remote connection that presents this
+node's own identifier (the rules never trust this node as a remote sender), so a record
+from this node was taken in over the loopback. A message the rules still
 allow is handed out; a suspended one stays queued, with no lease and nobody told; a
 refused one is closed by `delivery.Record.Handout` (rejected as `second_check_failed`
 when its body was never handed out, `delivery_unknown` when it was) and its body goes with

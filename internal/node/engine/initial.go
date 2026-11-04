@@ -98,16 +98,9 @@ func (e *Engine) derivedHandoutAuthorization(now time.Time, in store.InRecord) (
 	if err != nil {
 		return 0, err
 	}
-	var size int64
-	if in.Body != nil {
-		size = int64(in.Body.Len)
-	}
-	v := e.evaluate(now, authCheck{
-		stage: authz.StageRecv, local: in.Key.SenderNode == e.d.Node,
-		sender: authz.Sender{Node: in.Key.SenderNode, Endpoint: in.Key.Sender}, action: action,
-		target: authz.Target{Kind: authz.TargetRuntime, Endpoint: in.Derived.From}, preset: req.Preset, bodySize: size,
-		reply: in.ReplyDecision.Granted(), decl: runtime.decl,
-	})
+	check := e.handoutCheck(in, action, authz.Target{Kind: authz.TargetRuntime, Endpoint: in.Derived.From}, runtime.decl)
+	check.preset = req.Preset
+	v := e.evaluate(now, check)
 	auth := delivery.IntakeAuthorization(v).Kind
 	if auth == 0 {
 		return 0, fmt.Errorf("the check of the initial message %s gave no verdict", in.Key.Message)

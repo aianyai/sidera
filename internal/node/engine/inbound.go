@@ -385,6 +385,26 @@ type authCheck struct {
 	decl           authz.Declaration
 }
 
+// handoutCheck is the authorization check of the hand-out of a delivery's body, the
+// second one, for the action and target it is judged as and the declarations of the
+// endpoint it is judged by. It is the one place the hand-out decides whether the sender
+// is a source on this node, and it decides it by the sender's node: a record keeps the
+// node its message came from and not the origin it came over. That is the same fact as
+// the origin, because a remote connection that presents this node's identifier is
+// refused at intake (the rules distrust this node as a remote sender), so a record from
+// this node was taken in over the loopback.
+func (e *Engine) handoutCheck(in store.InRecord, action authz.Action, target authz.Target, decl authz.Declaration) authCheck {
+	var size int64
+	if in.Body != nil {
+		size = int64(in.Body.Len)
+	}
+	return authCheck{
+		stage: authz.StageRecv, local: in.Key.SenderNode == e.d.Node,
+		sender: authz.Sender{Node: in.Key.SenderNode, Endpoint: in.Key.Sender}, action: action, target: target,
+		bodySize: size, reply: in.ReplyDecision.Granted(), decl: decl,
+	}
+}
+
 // evaluate is the one place the engine asks the authorization rules: a local source is
 // judged by the declarations of the target alone, and any other by the node's rules,
 // with this node's trust in the node it came from (trust.Evaluate): a node this node

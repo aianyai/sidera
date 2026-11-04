@@ -188,7 +188,10 @@ Tighten, because it stops their replies.
   in a request is only a claim; the loopback transport is the fact. A remote
   connection that presents this node's ID would otherwise be taken for a local
   source and escape node rules, so it is judged by `Evaluate` like any other
-  remote sender.
+  remote sender. The second check at recv has no origin to read, since a record
+  keeps the sender's node only; it tells a local source by that node, which is the
+  same fact because intake never takes in a message from this node's own ID
+  unless the loopback carried it.
 - **The system endpoint is refused as a sender by the shape check.** Only this
   node's own feedback comes from it, and that is exempt traffic, so a request
   claiming it is either forged or a bug. The check sits in the shared shape check

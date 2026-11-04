@@ -272,6 +272,19 @@ func TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot(t *testing.T) {
 	if !found {
 		t.Fatal("the remote envelope left no record")
 	}
+	// A remote connection that presents this node's own identifier is judged as a remote
+	// one: intake decides by the origin of the connection, not by the node the envelope
+	// names, and no node is trusted here, so the message is refused as unauthorized. The
+	// second check at recv tells a source on this node by the sender's node alone, which
+	// is right only while no record from this node's identifier is taken in from outside.
+	// That the trust evaluation itself denies this node as ReasonSelf is covered in
+	// internal/trust.
+	if _, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(harness.NodeID()), sender, forged(t, h, "from-a-twin", aAddr, "", "a twin's message")); err != nil {
+		t.Fatalf("a remote envelope that names this node: %v", err)
+	}
+	if in := inOf(t, h, "from-a-twin"); in.Record.State != delivery.StateRejected || in.Record.Reject != delivery.RejectUnauthorized {
+		t.Errorf("the message of a remote connection that names this node is %s (%s), want rejected (unauthorized)", in.Record.State, in.Record.Reject)
+	}
 	// The same envelope from the loopback is judged by the endpoint's declarations only.
 	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), sender, forged(t, h, "from-here", aAddr, "", "a neighbour's message")); err != nil {
 		t.Fatal(err)
