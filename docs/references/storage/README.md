@@ -1146,9 +1146,19 @@ transactions that close the endpoint when they already know the answer
 (`TestRecordGoldenVectors`, vectors `endpoint released` and `endpoint closed unreleased`). The name and the
 description are what the adapter registered the endpoint under and are held to the
 bounds of that protocol (`adapterproto.MaxDisplayName` and
-`adapterproto.MaxDescription`, counted in characters, valid UTF-8): a record the
-protocol could not have registered is refused when it is written and when it is
-read. The node's declaration to peers bounds a name more tightly
+`adapterproto.MaxDescription`, counted in characters, valid UTF-8) and, for the
+name, to `adapterproto.ValidateOptionalDisplayName`, which also refuses control and
+bidirectional formatting characters: a record the protocol could not have
+registered is refused when it is written and when it is read. A record written
+before the name was held to that rule and carrying such a character is therefore a
+damaged body: the node still starts, the scan entry settles the file like any
+other damaged endpoint record (the file is removed, the owner has an alert of
+kind `corrupt_record`, which here does not mean the disk is damaged). The endpoint
+is gone with its record: the deliveries accepted for it have a recipient with no
+record, so endpoint-drain-replay rejects them as `endpoint_closed` and their senders
+are told; the token went with the record, so a session that holds it must obtain
+its credentials again, and an attached session attaches again and gets a new
+endpoint (`TestOpenSettlesAnEndpointWhoseNameHasAControlCharacter`). The node's declaration to peers bounds a name more tightly
 (`publication.MaxNameLen`, in bytes), so a name that is stored may have to be cut
 or refused where the declaration is built; the record does not decide that.
 `TestEndpointTextIsBoundedAsTheRegistrationIs` checks the bounds against the
@@ -1916,7 +1926,7 @@ so that the double cannot drift from what it stands for.
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
-| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead`, `TestOpenSettlesAnEndpointWhoseNameHasAControlCharacter` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheOwnersFileAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | trust and peer records | `internal/node/store/codec_trust.go`, `write_trust.go` | `trust_test.go`, `trust_fixtures_test.go`, the four trust and peer vectors of `golden_vectors_test.go`, the scenarios `trust-credential`, `trust-revocation` and `peer-cert` of `TestEveryTransactionConvergesFromEveryCrashState` |
 | pairing records | `internal/node/store/codec_pairing.go`, `write_pairing.go` | `pairing_test.go`, `pairing_fixtures_test.go`, the six pairing scenarios of `TestEveryTransactionConvergesFromEveryCrashState` |

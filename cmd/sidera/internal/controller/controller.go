@@ -38,8 +38,6 @@ const (
 // servers; the adapter then finds it by the session id.
 var claudeWakeKeys = []string{"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID"}
 
-const maxDisplayName = 128
-
 // ErrNotController says the process is not in a session a person opened: a plain
 // terminal, or a process that already has a credential of its own.
 var ErrNotController = errors.New("the process is not in a controller session")
@@ -122,12 +120,18 @@ func displayName(adapter string, getwd func() (string, error)) string {
 		return name
 	}
 	base = strings.ToValidUTF8(base, "?")
-	room := maxDisplayName - len(name) - len(" ()")
-	for len(base) > room {
+	room := adapterproto.MaxDisplayName - utf8.RuneCountInString(name) - len(" ()")
+	for utf8.RuneCountInString(base) > room {
 		_, size := utf8.DecodeLastRuneInString(base)
 		base = base[:len(base)-size]
 	}
-	return name + " (" + base + ")"
+	// A directory name may hold a character a display name cannot, such as a line
+	// break; the name then leaves the directory out instead of changing it.
+	full := name + " (" + base + ")"
+	if adapterproto.ValidateDisplayName(full) != nil {
+		return name
+	}
+	return full
 }
 
 // Wake is what the adapter answered about delivering prompts to the session.

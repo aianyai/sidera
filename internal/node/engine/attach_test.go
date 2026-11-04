@@ -272,6 +272,8 @@ func TestAttachingASessionIsRefused(t *testing.T) {
 		{name: "an adapter that is not an identifier", attach: true, req: engine.AttachRequest{Adapter: "Not An Id", NativeRef: "native-a"}, reason: engine.ReasonInvalidArgument, field: "adapter"},
 		{name: "a name that is too long", attach: true, req: engine.AttachRequest{Adapter: "chat", NativeRef: "native-a", DisplayName: strings.Repeat("n", adapterproto.MaxDisplayName+1)},
 			reason: engine.ReasonInvalidArgument, field: "display_name"},
+		{name: "a name with a line break", attach: true, req: engine.AttachRequest{Adapter: "chat", NativeRef: "native-a", DisplayName: "Mine\nnode"},
+			reason: engine.ReasonInvalidArgument, field: "display_name"},
 		{name: "a wake key that is not a name", attach: true, req: engine.AttachRequest{Adapter: "chat", NativeRef: "native-a", Wake: adapterproto.WakeInfo{"bad-key": "x"}},
 			reason: engine.ReasonInvalidArgument, field: "wake.bad-key"},
 	} {

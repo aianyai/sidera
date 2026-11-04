@@ -18,6 +18,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -192,6 +193,54 @@ func TestOpenQuarantinesADamagedFileAndOpens(t *testing.T) {
 	sc := r.scan()
 	if len(sc.Damaged) != 0 || len(sc.In) != 0 {
 		t.Errorf("the disk holds %d damaged files and %d target records after the scan entry, want none", len(sc.Damaged), len(sc.In))
+	}
+	if len(sc.Alerts) != 1 || sc.Alerts[0].Kind != "corrupt_record" {
+		t.Errorf("the owner has the alerts %+v, want one of kind corrupt_record", sc.Alerts)
+	}
+}
+
+// An endpoint record written before display names were held to the rule of the
+// protocol may carry a name with a control character. The node still starts: the
+// record is damaged like any other whose body the rules refuse, so it is settled
+// by the scan entry (the file is gone and the owner has an alert) instead of
+// being kept, which would print the name raw.
+func TestOpenSettlesAnEndpointWhoseNameHasAControlCharacter(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	id := register(t, e, "legacy")
+	r.restart()
+	var rec store.EndpointRecord
+	for _, ep := range r.scan().Endpoints {
+		if ep.ID == id {
+			rec = ep
+		}
+	}
+	data, err := store.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr, dmg := recfile.DecodeFrame(data)
+	if dmg != nil {
+		t.Fatal(dmg)
+	}
+	body := bytes.Replace(fr.Body, []byte(rec.DisplayName), []byte(`n\u001b[2J`), 1)
+	if bytes.Equal(body, fr.Body) {
+		t.Fatalf("the name %q is not in the body %q", rec.DisplayName, fr.Body)
+	}
+	legacy, err := recfile.EncodeFrame(fr.Kind, fr.Key, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.seedFile(store.EndpointsDir, rec.Name(), legacy)
+	e2, _, err := r.open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer r.stop2(e2)
+	sc := r.scan()
+	if len(sc.Damaged) != 0 || len(sc.Endpoints) != 0 {
+		t.Errorf("the disk holds %d damaged files and %d endpoint records after the scan entry, want none", len(sc.Damaged), len(sc.Endpoints))
 	}
 	if len(sc.Alerts) != 1 || sc.Alerts[0].Kind != "corrupt_record" {
 		t.Errorf("the owner has the alerts %+v, want one of kind corrupt_record", sc.Alerts)

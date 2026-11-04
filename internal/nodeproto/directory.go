@@ -164,8 +164,8 @@ func entryFromWire(w directoryEntryWire) (DirectoryEntry, error) {
 	if !ok {
 		return DirectoryEntry{}, invalid("kind %q", w.Kind)
 	}
-	if n := utf8.RuneCountInString(w.DisplayName); n > adapterproto.MaxDisplayName {
-		return DirectoryEntry{}, invalid("display name of %d characters, at most %d", n, adapterproto.MaxDisplayName)
+	if err := adapterproto.ValidateOptionalDisplayName(w.DisplayName); err != nil {
+		return DirectoryEntry{}, invalid("display name: %v", err)
 	}
 	if n := utf8.RuneCountInString(w.Description); n > adapterproto.MaxDescription {
 		return DirectoryEntry{}, invalid("description of %d characters, at most %d", n, adapterproto.MaxDescription)

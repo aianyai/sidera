@@ -55,7 +55,7 @@ answer  = { 1: outcome, 2: [entry, ...], 3: next cursor (optional), 4: reason (r
 entry   = { 1: endpoint, 2: kind (name), 3: display name, 4: description, 5: [action name, ...] }
 ```
 
-A cursor is at most 256 bytes of visible ASCII and means something to the target only. An entry names its kind (`runtime`, `session`, `direct`) and the actions it accepts (`message.send`, `see`, ...) by name; the display name is at most 128 characters and the description at most 1024, both valid UTF-8. An entry carries no node: the asker fills in the node it called and never takes one from the answer. At most 256 entries, the most endpoints a node has.
+A cursor is at most 256 bytes of visible ASCII and means something to the target only. An entry names its kind (`runtime`, `session`, `direct`) and the actions it accepts (`message.send`, `see`, ...) by name; the display name is empty or follows the display-name rule of the adapter protocol (at most 128 characters, no control or bidirectional formatting character), and the description is at most 1024 characters, both valid UTF-8. An entry whose display name breaks the rule makes the whole answer invalid. An entry carries no node: the asker fills in the node it called and never takes one from the answer. At most 256 entries, the most endpoints a node has.
 
 ### Outcomes
 

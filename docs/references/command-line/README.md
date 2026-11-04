@@ -96,7 +96,7 @@ calls the management method `sessions.attach` (so a command refused for its argu
 nothing; see
 [the daemon reference](../daemon/README.md)) with the adapter id (`claude` or `codex`),
 the native session id, the display name `<Claude|Codex> controller (<base name of the
-working directory>)` and, for Claude, the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`,
+working directory>)` (the base name is left out when it holds a character a display name cannot, such as a line break) and, for Claude, the wake keys `CLAUDE_CODE_MESSAGING_SOCKET`,
 `CLAUDE_CODE_MESSAGING_TOKEN` and `CLAUDE_PID` copied from its environment when present.
 The call is idempotent. The Agent client takes the token from the answer in memory: it is
 never put into the environment, argv, a log or a file. A refusal is the command's error,

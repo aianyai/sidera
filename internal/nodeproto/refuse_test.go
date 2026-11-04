@@ -159,6 +159,8 @@ func TestDecodeDirectoryAnswerRefuses(t *testing.T) {
 		{"an action listed twice", answer(good(with(5, w.arr(w.tstr("see"), w.tstr("see"))))), ErrInvalid},
 		{"the zero endpoint", answer(good(with(1, zeroBytes))), ErrInvalid},
 		{"a display name of 129 characters", answer(good(with(3, w.tstr(strings.Repeat("é", 129))))), ErrInvalid},
+		{"a display name with an escape sequence", answer(good(with(3, w.tstr("n\x1b[2J")))), ErrInvalid},
+		{"a display name with a right-to-left override", answer(good(with(3, w.tstr("n\u202etxt")))), ErrInvalid},
 		{"a description of 1025 characters", answer(good(with(4, w.tstr(strings.Repeat("é", 1025))))), ErrInvalid},
 		{"a display name that is not UTF-8", answer(good(with(3, []byte{0x62, 0xff, 0xfe}))), record.ErrMalformed},
 		{"an entry missing a field", answer(w.mapOf(w.uint(1), ep1Bytes, w.uint(2), w.tstr("direct"))), record.ErrNotCanonical},

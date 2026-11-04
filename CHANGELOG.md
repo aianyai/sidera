@@ -26,6 +26,24 @@ protocol has a version of its own.
   exports it as `adapterproto.ValidateDisplayName`, `ValidateOptionalDisplayName` and
   `DisplayNamePattern`.
 
+### Fixed
+
+- **A name with a line break or an escape sequence can no longer reach your terminal.** The
+  names that `sidera directory` and `sidera me` print come from adapters and, now, from other
+  nodes. The node applied only a length limit to them, so a name could forge extra lines or
+  move the cursor. It now refuses such a name wherever it takes one in: from a peer's
+  directory answer (the whole answer is refused), from a session that attaches, and from a
+  stored endpoint record. Until a peer is upgraded, a directory query to it fails if any of
+  its endpoints has a name the rule refuses, because the whole answer is refused. A record
+  written by an earlier version whose name has such a character is settled like any
+  damaged record at the next start: the node starts, the file is removed, and the owner has
+  an alert of kind `corrupt_record` (here it does not mean the disk is damaged). The
+  endpoint is gone with its record: the deliveries queued for it are rejected as
+  `endpoint_closed` and their senders are told, a session that holds its old token must get
+  its credentials again, and an attached session attaches again and gets a new endpoint. The
+  controller name `sidera` gives a session leaves the directory name out when the directory's
+  name has such a character.
+
 ## [0.12.2] - 2026-11-04
 
 A patch release with one fix, for Windows. State written by 0.12.1 needs no migration: no

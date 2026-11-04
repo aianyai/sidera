@@ -8,10 +8,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 const tokenA = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -83,10 +85,14 @@ func TestRequestFromEnvironment(t *testing.T) {
 }
 
 func TestDisplayNameStaysWithinTheLimit(t *testing.T) {
-	long := "/w/" + strings.Repeat("\u76ee", 100)
+	long := "/w/" + strings.Repeat("\u76ee", 200)
 	req, err := controller.RequestFromEnv(env("CODEX_THREAD_ID", "t"), cwd(long), "")
-	if err != nil || len(req.DisplayName) > 128 || !strings.HasSuffix(req.DisplayName, ")") {
+	if err != nil || utf8.RuneCountInString(req.DisplayName) != adapterproto.MaxDisplayName || !strings.HasSuffix(req.DisplayName, ")") {
 		t.Fatalf("%q %v", req.DisplayName, err)
+	}
+	req, err = controller.RequestFromEnv(env("CODEX_THREAD_ID", "t"), cwd("/w/proj\n\x1b[2J"), "")
+	if err != nil || req.DisplayName != "Codex controller" {
+		t.Fatalf("a directory name with a line break gave %q %v", req.DisplayName, err)
 	}
 	req, err = controller.RequestFromEnv(env("CODEX_THREAD_ID", "t"), cwd("/"), "")
 	if err != nil || req.DisplayName != "Codex controller" {

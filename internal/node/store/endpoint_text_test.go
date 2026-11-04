@@ -23,6 +23,8 @@ func TestEndpointTextIsBoundedAsTheRegistrationIs(t *testing.T) {
 		{"a display name one character over", strings.Repeat("ü", adapterproto.MaxDisplayName+1), ""},
 		{"a description of the most characters, each of three bytes", "n", strings.Repeat("€", adapterproto.MaxDescription)},
 		{"a description one character over", "n", strings.Repeat("€", adapterproto.MaxDescription+1)},
+		{"a display name with a line break", "two\nlines", ""},
+		{"a display name with a right-to-left override", "gpj.\u202Etxt", ""},
 		{"a display name of 129 characters of ASCII", strings.Repeat("n", 129), ""},
 		{"both at their bounds", strings.Repeat("n", adapterproto.MaxDisplayName), strings.Repeat("n", adapterproto.MaxDescription)},
 	} {
@@ -98,8 +100,8 @@ func TestEndpointTextThatIsNotUTF8IsRefusedOnRead(t *testing.T) {
 	}
 }
 
-// A body whose display name or description is over the bound of the protocol is
-// refused on read as it is on write, even when its first line and checksum are
+// A body whose display name or description is over the bound of the protocol, or
+// whose name has a character the protocol refuses, is refused on read as it is on write, even when its first line and checksum are
 // right for it: a record the protocol could not have registered is not kept.
 func TestEndpointTextOverTheBoundIsRefusedOnRead(t *testing.T) {
 	r := directEndpoint(6, "chat")
@@ -115,6 +117,7 @@ func TestEndpointTextOverTheBoundIsRefusedOnRead(t *testing.T) {
 	for _, c := range []struct{ name, from, to string }{
 		{"a display name one character over", "Bxro", strings.Repeat("n", adapterproto.MaxDisplayName+1)},
 		{"a description one character over", "Dxsc", strings.Repeat("n", adapterproto.MaxDescription+1)},
+		{"a display name with an escape character", "Bxro", `n\u001b[2J`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			body := bytes.Replace(fr.Body, []byte(c.from), []byte(c.to), 1)

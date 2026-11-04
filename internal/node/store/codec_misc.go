@@ -81,29 +81,28 @@ func checkAttached(status EndpointStatus, createdBy string, s SessionInfo) error
 const TokenLen = 32
 
 // checkEndpointText holds the display name and the description of an endpoint
-// to the bounds of the protocol that registers them. Both are optional: an empty
+// to the rules of the protocol that registers them. Both are optional: an empty
 // one is not written. Text that is not valid UTF-8 would not come back from the
 // encoder as it went in, so the encoder refuses it rather than altering it. The
 // decoder never sees such text: encoding/json replaces an invalid byte with
 // U+FFFD, and a body that held one is refused by the canonical re-encoding check
 // of DecodeRecord, which is where a body the encoder never writes is caught; the
 // test is kept on that path only so that this function states the whole rule and
-// the encoder and the decoder cannot drift apart. The length bound is checked on
-// both paths.
+// the encoder and the decoder cannot drift apart. The rules of the name
+// (adapterproto.ValidateOptionalDisplayName) and the length bound of the
+// description are checked on both paths.
 func checkEndpointText(displayName, description string) error {
-	for _, f := range []struct {
-		what, text string
-		max        int
-	}{
-		{"display name", displayName, adapterproto.MaxDisplayName},
-		{"description", description, adapterproto.MaxDescription},
-	} {
-		if !utf8.ValidString(f.text) {
-			return fmt.Errorf("an endpoint's %s is not valid UTF-8", f.what)
-		}
-		if n := utf8.RuneCountInString(f.text); n > f.max {
-			return fmt.Errorf("an endpoint's %s is %d characters, at most %d", f.what, n, f.max)
-		}
+	if !utf8.ValidString(displayName) {
+		return errors.New("an endpoint's display name is not valid UTF-8")
+	}
+	if err := adapterproto.ValidateOptionalDisplayName(displayName); err != nil {
+		return fmt.Errorf("an endpoint's display name: %w", err)
+	}
+	if !utf8.ValidString(description) {
+		return errors.New("an endpoint's description is not valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(description); n > adapterproto.MaxDescription {
+		return fmt.Errorf("an endpoint's description is %d characters, at most %d", n, adapterproto.MaxDescription)
 	}
 	return nil
 }

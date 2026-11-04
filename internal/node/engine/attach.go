@@ -3,11 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"sort"
 	"time"
-	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
@@ -252,8 +250,8 @@ func validateAttachRequest(r AttachRequest) error {
 	if err := adapterproto.NativeRef(r.NativeRef).Validate(); err != nil {
 		return invalidArgument("native_ref", err)
 	}
-	if n := utf8.RuneCountInString(r.DisplayName); n > adapterproto.MaxDisplayName {
-		return invalidArgument("display_name", fmt.Errorf("%d characters, at most %d", n, adapterproto.MaxDisplayName))
+	if err := adapterproto.ValidateOptionalDisplayName(r.DisplayName); err != nil {
+		return invalidArgument("display_name", err)
 	}
 	if len(r.Wake) > 0 {
 		if err := r.Wake.Validate(); err != nil {

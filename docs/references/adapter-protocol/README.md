@@ -449,6 +449,13 @@ length and a pattern) and `adapterproto.ValidateDisplayName` in Go, which is the
 one rule for every place a display name is read, stored, forwarded or shown;
 `ValidateOptionalDisplayName` is the same rule for a name that may be absent.
 
+The `description` is held to its length only, and not to this rule, on purpose: it may
+legitimately span several lines, and it is never printed as a line of a terminal. The human
+output of the command line does not show it. JSON output escapes its control characters
+(Go's encoder) but passes bidirectional formatting characters such as U+202E through
+unchanged, which is acceptable because JSON output is read by programs, not shown as a
+terminal line.
+
 `MaxAckItems` exports the existing acknowledgement limit of 1024 entries. The
 adapter request and result validators, the observed-receive result, and other
 interfaces accepting these acknowledgement values use the same bound; exposing
@@ -527,7 +534,9 @@ One rule was **tightened** in place, and this is a change that can refuse what w
 valid: a `display_name` with a control or bidirectional formatting character, which
 `endpoint.register` accepted before, is refused with `-32602`. It is done in place
 because no implementation outside this repository exists, and the adapters in it
-register plain names; no name that was ever registered by them is affected.
+register plain names; no name that was ever registered by them is affected. The
+`display_name` members of a node's answer to a directory query are tightened the same
+way: the node that asked refuses the whole answer that carries a name breaking the rule.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
