@@ -256,7 +256,7 @@ sidera version
 (Get-Command sidera).Source             # Windows
 ```
 
-Expected: one line such as `sidera 0.12.1 (commit abc123456789, go1.26.10)`. A
+Expected: one line such as `sidera 0.12.2 (commit abc123456789, go1.26.10)`. A
 program built from source without release settings prints `0.0.0-dev`. The second
 command starts a login shell and must print the path of the binary you just
 installed (`~/.local/bin/sidera` expanded), not another one and not nothing: the

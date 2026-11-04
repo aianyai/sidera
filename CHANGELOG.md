@@ -8,6 +8,25 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-11-04
+
+A patch release with one fix, for Windows. State written by 0.12.1 needs no migration: no
+stored format changed. The adapter protocol stays at version 1 without a change, and the Go
+SDK does not change. An installation of 0.12.0 or later updates with `sidera update`.
+
+### Fixed
+
+- **Windows: a daemon without a console no longer gives each adapter a console window of its
+  own.** A daemon has no console when `sidera update` or `sidera daemon restart` restarted
+  it, when it runs as a service and when it was started through WMI. It then gave every
+  adapter, and the check of the new program that runs before a restart, a new console, which
+  Windows Terminal showed as a window. Closing an adapter's window ended the adapter, and the
+  daemon started it again in a new window. The adapters and the check now run without a
+  window. As a result an adapter no longer shares the console of a daemon run in a terminal:
+  Ctrl-C there reaches only the daemon, which ends the adapters itself as it shuts down. The
+  update from 0.12.1 can still show one brief window, because the 0.12.1 daemon runs that
+  check of the new program before it restarts into it.
+
 ## [0.12.1] - 2026-11-04
 
 A patch release of fixes. State written by 0.12.0 needs no migration: no stored format
@@ -471,7 +490,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/aianyai/sidera/releases/tag/v0.12.2
 [0.12.1]: https://github.com/aianyai/sidera/releases/tag/v0.12.1
 [0.12.0]: https://github.com/aianyai/sidera/releases/tag/v0.12.0
 [0.11.0]: https://github.com/aianyai/sidera/releases/tag/v0.11.0

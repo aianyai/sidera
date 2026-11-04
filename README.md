@@ -26,7 +26,7 @@ app are planned.
 
 ## Status
 
-Sidera 0.12.1 is the current release; 0.8.0 was the first public release.
+Sidera 0.12.2 is the current release; 0.8.0 was the first public release.
 
 **Works today**
 
