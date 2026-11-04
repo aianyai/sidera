@@ -208,48 +208,75 @@ func shortTempDir(t *testing.T) string {
 }
 
 // Stop, retire and replace find a server only through the state file. A start
-// writes its own record before the server is reachable; when that server ends
-// first (it lost the socket to an earlier one that is still running) the file
-// must name the earlier server again, or none when there was no file.
-func TestStartThatEndsEarlyKeepsTheRecordOfTheRunningServer(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		previous string // empty: no state file before the start
-	}{
-		{"an earlier record", `{"pid":4242,"address":"/earlier.sock","start_key":"earlier-key","work_dir":"/earlier"}`},
-		{"no earlier record", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := shortTempDir(t)
-			path := filepath.Join(dir, stateFileName)
-			if tc.previous != "" {
-				if err := os.WriteFile(path, []byte(tc.previous), 0o600); err != nil {
-					t.Fatal(err)
-				}
+// writes its own record before the server is reachable; when the start ends without
+// a reachable server (the server ended first because it lost the socket to an earlier
+// one that is still running, or it never answered, or the caller gave up) the file
+// must name the earlier server again, or none when there was no file, and the new
+// process must be gone.
+func TestStartThatDoesNotComeUpKeepsTheRecordOfTheRunningServer(t *testing.T) {
+	const earlier = `{"pid":4242,"address":"/earlier.sock","start_key":"earlier-key","work_dir":"/earlier"}`
+	for _, how := range []string{"the server exits", "the server never answers", "the caller gives up"} {
+		for _, previous := range []string{earlier, ""} { // empty: no state file before the start
+			name := how + ", no earlier record"
+			if previous != "" {
+				name = how + ", an earlier record"
 			}
-			srv := New(Config{
-				Program:      os.Args[0],
-				StateDir:     dir,
-				Environ:      append(os.Environ(), exitEnv+"=1"),
-				StartTimeout: 10 * time.Second,
-			})
-			srv.userCacheDir = func() (string, error) { return t.TempDir(), nil }
-			srv.probe = func(context.Context, appserver.Endpoint) error { return errors.New("not up") }
+			t.Run(name, func(t *testing.T) {
+				dir := shortTempDir(t)
+				path := filepath.Join(dir, stateFileName)
+				if previous != "" {
+					if err := os.WriteFile(path, []byte(previous), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				pidFile := filepath.Join(t.TempDir(), "pid")
+				env := hangFileEnv + "=" + pidFile
+				if how == "the server exits" {
+					env = exitEnv + "=1"
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				srv := New(Config{
+					Program:      os.Args[0],
+					StateDir:     dir,
+					Environ:      append(os.Environ(), env),
+					StartTimeout: 500 * time.Millisecond,
+				})
+				srv.userCacheDir = func() (string, error) { return t.TempDir(), nil }
+				srv.probe = func(context.Context, appserver.Endpoint) error {
+					if how == "the caller gives up" {
+						cancel()
+					}
+					return errors.New("not up")
+				}
 
-			// The stand-in exits at once, as a server that lost the socket does.
-			if _, err := srv.start(context.Background()); !errors.Is(err, ErrStartFailed) {
-				t.Fatalf("start: %v, want the stand-in to have exited", err)
-			}
-			raw, err := os.ReadFile(path)
-			if tc.previous == "" {
-				if !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("state file after the start: %q (%v), want none", raw, err)
+				_, err := srv.start(ctx)
+				if how == "the caller gives up" {
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("start: %v, want the caller's cancellation", err)
+					}
+				} else if !errors.Is(err, ErrStartFailed) {
+					t.Fatalf("start: %v, want the start to fail", err)
 				}
-				return
-			}
-			if err != nil || string(raw) != tc.previous {
-				t.Fatalf("state file after the start: %q (%v), want the earlier record %q", raw, err, tc.previous)
-			}
-		})
+				raw, err := os.ReadFile(path)
+				if previous == "" {
+					if !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("state file after the start: %q (%v), want none", raw, err)
+					}
+				} else if err != nil || string(raw) != previous {
+					t.Fatalf("state file after the start: %q (%v), want the earlier record %q", raw, err, previous)
+				}
+				if how != "the server exits" {
+					pid, err := os.ReadFile(pidFile)
+					if err != nil {
+						t.Fatalf("the stand-in did not run: %v", err)
+					}
+					n, _ := strconv.Atoi(string(pid))
+					if _, found, err := srv.lookup(n); err == nil && found {
+						t.Errorf("the stand-in (pid %d) still runs after the start ended", n)
+					}
+				}
+			})
+		}
 	}
 }

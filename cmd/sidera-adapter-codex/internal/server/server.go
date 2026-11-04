@@ -433,6 +433,21 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	}
 	previous, readErr := os.ReadFile(filepath.Join(s.cfg.StateDir, stateFileName))
 	s.writeState(started, ep, workDir)
+	reachable := false
+	defer func() {
+		if reachable {
+			return
+		}
+		// Whatever the reason, the new record names a process that is not going to
+		// serve: end the process, unless it has ended already, and put the earlier
+		// record back.
+		select {
+		case <-exited:
+		default:
+			s.endUnreachable(started)
+		}
+		s.restoreState(previous, readErr == nil)
+	}()
 
 	deadline := time.NewTimer(s.cfg.StartTimeout)
 	defer deadline.Stop()
@@ -441,19 +456,18 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	for {
 		select {
 		case <-exited:
-			s.restoreState(previous, readErr == nil)
 			return ep, fmt.Errorf("%w: it exited (%s) before it was reachable; an earlier App Server may hold the socket, see %s",
 				ErrStartFailed, exitStatus(exitErr), logName)
 		case <-ctx.Done():
 			return ep, ctx.Err()
 		case <-deadline.C:
-			s.endUnreachable(started)
 			return ep, fmt.Errorf("%w: not reachable after %v", ErrStartFailed, s.cfg.StartTimeout)
 		case <-tick.C:
 			pctx, cancel := context.WithTimeout(ctx, time.Second)
 			err := s.probe(pctx, ep)
 			cancel()
 			if err == nil {
+				reachable = true
 				return ep, nil
 			}
 		}
@@ -560,10 +574,11 @@ func (s *Server) writeState(started process.Started, ep appserver.Endpoint, work
 }
 
 // restoreState puts back the state file as it was before a start wrote its own,
-// for a server that ended before it was reachable. Such a server lost the socket
-// to an earlier one, still running, and stop, retire and replace find a server
-// only through this file: left naming the dead process, it would hide the earlier
-// one. With no earlier file there is nothing to put back and the new one goes.
+// for a server that did not become reachable and has ended. Such a server may have
+// lost the socket to an earlier one, still running, and stop, retire and replace
+// find a server only through this file: left naming the dead process, it would hide
+// the earlier one. With no earlier file there is nothing to put back and the new
+// one goes.
 func (s *Server) restoreState(previous []byte, existed bool) {
 	path := filepath.Join(s.cfg.StateDir, stateFileName)
 	if !existed {
@@ -666,7 +681,7 @@ func (s *Server) end(ctx context.Context, id process.Identity) error {
 	return nil
 }
 
-// endUnreachable ends a server this call started that never answered. It is ended
+// endUnreachable ends a server this call started that did not become reachable. It is ended
 // by the identity the start returned, not by the state file: the file may not have
 // been written, and then it names no server or an earlier, gone one. When the
 // identity could not be read, the process the start returned is killed.

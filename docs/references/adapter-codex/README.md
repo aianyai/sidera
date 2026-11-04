@@ -60,11 +60,13 @@ the socket.
 start key of the process (`process.Identity`, the same pair that names a Claude turn
 process) and the container `process.Start` returned, besides the address, the working
 directory and `started_ns`. It is written for every start, on every platform, by
-replacing the file whole, and every platform reads it. A server that ends before it is
-reachable (it lost the socket to an earlier one that is still running) leaves the file as it
-was before the start, or no file when there was none, because stop, retire and replace find a
-server only through this file. Whether the recorded process is
-the server is asked of the process table by pid and key (`process.Running`).
+replacing the file whole, and every platform reads it. A start that does not end with a
+reachable server (the server ended first because it lost the socket to an earlier one that
+is still running, or it did not answer within the start timeout, or the caller gave up)
+ends the new process, if it still runs, and leaves the file as it was before the start, or
+no file when there was none, because stop, retire and replace find a server only through
+this file. Whether the recorded process is the server is asked of the process table by pid
+and key (`process.Running`).
 
 **A file an earlier adapter wrote has a start time and no key.** `started_ns` is the
 wall-clock start, which the SDK says never to use as identity: on Linux it moves when
