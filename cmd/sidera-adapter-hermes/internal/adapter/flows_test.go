@@ -528,9 +528,14 @@ func TestBlockedReplyCardCompletedByHermesAnswersItsRequest(t *testing.T) {
 	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) {
 		b.Cards["r_1"] = &kanbantest.Card{ID: "r_1", Title: "answer", Body: replyCard, Assignee: "sidera", Status: "ready", CreatedBy: "hermes"}
 	})
-	until(t, "the reply card to be blocked", func() bool { return boardCard(h, "r_1").Status == "blocked" })
-	if r := h.app.env.State.View().Replies["r_1"]; r == nil || r.Phase != state.PhaseBlocked || r.Answered() {
-		t.Fatalf("reply record %+v, want blocked and its request unanswered", r)
+	// The adapter records the block after Hermes has taken it, so the board shows
+	// the card blocked before the record does.
+	until(t, "the reply card to be blocked in the record", func() bool {
+		r := h.app.env.State.View().Replies["r_1"]
+		return r != nil && r.Phase == state.PhaseBlocked
+	})
+	if r := h.app.env.State.View().Replies["r_1"]; r.Answered() {
+		t.Fatalf("reply record %+v, want its request unanswered", r)
 	}
 
 	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) { b.Cards["r_1"].Status = "done" })
