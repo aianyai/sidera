@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -13,8 +14,12 @@ type Lease struct {
 	// Handouts counts the leases issued so far: the first hand-out and its
 	// redeliveries.
 	Handouts int
-	// IDs holds every page identifier under which some part of this message was
-	// handed out, oldest first. An acknowledgement must name one of them.
+	// IDs holds the page identifiers under which some part of this message was
+	// handed out, oldest first: the latest maxLeaseIDs of them, because every recv
+	// that hands the message out records one and a message may be re-sent for as
+	// long as its lease lives. An acknowledgement must name one of them. A record
+	// restored from storage may hold more; Handout trims it when it records the
+	// next one.
 	IDs []LeaseID
 	// Active is set while a lease is outstanding.
 	Active bool
@@ -30,6 +35,14 @@ type Lease struct {
 	HandedOut []bool
 	Acked     []bool
 }
+
+// maxLeaseIDs is how many page identifiers a record keeps (see Lease.IDs). An
+// agent acknowledges the page it has just read, or one a few recvs back. Sixteen
+// pages are about one LeaseRenewalCap of recv at one a minute, which is also how
+// long the engine remembers the parts of a page for an acknowledgement of the
+// whole page. An acknowledgement that names an older page is refused as
+// AckRefusedLease and the agent reads the message again.
+const maxLeaseIDs = 16
 
 // isZero reports whether no lease was ever issued: the state of a message
 // before its first hand-out, and the only state of a record that is never
@@ -128,8 +141,9 @@ func (r Record) HoldsLiveLease(now time.Time) bool {
 // several messages, under one lease and the page prints one identifier. Handout
 // records it in Lease.IDs, so an acknowledgement that names it is accepted for
 // every part handed out on that page; a zero lease is ErrInvalidInput. A new
-// lease or a re-send under a live lease records it alike; the lease's times
-// and the hand-out count change only when a new lease is issued.
+// lease or a re-send under a live lease records it alike, and once maxLeaseIDs
+// are recorded the oldest is forgotten; the lease's times and the hand-out
+// count change only when a new lease is issued.
 func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int, lease LeaseID) (Record, HandoutResult, error) {
 	if r.Side != SideTarget {
 		return r, HandoutResult{}, fmt.Errorf("%w: only the target hands out bodies", ErrWrongSide)
@@ -171,7 +185,11 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	handedOut[part-1] = true
 	r.Lease.HandedOut = handedOut
 	if !r.Lease.issued(lease) {
-		r.Lease.IDs = append(append([]LeaseID(nil), r.Lease.IDs...), lease)
+		kept := r.Lease.IDs
+		if len(kept) > maxLeaseIDs-1 {
+			kept = kept[len(kept)-(maxLeaseIDs-1):]
+		}
+		r.Lease.IDs = append(slices.Clone(kept), lease)
 	}
 	if live {
 		return r, HandoutResult{Action: HandoutResent, PossibleDuplicate: dup, Lease: lease, ExpiresAt: r.Lease.ExpiresAt}, nil
@@ -248,8 +266,10 @@ const (
 )
 
 // Renew extends the lease by LeaseDuration from now, never beyond
-// LeaseRenewalCap after it was issued. The cap bounds MaxRedeliveryPeriod and
-// with it ReportBy, which is why it is protocol-level and not configurable.
+// LeaseRenewalCap after it was issued and never to an instant before the
+// current expiry: a clock that moved backward does not shorten a lease. The cap
+// bounds MaxRedeliveryPeriod and with it ReportBy, which is why it is
+// protocol-level and not configurable.
 func (r Record) Renew(now time.Time, activeTurn bool) (Record, RenewResult) {
 	switch {
 	case !r.Lease.Active:
@@ -264,6 +284,9 @@ func (r Record) Renew(now time.Time, activeTurn bool) (Record, RenewResult) {
 		return r, RenewCapReached
 	}
 	next := now.Add(LeaseDuration)
+	if next.Before(r.Lease.ExpiresAt) {
+		next = r.Lease.ExpiresAt
+	}
 	if next.After(limit) {
 		next = limit
 	}
@@ -317,7 +340,8 @@ const (
 // is the fact that corrects the unknown. The acknowledgement names the page
 // the chunk was handed out on; any page the message was handed out on counts,
 // the latest one or an earlier one, because the chunk was seen on whichever
-// page carried it and a redelivery in between does not unsee it. Only a chunk
+// page carried it and a redelivery in between does not unsee it; only a page
+// older than the latest maxLeaseIDs is no longer known. Only a chunk
 // that was handed out can be acknowledged: an acknowledgement for anything else,
 // a chunk number outside the message included, would deliver a body the agent
 // never received, and is refused as AckRefusedNoHandout. The delivery becomes

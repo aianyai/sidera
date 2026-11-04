@@ -606,7 +606,9 @@ queued it would be prompted for at every turn end and read by no one.
 
 `Ack` takes the lease of the page and the parts, or no parts for all the page. A lease no
 record of the caller's endpoint holds is `lease_unknown`, whoever holds it: a record of
-another endpoint with the same lease does not make it this endpoint's. Each part is
+another endpoint with the same lease does not make it this endpoint's. A record keeps only
+its latest page identifiers, and the view's index of pages follows each change of a record, so a
+page that no record holds any more is `lease_unknown`, as it is after a restart. Each part is
 acknowledged by `delivery.Record.Ack` on a working copy, and the records that changed go in
 one `ack` transaction; an acknowledgement is valid after its lease ran out and even after the
 delivery was declared unknown, which it then corrects. A part of a message the endpoint
@@ -2120,7 +2122,7 @@ reproducible).
 | Whatever agents do with their pages, every record is closed in the end, and nothing is delivered, or told to its sender as delivered, that the model was not shown whole; the run also reaches leases extended and extended to the cap | `lease.go`, `ticks.go`, `pull.go` | `TestEveryRecordEventuallyCloses` |
 | The power is cut under a node that does what agents do (sends, reads, acknowledgements through the agent and the model's turn, control signals, a target out of reach, time that expires and feeds back, the sweep), in the middle of a transaction and between two steps, and the node goes on from the disk the model leaves. After each cut every answer the node gave before it is on the disk (a message taken from a sender, a page handed out and remembered by its lease, a part acknowledged), no file is half a record, no record lost its body, nothing was quarantined, the view the engine rebuilt equals a scan, the recovery of the start left nothing to do, and a source that says delivered has a target that says it. At the end every record is closed and nothing was told delivered that the model was not shown whole. Every transaction the program declares is either cut at by the run, owned by a package whose own walks reach every point of its table, or listed with the walk of the engine that does | `crash_test.go` (`crashDisks`), `lease_model_test.go` (the run), `powerloss_test.go` | `TestPowerLossCloneEngineKeepsAcknowledgedWrites` |
 | A node that never crashed has no recovery work after any step, nor after a clean restart that follows an event that leaves state behind: every owner's criterion finds nothing | `recovery.go` (`PlanRecovery`), `txn` (`CleanupWork`), `config` (`AdapterGCWork`), `daemon` (`LayoutWork`), `store` (`MissingStateDirs`), `keys` (`RecoveryWork`) | `TestCleanScenariosLeaveNoRecoveryWork` |
-| An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
+| An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge`, `TestTheLeaseIndexHoldsExactlyTheIdentifiersOfTheRecord` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
 | A message handed out in another number of parts than it is cut into now is closed as `delivery_unknown` at the hand-out and is not prompted for again | `pull.go` (`pack`, `recvPart`, `closeCutDifferently`) | `TestAMessageCutDifferentlyThanItWasHandedOutIsClosedUnknownAndNotPromptedFor` |
 | A body that is wrong or gone is settled, not handed out, the others go on | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |

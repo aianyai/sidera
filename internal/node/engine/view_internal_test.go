@@ -2,8 +2,10 @@ package engine
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -411,6 +413,49 @@ func TestDroppingATargetRecordLeavesTheViewAsIfItWereNeverThere(t *testing.T) {
 	}
 	if len(told) != 1 || told[0] != inTick(dropped.Key) {
 		t.Errorf("the schedule was told %v, want that the record has no entry any more", told)
+	}
+}
+
+// The index of pages holds what the records hold. A record forgets its oldest page
+// identifiers as it hands out new ones, and an acknowledgement of a forgotten page
+// must find no record, as it does after a restart.
+func TestTheLeaseIndexHoldsExactlyTheIdentifiersOfTheRecord(t *testing.T) {
+	to := idOf(t, 4)
+	in := inRec(t, 1, to, delivery.StateAccepted)
+	v, err := buildView(nodeOf(t, 9), &store.Scan{In: []store.InRecord{in}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all []delivery.LeaseID
+	now := in.AcceptedAt
+	for range 3 * 16 {
+		id, err := delivery.NewLeaseID(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, id)
+		in.Record, _, err = in.Record.Handout(now, delivery.AuthorizationAllow, 1, 1, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.setIn(in)
+	}
+	if len(in.Record.Lease.IDs) >= len(all) {
+		t.Fatalf("the record kept %d of %d identifiers; the test needs it to forget some", len(in.Record.Lease.IDs), len(all))
+	}
+	for _, id := range all {
+		want := slices.Contains(in.Record.Lease.IDs, id)
+		if got := slices.Contains(v.leased[id], in.Key); got != want {
+			t.Errorf("page %s: the index finds the record = %v, the record holds it = %v", id, got, want)
+		}
+	}
+	if len(v.leased) != len(in.Record.Lease.IDs) {
+		t.Errorf("the index holds %d pages, the record %d", len(v.leased), len(in.Record.Lease.IDs))
+	}
+
+	v.dropIn(in.Key)
+	if len(v.leased) != 0 {
+		t.Errorf("the index holds %d pages after the record was dropped", len(v.leased))
 	}
 }
 

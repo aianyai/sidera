@@ -341,9 +341,10 @@ record, never a clock.
   not over while the message is still accepted, a lease is outstanding only
   while accepted, its times are set and the expiry is no later than
   `LeaseRenewalCap` after the issue time, and it was issued before the backlog
-  deadline. There is no lower bound on the expiry: a renewal made after the
-  wall clock stepped back (within `timing.ClockTolerance`) ends earlier than
-  `LeaseDuration` after the issue time.
+  deadline. There is no lower bound on the expiry: `Renew` never moves it
+  earlier, but a stored record may still hold one earlier than `LeaseDuration`
+  after the issue time, from a renewal made before that guarantee, after the
+  wall clock stepped back (within `timing.ClockTolerance`).
 - Outcome: a target message is `delivered` exactly when every chunk is
   acknowledged; a target is `delivery_unknown` only for a delivery that was
   handed over, and `rejected` only for one that was not.
@@ -408,7 +409,8 @@ correction and the blocked notice.
   re-send under a live lease records it too and leaves the lease times alone.
   The acknowledgement hands the identifier back in `Ack.Lease`; one under which
   no chunk of the message was handed out is refused (`AckRefusedLease`), while
-  any that was counts, expired or not. The order of one `recv`, with the
+  any that was counts, expired or not, among the latest 16 pages the record
+  keeps; the older ones are forgotten and refused alike. The order of one `recv`, with the
   handoff package, is in [handoff](../handoff/README.md).
 - `HandoutResult.PossibleDuplicate` and `Record.PossibleDuplicate(part)` are per
   chunk: true only for a chunk handed out before. The caller fills the

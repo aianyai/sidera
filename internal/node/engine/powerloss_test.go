@@ -44,6 +44,10 @@ import (
 // ran left nothing to recover, and a sender's record that says delivered has a target
 // record that says it too.
 
+// leaseIDsKept is how many page identifiers a delivery record keeps (the latest ones);
+// a record holding fewer has forgotten none.
+const leaseIDsKept = 16
+
 // powerLossSeeds are the seeds of the runs: the draw of the steps and of the moments
 // of the cuts follows from the seed, and so does the disk each cut leaves.
 var powerLossSeeds = []int64{20261027, 20261028}
@@ -721,7 +725,9 @@ func (p *powerLoss) judgeFacts(sc *store.Scan, c *cut, fail func(string, ...any)
 			switch {
 			case !ok:
 				fail("message %s was handed out to %s and the node holds no record of it", f.msg, f.who)
-			case !slices.ContainsFunc(r.Lease.IDs, func(id delivery.LeaseID) bool { return id.String() == f.lease }):
+			case !slices.ContainsFunc(r.Lease.IDs, func(id delivery.LeaseID) bool { return id.String() == f.lease }) && len(r.Lease.IDs) < leaseIDsKept:
+				// A record keeps the latest pages only; a page it does not hold is
+				// forgotten, and that is a fault only while it has room for it.
 				fail("message %s was handed out to %s on page %s and the record does not remember it (%d leases)", f.msg, f.who, f.lease, r.Lease.Handouts)
 			}
 		case factAcked:

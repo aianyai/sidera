@@ -316,23 +316,16 @@ func TestRecordValidAcceptsFreshRecords(t *testing.T) {
 	}
 }
 
-// TestRecordValidAcceptsALeaseRenewedAfterTheClockSteppedBack: the wall clock
-// may step back by up to timing.ClockTolerance in normal operation, so a lease
-// renewed at an instant before its issue time expires earlier than LeaseDuration
-// after the issue time, and the record is still one the transitions produced.
-func TestRecordValidAcceptsALeaseRenewedAfterTheClockSteppedBack(t *testing.T) {
-	issuedAt := at(time.Minute)
-	r := handOut(t, targetRecord(t, t0, 30*time.Minute), issuedAt, 2, 1)
-	renewedAt := issuedAt.Add(-timing.ClockTolerance / 2)
-	r, res := r.Renew(renewedAt, true)
-	if res != Renewed {
-		t.Fatalf("Renew at %v before the issue time: %v, want Renewed", issuedAt.Sub(renewedAt), res)
-	}
-	if !r.Lease.ExpiresAt.Before(r.Lease.IssuedAt.Add(LeaseDuration)) {
-		t.Fatalf("the lease expires at %v after its issue, want less than LeaseDuration: the scenario no longer steps the clock back", r.Lease.ExpiresAt.Sub(r.Lease.IssuedAt))
-	}
+// TestRecordValidAcceptsAStoredLeaseThatExpiresEarlyAfterItsIssue: a record
+// stored while Renew could still end a lease earlier than LeaseDuration after
+// its issue time (a renewal after the wall clock stepped back by up to
+// timing.ClockTolerance) is still one the validator accepts. Renew no longer
+// produces such a record.
+func TestRecordValidAcceptsAStoredLeaseThatExpiresEarlyAfterItsIssue(t *testing.T) {
+	r := handOut(t, targetRecord(t, t0, 30*time.Minute), at(time.Minute), 2, 1)
+	r.Lease.ExpiresAt = r.Lease.IssuedAt.Add(LeaseDuration - timing.ClockTolerance/2)
 	if err := r.Valid(); err != nil {
-		t.Errorf("a lease renewed after a clock step back is refused: %v", err)
+		t.Errorf("a lease that expires early is refused: %v", err)
 	}
 }
 

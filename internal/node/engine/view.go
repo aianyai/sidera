@@ -411,6 +411,13 @@ func (v *view) setIn(in store.InRecord) {
 		if old.Record.OccupiesBacklogSlot() {
 			v.backlog[in.Key.Recipient]--
 		}
+		// A record forgets its oldest page identifiers as it hands out new ones; the
+		// index holds what the record holds, as a view built from disk would.
+		for _, id := range old.Record.Lease.IDs {
+			if !slices.Contains(in.Record.Lease.IDs, id) {
+				v.unlease(id, in.Key)
+			}
+		}
 	} else {
 		k := msgKey{in.Key.Recipient, in.Key.Message}
 		v.received[k] = append(v.received[k], in.Key)
@@ -439,6 +446,13 @@ func (v *view) setIn(in store.InRecord) {
 	}
 }
 
+// unlease takes a target record out of the index of the page it was handed out on.
+func (v *view) unlease(id delivery.LeaseID, key store.TargetKey) {
+	if v.leased[id] = slices.DeleteFunc(v.leased[id], func(x store.TargetKey) bool { return x == key }); len(v.leased[id]) == 0 {
+		delete(v.leased, id)
+	}
+}
+
 // dropIn takes a target record out of the view, as its file being removed does.
 func (v *view) dropIn(key store.TargetKey) {
 	old, ok := v.in[key]
@@ -453,9 +467,7 @@ func (v *view) dropIn(key store.TargetKey) {
 	}
 	delete(v.in, key)
 	for _, id := range old.Record.Lease.IDs {
-		if v.leased[id] = slices.DeleteFunc(v.leased[id], func(x store.TargetKey) bool { return x == key }); len(v.leased[id]) == 0 {
-			delete(v.leased, id)
-		}
+		v.unlease(id, key)
 	}
 	v.queue(key.Recipient, key, false)
 	k := msgKey{key.Recipient, key.Message}

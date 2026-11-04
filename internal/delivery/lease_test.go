@@ -151,6 +151,11 @@ func TestRenew(t *testing.T) {
 			{10 * time.Minute, true, Renewed, 15 * time.Minute},
 			{11 * time.Minute, true, RenewCapReached, 15 * time.Minute},
 		}},
+		{"a renewal at an earlier instant than the last one does not shorten the lease", []renewal{
+			{4 * time.Minute, true, Renewed, 9 * time.Minute},
+			{8 * time.Minute, true, Renewed, 13 * time.Minute},
+			{5 * time.Minute, true, Renewed, 13 * time.Minute},
+		}},
 		{"a lease cannot be renewed after the cap", []renewal{
 			{4 * time.Minute, true, Renewed, 9 * time.Minute},
 			{8 * time.Minute, true, Renewed, 13 * time.Minute},
@@ -632,6 +637,68 @@ func TestLeaseIDs(t *testing.T) {
 			if err != nil || v != AckCompleted || got.State != StateDelivered {
 				t.Errorf("record %d: verdict %v state %s err %v", i, v, got.State, err)
 			}
+		}
+	})
+}
+
+func TestLeaseIDsAreBounded(t *testing.T) {
+	// resends is how many recvs hand the message out: more than the record keeps,
+	// all inside the one live lease of the first.
+	const resends = 3 * maxLeaseIDs
+	r := targetRecord(t, t0, 2*time.Hour)
+	var pages []LeaseID
+	for i := 0; i < resends; i++ {
+		page := freshLease()
+		var err error
+		r, _, err = r.Handout(at(time.Duration(i)*time.Second), AuthorizationAllow, 1, 1, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages = append(pages, page)
+		if len(r.Lease.IDs) > maxLeaseIDs {
+			t.Fatalf("after %d hand-outs the record keeps %d identifiers", i+1, len(r.Lease.IDs))
+		}
+	}
+	if !reflect.DeepEqual(r.Lease.IDs, pages[resends-maxLeaseIDs:]) {
+		t.Fatalf("the record keeps %v, want the latest %d pages in order", r.Lease.IDs, maxLeaseIDs)
+	}
+	if v := r.Valid(); v != nil {
+		t.Fatalf("the record is not valid: %v", v)
+	}
+	rows := []struct {
+		rule string
+		page LeaseID
+		want AckVerdict
+	}{
+		{"the newest page is accepted", pages[resends-1], AckCompleted},
+		{"the oldest page kept is accepted", pages[resends-maxLeaseIDs], AckCompleted},
+		{"the newest page dropped is refused like a page never issued", pages[resends-maxLeaseIDs-1], AckRefusedLease},
+		{"the first page is refused like a page never issued", pages[0], AckRefusedLease},
+	}
+	for _, row := range rows {
+		t.Run(row.rule, func(t *testing.T) {
+			got, v, _, err := r.Ack(at(time.Minute), Ack{Part: 1, Lease: row.page, TokenMatches: true})
+			if err != nil || v != row.want {
+				t.Fatalf("verdict %v err %v", v, err)
+			}
+			if v == AckRefusedLease && (got.State != StateAccepted || got.Lease.Acked[0]) {
+				t.Errorf("a refused acknowledgement changed the record: state %s acked %v", got.State, got.Lease.Acked)
+			}
+		})
+	}
+	t.Run("a record stored with more identifiers than the bound is valid and is trimmed by its next hand-out", func(t *testing.T) {
+		long := r
+		long.Lease.IDs = append([]LeaseID(nil), r.Lease.IDs...)
+		for len(long.Lease.IDs) < 2*maxLeaseIDs {
+			long.Lease.IDs = append([]LeaseID{freshLease()}, long.Lease.IDs...)
+		}
+		if v := long.Valid(); v != nil {
+			t.Fatalf("an over-long record is not valid: %v", v)
+		}
+		page := freshLease()
+		trimmed, _, err := long.Handout(at(time.Minute), AuthorizationAllow, 1, 1, page)
+		if err != nil || len(trimmed.Lease.IDs) != maxLeaseIDs || trimmed.Lease.IDs[maxLeaseIDs-1] != page {
+			t.Errorf("ids %d err %v", len(trimmed.Lease.IDs), err)
 		}
 	})
 }
