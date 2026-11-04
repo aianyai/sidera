@@ -254,6 +254,12 @@ const (
 	// DetailInstanceRequired: the request names no adapter instance and more than
 	// one instance of the adapter is enabled, so the node cannot choose.
 	DetailInstanceRequired
+	// DetailTooManySenders: the list of senders of a declaration is longer than
+	// MaxAcceptFrom.
+	DetailTooManySenders
+	// DetailDuplicateSender: the list of senders of a declaration names an address
+	// twice.
+	DetailDuplicateSender
 
 	detailEnd
 )
@@ -266,6 +272,8 @@ var detailNames = [detailEnd]string{
 	DetailSourceUnreadable:      "source_unreadable",
 	DetailCursorInvalid:         "cursor_invalid",
 	DetailInstanceRequired:      "instance_required",
+	DetailTooManySenders:        "too_many_senders",
+	DetailDuplicateSender:       "duplicate_sender",
 }
 
 // String returns the name of the detail; the zero value has none.

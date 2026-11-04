@@ -744,7 +744,7 @@
       "properties": { "nodes": { "type": "array", "items": { "$ref": "types.schema.json#/$defs/PeerNode" } } }
     },
     "endpoint.declare.params": {
-      "description": "A patch: a member that is absent stays as it is, accept_from replaces the whole list and an empty list clears it. A patch that names nothing and an accept_from over the node's bound are refused by the node, with -32602 and a reason in the data (empty_patch, too_many_senders), so the schema does not state them.",
+      "description": "A patch: a member that is absent stays as it is, accept_from replaces the whole list and an empty list clears it. A patch that names nothing, an accept_from over the node's bound and an accept_from with one address twice are refused by the node, with -32602 and a reason in the data (empty_patch, too_many_senders, duplicate_sender), so the schema does not state them.",
       "type": "object",
       "required": ["endpoint"],
       "additionalProperties": false,

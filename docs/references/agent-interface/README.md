@@ -80,8 +80,12 @@ request durations are integer seconds.
 addresses), and `hidden_from_directory`. The `declare` request is a patch with
 those same fields directly in the request object, not inside `declaration`.
 Omitted fields stay unchanged; `accept_from` replaces its entire list, and an
-explicit empty list clears it. An empty patch is `invalid_argument/empty_patch`.
-The engine owns declaration validity and its sender-list bound.
+explicit empty list clears it. An empty patch is `invalid_argument/empty_patch`. A list of senders the engine
+refuses is `invalid_argument` with its own code: `too_many_senders` (over the
+bound) or `duplicate_sender` (an address listed twice). An entry that is not an
+address never reaches the engine: it is `malformed_request`, like any other address
+of a request. The engine owns declaration validity and its
+sender-list bound.
 
 `me.frontends` contains only `cli` and/or `mcp` actually declared by the adapter;
 an instance not yet admitted has an empty object. Each value is
@@ -208,7 +212,7 @@ producers must keep request bodies, credentials and private keys out of them.
 
 | Category | HTTP | Command exit | Representative codes |
 | --- | --- | --- | --- |
-| `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `cursor_invalid`, `probe_frontend_mismatch`, `socket_path_too_long` |
+| `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `too_many_senders`, `duplicate_sender`, `cursor_invalid`, `probe_frontend_mismatch`, `socket_path_too_long` |
 | `unauthenticated` | 401 | 4 | `token_missing`, `token_malformed`, `token_unknown`, `probe_token_used`, `probe_token_expired` |
 | `not_found` | 404 | 5 | `method_unknown`, `message_unknown`, `lease_unknown`, `endpoint_unknown`, `instance_unknown` |
 | `conflict` | 409 | 6 | `idempotency_conflict`, `daemon_already_running`, `data_directory_already_initialized`, `pairing_in_progress` |

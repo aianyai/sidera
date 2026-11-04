@@ -33,19 +33,35 @@ type declarationWire struct {
 	HiddenFromDirectory  bool     `json:"hidden_from_directory,omitempty"`
 }
 
+// senderListError is the fault of a list of senders, with the detail a refusal
+// of a caller's declaration carries for it. It is not a Refusal itself:
+// encodeDeclaration also judges the list when it reads a record back, and a
+// fault there is damage to the record, which must not be read as a caller's
+// refusal.
+type senderListError struct {
+	detail Detail
+	msg    string
+}
+
+func (e *senderListError) Error() string { return e.msg }
+
 // checkAcceptFrom judges the list of senders of a declaration: at most
-// MaxAcceptFrom, each a real address, none twice.
+// MaxAcceptFrom, each a real address, none twice. A fault of the list is a
+// *senderListError; a zero address is a plain error, because no interface can
+// send one, so it fails as the defect it would be.
 func checkAcceptFrom(list []ident.Address) error {
 	if len(list) > MaxAcceptFrom {
-		return fmt.Errorf("%d senders, at most %d", len(list), MaxAcceptFrom)
+		return &senderListError{DetailTooManySenders, fmt.Sprintf("%d senders, at most %d", len(list), MaxAcceptFrom)}
 	}
 	seen := make(map[ident.Address]bool, len(list))
 	for i, a := range list {
 		switch {
 		case a.IsZero():
-			return fmt.Errorf("sender %d is not an address", i)
+			// Both interfaces parse an address before the engine sees it, so a zero
+			// address is a defect of the caller, not a refusal.
+			return fmt.Errorf("sender %d is the zero address", i)
 		case seen[a]:
-			return fmt.Errorf("sender %d is listed twice", i)
+			return &senderListError{DetailDuplicateSender, fmt.Sprintf("sender %d is listed twice", i)}
 		}
 		seen[a] = true
 	}

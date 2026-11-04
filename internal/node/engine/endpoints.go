@@ -278,7 +278,13 @@ func (e *Engine) declare(c Caller, p DeclarationPatch) (authz.Declaration, error
 	}
 	decl := p.apply(st.decl)
 	if err := checkAcceptFrom(decl.AcceptFrom); err != nil {
-		return authz.Declaration{}, invalidArgument("accept_from", err)
+		var fault *senderListError
+		if !errors.As(err, &fault) {
+			return authz.Declaration{}, err
+		}
+		ref := invalidArgument("accept_from", err)
+		ref.Detail = fault.detail
+		return authz.Declaration{}, ref
 	}
 	rec := st.rec
 	if rec.Declaration, err = encodeDeclaration(decl); err != nil {

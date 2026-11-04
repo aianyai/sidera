@@ -107,14 +107,14 @@ func TestDeclareRefusesWhatCannotBeStored(t *testing.T) {
 		tooMany[i] = ident.Address{Node: r.node, Endpoint: id}
 	}
 	for _, tc := range []struct {
-		name  string
-		patch engine.DeclarationPatch
-		field string
+		name   string
+		patch  engine.DeclarationPatch
+		field  string
+		detail engine.Detail
 	}{
-		{"an empty patch", engine.DeclarationPatch{}, "patch"},
-		{"a zero address in the list", engine.DeclarationPatch{AcceptFrom: &[]ident.Address{{}}}, "accept_from"},
-		{"more senders than an endpoint record may list", engine.DeclarationPatch{AcceptFrom: &tooMany}, "accept_from"},
-		{"the same sender twice", engine.DeclarationPatch{AcceptFrom: &[]ident.Address{r.addr(5), r.addr(5)}}, "accept_from"},
+		{"an empty patch", engine.DeclarationPatch{}, "patch", engine.DetailEmptyPatch},
+		{"more senders than an endpoint record may list", engine.DeclarationPatch{AcceptFrom: &tooMany}, "accept_from", engine.DetailTooManySenders},
+		{"the same sender twice", engine.DeclarationPatch{AcceptFrom: &[]ident.Address{r.addr(5), r.addr(5)}}, "accept_from", engine.DetailDuplicateSender},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := e.Declare(context.Background(), caller, tc.patch)
@@ -122,30 +122,13 @@ func TestDeclareRefusesWhatCannotBeStored(t *testing.T) {
 			if ref.Field != tc.field {
 				t.Errorf("field %q, want %q", ref.Field, tc.field)
 			}
+			if ref.Detail != tc.detail {
+				t.Errorf("detail %q, want %q", ref.Detail, tc.detail)
+			}
 			if d := declared(t, e, id); d.Paused || len(d.AcceptFrom) != 0 {
 				t.Errorf("a refused patch changed the declaration to %+v", d)
 			}
 		})
-	}
-}
-
-// A patch that names nothing is refused as such: the interface answers it with the
-// detail the management interface defines, which a caller must not have to read
-// out of a free string.
-func TestAnEmptyPatchIsRefusedWithItsOwnDetail(t *testing.T) {
-	noLeaks(t)
-	r := newRig(t, 10)
-	e := r.start()
-	id := register(t, e, "a")
-	_, err := e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{})
-	ref := wantReason(t, err, engine.ReasonInvalidArgument)
-	if ref.Detail != engine.DetailEmptyPatch || ref.Field != "patch" {
-		t.Errorf("refused with detail %q on %q, want %q on %q", ref.Detail, ref.Field, engine.DetailEmptyPatch, "patch")
-	}
-	// The other refusals of an invalid argument carry no detail.
-	_, err = e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{AcceptFrom: &[]ident.Address{{}}})
-	if ref := wantReason(t, err, engine.ReasonInvalidArgument); ref.Detail != 0 {
-		t.Errorf("a zero address was refused with detail %q, want none", ref.Detail)
 	}
 }
 

@@ -479,9 +479,9 @@ func (r PeersResult) Validate() error {
 // DeclareParams changes the declaration of a direct endpoint: what it will take
 // and whether it shows in directories, as the declare of the Agent interface does
 // for a session endpoint. It is a patch: a member that is absent stays as it is.
-// The patch must change something, and the node judges that and the bound of
-// AcceptFrom, which are the node's rules, with ParamsEmptyPatch and
-// ParamsTooManySenders.
+// The patch must change something, and the node judges that and the list of
+// senders (its bound, and a sender named twice), which are the node's rules, with
+// ParamsEmptyPatch, ParamsTooManySenders and ParamsDuplicateSender.
 type DeclareParams struct {
 	Endpoint EndpointRef `json:"endpoint"`
 	// Paused: the endpoint takes no new message while it is set.

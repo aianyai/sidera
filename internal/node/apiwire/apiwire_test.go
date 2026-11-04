@@ -437,6 +437,7 @@ func TestNoTwoCategoriesShareAnExitCode(t *testing.T) {
 // which is the code of that table that fits; no code that is not in it is made up.
 var listedInvalidArgumentCodes = []string{
 	"malformed_request", "request_too_large", "single_recipient_only", "empty_patch", "cursor_invalid",
+	"too_many_senders", "duplicate_sender",
 	"probe_frontend_mismatch", "node_mismatch", "digest_mismatch", "unexpected_version", "method_not_allowed",
 	"config_invalid", "source_unreadable", "socket_path_too_long", "instance_required",
 }
@@ -454,6 +455,8 @@ func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(
 		{"a refusal without a detail", &engine.Refusal{Reason: engine.ReasonInvalidArgument}, "malformed_request"},
 		{"a refusal that names its field", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"}, "malformed_request"},
 		{"a refusal with the detail of an empty patch", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailEmptyPatch}, "empty_patch"},
+		{"a refusal with the detail of too many senders", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailTooManySenders}, "too_many_senders"},
+		{"a refusal with the detail of a sender listed twice", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailDuplicateSender}, "duplicate_sender"},
 		{"a refusal with the detail of another node", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailNodeMismatch}, "node_mismatch"},
 		{"a refusal with the detail of another digest", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailDigestMismatch}, "digest_mismatch"},
 		{"a value of the configuration that is not acceptable", &config.ChangeError{Reason: config.ChangeInvalid, Field: "settings.x"}, "config_invalid"},

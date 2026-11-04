@@ -475,7 +475,9 @@ own instance. The declaration is the engine's field of the endpoint record
 and description the adapter gave are fields of the record of their own. A patch that names nothing is refused as
 `invalid_argument` with the detail `empty_patch`: the detail is a typed value of
 the `Refusal`, as the limit of `endpoint_limit` is, so that the interface maps it
-without reading text. `Endpoints` lists for each endpoint how many messages wait
+without reading text. A list of senders it refuses is `invalid_argument` on the
+field `accept_from` with the detail `too_many_senders` or
+`duplicate_sender`. `Endpoints` lists for each endpoint how many messages wait
 for it (`Queued`).
 
 **The life of an adapter's connection.** The adapter host tells the engine, in

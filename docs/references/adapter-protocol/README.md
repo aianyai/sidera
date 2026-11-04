@@ -883,9 +883,11 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
   `declaration` after the patch, all five members. The node judges the patch, because the
   declaration is its own: a patch that names nothing is `-32602` with `data.reason`
   `empty_patch`, an `accept_from` over 256 senders `too_many_senders`, and one that names a
-  sender twice `duplicate_sender`. `ParamsReasons` lists these words; like the reason of
-  `node_busy` they are names an adapter may act on, and one it does not know is a plain
-  invalid-params error.
+  sender twice `duplicate_sender`. An entry that is not an address is a plain `-32602` that
+  names the entry (`accept_from[1]`) and has no reason: the form of an address is checked
+  where it is read, as for every other address of the protocol. `ParamsReasons` lists these
+  words; like the reason of `node_busy` they are names an adapter may act on, and one it does
+  not know is a plain invalid-params error.
 
 A read goes through the node's one outbound queue, in turn with sends, so a slow node holds
 up the other sends of this node for up to the connect budget of a few seconds. The adapter
