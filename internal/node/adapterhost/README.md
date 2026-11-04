@@ -8,8 +8,8 @@ for the protocol itself and
 for the reasons behind the rules below.
 
 This is a runtime package of layer 4 of [`internal/node/README.md`](../README.md):
-it imports the contract packages, `config`, `fsx`, `logfile` and the SDK, and never the
-engine. It defines `Engine`, the few things it asks of the engine, and the engine
+it imports the contract packages, `config`, `fsx`, `logfile`, `childproc` and the SDK, and
+never the engine. It defines `Engine`, the few things it asks of the engine, and the engine
 defines the interface it asks of the host. Time comes only from the clock it is
 given, and every goroutine it starts ends with the host. Its one file operation is making the state
 directory of an instance, through `fsx`; starting a program is not a file operation,

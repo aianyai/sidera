@@ -313,6 +313,16 @@ On Windows the program's file must have the extension of an executable (`.exe`):
 those extensions in turn on a path that has none, and never starts a file without
 one, so a package whose `entry.program` names `bin/adapter` must hold
 `bin/adapter.exe` there, and one that names `bin/adapter.exe` runs that file.
+On Windows the process is started with `childproc.Windowless` (see "Programs the
+daemon starts" in the [daemon](../daemon/README.md) reference): it has a console of its
+own that has no window, and what it starts shares that console. A daemon that has no
+console (one restarted by `sidera update`, a service) would otherwise give every adapter
+a new visible console, a Windows Terminal window that restarts the adapter in a new one
+when it is closed. The consequence is that an adapter no longer shares the console of a
+daemon run in a terminal: Ctrl-C typed there reaches only the daemon, whose shutdown
+ends the adapters (step 3 of the daemon's
+[shutdown](../daemon/README.md#the-shutdown), whose mechanics are in this document's
+"Shutdown and abort": `shutdown`, the end of the stream, a kill after `ShutdownWait`).
 Everything about Windows and Linux is pending verification by CI on main.
 
 ## Why

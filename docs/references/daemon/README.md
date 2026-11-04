@@ -216,6 +216,8 @@ starts the program, so that the new daemon takes the lock and the sockets over:
   task does not), which `process.HostDetachment().OutlivesDaemon` says before anything is
   shut down. A job that ends its processes when it closes, or that cannot be read, makes
   the restart `restart_unavailable`: a service wrapper restarts the daemon it started.
+  The new process has no console. What it starts, the restart check and the adapters, is
+  started without a window (see "Programs the daemon starts"), so a restart opens none.
 
 If `ErrEngineNotStopped` or a fatal failure of the disk ended the daemon, the process ends
 as for a stop and starts nothing.
@@ -239,6 +241,15 @@ Terminal as the default terminal that console becomes a window; closing it ends 
 program, and the supervisor starts it again in a new one. A daemon has no console when
 it is restarted by `sidera update` or `sidera daemon restart` (the new process is
 started detached), when it runs as a service and when it is started through WMI.
+
+Two places start such programs, and both call it: the method `ExecLauncher.Launch` of
+package `adapterhost` (the adapters, which are long-lived, see
+[adapter-host](../adapter-host/README.md)) and the method `Launch.Probe` of package
+`launch` (the `sidera version --json` of the restart check and of `sidera update`).
+A program those start with a plain `exec.Command` (an adapter's `claude --version`, its
+probes) shares their console and gets no window either. The session processes an
+adapter starts through `adapterkit/process` are not among them: that package chooses
+their console flags.
 
 The Windows test of the package (`internal/node/childproc`) is the only place that
 shows this. It starts the test binary with no console, as the daemon a restart starts

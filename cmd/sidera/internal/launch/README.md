@@ -19,9 +19,10 @@ Rules:
   `os.Executable` reports is used; on Linux that has its links resolved.
 - **`Probe` runs the program as `sidera`, never under the name it was started
   under.** The name `siderad` selects `daemon`, and `siderad version --json` would
-  run `daemon version --json`. The output and the time are bounded; a program that
-  fails, does not answer or prints no version is an error, so a restart is refused
-  before anything is stopped.
+  run `daemon version --json`. On Windows it is started without a console window,
+  which a daemon that has no console would otherwise get for it. The output and the
+  time are bounded; a program that fails, does not answer or prints no version is an
+  error, so a restart is refused before anything is stopped.
 - **`Replace` starts the program as it was started**: the same arguments, the
   environment this process has, the start directory. On Unix it is `execve` in place,
   so the process number, the terminal, the ignored signals and the standard streams

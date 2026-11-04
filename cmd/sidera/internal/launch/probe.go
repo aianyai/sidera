@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/childproc"
 	"github.com/aianyai/sidera/internal/release"
 )
 
@@ -29,6 +30,7 @@ func (l Launch) Probe(ctx context.Context) (release.Info, error) {
 	var stdout, stderr cappedBuffer
 	cmd := exec.CommandContext(ctx, l.Program, "version", "--json")
 	cmd.Args[0] = "sidera"
+	childproc.Windowless(cmd)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	// A killed program can leave a child holding the pipes; do not wait for it.
 	cmd.WaitDelay = 2 * time.Second

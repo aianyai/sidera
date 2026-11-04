@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/aianyai/sidera/internal/node/childproc"
 )
 
 // execWaitDelay is how long after the program has ended its streams are kept
@@ -39,6 +41,7 @@ func (l ExecLauncher) Launch(_ context.Context, inst Instance) (Process, error) 
 	cmd.Env = append(os.Environ(), l.Env...)
 	cmd.Stderr = inst.Stderr
 	cmd.WaitDelay = execWaitDelay
+	childproc.Windowless(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("adapterhost: standard input of %s: %w", entry.Program, err)
