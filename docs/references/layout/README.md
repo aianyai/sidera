@@ -8,7 +8,7 @@ of nondeterminism in the daemon behind a seam that tests replace.
 
 Three locations of Go code matter for the daemon. The rest of the repository
 is bound by none of these rules: `protocol/` holds the schema conformance tests,
-`cmd/sidera-adapter-claude/`, `cmd/sidera-adapter-console/` and `cmd/sidera-adapter-hermes/` are adapters that import only
+`cmd/sidera-adapter-claude/`, `cmd/sidera-adapter-codex/`, `cmd/sidera-adapter-console/` and `cmd/sidera-adapter-hermes/` are adapters that import only
 the `sdk/go` module, `internal/release`, for the version alone, and (the console, and the `setup` command of the Hermes adapter, which are clients of the data directory) `internal/datahome`, which says which directory that is, `cmd/sidera-fake-adapter/` and `cmd/sidera-fake-runtime/`
 are the two test programs that stand in for an adapter and for a native runtime
 (built from `internal/node/testkit`, see [testkit](../testkit/README.md), never
