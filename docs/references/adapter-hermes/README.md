@@ -356,7 +356,14 @@ chat, thread). A card with none is subscribed to the home target (`notify-subscr
 before it is claimed: the subscription starts caught up on the card's events, so one
 made after the card was completed would never wake anybody. A cron job's card is
 recognised by its session id (`cron_<job>_<date>_<time>`), anything else with no
-subscription sends from the shared orphan endpoint.
+subscription sends from the shared orphan endpoint. What was learned is recorded with
+the card (`state.Card.Origin`: the source, the target and whether the home target was
+the card's only subscriber) before the subscription is made, and a card planned again
+(unblocked after a failure, read again after a crash) takes it from the record: the
+board then holds the subscription of the home target, which is the adapter's and not
+the card's own, and reading it again would move a cron job's or orphan card to the
+home chat's endpoint, keep its session as long as a conversation's and send a late
+reply to an endpoint the first attempt never used.
 
 *Sending.* The record is written first (attempt number and start), then the message is
 sent with the key `<card>:<attempt>` (`lane.IdempotencyKey`). The key is built from the

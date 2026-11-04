@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -20,15 +21,7 @@ import (
 const OrphanKey = "orphan"
 
 // Source is where a card came from, as far as the board says.
-type Source struct {
-	// Profile is the profile whose gateway owns the conversation.
-	Profile  string
-	Platform string
-	ChatID   string
-	ThreadID string
-	// CronJobID is set for a card made by a cron job.
-	CronJobID string
-}
+type Source = state.Source
 
 // Kind tells how an endpoint, and so the remote sessions it created, is used.
 type Kind int

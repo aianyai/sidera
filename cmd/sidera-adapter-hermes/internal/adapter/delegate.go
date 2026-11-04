@@ -77,6 +77,9 @@ type plan struct {
 	placeNote string
 	peer      string
 	session   bool
+	// origin is where the card comes from (state.Origin): read from the record of a
+	// card planned before, else from the board.
+	origin state.Origin
 }
 
 type failure struct {
@@ -103,7 +106,14 @@ func (f *laneFlows) take(ctx context.Context, id string) (reply bool) {
 	if p.reply {
 		return true
 	}
-	if !f.intendClaim(id) || !f.claim(ctx, id) {
+	if !f.intendClaim(id, p.origin) {
+		return false
+	}
+	if err := f.ensureSubscribed(ctx, id, p.origin); err != nil {
+		f.env.Log.Warn("subscribing a card; it is looked at again", "card", id, "error", err)
+		return false
+	}
+	if !f.claim(ctx, id) {
 		return false
 	}
 	f.begin(ctx, id, p)
@@ -111,14 +121,20 @@ func (f *laneFlows) take(ctx context.Context, id string) (reply bool) {
 }
 
 // intendClaim writes the record of a card the adapter does not know yet before the
-// card is claimed. A claim that is made and then forgotten by a crash leaves the
-// card running for the whole claim time, listed by nobody; the record is how the
-// next start finds it (reconcileClaiming). It reports whether the record is
-// written, and the card is not claimed when it is not.
-func (f *laneFlows) intendClaim(id string) bool {
+// card is claimed, with its origin; a card it knows keeps the origin it has. A claim
+// that is made and then forgotten by a crash leaves the card running for the whole
+// claim time, listed by nobody; the record is how the next start finds it
+// (reconcileClaiming). It reports whether the record is written, and the card is not
+// claimed when it is not.
+func (f *laneFlows) intendClaim(id string, origin state.Origin) bool {
 	err := f.env.State.Update(func(d *state.Data) error {
-		if _, ok := d.Cards[id]; !ok {
-			d.Cards[id] = &state.Card{ID: id, Phase: state.PhaseClaiming, ClaimedAt: f.env.Now()}
+		c, ok := d.Cards[id]
+		if !ok {
+			c = &state.Card{ID: id, Phase: state.PhaseClaiming, ClaimedAt: f.env.Now()}
+			d.Cards[id] = c
+		}
+		if c.Origin == nil {
+			c.Origin = &origin
 		}
 		return nil
 	})
@@ -126,6 +142,22 @@ func (f *laneFlows) intendClaim(id string) bool {
 		f.env.Log.Error("recording that a card is about to be claimed; it is not claimed", "card", id, "error", err)
 	}
 	return err == nil
+}
+
+// ensureSubscribed makes sure that the completion of a card with no subscription of
+// its own wakes someone: the home target is subscribed before the card is claimed,
+// since a subscription starts caught up on the card's events and one made after the
+// completion would never wake anybody. It is done after the origin is recorded, so
+// that a crash in between cannot make the subscription look like the card's own.
+func (f *laneFlows) ensureSubscribed(ctx context.Context, id string, o state.Origin) error {
+	if !o.Home {
+		return nil
+	}
+	subs, err := f.env.Board.NotifyList(ctx, id)
+	if err != nil || len(subs) > 0 {
+		return err
+	}
+	return f.env.Board.NotifySubscribe(ctx, id, subscriptionFor(o.Target))
 }
 
 // begin starts a card the adapter has claimed: it completes the record, tells the
@@ -223,10 +255,12 @@ func (f *laneFlows) plan(ctx context.Context, id string) (*plan, error) {
 		p.alias, p.peer, p.session = r.Alias, r.Peer, r.Session
 	}
 
-	src, target, err := f.source(ctx, id, detail.Card)
-	if err != nil {
+	if rec, ok := d.Cards[id]; ok && rec.Origin != nil {
+		p.origin = *rec.Origin
+	} else if p.origin, err = f.origin(ctx, id, detail.Card); err != nil {
 		return nil, err
 	}
+	src, target := p.origin.Source, p.origin.Target
 	if _, ok := d.Endpoints[route.Endpoint]; route.Endpoint != "" && ok {
 		p.endpoint = route.Endpoint
 		return p, nil
@@ -265,15 +299,16 @@ func (f *laneFlows) request(d *kanban.Detail) (card.Request, *card.InvalidError)
 	return f.env.validate(env, d.Card.CreatedBy, len(d.Parents) > 0)
 }
 
-// source finds the conversation or job a card comes from and makes sure its
-// completion will wake someone. A card with no subscription (a cron job's, or one
-// made outside a chat) is subscribed to the home target here, before the card can
-// be completed: the subscription starts caught up on the card's events, so one made
-// after the completion would never wake anybody.
-func (f *laneFlows) source(ctx context.Context, id string, c kanban.Card) (lane.Source, config.Target, error) {
+// origin finds the conversation or job a card comes from, reading the board only. A
+// card with no subscription (a cron job's, or one made outside a chat) has none: its
+// completion will wake the home target, which take subscribes before the card is
+// claimed (ensureSubscribed). The result is recorded with the card by intendClaim and
+// never read from the board again, because the board then holds the subscription of
+// the home target the adapter made.
+func (f *laneFlows) origin(ctx context.Context, id string, c kanban.Card) (state.Origin, error) {
 	subs, err := f.env.Board.NotifyList(ctx, id)
 	if err != nil {
-		return lane.Source{}, config.Target{}, err
+		return state.Origin{}, err
 	}
 	if len(subs) > 0 {
 		s := subs[0]
@@ -281,17 +316,14 @@ func (f *laneFlows) source(ctx context.Context, id string, c kanban.Card) (lane.
 		target := config.Target{Profile: s.NotifierProfile, Platform: s.Platform, ChatID: s.ChatID, ThreadID: s.ThreadID,
 			ChatType: s.ChatType, UserID: s.UserID, UserIDAlt: s.UserIDAlt,
 			ParentChatID: meta("parent_chat_id"), GuildID: meta("guild_id")}
-		return lane.Source{Profile: s.NotifierProfile, Platform: s.Platform, ChatID: s.ChatID, ThreadID: s.ThreadID}, target, nil
+		return state.Origin{Source: lane.Source{Profile: s.NotifierProfile, Platform: s.Platform, ChatID: s.ChatID, ThreadID: s.ThreadID}, Target: target}, nil
 	}
 	home := f.env.Config.Home
-	if err = f.env.Board.NotifySubscribe(ctx, id, subscriptionFor(home)); err != nil {
-		return lane.Source{}, config.Target{}, err
-	}
 	src := lane.Source{Profile: home.Profile}
 	if m := cronSession.FindStringSubmatch(c.SessionID); m != nil {
 		src.CronJobID = m[1]
 	}
-	return src, home, nil
+	return state.Origin{Source: src, Target: home, Home: true}, nil
 }
 
 // adopt completes the record of a claimed card (intendClaim wrote its start). A card the adapter knew keeps its

@@ -375,6 +375,39 @@ func TestFailuresToCompleteAReply(t *testing.T) {
 	})
 }
 
+// A cron job's card is subscribed to the home target by the adapter. Planning it
+// again (it was unblocked after a failed delivery) must not take that subscription
+// for the card's own source and move the card to the home chat's endpoint: the
+// remote session would be kept as long as a conversation's and a late reply would
+// arrive at an endpoint the first attempt never used.
+func TestCardKeepsItsSourceWhenPlannedAgain(t *testing.T) {
+	d := &daemon{directAccess: true}
+	d.sendError = func(n int, _ adapterproto.SendParams) (error, bool) {
+		if n == 1 {
+			return peer.NewError(adapterproto.CodeSendRefused, "refused").WithData(map[string]any{"reason": "too_large"}), false
+		}
+		return nil, true
+	}
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(nil)})
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) {
+		b.Cards["t_1"] = &kanbantest.Card{ID: "t_1", Title: "t", Body: sessionCard, Assignee: "sidera", Status: "ready",
+			CreatedBy: "hermes", SessionID: "cron_ab12cd_20261104_120000"}
+	})
+	until(t, "the card to be blocked", func() bool { return boardCard(h, "t_1").Status == "blocked" })
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) { b.Cards["t_1"].Status = "ready" })
+	until(t, "the card to be sent", func() bool { return cardState(h, "t_1").Phase == state.PhaseSent })
+
+	const want = "cron:default:ab12cd"
+	if got := cardState(h, "t_1").Endpoint; got != want {
+		t.Errorf("the card sends from %q after being planned again, want %q", got, want)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.sends) != 2 || d.sends[0].Endpoint != d.sends[1].Endpoint || d.sends[1].Endpoint != d.refs[want] {
+		t.Errorf("sends %+v, want both from the endpoint of the cron job", d.sends)
+	}
+}
+
 // A blocked card that its creator completes instead of unblocking, as the Skill
 // allows, is ended in the record within minutes, and the remote session it held is
 // then closed in its turn: nothing else would tell the adapter.

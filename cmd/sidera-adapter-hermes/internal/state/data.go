@@ -46,6 +46,31 @@ const (
 	CategoryNoReply     Category = "no_reply"
 )
 
+// Source is where a card came from, as far as the board says.
+type Source struct {
+	// Profile is the profile whose gateway owns the conversation.
+	Profile  string `json:"profile,omitempty"`
+	Platform string `json:"platform,omitempty"`
+	ChatID   string `json:"chat_id,omitempty"`
+	ThreadID string `json:"thread_id,omitempty"`
+	// CronJobID is set for a card made by a cron job.
+	CronJobID string `json:"cron_job_id,omitempty"`
+}
+
+// Origin is what the adapter learned of where a card comes from the first time it
+// planned the card, kept so that planning it again gives the same answer. The
+// adapter itself subscribes the home target to a card that has no subscription, so
+// a later reading of the subscriptions would take that for the card's own source.
+type Origin struct {
+	Source Source `json:"source"`
+	// Target is the subscription that wakes the card's creator: the card's own, or
+	// the home target when it had none.
+	Target config.Target `json:"target"`
+	// Home says the card had no subscription of its own, and the home target is
+	// subscribed to it.
+	Home bool `json:"home,omitempty"`
+}
+
 // Card is what the adapter keeps about one claimed card.
 type Card struct {
 	ID string `json:"id"`
@@ -73,6 +98,9 @@ type Card struct {
 	// a new session, that its control reply was read), so the adapter stops asking
 	// about it.
 	Delivered bool `json:"delivered,omitempty"`
+
+	// Origin is set when the card is first planned (see Origin).
+	Origin *Origin `json:"origin,omitempty"`
 
 	Phase Phase `json:"phase"`
 	// ReplyID is the Sidera id of the reply being written to the card as its
