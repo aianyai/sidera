@@ -3,7 +3,9 @@ package adapter
 import (
 	"context"
 	"path/filepath"
+	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -12,9 +14,11 @@ import (
 
 // Start takes the adapter on: it reads the configuration, reaches or starts the
 // App Server and resumes every session the daemon lists, each with its own
-// credentials. A server that cannot be reached is not a failure of the request:
-// the sessions are reported unreachable, the availability says why and the adapter
-// keeps trying to reach it.
+// credentials. The server and the sessions are taken in the background and the
+// answer waits for them only as long as the request allows (see restore): a session
+// not resumed by then is reported unreachable. A server that cannot be reached is
+// not a failure of the request either: the sessions are reported unreachable, the
+// availability says why and the adapter keeps trying to reach it.
 func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
 	inst, err := codexcfg.ParseInstance(p.Config)
 	if err != nil {
@@ -65,6 +69,10 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		} else {
 			s = newSession(sa.Endpoint, sa.Preset, string(sa.NativeRef), sa.ToolAccess.Env)
 		}
+		// The server has not loaded the thread in this adapter's books until the restore
+		// has: whatever an earlier connection held is loaded again, with the
+		// credentials of this start.
+		s.status = appserver.ThreadNotLoaded
 		sessions[sa.Endpoint], byThread[s.threadID] = s, s
 		order = append(order, s)
 	}
@@ -78,6 +86,11 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 			old.watchCancel = nil
 		}
 	}
+	if a.endRestore != nil {
+		a.endRestore() // the loading of an earlier start's sessions
+	}
+	rctx, endRestore := context.WithCancel(a.bgCtx)
+	a.endRestore = endRestore
 	a.started = true
 	a.runtimeEP, a.instance = p.RuntimeEndpoint, inst
 	a.codexPath, a.sideraPath, a.codexVer, a.missing = codexPath, sideraPath, version, missing
@@ -87,25 +100,23 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	})
 	a.mu.Unlock()
 
-	result := adapterproto.StartResult{Sessions: make([]adapterproto.SessionState, 0, len(order))}
-	c, cerr := a.ensureClient(ctx)
-	if cerr != nil {
-		a.log.Warn("the App Server cannot be reached", "error", cerr)
-		a.startReconnect()
+	// The sessions are loaded in the background and answered when the time adapter.start
+	// has is used up; the ones not loaded by then are unreachable for now, which is what
+	// they are when the server cannot be reached, and are reported when they are.
+	rest := newRestore(order)
+	go rest.run(rctx, a, order)
+	var timeout <-chan time.Time
+	if wait, ok := a.answerWait(ctx); ok {
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		timeout = t.C
 	}
-	for _, s := range order {
-		state, active := adapterproto.AttachUnreachable, false
-		if s.attached {
-			state, active = a.resumeAttached(ctx, c, s)
-		} else if c != nil {
-			state, active = a.attach(ctx, c, s, false)
-			if state == adapterproto.AttachUnreachable {
-				// The reconnect loop resumes the sessions still not loaded.
-				a.startReconnect()
-			}
-		}
-		result.Sessions = append(result.Sessions, adapterproto.SessionState{Endpoint: s.endpoint, State: state, TurnActive: active})
+	select {
+	case <-rest.finished:
+	case <-timeout:
+	case <-ctx.Done():
 	}
+	states := rest.answer()
 	a.publishAvailability(true)
-	return result, nil
+	return adapterproto.StartResult{Sessions: states}, nil
 }

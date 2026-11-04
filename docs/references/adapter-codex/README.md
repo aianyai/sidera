@@ -334,12 +334,29 @@ a second one. This was not run on Windows.
 | Protocol | What the adapter does |
 | -------- | --------------------- |
 | `initialize` | Declares a runtime with `interrupt: true`, `ack_on_behalf: false`, `server_requests: true`, `attach: true` and front ends `mcp` and `cli`. It does not touch the server. |
-| `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, connects or starts the server, `initialize` and `account/read`, then resumes every session listed: `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), `unreachable` otherwise or when the preset is unusable. Attached entries are taken back as described in "Attached sessions". It ends with a full availability snapshot. A server that cannot be reached is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
+| `adapter.start` | Reads the configuration, finds the `codex` and `sidera` programs, then connects or starts the server (`initialize` and `account/read`) and resumes the sessions listed, four at a time, in the background: the answer waits for them only until a second before the deadline of the request (see "Starting within the time the request allows"). A session resumed in time is `attached` (with `turn_active` when the thread runs a turn), `lost` when the server has no record of the thread (`no rollout found`), or `unreachable` when the resume failed or the preset is unusable; one not resumed in time is `unreachable` too. Attached entries are taken back as described in "Attached sessions". It ends with a full availability snapshot. A server that cannot be reached, or not yet, is not a failure of `adapter.start`: every session is `unreachable`, the snapshot says `native_unavailable` and the adapter goes on reconnecting. |
 | `adapter.probe` | The runtime version; `auth` from `account/read` (`valid` with an account, `invalid` without, `unknown` when the server is unreachable); the dependencies `codex`, `sidera` and `app-server`; each preset's problems and whether its directory exists; the tool probes. |
 | `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.close` | Below. |
 | `session.attach`, `session.detached` | "Attached sessions". |
 | `session.interrupt` | Below. For an attached endpoint it is `1002`: the turn is the person's. |
 | `checkpoint.put` | `scope: attempt` while creating, and only there. |
+
+**Starting within the time the request allows.** The daemon ends the connection of an
+adapter that has not answered `adapter.start` in twenty seconds, and the time to take the
+sessions back grows with their number and with the length of their threads (a resume loads the
+thread's record from disk), while a server that has to start leaves about five of the twenty.
+`adapter.start` therefore answers at the deadline of its request less a second, with what was
+done by then, and leaves the rest to run: the server is connected or started in the background
+(each attempt bounded by `dialTimeout`), and the sessions are resumed four at a time. A session
+not resumed at the answer is `unreachable` with `turn_active` false, the state it has when the
+server cannot be reached, so the engine needs nothing new. When it is resumed afterwards, a turn
+found running in it is reported `turn.started`, as the reconnect loop reports one, and the
+availability snapshot is sent again once the connection is up. A thread is resumed once: the
+loading of a session is serialized, and a path that finds the thread loaded by another (the
+background loading, the reconnect loop, a delivery or an interrupt that found it unloaded) does
+not resume it again. A session found `lost` after the answer is not reported to the daemon, as
+none found so by the reconnect loop is; it is refused with `session_lost` when a prompt is
+delivered. Another `adapter.start` ends the loading of the earlier one.
 
 **Availability.** A full snapshot at `adapter.start`, and again whenever it changes:
 `dependency_missing` when `codex` or `sidera` is not found, `native_unavailable` while
@@ -483,7 +500,9 @@ did not start has no attempt. `turn/completed` becomes `turn.ended` (`completed`
 `interrupted`, `failed`). Every turn has one pair: a turn whose start was missed is
 reported started just before it is reported ended. When the adapter restarts, the
 busy state comes from `turn_active` in the result of `adapter.start`, the running turn
-is taken from the server's list silently and its end is reported when it comes.
+is taken from the server's list silently and its end is reported when it comes. A session
+resumed only after `adapter.start` answered is unreachable in that answer, and its running
+turn is reported started when it is found.
 
 **`session.close`.** A held session that runs a turn is `close_unconfirmed` with
 `turn_still_running` (the sender interrupts first). Otherwise the thread is unsubscribed
@@ -875,7 +894,8 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
 (the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
-`TestStartAttachesSessions`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
+`TestStartAttachesSessions`, `TestStartAnswersByItsDeadlineWithManySlowSessions`,
+`TestStartAnswersBeforeTheServerIsReachedAndLoadsTheSessionsWhenItIs`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
 `TestCloseSession`, `TestInterruptEndsTheCommandsOfTheTurn`,
 `TestInterruptRequestedEndsTheCommandsWhenTheTurnEnds`, `TestInterruptOfAFoundTurnEndsEveryCommandOfTheThread`,
 `TestInterruptWithoutATurn`, `TestThreadsTurnsAndCommandsNameThePresetDirectory`,

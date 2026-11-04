@@ -65,7 +65,7 @@ func (a *App) Interrupt(ctx context.Context, p adapterproto.InterruptParams) (ad
 	status := s.status
 	a.mu.Unlock()
 	if status == appserver.ThreadNotLoaded {
-		switch state, _ := a.attach(ctx, c, s, true); state {
+		switch state, _ := a.loadUnloaded(ctx, c, s, true); state {
 		case adapterproto.AttachAttached:
 		case adapterproto.AttachLost:
 			return adapterproto.InterruptResult{Stage: adapterproto.InterruptNotRunning}, nil

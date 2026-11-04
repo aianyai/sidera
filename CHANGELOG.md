@@ -33,6 +33,13 @@ protocol has a version of its own.
 
 ### Fixed
 
+- **A Codex instance with many sessions no longer stays offline after a restart.** The adapter
+  took its sessions back one at a time before it answered the daemon, so a node with enough
+  sessions, or a Codex that had to start first, ran past the 20 seconds the daemon allows; the
+  daemon then restarted the adapter, which ran past them again. The adapter now connects and
+  takes sessions back in the background, four at a time, and answers by the deadline. A session
+  not taken back by then is reported unreachable, as when Codex cannot be reached, and a turn
+  found running in it afterwards is reported when it is found.
 - **A name with a line break or an escape sequence can no longer reach your terminal.** The
   names that `sidera directory` and `sidera me` print come from adapters and, now, from other
   nodes. The node applied only a length limit to them, so a name could forge extra lines or

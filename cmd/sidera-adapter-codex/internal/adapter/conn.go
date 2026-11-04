@@ -175,7 +175,7 @@ func (a *App) resync(c *appserver.Client) (failed int) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(a.bgCtx, dialTimeout)
-		state, _ := a.attach(ctx, c, s, true)
+		state, _ := a.loadUnloaded(ctx, c, s, true)
 		cancel()
 		if state != adapterproto.AttachAttached {
 			a.log.Warn("a session could not be resumed", "endpoint", s.endpoint, "state", state)
@@ -192,7 +192,39 @@ func (a *App) resync(c *appserver.Client) (failed int) {
 // known is reported as started: the daemon was told of every turn before the
 // connection ended and thinks the session idle. Without it (the adapter has just
 // started) the daemon learns the state from the answer to adapter.start.
+//
+// A caller that holds the session's loadMu does the same with attachLocked.
 func (a *App) attach(ctx context.Context, c *appserver.Client, s *session, report bool) (adapterproto.AttachState, bool) {
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+	return a.attachLocked(ctx, c, s, report)
+}
+
+// loadUnloaded is attach for a caller that found the thread not loaded: a thread
+// another caller loaded while this one waited is not resumed again, the caller that
+// loaded it having reported what it found.
+func (a *App) loadUnloaded(ctx context.Context, c *appserver.Client, s *session, report bool) (adapterproto.AttachState, bool) {
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+	if state, active, ok := a.loadedBy(s); ok {
+		return state, active
+	}
+	return a.attachLocked(ctx, c, s, report)
+}
+
+// loadedBy says whether the session's thread is loaded in the connection, with the
+// state and activity attach answers for it. The caller holds the session's loadMu.
+func (a *App) loadedBy(s *session) (state adapterproto.AttachState, active, loaded bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s.status == appserver.ThreadNotLoaded {
+		return "", false, false
+	}
+	return adapterproto.AttachAttached, s.busy(), true
+}
+
+// attachLocked is attach for a caller that holds the session's loadMu.
+func (a *App) attachLocked(ctx context.Context, c *appserver.Client, s *session, report bool) (adapterproto.AttachState, bool) {
 	preset, ok := a.presetOf(s.preset)
 	if !ok {
 		return adapterproto.AttachUnreachable, false

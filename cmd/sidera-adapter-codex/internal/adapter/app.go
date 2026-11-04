@@ -65,6 +65,9 @@ type Options struct {
 	// TurnStaleAfter is how long a turn of an attached session that shows no end is
 	// taken for running; after it the turn is taken for abandoned.
 	TurnStaleAfter time.Duration
+	// StartWait is the longest adapter.start waits for the sessions to be loaded; zero
+	// means until a second before the deadline of its context.
+	StartWait time.Duration
 	// ReconnectMin and ReconnectMax bound the wait between attempts to reach the
 	// App Server again.
 	ReconnectMin, ReconnectMax time.Duration
@@ -135,24 +138,26 @@ type App struct {
 	// never starts two readings of one thread.
 	attachMu sync.Mutex
 
-	mu          sync.Mutex // guards everything below
-	started     bool
-	runtimeEP   adapterproto.EndpointRef
-	instance    codexcfg.Instance
-	codexPath   string
-	sideraPath  string
-	missing     missingPrograms // programs that could not be found, for the availability
-	codexVer    string
-	srv         ServerManager
-	presets     map[string]presetEntry
-	sessions    map[adapterproto.EndpointRef]*session
-	byThread    map[string]*session
-	attempts    map[adapterproto.AttemptID]*createAttempt
-	mcp         map[string]string // thread id to the state of the channel's MCP server
-	client      *appserver.Client // nil while there is no connection
-	serverVer   string
-	signedIn    bool
-	reconnect   bool // a reconnect loop is running
+	mu         sync.Mutex // guards everything below
+	started    bool
+	runtimeEP  adapterproto.EndpointRef
+	instance   codexcfg.Instance
+	codexPath  string
+	sideraPath string
+	missing    missingPrograms // programs that could not be found, for the availability
+	codexVer   string
+	srv        ServerManager
+	presets    map[string]presetEntry
+	sessions   map[adapterproto.EndpointRef]*session
+	byThread   map[string]*session
+	attempts   map[adapterproto.AttemptID]*createAttempt
+	mcp        map[string]string // thread id to the state of the channel's MCP server
+	client     *appserver.Client // nil while there is no connection
+	serverVer  string
+	signedIn   bool
+	reconnect  bool // a reconnect loop is running
+	// endRestore ends the loading of the sessions of the latest adapter.start.
+	endRestore  context.CancelFunc
 	lastAvail   string
 	availSince  int64
 	shutdownNow bool

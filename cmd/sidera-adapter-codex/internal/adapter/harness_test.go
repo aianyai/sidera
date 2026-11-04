@@ -58,6 +58,8 @@ type fakeCodex struct {
 	// turnStartGone makes that many turn/start calls answer that the thread was not
 	// found, as the server does for a thread it has unloaded.
 	turnStartGone int
+	// resumeDelay holds every thread/resume for that long before it answers.
+	resumeDelay time.Duration
 	// unprotected makes thread/start and thread/resume answer with no active
 	// permission profile, whatever the request asked for.
 	unprotected bool
@@ -153,6 +155,10 @@ func (f *fakeCodex) install() {
 	})
 	f.srv.Handle("thread/resume", func(raw json.RawMessage) (any, *appserver.RPCError) {
 		p := decode[struct{ ThreadID string }](raw)
+		f.mu.Lock()
+		delay := f.resumeDelay
+		f.mu.Unlock()
+		time.Sleep(delay)
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if f.resumeFailures > 0 {
@@ -325,10 +331,21 @@ type fakeManager struct {
 	ep       appserver.Endpoint
 	err      error
 	exposure string
+	// gate, when set, holds Connect until it is closed.
+	gate chan struct{}
 }
 
-func (m *fakeManager) Connect(context.Context) (appserver.Endpoint, error) { return m.ep, m.err }
-func (m *fakeManager) Exposure() string                                    { return m.exposure }
+func (m *fakeManager) Connect(ctx context.Context) (appserver.Endpoint, error) {
+	if m.gate != nil {
+		select {
+		case <-m.gate:
+		case <-ctx.Done():
+			return appserver.Endpoint{}, ctx.Err()
+		}
+	}
+	return m.ep, m.err
+}
+func (m *fakeManager) Exposure() string { return m.exposure }
 
 // harness is the daemon's end of a served adapter, with a fake App Server behind
 // the adapter.

@@ -90,7 +90,7 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	// without the session's credentials. Loading also brings the books on its turns
 	// up to date, so the busy check comes after it.
 	if status == appserver.ThreadNotLoaded {
-		if res, ok := a.reload(ctx, c, s); !ok {
+		if res, ok := a.reload(ctx, c, s, a.loadUnloaded); !ok {
 			return res, nil
 		}
 	}
@@ -106,7 +106,7 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 		// "Not found" from turn/start does not show that the thread is gone: the
 		// server may have unloaded it. thread/resume, which reloads a thread that
 		// exists, says so for one that does not.
-		res, ok := a.reload(ctx, c, s)
+		res, ok := a.reload(ctx, c, s, a.attach)
 		if !ok {
 			return res, nil
 		}
@@ -128,10 +128,13 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	return res, nil
 }
 
+// loader loads a session's thread: attach, or loadUnloaded.
+type loader func(ctx context.Context, c *appserver.Client, s *session, report bool) (adapterproto.AttachState, bool)
+
 // reload loads the session's thread in the connection. When it cannot, ok is false
 // and the result is the refusal to answer the delivery with.
-func (a *App) reload(ctx context.Context, c *appserver.Client, s *session) (res adapterproto.PromptDeliverResult, ok bool) {
-	switch state, _ := a.attach(ctx, c, s, true); state {
+func (a *App) reload(ctx context.Context, c *appserver.Client, s *session, load loader) (res adapterproto.PromptDeliverResult, ok bool) {
+	switch state, _ := load(ctx, c, s, true); state {
 	case adapterproto.AttachAttached:
 		return adapterproto.PromptDeliverResult{}, true
 	case adapterproto.AttachLost:

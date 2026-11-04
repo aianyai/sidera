@@ -64,6 +64,10 @@ type session struct {
 	// turn can be given the attempt that caused it.
 	pending *pendingStart
 
+	// loadMu serializes the loading of the session's thread in the connection, so
+	// that the paths that do it (adapter.start, the reconnect loop, a delivery or an
+	// interrupt that finds the thread unloaded) never resume one thread twice.
+	loadMu  sync.Mutex
 	startMu sync.Mutex // one turn start at a time
 	// interruptMu serializes the interrupts of the session, so that one turn is
 	// asked to stop once and every caller waits for the same end.
