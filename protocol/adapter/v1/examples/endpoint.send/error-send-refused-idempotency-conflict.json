@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 188,
+  "error": {
+    "code": 1009,
+    "message": "the idempotency key was used for another message",
+    "data": {
+      "reason": "idempotency_conflict"
+    }
+  }
+}

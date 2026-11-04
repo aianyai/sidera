@@ -228,22 +228,28 @@ func messageLookupError(err error) error {
 	return adapterError(err)
 }
 
+// sendRefusals are the reasons of the engine that endpoint.send answers with
+// CodeSendRefused, each with the word the protocol names for it.
+var sendRefusals = map[engine.Reason]adapterproto.SendRefusedReason{
+	engine.ReasonInvalidArgument:     adapterproto.SendRefusedInvalidArgument,
+	engine.ReasonTooLarge:            adapterproto.SendRefusedTooLarge,
+	engine.ReasonIdempotencyConflict: adapterproto.SendRefusedIdempotencyConflict,
+	engine.ReasonMessageUnknown:      adapterproto.SendRefusedMessageUnknown,
+	engine.ReasonIdentityRetired:     adapterproto.SendRefusedIdentityRetired,
+}
+
 func directSendError(err error) error {
 	var ref *engine.Refusal
 	if !errors.As(err, &ref) {
 		return err
 	}
-	switch ref.Reason {
-	case engine.ReasonInvalidArgument:
-		if strings.HasPrefix(ref.Field, "to[") {
-			return peer.NewError(adapterproto.CodeInvalidAddress, "an address is not valid").WithData(map[string]any{"field": ref.Field})
-		}
-		fallthrough
-	case engine.ReasonTooLarge, engine.ReasonIdempotencyConflict, engine.ReasonMessageUnknown, engine.ReasonIdentityRetired:
-		return peer.NewError(adapterproto.CodeSendRefused, "the message was not accepted").WithData(map[string]any{"reason": ref.Reason.String()})
-	default:
-		return adapterError(err)
+	if ref.Reason == engine.ReasonInvalidArgument && strings.HasPrefix(ref.Field, "to[") {
+		return peer.NewError(adapterproto.CodeInvalidAddress, "an address is not valid").WithData(map[string]any{"field": ref.Field})
 	}
+	if word, ok := sendRefusals[ref.Reason]; ok {
+		return peer.NewError(adapterproto.CodeSendRefused, "the message was not accepted").WithData(map[string]any{"reason": word})
+	}
+	return adapterError(err)
 }
 
 // adapterCode is what an adapter is told for one reason of the engine.

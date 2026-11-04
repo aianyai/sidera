@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 189,
+  "error": {
+    "code": 1009,
+    "message": "the identity of this node is retired",
+    "data": {
+      "reason": "identity_retired"
+    }
+  }
+}

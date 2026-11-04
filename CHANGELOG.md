@@ -10,6 +10,12 @@ protocol has a version of its own.
 
 ### Added
 
+- **Go SDK: the reasons a refused send carries are named.** `adapterproto` gains
+  `SendRefusedReason` with `SendRefusedMessageUnknown`, `SendRefusedTooLarge`,
+  `SendRefusedIdempotencyConflict`, `SendRefusedIdentityRetired` and
+  `SendRefusedInvalidArgument`, and `SendRefusedReasons()`, so an adapter whose `reply_to`
+  names a message the endpoint no longer holds recognizes `message_unknown` and falls back to a
+  plain send instead of copying the word. The wire is unchanged.
 - **Receive pages mark the node's own channel feedback.** A message the node sent from its
   system endpoint, such as the notice that a message was refused or expired, carries
   `feedback: true` on a page an adapter receives, so the adapter can tell it from a message
@@ -32,6 +38,9 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Go SDK: `SendRefusedData.Reason` is a `SendRefusedReason`.** It was a `string`; code that
+  assigns it to a `string` or compares it with an untyped string variable now writes
+  `string(data.Reason)`. Comparison with a string constant still compiles.
 - **`declare` names why a list of senders is refused.** Over HTTP, the command line and MCP,
   the Agent interface now answers a `declare` whose `accept_from` is too long with the code
   `too_many_senders`, and one that lists an address twice with `duplicate_sender`, where it

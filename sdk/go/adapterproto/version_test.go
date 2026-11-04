@@ -293,6 +293,27 @@ func TestErrorObjectKnowsEveryCode(t *testing.T) {
 	}
 }
 
+// TestSendRefusedReasonTable: the reasons this version of the node sends in a
+// send_refused error, written out in order. A name once sent is never renamed or
+// removed, and each one validates as the data of the code.
+func TestSendRefusedReasonTable(t *testing.T) {
+	want := []string{"message_unknown", "too_large", "idempotency_conflict", "identity_retired", "invalid_argument"}
+	got := adapterproto.SendRefusedReasons()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SendRefusedReasons() = %v, want %v", got, want)
+	}
+	for _, why := range want {
+		e := adapterproto.ErrorObject{Code: adapterproto.CodeSendRefused, Message: "m", Data: json.RawMessage(`{"reason":"` + why + `"}`)}
+		if err := e.Validate(); err != nil {
+			t.Errorf("reason %s: %v", why, err)
+		}
+	}
+	got[0] = "changed"
+	if adapterproto.SendRefusedReasons()[0] != "message_unknown" {
+		t.Error("SendRefusedReasons shares its backing array with its caller")
+	}
+}
+
 // TestBusyReasonTable: the reasons this version of the node sends in a node_busy
 // error, written out in order. The names are those the engine gives its refusals
 // that left no effect, so nothing is translated on the way to the adapter; a name

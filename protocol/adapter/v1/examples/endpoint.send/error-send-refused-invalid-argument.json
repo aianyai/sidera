@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 190,
+  "error": {
+    "code": 1009,
+    "message": "a member of the request is not acceptable",
+    "data": {
+      "reason": "invalid_argument"
+    }
+  }
+}

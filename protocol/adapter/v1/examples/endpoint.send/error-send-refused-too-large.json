@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 187,
+  "error": {
+    "code": 1009,
+    "message": "the body is too large",
+    "data": {
+      "reason": "too_large"
+    }
+  }
+}

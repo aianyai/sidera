@@ -247,6 +247,18 @@ func TestDirectSendErrorMappingKeepsNoEffectSeparateFromUnknown(t *testing.T) {
 			}
 		}
 	}
+	// The reasons answered with 1009 are the ones the protocol names, no fewer.
+	sent := map[string]bool{}
+	for _, word := range sendRefusals {
+		sent[string(word)] = true
+	}
+	listed := map[string]bool{}
+	for _, word := range adapterproto.SendRefusedReasons() {
+		listed[word] = true
+	}
+	if !reflect.DeepEqual(sent, listed) {
+		t.Errorf("the reasons answered with 1009 are %v, the protocol names %v", sent, listed)
+	}
 	plain := errors.New("unknown storage failure")
 	if directSendError(plain) != plain || directSendError(nil) != nil {
 		t.Fatal("unknown error or success changed")

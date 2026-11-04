@@ -264,7 +264,7 @@ func directError(err error) error {
 		if e := json.Unmarshal(p.Data, &data); e != nil {
 			return e
 		}
-		category, code = fakeagent.CategoryRefused, data.Reason
+		category, code = fakeagent.CategoryRefused, string(data.Reason)
 	case adapterproto.CodeNodeBusy:
 		var data adapterproto.BusyData
 		if e := json.Unmarshal(p.Data, &data); e != nil {

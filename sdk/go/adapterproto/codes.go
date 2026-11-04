@@ -78,13 +78,56 @@ type InvalidAddressData struct {
 func (d InvalidAddressData) Validate() error { return strLen(d.Field, 1, MaxIdentLen) }
 
 // SendRefusedData is the data of a send-refused error: a short snake_case word
-// for why the local intake refused the message, for example "too_many_recipients".
+// for why the local intake refused the message. A reader accepts any word; the
+// words this version of the node sends are the SendRefused constants.
 type SendRefusedData struct {
-	Reason string `json:"reason"`
+	Reason SendRefusedReason `json:"reason"`
 }
 
 // Validate checks the data.
-func (d SendRefusedData) Validate() error { return reasonWordOK(d.Reason) }
+func (d SendRefusedData) Validate() error { return reasonWordOK(string(d.Reason)) }
+
+// SendRefusedReason says why the local intake refused an endpoint.send with
+// CodeSendRefused. The refusal had no effect: nothing was recorded or sent. The
+// reason is an open word, as the reason of a node-busy error is: a reader that
+// does not know one treats the error as a plain refusal. The constants are the
+// reasons this version of the node sends; a name once sent is never renamed,
+// removed or reused, so an adapter may branch on it.
+type SendRefusedReason string
+
+const (
+	// SendRefusedMessageUnknown: reply_to names no message this endpoint took in. It
+	// was never received, it was refused at intake, or its record is gone (a message
+	// is kept for about 27 hours after it arrived), or it is another endpoint's. An
+	// adapter answering a request late falls back to a plain send to the sender it
+	// knows.
+	SendRefusedMessageUnknown SendRefusedReason = "message_unknown"
+	// SendRefusedTooLarge: the body is larger than a message may be. Send less.
+	SendRefusedTooLarge SendRefusedReason = "too_large"
+	// SendRefusedIdempotencyConflict: the idempotency key was used before for a
+	// different message. Sending the same message again with the key is safe; a
+	// different message needs a different key.
+	SendRefusedIdempotencyConflict SendRefusedReason = "idempotency_conflict"
+	// SendRefusedIdentityRetired: the owner retired this node's identity, so the node
+	// signs and accepts nothing any more. Sending again cannot succeed.
+	SendRefusedIdentityRetired SendRefusedReason = "identity_retired"
+	// SendRefusedInvalidArgument: a member of the request breaks a rule the schema
+	// cannot state, for example a thread that is not an identifier or a reply to a
+	// notice of the node itself. The adapter's request is wrong; the error message
+	// is generic text for a person and names no member. (A recipient address that
+	// cannot be parsed is CodeInvalidAddress instead.)
+	SendRefusedInvalidArgument SendRefusedReason = "invalid_argument"
+)
+
+var sendRefusedReasons = []SendRefusedReason{
+	SendRefusedMessageUnknown, SendRefusedTooLarge, SendRefusedIdempotencyConflict,
+	SendRefusedIdentityRetired, SendRefusedInvalidArgument,
+}
+
+// SendRefusedReasons lists the reasons this version of the node sends in a
+// send-refused error, in order. A reader accepts any reason word, so the list
+// constrains the sender only.
+func SendRefusedReasons() []string { return strs(sendRefusedReasons) }
 
 // reasonWordOK checks a reason word, the open name of why a node refused: a short
 // snake_case word that a reader takes as it is, known or not.

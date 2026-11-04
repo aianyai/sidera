@@ -717,6 +717,31 @@ func TestEveryBusyReasonAppearsInAnExample(t *testing.T) {
 	}
 }
 
+// TestEverySendRefusedReasonAppearsInAnExample: each reason the node sends in a
+// send_refused error is in the data of at least one golden error, for the same
+// reason as the busy reasons.
+func TestEverySendRefusedReasonAppearsInAnExample(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range decodePositive(t) {
+		e, ok := d.value.(adapterproto.ErrorObject)
+		if !ok || e.Code != adapterproto.CodeSendRefused {
+			continue
+		}
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(e.Data, &data); err != nil {
+			t.Fatalf("%s: %v", d.Path, err)
+		}
+		seen[data.Reason] = true
+	}
+	for _, why := range adapterproto.SendRefusedReasons() {
+		if !seen[why] {
+			t.Errorf("no golden error holds send_refused with reason %q", why)
+		}
+	}
+}
+
 // TestEveryDirectoryAndParamsReasonAppearsInAnExample: each reason this version
 // of the node sends is in a golden message: the reasons of an unavailable
 // directory read in a result, the reasons of invalid params in the data of an

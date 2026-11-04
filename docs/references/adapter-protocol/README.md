@@ -444,7 +444,14 @@ the body) and the golden messages `invalid/endpoint-send--body-empty.json` and
 **Direct reply routing.** A nonempty `reply_to` must name the unique message
 this endpoint actually took in, excluding rejected intake records. `to` must
 contain exactly that message's original sender. Unknown reply sources, other
-recipients and multi-recipient replies are refused with no effect. A successful
+recipients and multi-recipient replies are refused with no effect. A `reply_to`
+that names no message the endpoint took in (never received, refused at intake,
+another endpoint's, or a record already swept, about 27 hours after the message
+arrived) is refused with `1009` and `reason` `message_unknown`, and nothing is
+recorded or sent: an adapter that answers a request late recognizes the word
+(`adapterproto.SendRefusedMessageUnknown`) and falls back to a plain send to the
+sender it knows. A reply to a notice of the node itself is refused with
+`invalid_argument` instead, since such a notice has no sender to answer. A successful
 reply retains its thread, deadline and idempotency key; disclosure with one
 recipient is normalized away as in every envelope. A control signal cannot carry
 `reply_to`, and otherwise preserves its applicable fields, including thread.
@@ -956,7 +963,7 @@ with the rest. `1001` to `1012` are the protocol's own (`adapterproto.Code*`):
 | 1006 | checkpoint_too_large | the checkpoint exceeds 16 KiB |
 | 1007 | endpoint_limit | the direct-endpoint limit is reached |
 | 1008 | invalid_address | an address cannot be parsed; `data`: `{field}` |
-| 1009 | send_refused | the local intake refused the message; `data`: `{reason}`, a snake_case word |
+| 1009 | send_refused | the local intake refused the message and recorded nothing; `data`: `{reason}`, a snake_case word; a reader treats a reason it does not know as a plain refusal, and a name once sent is never renamed, removed or reused (this version sends `message_unknown`: `reply_to` names no message the endpoint holds; `too_large`: the body is over the limit; `idempotency_conflict`: the key was used for a different message; `identity_retired`: the node's identity was retired and nothing is accepted in its name; `invalid_argument`: a member breaks a rule the schema cannot state, so the request is wrong) |
 | 1010 | lease_unknown | the lease does not belong to the endpoint |
 | 1011 | instance_locked | another process holds the instance lock |
 | 1012 | node_busy | the node refused the request before any effect because it could not take it now (back pressure, a failing volume, a node still starting), and sending it again later is safe; `data`: `{reason}`, a snake_case word; a reader treats a reason it does not know as busy with no further hint, and a name once sent is never renamed, removed or reused (this version sends `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy`, `recovering`) |
@@ -1115,7 +1122,7 @@ is authoritative.
   SDK, such as the CLI, order versions by the same code; the
   rules are in its README. Test: `TestCompare`.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
-  `TestBusyReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,
+  `TestBusyReasonTable`, `TestSendRefusedReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,
   `TestEnumNamesMatchContractPackages` (the reasons are the delivery package's
   own names), `TestErrorObjectKnowsEveryCode`,
   `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDirectoryResultRules`,
