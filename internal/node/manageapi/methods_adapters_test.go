@@ -36,6 +36,7 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 				Reached: []engine.ProbeReached{{Preset: "default", Frontend: adapterproto.FrontendCLI}},
 			}},
 			{Name: "waiting", Adapter: "chat", Enabled: true, Probe: engine.ProbeView{State: engine.ProbePending}},
+			{Name: "broken", Adapter: "chat", Enabled: true, Probe: engine.ProbeView{State: engine.ProbePending}, Fault: "package_invalid"},
 		},
 	}
 	status, out := r.post("adapters.list", `{}`)
@@ -43,7 +44,8 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 		`"adapters":[{"id":"chat","version":"1.0.0"},{"id":"relay","version":"2.1.0"}],` +
 		`"instances":[{"instance":"old","adapter":"relay","enabled":false},` +
 		`{"instance":"relay","adapter":"relay","enabled":true,"probe":{"state":"passed","at":"2026-10-24T09:00:00Z","frontends":[{"preset":"default","frontend":"cli"}]}},` +
-		`{"instance":"waiting","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]}}]}}`
+		`{"instance":"waiting","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]}},` +
+		`{"instance":"broken","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]},"fault":{"reason":"package_invalid"}}]}}`
 	if status != 200 || strings.TrimSpace(string(out)) != want {
 		t.Errorf("%d\n%s\nwant\n%s", status, out, want)
 	}

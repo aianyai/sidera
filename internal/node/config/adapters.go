@@ -53,6 +53,11 @@ func (e *SourceError) Error() string {
 
 func (e *SourceError) Unwrap() error { return e.Err }
 
+// readAdapters loads the installed adapters. An entry of adapters/ that is no
+// adapter directory refuses startup, as a stray entry anywhere in config/ does. A
+// package that cannot be loaded does not: its adapter is kept with the Fault that
+// says why, because one bad package must not stop the node and the adapters beside
+// it, and installing the package again repairs it.
 func readAdapters(r fsx.Reader, st *state) error {
 	entries, err := listDir(r, AdaptersDir)
 	if err != nil {
@@ -64,43 +69,64 @@ func readAdapters(r fsx.Reader, st *state) error {
 			return &FileError{Path: AdapterDir(id), Kind: KindDir, Reason: FileMisnamed,
 				Err: errors.New("an entry here is the directory of an adapter, named by its id")}
 		}
-		data, err := r.ReadFile(AdapterCurrentPath(id))
-		if missing(err) {
-			// An installation that did not finish. It is not installed, and the
-			// repair removes it; it is never a reason to refuse to start.
-			continue
+		a, installed := readAdapter(r, id)
+		if installed {
+			st.adapters[id] = a
 		}
-		if err != nil {
-			return &FileError{Path: AdapterCurrentPath(id), Kind: KindAdapterCurrent, Reason: FileUnreadable, Err: err}
-		}
-		cur, err := DecodeAdapterCurrent(id, data)
-		if err != nil {
-			return err
-		}
-		version := cur.Version
-		mpath := path.Join(AdapterRevisionDir(id, version, cur.Revision), manifest.FileName)
-		mdata, err := readFile(r, mpath, KindAdapterManifest)
-		if err != nil {
-			return err
-		}
-		m, err := manifest.Parse(mdata)
-		if err != nil {
-			return &FileError{Path: mpath, Kind: KindAdapterManifest, Reason: FileInvalid, Err: err}
-		}
-		if m.ID != id || m.Version != version {
-			return &FileError{Path: mpath, Kind: KindAdapterManifest, Reason: FileMisnamed,
-				Err: fmt.Errorf("the manifest is of %s %s, the directory is %s %s", m.ID, m.Version, id, version)}
-		}
-		st.adapters[id] = Adapter{ID: id, Version: version, Digest: cur.Digest, Revision: cur.Revision, Manifest: m}
 	}
 	return nil
+}
+
+// asFileError returns the *FileError that readFile and DecodeAdapterCurrent make of
+// every failure.
+func asFileError(err error) *FileError {
+	var fe *FileError
+	errors.As(err, &fe)
+	return fe
+}
+
+// readAdapter loads one adapter. It says false for a directory with no current
+// pointer, an installation that did not finish: that is not installed, and the
+// repair removes it.
+func readAdapter(r fsx.Reader, id string) (Adapter, bool) {
+	data, err := r.ReadFile(AdapterCurrentPath(id))
+	if missing(err) {
+		return Adapter{}, false
+	}
+	if err != nil {
+		return Adapter{ID: id, Fault: &FileError{Path: AdapterCurrentPath(id), Kind: KindAdapterCurrent, Reason: FileUnreadable, Err: err}}, true
+	}
+	cur, err := DecodeAdapterCurrent(id, data)
+	if err != nil {
+		return Adapter{ID: id, Fault: asFileError(err)}, true
+	}
+	a := Adapter{ID: id, Version: cur.Version, Digest: cur.Digest, Revision: cur.Revision}
+	mpath := path.Join(AdapterRevisionDir(id, cur.Version, cur.Revision), manifest.FileName)
+	mdata, err := readFile(r, mpath, KindAdapterManifest)
+	if err != nil {
+		a.Fault = asFileError(err)
+		return a, true
+	}
+	m, err := manifest.Parse(mdata)
+	if err != nil {
+		a.Fault = &FileError{Path: mpath, Kind: KindAdapterManifest, Reason: FileInvalid, Err: err}
+		return a, true
+	}
+	if m.ID != id || m.Version != cur.Version {
+		a.Fault = &FileError{Path: mpath, Kind: KindAdapterManifest, Reason: FileMisnamed,
+			Err: fmt.Errorf("the manifest is of %s %s, the directory is %s %s", m.ID, m.Version, id, cur.Version)}
+		return a, true
+	}
+	a.Manifest = m
+	return a, true
 }
 
 // AdapterGCWork lists what the repair of the adapter directory removes: an
 // adapter directory without a current pointer, and in an installed adapter a
 // staging directory or a version directory the pointer does not name. It only
 // reads, and it is the one definition of that garbage: the repair removes
-// exactly this list, and a test evaluates it on a copy of the disk, where a run
+// exactly this list (an adapter whose pointer cannot be read is left alone, for
+// what to keep is not known), and a test evaluates it on a copy of the disk, where a run
 // without a crash must leave it empty at every quiet point. The order is by
 // adapter id and, within an adapter, by name.
 func AdapterGCWork(r fsx.Reader) ([]GCItem, error) {
@@ -120,11 +146,11 @@ func AdapterGCWork(r fsx.Reader) ([]GCItem, error) {
 			continue
 		}
 		if err != nil {
-			return nil, &FileError{Path: AdapterCurrentPath(id), Kind: KindAdapterCurrent, Reason: FileUnreadable, Err: err}
+			continue // which version is kept is not known: the adapter is faulted, and a new installation repairs it
 		}
 		cur, err := DecodeAdapterCurrent(id, data)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		keep := path.Base(AdapterRevisionDir(id, cur.Version, cur.Revision))
 		versions, err := r.ReadDir(AdapterVersionsDir(id))
@@ -502,12 +528,16 @@ func (c *Config) PlanInstall(s Staged, ending StillEnding) (Install, error) {
 	var cur AdapterCurrent
 	if installed, ok := st.adapters[s.ID]; ok {
 		cur = AdapterCurrent{Version: installed.Version, Digest: installed.Digest, Revision: installed.Revision}
-		if cur.Version == s.Version && cur.Digest != "" && cur.Digest == s.Digest {
+		// A package that could not be loaded is replaced even by one with its own
+		// digest: what the pointer names is what is wrong.
+		if installed.Fault == nil && cur.Version == s.Version && cur.Digest != "" && cur.Digest == s.Digest {
 			plan.AlreadyCurrent = true
 			return plan, nil
 		}
 		plan.Replaced = true
-		if !holdsFiles(st, s.ID, ending) {
+		// The directory of a package that could not be loaded is not known to be
+		// this one's, so it is left to the repair as well.
+		if installed.Fault == nil && !holdsFiles(st, s.ID, ending) {
 			plan.previousDir = installed.Dir()
 		}
 	}

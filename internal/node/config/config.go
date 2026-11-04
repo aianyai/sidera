@@ -329,7 +329,9 @@ func (c *Config) Adapters() []Adapter {
 	out := make([]Adapter, 0, len(st.adapters))
 	for _, id := range sortedKeys(st.adapters) {
 		a := st.adapters[id]
-		a.Manifest = cloneManifest(a.Manifest)
+		if a.Fault == nil {
+			a.Manifest = cloneManifest(a.Manifest)
+		}
 		out = append(out, a)
 	}
 	return out

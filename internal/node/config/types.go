@@ -191,12 +191,21 @@ type AdapterCurrent struct {
 
 // Adapter is an installed adapter package.
 type Adapter struct {
-	ID      string
+	ID string
+	// Version is the version the current pointer names; empty when the pointer
+	// could not be read.
 	Version string
 	// Digest and Revision are those of the current pointer.
 	Digest   string
 	Revision uint32
+	// Manifest is the manifest of the package; the zero value when Fault is set.
 	Manifest manifest.Manifest
+	// Fault says why the package on the disk could not be loaded: the pointer or the
+	// manifest it names is missing, unreadable or invalid, or is of another adapter
+	// or version. The adapter is still installed, so that an installation replaces
+	// it, but nothing of it can run. A fault is the package's, never the node's: the
+	// node loads and the other adapters run.
+	Fault *FileError
 }
 
 // Dir is the directory of the package, relative to the data directory root.

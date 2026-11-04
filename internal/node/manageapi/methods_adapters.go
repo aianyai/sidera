@@ -106,6 +106,13 @@ type instanceJSON struct {
 	Adapter  string     `json:"adapter"`
 	Enabled  bool       `json:"enabled"`
 	Probe    *probeJSON `json:"probe,omitempty"`
+	// Fault is there when the package of the enabled instance cannot run (see
+	// adapters.list in the daemon reference); the instance is offline then.
+	Fault *faultJSON `json:"fault,omitempty"`
+}
+
+type faultJSON struct {
+	Reason string `json:"reason"`
 }
 
 type probeJSON struct {
@@ -135,6 +142,9 @@ func adapterListJSON(l engine.AdapterList) adapterListResult {
 				p.Frontends = append(p.Frontends, reachedJSON{Preset: r.Preset, Frontend: string(r.Frontend)})
 			}
 			v.Probe = p
+			if in.Fault != "" {
+				v.Fault = &faultJSON{Reason: in.Fault}
+			}
 		}
 		out.Instances = append(out.Instances, v)
 	}

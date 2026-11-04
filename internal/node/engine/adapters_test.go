@@ -1950,3 +1950,49 @@ func TestQuiesceDoesNotTakeACallTheEngineCancelledForOneTheAdapterHolds(t *testi
 		t.Fatalf("not quiet after the call returned: %v", err)
 	}
 }
+
+// A report that the package of an instance cannot run is shown with the instance
+// until the instance is online again; a report that is only about one connection
+// takes the fault away, since the package was run since.
+func TestAnInstanceWhosePackageCannotRunShowsWhyUntilItIsOnline(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	r.enableInstance("chat", "")
+	e := r.start()
+	faultOf := func() string {
+		t.Helper()
+		list, err := e.AdapterList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, in := range list.Instances {
+			if in.Name == "chat" {
+				return in.Fault
+			}
+		}
+		t.Fatal("the instance is not listed")
+		return ""
+	}
+	if got := faultOf(); got != "" {
+		t.Fatalf("fault %q before anything was reported", got)
+	}
+	for _, cause := range adapterhost.GoneCauses() {
+		if err := e.AdapterGone(ctx, "chat", cause); err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if cause.PackageFault() {
+			want = cause.String()
+		}
+		if got := faultOf(); got != want {
+			t.Errorf("after %s the fault is %q, want %q", cause, got, want)
+		}
+	}
+	if err := e.AdapterGone(ctx, "chat", adapterhost.GonePackageInvalid); err != nil {
+		t.Fatal(err)
+	}
+	started(t, e, "chat")
+	if got := faultOf(); got != "" {
+		t.Errorf("fault %q after the instance started", got)
+	}
+}

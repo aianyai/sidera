@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/node/clock"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -26,7 +29,7 @@ func (s *supervisor) pass() (stable bool, err error) {
 			return false, err
 		}
 		s.log.Warn("the adapter was not taken on", "err", err)
-		s.report(GoneStartFailed)
+		s.report(causeOf(err))
 		s.release()
 		return false, nil
 	}
@@ -44,6 +47,9 @@ func (s *supervisor) instance() (Instance, error) {
 	}
 	for _, a := range env.Source.Adapters() {
 		if a.ID == in.Adapter {
+			if err := runnable(a); err != nil {
+				return Instance{}, err
+			}
 			return Instance{
 				ID:       s.id,
 				Adapter:  a,
@@ -54,6 +60,56 @@ func (s *supervisor) instance() (Instance, error) {
 		}
 	}
 	return Instance{}, fmt.Errorf("the adapter %q is not installed", in.Adapter)
+}
+
+// packageFault is a start that failed for a fault of the installed package, with
+// the cause to report it as.
+type packageFault struct {
+	cause GoneCause
+	err   error
+}
+
+func (f *packageFault) Error() string { return f.err.Error() }
+func (f *packageFault) Unwrap() error { return f.err }
+
+// causeOf is the cause a failed start is reported with: that of a fault of the
+// package, otherwise GoneStartFailed.
+func causeOf(err error) GoneCause {
+	var f *packageFault
+	if errors.As(err, &f) {
+		return f.cause
+	}
+	return GoneStartFailed
+}
+
+// runnable judges what the manifest alone says: whether the package could be
+// loaded, runs on this platform and speaks a protocol this node speaks. These are
+// the rules the installation applies, so that a package that was installed and has
+// become unfit (a data directory copied to another machine) is told the same way.
+func runnable(a config.Adapter) error {
+	switch {
+	case a.Fault != nil:
+		return &packageFault{GonePackageInvalid, fmt.Errorf("the package of adapter %q cannot be loaded: %w", a.ID, a.Fault)}
+	case !adapterreg.RunsOn(a.Manifest, runtime.GOOS, runtime.GOARCH):
+		return &packageFault{GonePlatformUnsupported, fmt.Errorf("the package of adapter %q does not run on %s/%s", a.ID, runtime.GOOS, runtime.GOARCH)}
+	}
+	if _, ok := adapterreg.SharedProtocol(adapterproto.SupportedRange(), a.Manifest); !ok {
+		return &packageFault{GoneProtocolUnsupported, fmt.Errorf("the package of adapter %q declares protocol versions %d..%d, and this node speaks %d..%d",
+			a.ID, a.Manifest.Protocol.Min, a.Manifest.Protocol.Max, adapterproto.ProtocolMin, adapterproto.ProtocolMax)}
+	}
+	return nil
+}
+
+// launchFault is the error of a launch that failed, with the cause the operating
+// system's answer gives: the program is not there, or may not be run.
+func launchFault(err error) error {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return &packageFault{GoneProgramMissing, err}
+	case errors.Is(err, fs.ErrPermission):
+		return &packageFault{GoneProgramNotExecutable, err}
+	}
+	return err
 }
 
 // connect launches the adapter and takes it on: initialize, admission,
@@ -73,7 +129,7 @@ func (s *supervisor) connect() (*conn, error) {
 	proc, err := h.launcher.Launch(h.ctx, inst)
 	if err != nil {
 		logw.Close()
-		return nil, fmt.Errorf("launch: %w", err)
+		return nil, launchFault(fmt.Errorf("launch: %w", err))
 	}
 	c := s.newConn(proc, logw)
 	stream, stdin := proc.Stream()

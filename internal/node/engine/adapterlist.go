@@ -24,6 +24,11 @@ type InstanceView struct {
 	// Probe is how far the probe of an enabled instance has come; it is the zero
 	// value for an instance that is not enabled, which runs nothing to probe.
 	Probe ProbeView
+	// Fault is why the package of an enabled instance cannot run, as the adapter
+	// host last reported it: empty when the instance is online, has not been
+	// reported, or was last lost for the sake of one connection. The names are those
+	// of adapterhost.GoneCause.
+	Fault string
 }
 
 // AdapterList is what the owner is shown of the adapters.
@@ -55,6 +60,9 @@ func (e *Engine) adapterList(now time.Time) AdapterList {
 			v.Probe = ProbeView{State: ProbePending}
 			if st := e.adapters[name]; st != nil {
 				v.Probe = st.probeView(now)
+				if st.fault != 0 {
+					v.Fault = st.fault.String()
+				}
 			}
 		}
 		list.Instances = append(list.Instances, v)

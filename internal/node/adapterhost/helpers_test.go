@@ -347,6 +347,12 @@ func (s *sourceDouble) Adapters() []config.Adapter {
 	return append([]config.Adapter(nil), s.adapters...)
 }
 
+func (s *sourceDouble) setAdapters(adapters ...config.Adapter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.adapters = adapters
+}
+
 func (s *sourceDouble) setInstance(name string, in config.Instance) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -145,12 +145,6 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 
 		// adapters
 		{"adapter directory that is not an id", config.AdapterDir("Bad Id") + "/current", goldenCurrent, config.KindDir, config.FileMisnamed, ""},
-		{"adapter current not json", config.AdapterCurrentPath("example"), "1.0.0", config.KindAdapterCurrent, config.FileMalformed, ""},
-		{"adapter current with a version that is not semver", config.AdapterCurrentPath("example"), edit(goldenCurrent, `1.0.0`, `one`), config.KindAdapterCurrent, config.FileInvalid, "version"},
-		{"adapter current names a version that is not there", config.AdapterCurrentPath("example"), edit(goldenCurrent, `1.0.0`, `1.1.0`), config.KindAdapterManifest, config.FileMissing, ""},
-		{"adapter manifest not valid", config.AdapterManifestPath("example", "1.0.0"), `{"manifest_version": 1}`, config.KindAdapterManifest, config.FileInvalid, ""},
-		{"adapter manifest of another adapter", config.AdapterManifestPath("example", "1.0.0"), manifestOf("another", "1.0.0"), config.KindAdapterManifest, config.FileMisnamed, ""},
-		{"adapter manifest of another version", config.AdapterManifestPath("example", "1.0.0"), manifestOf("example", "1.0.1"), config.KindAdapterManifest, config.FileMisnamed, ""},
 	}
 
 	for _, r := range rows {
@@ -174,9 +168,6 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 			}
 			fe := fileError(t, err)
 			wantPath := r.path
-			if r.kind == config.KindAdapterManifest && r.reason == config.FileMissing {
-				wantPath = config.AdapterManifestPath("example", "1.1.0")
-			}
 			if r.kind == config.KindDir && r.reason == config.FileMisnamed {
 				wantPath = config.AdapterDir("Bad Id")
 			}
@@ -388,6 +379,71 @@ func TestWrongTypeIsNamedByItsPath(t *testing.T) {
 			fe := fileError(t, err)
 			if fe.Field != r.field || fe.Reason != config.FileMalformed {
 				t.Errorf("field %q reason %v, want %q malformed: %v", fe.Field, fe.Reason, r.field, err)
+			}
+		})
+	}
+}
+
+// A package that cannot be loaded makes its adapter faulted and nothing else: the
+// node starts, the adapters beside it load, and the adapter says what is wrong
+// with its package. One row per way a package on the disk can be bad. Only an
+// entry of adapters/ that is no adapter at all, which no package can be blamed
+// for, refuses startup (TestInvalidFileRefusesStartupAndNamesTheFile).
+func TestABadPackageFaultsItsAdapterAndNotTheNode(t *testing.T) {
+	edit := func(doc, old, new string) string {
+		t.Helper()
+		if !strings.Contains(doc, old) {
+			t.Fatalf("test row edits %q, which the golden file does not hold", old)
+		}
+		return strings.Replace(doc, old, new, 1)
+	}
+	rows := []struct {
+		name    string
+		path    string // the file that is replaced; "" content removes it
+		content string
+		blamed  string // the file the fault names
+		kind    config.FileKind
+		reason  config.FileReason
+	}{
+		{"current is not json", config.AdapterCurrentPath("example"), "1.0.0", config.AdapterCurrentPath("example"), config.KindAdapterCurrent, config.FileMalformed},
+		{"current holds a version that is not semver", config.AdapterCurrentPath("example"), edit(goldenCurrent, `1.0.0`, `one`), config.AdapterCurrentPath("example"), config.KindAdapterCurrent, config.FileInvalid},
+		{"current names a version that is not there", config.AdapterCurrentPath("example"), edit(goldenCurrent, `1.0.0`, `1.1.0`), config.AdapterManifestPath("example", "1.1.0"), config.KindAdapterManifest, config.FileMissing},
+		{"manifest is missing", config.AdapterManifestPath("example", "1.0.0"), "", config.AdapterManifestPath("example", "1.0.0"), config.KindAdapterManifest, config.FileMissing},
+		{"manifest is not valid", config.AdapterManifestPath("example", "1.0.0"), `{"manifest_version": 1}`, config.AdapterManifestPath("example", "1.0.0"), config.KindAdapterManifest, config.FileInvalid},
+		{"manifest is of another adapter", config.AdapterManifestPath("example", "1.0.0"), manifestOf("another", "1.0.0"), config.AdapterManifestPath("example", "1.0.0"), config.KindAdapterManifest, config.FileMisnamed},
+		{"manifest is of another version", config.AdapterManifestPath("example", "1.0.0"), manifestOf("example", "1.0.1"), config.AdapterManifestPath("example", "1.0.0"), config.KindAdapterManifest, config.FileMisnamed},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			rg := newRig(t)
+			tree := validTree(t)
+			// A second, good adapter beside the one that is bad.
+			tree[config.AdapterCurrentPath("beside")] = goldenCurrent
+			tree[config.AdapterManifestPath("beside", "1.0.0")] = manifestOf("beside", "1.0.0")
+			if r.content == "" {
+				delete(tree, r.path)
+			} else {
+				tree[r.path] = r.content
+			}
+			putTree(t, rg.mem, tree)
+
+			c, err := config.Load(rg.w)
+			if err != nil {
+				t.Fatalf("Load refused the tree for a bad package: %v", err)
+			}
+			byID := map[string]config.Adapter{}
+			for _, a := range c.Adapters() {
+				byID[a.ID] = a
+			}
+			if len(byID) != 2 || byID["beside"].Fault != nil || byID["beside"].Version != "1.0.0" {
+				t.Errorf("adapters = %+v, want the good one loaded beside the bad one", byID)
+			}
+			fe := byID["example"].Fault
+			if fe == nil {
+				t.Fatalf("the bad package is not faulted: %+v", byID["example"])
+			}
+			if fe.Path != r.blamed || fe.Kind != r.kind || fe.Reason != r.reason {
+				t.Errorf("fault is {path %q kind %v reason %v}, want {path %q kind %v reason %v}", fe.Path, fe.Kind, fe.Reason, r.blamed, r.kind, r.reason)
 			}
 		})
 	}

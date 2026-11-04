@@ -62,6 +62,10 @@ type adapterState struct {
 	// that has not been online since the engine started.
 	online       bool
 	offlineSince time.Time
+	// fault is the last report that the installed package cannot run (see
+	// adapterhost.GoneCause.PackageFault); zero while the instance is online or was
+	// last reported gone for the sake of one connection.
+	fault adapterhost.GoneCause
 	// inService is true once the connection is known to take calls: its probe has
 	// answered, or the wait after adapter.start for a probe that failed has passed. The
 	// host tells the node that the adapter started before it puts the connection in
@@ -411,6 +415,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 		return err
 	}
 	st.online, st.offlineSince, st.inService = true, time.Time{}, false
+	st.fault = 0
 	// The busy state is what the result lists, not that and what was known before.
 	st.busy = nil
 	for _, s := range r.Sessions {
@@ -586,7 +591,12 @@ func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCaus
 	if _, ok := e.enabledInstance(instance); !ok {
 		return refuse(ReasonInstanceUnknown)
 	}
-	e.adapter(instance).goOffline(now)
+	st := e.adapter(instance)
+	st.goOffline(now)
+	st.fault = 0
+	if cause.PackageFault() {
+		st.fault = cause
+	}
 	e.sched.remove(schedKey{schedProbeFallback, instance})
 	e.noteBlockedInstance(instance) // the adapter being away is a cause that has just begun
 	e.noteLeasesOfInstance(instance)

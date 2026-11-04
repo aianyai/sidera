@@ -451,6 +451,20 @@ lists exactly this, and loading removes it in one recovery transaction after
 every file has been found valid. An adapter directory without `current` is an
 installation that did not finish: it is never a reason to refuse startup.
 
+**A bad package faults its adapter and not the node.** The pointer of an adapter
+that is unreadable or invalid, and a manifest that is missing, unreadable, invalid
+or of another adapter or version, do not refuse startup: the adapter is loaded as
+installed with `Adapter.Fault`, the `*FileError` that names the file and says what
+is wrong, and no manifest. The instances of the other adapters start; the instances
+of the faulted one are reported `package_invalid` (see the adapter host) and the
+daemon logs a warning for the adapter at start. Installing the package again
+replaces it, even with the digest the pointer holds (the pointer's package is what
+is wrong), restarts its enabled instances and clears the fault. The repair leaves an
+adapter whose pointer cannot be read alone, since which version it keeps is not
+known. What still refuses startup is damage no single package is to blame for: a
+missing or unreadable `adapters/` directory, an entry of it that is no adapter
+directory, and every invalid file outside the adapter packages.
+
 ### Changing the configuration
 
 A request that changes a setting names the version it was based on. Every change
@@ -714,8 +728,12 @@ endpoints and not to others for a reason nobody remembers.
   platform. The installation depends on the rename of the staging directory
   becoming durable before the replacement of `current`; not exercised by CI, no
   job loses power. The repair makes either order harmless for the files of
-  `config`: a pointer that names a version that is not there refuses startup,
-  naming the manifest, rather than starting on half an installation.
+  `config`: a pointer that names a version that is not there leaves that adapter
+  faulted, naming the manifest, rather than starting it on half an installation.
+  The repair then keeps nothing of that adapter that the pointer does not name, and
+  the pointer names a directory that does not exist: it removes the adapter's other
+  version directories and its staging directories, so the previous version is gone
+  too and the adapter must be installed again.
 - A direct-endpoint key is never forgotten: `endpoint-ids/` only grows.
 
 ## Where
@@ -728,6 +746,7 @@ endpoints and not to others for a reason nobody remembers.
 | Versioned changes, write functions for other packages | `change.go`; the changes of `network.json` (`SetListen`, `SetPeerAddresses`, `RemovePeer`) and the address rules are in `network.go` |
 | Adapter packages, the repair and its predicate | `adapters.go` (`AdapterGCWork`, `StageAdapter`, `Unstage`, `PlanInstall`) |
 | `init` | `init.go` |
+| A bad package faults its adapter, one row per way a package is bad; installing over it | `TestABadPackageFaultsItsAdapterAndNotTheNode`, `TestInstallingOverAFaultedAdapterRecoversIt`, `TestAdapterGCWorkSkipsAnAdapterWhosePointerIsBad` |
 | An invalid file refuses startup, one row per file and failure | `TestInvalidFileRefusesStartupAndNamesTheFile`, `TestMissingDirectoryRefusesStartupAndNamesIt`, `TestFirstInvalidFileInFixedOrderIsNamed`, `TestWrongTypeIsNamedByItsPath` |
 | A preset without the statement is invalid | `TestPresetWithoutLocalSourcesIsInvalid`, `TestAddPresetWithoutLocalSourcesIsRefused`, `TestEveryPresetOnDiskMadeTheStatement` |
 | Expected versions, recording the operation | `TestExpectedVersionConflictPerCollection`, `TestVersionedChangeRecordsTheOperation`, `TestStaleVersionIsReportedBeforeAnInvalidValue` |

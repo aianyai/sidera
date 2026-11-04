@@ -18,6 +18,7 @@ declared here or in the package that composes it. It reads no clock.
 | Name | Purpose |
 | ---- | ------- |
 | `Load(w)` | Reads and checks all of `config/`, then repairs the adapter directory. Returns a `*Config`, or a `*FileError` that names the file that is wrong. |
+| `Adapter.Fault` | Why an installed package could not be loaded (a `*FileError`); nil for a package that loaded. |
 | `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `Network`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state, manifests of `Adapters` included: nothing a caller changes reaches the configuration or another caller. |
 | `NodeSettings.ArchiveRetention()` | The retention of the archive as a duration: the one conversion of `archive_retention_days`. |
 | `NodeSettings.WireJSON()`, `EndpointOverride.WireJSON()`, `Preset.WireJSON()` | The settings and presets as the owner's commands show them: the compact object the file holds (under `"settings"`, or the preset's own document), with the names `node set`, `endpoint set` and `preset add` take, so the names are written once. |
@@ -37,7 +38,8 @@ declared here or in the package that composes it. It reads no clock.
 - **Strict decoding, one rule for every file.** Decoding goes through
   `strictjson`: a key matches exactly, a field without `omitempty` is required,
   `null` is no value, an explicit zero in an optional field is an error, unknown
-  and repeated keys are errors. A file that fails refuses startup and the error
+  and repeated keys are errors. A file that fails refuses startup (an adapter package
+  that fails faults only its adapter) and the error
   names the file and the JSON path of the value. Nothing is written when a file
   is refused, the repair of the adapter directory included.
 - **Every file has `format` (1); versioned files also have `version` (from 1).**
@@ -113,6 +115,11 @@ declared here or in the package that composes it. It reads no clock.
   copy is what is parsed, and the manifest read from the source and from the
   copy must be of the same adapter and version. A name in a package that begins
   with `.tmp-`, `.trash-` or `.stage-` is refused: the cleanup would remove it.
+- **A bad package faults its adapter, never the node.** A pointer or manifest that
+  cannot be loaded leaves the adapter in `Adapters()` with `Fault` set and no
+  manifest; `PlanInstall` replaces it even with the digest its pointer holds, and
+  the repair leaves it alone. Only an entry of `adapters/` that is no adapter
+  directory refuses startup.
 - **No pointer means not installed, and never a reason to refuse startup.** An
   adapter directory without `current` is an installation that did not finish;
   the repair removes it. So does it remove staging directories and version

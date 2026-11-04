@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // waitPings waits until the scripted adapter has received n pings.
@@ -808,4 +811,87 @@ func TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold(t *test
 	if inst.Stderr == nil {
 		t.Fatal("Instance.Stderr is nil")
 	}
+}
+
+// A package that cannot run is reported with the reason that says so, and the
+// other instances go on: an instance with a package that could not be loaded, one
+// for another platform or protocol is judged before anything is launched, and a
+// launch the system refuses for want of the program or of permission is told by
+// what it answers. Any other failure to start stays a start that failed. A new
+// package is taken on without the host being restarted.
+func TestAPackageThatCannotRunIsReportedWithWhyAndTheOtherInstancesGoOn(t *testing.T) {
+	good := fakeadapter.DefaultManifestOptions().Manifest()
+	// bad is the adapter of the instance "broken"; edit makes its package wrong.
+	bad := func(edit func(*config.Adapter)) config.Adapter {
+		a := config.Adapter{ID: "bad", Version: good.Version, Manifest: good}
+		a.Manifest.ID = "bad"
+		edit(&a)
+		return a
+	}
+	pathErr := func(err error) error { return &fs.PathError{Op: "fork/exec", Path: "adapter", Err: err} }
+	for _, tc := range []struct {
+		name     string
+		adapter  config.Adapter
+		launch   error // what the launcher answers for "broken"
+		want     adapterhost.GoneCause
+		launches int // of "broken" before the package is replaced
+	}{
+		{"a package that could not be loaded", bad(func(a *config.Adapter) {
+			a.Manifest = manifest.Manifest{}
+			a.Fault = &config.FileError{Path: "adapters/bad/current.json", Kind: config.KindAdapterCurrent, Reason: config.FileInvalid, Err: errors.New("not json")}
+		}), nil, adapterhost.GonePackageInvalid, 0},
+		{"a package for another platform", bad(func(a *config.Adapter) {
+			a.Manifest.Platforms = []manifest.Platform{{OS: "plan9", Arch: "mips"}}
+		}), nil, adapterhost.GonePlatformUnsupported, 0},
+		{"a package for protocol versions the node does not speak", bad(func(a *config.Adapter) {
+			a.Manifest.Protocol = adapterproto.Range{Min: adapterproto.ProtocolMax + 1, Max: adapterproto.ProtocolMax + 2}
+		}), nil, adapterhost.GoneProtocolUnsupported, 0},
+		{"a program that is not there", bad(func(*config.Adapter) {}), pathErr(fs.ErrNotExist), adapterhost.GoneProgramMissing, 1},
+		{"a program that may not be run", bad(func(*config.Adapter) {}), pathErr(fs.ErrPermission), adapterhost.GoneProgramNotExecutable, 1},
+		{"a launch that fails otherwise", bad(func(*config.Adapter) {}), errors.New("out of processes"), adapterhost.GoneStartFailed, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var healed atomic.Bool
+			r := newRig(t, rigOptions{instances: []string{"fine", "broken"}, launch: func(r *rig, n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+				if inst.ID == "broken" && tc.launch != nil && !healed.Load() {
+					return nil, tc.launch
+				}
+				return r.fakeProcess(inst), nil
+			}})
+			r.src.setAdapters(config.Adapter{ID: good.ID, Version: good.Version, Manifest: good}, tc.adapter)
+			r.src.setInstance("broken", config.Instance{Adapter: "bad", Enabled: true})
+
+			r.start()
+			r.waitConnected("fine")
+			r.waitEvents("gone", 1)
+			if got := r.goneCauses("broken"); !slices.Equal(got, []adapterhost.GoneCause{tc.want}) {
+				t.Fatalf("broken was reported %v, want [%s]", got, tc.want)
+			}
+			if got := r.goneCauses("fine"); len(got) != 0 {
+				t.Errorf("fine was reported %v", got)
+			}
+			if got := launchesOf(r.lau, "broken"); got != tc.launches {
+				t.Errorf("broken was launched %d times, want %d", got, tc.launches)
+			}
+
+			// The package is replaced by a good one: the next pass takes it on.
+			healed.Store(true)
+			r.src.setAdapters(config.Adapter{ID: good.ID, Version: good.Version, Manifest: good})
+			r.src.setInstance("broken", config.Instance{Adapter: good.ID, Enabled: true})
+			r.advance(testParams().RestartBackoffMax, "broken")
+			r.waitConnected("broken")
+		})
+	}
+}
+
+func launchesOf(l *launcherDouble, instance string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, in := range l.instances {
+		if in.ID == instance {
+			n++
+		}
+	}
+	return n
 }

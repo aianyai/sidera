@@ -102,14 +102,45 @@ const (
 	// or the engine could not take it.
 	GoneStartFailed
 
+	// The causes below say that the installed package cannot run here, which only
+	// a new installation (or a node that fits the package) cures. The host judges
+	// them before it launches anything, except the last two, which are what the
+	// launch itself answers.
+	//
+	// GonePackageInvalid: the package on the disk could not be loaded: its pointer
+	// or manifest is missing, unreadable or invalid, or is of another adapter or
+	// version.
+	GonePackageInvalid
+	// GonePlatformUnsupported: the manifest does not list the platform of this
+	// machine, as when the data directory was copied from another kind of machine.
+	GonePlatformUnsupported
+	// GoneProtocolUnsupported: the manifest declares no protocol version this node
+	// speaks (adapterreg.SharedProtocol).
+	GoneProtocolUnsupported
+	// GoneProgramMissing: the program the manifest names, or the directory of the
+	// package, is not there.
+	GoneProgramMissing
+	// GoneProgramNotExecutable: the system refused to run the program for want of
+	// permission.
+	GoneProgramNotExecutable
+
 	goneEnd
 )
 
 var goneNames = [goneEnd]string{
-	GoneConnectionEnded: "connection_ended",
-	GonePingsFailed:     "pings_failed",
-	GoneStartFailed:     "start_failed",
+	GoneConnectionEnded:      "connection_ended",
+	GonePingsFailed:          "pings_failed",
+	GoneStartFailed:          "start_failed",
+	GonePackageInvalid:       "package_invalid",
+	GonePlatformUnsupported:  "platform_unsupported",
+	GoneProtocolUnsupported:  "protocol_unsupported",
+	GoneProgramMissing:       "program_missing",
+	GoneProgramNotExecutable: "program_not_executable",
 }
+
+// PackageFault says whether the cause is a fault of the installed package, which
+// stays until the package is replaced, and not an event of one connection.
+func (c GoneCause) PackageFault() bool { return c >= GonePackageInvalid && c < goneEnd }
 
 // String returns the name of the cause.
 func (c GoneCause) String() string {

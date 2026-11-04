@@ -43,6 +43,14 @@ protocol has a version of its own.
   its credentials again, and an attached session attaches again and gets a new endpoint. The
   controller name `sidera` gives a session leaves the directory name out when the directory's
   name has such a character.
+- **One bad adapter package no longer stops the node.** An installed adapter package whose
+  pointer or manifest was missing, unreadable or invalid made the whole daemon refuse to start.
+  The daemon now starts, the other adapters run, and only the instances of the bad adapter are
+  marked faulted: `sidera adapter list` shows `fault` with a `reason` for an enabled instance
+  whose package cannot run (`package_invalid`, `platform_unsupported`, `protocol_unsupported`,
+  `program_missing` or `program_not_executable`), where before such an instance was only offline
+  and the daemon log held the cause. The daemon logs a warning for a package it cannot load.
+  Installing the package again recovers the adapter without restarting the daemon.
 - **Installing an adapter package for an adapter protocol this node does not speak is refused.**
   `sidera adapter install` used to accept a package whose manifest declares protocol versions
   that share none with the ones the node speaks, and an instance running the previous version

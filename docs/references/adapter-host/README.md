@@ -62,6 +62,22 @@ engine as `GoneStartFailed`: the process did not start, its answers were wrong, 
 was refused admission, it held no lock or the engine could not take it. A probe the
 adapter fails (an error, a result that is not valid) is logged and nothing more.
 
+A start that fails because the installed package cannot run is reported with a
+cause of its own, so that the owner is told why and not only that the instance is
+offline (`GoneCause.PackageFault`). Before launching, the host judges the package
+by what the manifest says, with the rules the installation applies:
+`package_invalid` (the package could not be loaded: `config.Adapter.Fault`),
+`platform_unsupported` (`adapterreg.RunsOn`) and `protocol_unsupported`
+(`adapterreg.SharedProtocol`); nothing is launched then. What the launch answers
+tells the other two: `program_missing` (the program or the package directory is not
+there: the launch error is `ENOENT`, which on Unix also covers a script whose
+interpreter, named on its `#!` line, is missing) and `program_not_executable` (the system
+refused for want of permission). Any other failure stays `start_failed`. The instance keeps
+its backoff and tries again, and each try reads the configuration anew, so a package that
+is installed again (which also restarts the enabled instances) is taken on without the
+daemon being restarted. `TestAPackageThatCannotRunIsReportedWithWhyAndTheOtherInstancesGoOn`
+holds one row per cause.
+
 ### Supervision and the two-ping rule
 
 In service, every `PingInterval` the host sends `ping`, limited by `PingTimeout`.

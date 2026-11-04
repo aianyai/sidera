@@ -171,6 +171,11 @@ func (d *Daemon) stepConfig(context.Context) error {
 	if d.cfgd, err = config.Load(d.w); err != nil {
 		return err
 	}
+	for _, a := range d.cfgd.Adapters() {
+		if a.Fault != nil {
+			d.log.Warn("an installed adapter package cannot be loaded; install it again", "adapter", a.ID, "error", a.Fault.Error())
+		}
+	}
 	d.loaded.Store(d.cfgd)
 	return nil
 }

@@ -1162,3 +1162,60 @@ func TestStagingReadsTheManifestAndEveryFileWithinThePackageBudget(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+// Installing a package over an adapter whose package could not be loaded makes the
+// adapter good again, and a pointer that names the very package being installed
+// does not make that installation a no-op: the manifest it points at is the thing
+// that is wrong.
+func TestInstallingOverAFaultedAdapterRecoversIt(t *testing.T) {
+	rg := newRig(t)
+	tree := validTree(t)
+	tree[config.AdapterManifestPath("example", "1.0.0")] = `{"manifest_version": 1}`
+	// The pointer holds the digest of the package that is about to be installed.
+	pkg := srcPackage(t, "example", "1.0.0", nil)
+	_, c0 := loaded(t)
+	staged0, err := c0.StageAdapter(pkg, suffixReader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree[config.AdapterCurrentPath("example")] = `{"format": 1, "version": "1.0.0", "digest": "` + staged0.Digest + `"}`
+	putTree(t, rg.mem, tree)
+	c := rg.load()
+	if ads := c.Adapters(); len(ads) != 1 || ads[0].Fault == nil {
+		t.Fatalf("adapters = %+v, want example faulted", ads)
+	}
+	staged, err := c.StageAdapter(srcPackage(t, "example", "1.0.0", nil), otherSuffixReader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := c.PlanInstall(staged, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.AlreadyCurrent || !plan.Replaced {
+		t.Fatalf("plan = {AlreadyCurrent %v Replaced %v}, want a replacement", plan.AlreadyCurrent, plan.Replaced)
+	}
+	if err := install(t, rg, c, staged); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if ads := c.Adapters(); len(ads) != 1 || ads[0].Fault != nil || ads[0].Manifest.ID != "example" {
+		t.Errorf("adapters after the installation = %+v, want example loaded", ads)
+	}
+	if ads := rg.load().Adapters(); len(ads) != 1 || ads[0].Fault != nil {
+		t.Errorf("a restart reads %+v", ads)
+	}
+}
+
+// The repair of the adapter directory leaves an adapter whose pointer cannot be
+// read alone: what it keeps is not known.
+func TestAdapterGCWorkSkipsAnAdapterWhosePointerIsBad(t *testing.T) {
+	rg := newRig(t)
+	tree := validTree(t)
+	tree[config.AdapterCurrentPath("example")] = "not json"
+	putTree(t, rg.mem, tree)
+	mkdirAll(t, rg.mem, config.AdapterVersionDir("example", "0.9.0"))
+	work, err := config.AdapterGCWork(rg.mem)
+	if err != nil || len(work) != 0 {
+		t.Errorf("work = %+v, %v; want none and no error", work, err)
+	}
+}
