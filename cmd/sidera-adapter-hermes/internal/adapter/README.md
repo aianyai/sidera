@@ -78,7 +78,8 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   never matched as a reply nor made a request (`laneFlows.HandleMessage`). It settles the
   cards in flight on its endpoint (`settleEndpoint`, through `settle`, the code the tick
   uses), then reports an answer that did not arrive, once (`reportLostAnswers`,
-  `state.Reply.Reported`), and only when neither changed anything is relayed as a card
+  `state.Reply.Reported`), and only when neither changed anything, and no card of the endpoint ended for a
+  failed delivery since the last notice (`state.Endpoint.FailedAt`, `NoticedAt`), is relayed as a card
   titled "Sidera channel notice" (`HandleNotice`). It is `Written` only once the cards
   it needed are written; a failure of Hermes that may pass is a `Retry`.
 - **A reply card is not claimed** (`answer.go`): every step is resumed from its record

@@ -568,6 +568,13 @@ follow, in this order, each for the endpoint that received the notice:
    close that is unconfirmed as an outcome unknown. The tick would find it too, later;
    the notice is the moment the node says it, so the owner's agent is woken at once. A
    status the node refuses to give (it no longer knows the message) is left to the tick.
+   The tick usually comes first, since it reads the status every ten seconds: a card it
+   ended for a failed delivery (`state.Endpoint.FailedAt`) explains the first notice
+   handled on the endpoint after it (`NoticedAt` is when one was last handled), so that
+   a notice that finds nothing in flight is not relayed to the conversation, which the
+   blocked card has already woken about the same failure. One notice explains all the
+   failures before it; the notice of a second failure that follows within the same
+   interval is relayed, which wakes the conversation once more and loses nothing.
 2. **Answers that did not arrive are reported** (`inbound.reportLostAnswers`). A reply
    card is completed as soon as its answer is sent, so a failure of the answer afterwards
    has no card to land on. The reply record keeps the Sidera message id of the answer, the
@@ -580,7 +587,7 @@ follow, in this order, each for the endpoint that received the notice:
    answer's message id, and the record is marked reported (`Reply.Reported`), so a failure
    is reported once however many notices follow and however often a notice comes again.
 3. **A notice nothing explained is relayed** (`inbound.HandleNotice`). When steps 1 and 2
-   changed nothing, the notice becomes a card of the conversation of the endpoint,
+   changed nothing and no failure is waiting for its notice, the notice becomes a card of the conversation of the endpoint,
    assigned to `sidera-inbox` like every card the adapter makes of a message, with the
    continuation rules (the latest done card of the conversation is the parent; a `cron:`,
    orphan or instance endpoint wakes the home target) and the Sidera message id of the

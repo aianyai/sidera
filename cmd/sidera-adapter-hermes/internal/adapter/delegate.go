@@ -486,6 +486,7 @@ func (f *laneFlows) settle(ctx context.Context, c state.Card) (ended bool, err e
 		return false, nil
 	}
 	if reason, text, failed := undelivered(r); failed {
+		f.noteDeliveryFailure(c.Endpoint)
 		return true, f.fail(ctx, c.ID, reason, text)
 	}
 	return false, nil
@@ -534,6 +535,7 @@ func (f *laneFlows) settleEndpoint(ctx context.Context, key string) (ended bool,
 func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.MessageStatusResult) (ended bool, err error) {
 	r := res.ControlReply.Create
 	if r.Outcome == adapterproto.CreateReplyFailed {
+		f.noteDeliveryFailure(c.Endpoint)
 		return true, f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, fmt.Sprintf("The remote session could not be created (%s).", r.Reason))
 	}
 	addr := sessionAddress(res.Recipients, r.SessionEndpoint)

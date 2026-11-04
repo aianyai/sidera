@@ -179,6 +179,12 @@ type Endpoint struct {
 	// finished card of the conversation to continue: the fields of the source of
 	// the first card, taken at registration.
 	Target config.Target `json:"target"`
+	// FailedAt is when a card that sent from the endpoint last ended because the
+	// node reported its message as not delivered. NoticedAt is when a notice of the
+	// node about the endpoint was last handled. A failure after the last notice is
+	// one the notice that follows it is about (see the reference, notices).
+	FailedAt  time.Time `json:"failed_at,omitzero"`
+	NoticedAt time.Time `json:"noticed_at,omitzero"`
 }
 
 // Session is a remote session this adapter created and has not closed.

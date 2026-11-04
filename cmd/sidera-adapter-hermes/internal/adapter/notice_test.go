@@ -85,6 +85,37 @@ func TestNoticeSettlesTheCardsInFlight(t *testing.T) {
 	}
 }
 
+// The tick reads what became of a message every few seconds and usually ends the
+// card before the node's notice is read. The notice that follows has nothing in
+// flight to settle, but the blocked card was its explanation: it is acknowledged and
+// not relayed to the conversation as a card of its own, which would wake it twice
+// about one failure. A second notice, with no failure before it, is relayed.
+func TestNoticeAfterTheTickExplainedIt(t *testing.T) {
+	var released, second atomic.Bool
+	d := &daemon{directAccess: true}
+	d.statusAnswer = func(sent adapterproto.SendParams) adapterproto.MessageStatusResult {
+		return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{
+			{To: sent.To[0], State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectEndpointMissing}}}
+	}
+	d.serveInOrder("orphan",
+		step{notice("n1", systemSender, "Your message was refused."), released.Load},
+		step{notice("n2", systemSender, "Another thing happened."), second.Load})
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(NewInbound)})
+	addCard(t, h, "t_1", messageCard)
+	until(t, "the tick to block the card", func() bool { return boardCard(h, "t_1").Status == "blocked" })
+
+	released.Store(true)
+	h.eventually("the first notice to be acknowledged", func() bool { return slices.Contains(d.acked(), "n1") })
+	if n := len(inboxCards(h)); n != 0 {
+		t.Fatalf("%d cards made of a notice that the blocked card explained, want none", n)
+	}
+	second.Store(true)
+	h.eventually("the second notice to be acknowledged", func() bool { return slices.Contains(d.acked(), "n2") })
+	if n := len(inboxCards(h)); n != 1 {
+		t.Errorf("%d cards made of notices, want one for the notice nothing explained", n)
+	}
+}
+
 // The failure of an answer has no card to land on, because the reply card was
 // completed when the answer left: it becomes a card of the conversation, once.
 func TestNoticeReportsAnAnswerThatDidNotArrive(t *testing.T) {

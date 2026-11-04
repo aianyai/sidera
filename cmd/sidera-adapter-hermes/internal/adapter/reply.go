@@ -49,14 +49,59 @@ func (f *laneFlows) HandleMessage(ctx context.Context, m Message) (Verdict, erro
 // that sent from it and whose message the node says did not arrive, then, when none
 // ended, by the inbound half. A card ended here is blocked or completed on the board
 // before the notice is acknowledged: a failure of Hermes that may pass is a Retry.
+//
+// A card that the tick already ended for the same failure explains the notice as
+// well: the tick reads the status of a message every ten seconds and usually comes
+// first, and a notice that finds nothing in flight would otherwise be relayed to the
+// conversation as a card of its own, waking it a second time about the failure the
+// blocked card already told it. Such a failure explains the first notice handled
+// after it (state.Endpoint.FailedAt, NoticedAt).
 func (f *laneFlows) notice(ctx context.Context, m Message) (Verdict, error) {
 	f.mu.Lock()
 	ended, err := f.settleEndpoint(ctx, m.To.Key)
+	explained := ended || f.failureNotNoticed(m.To.Key)
 	f.mu.Unlock()
 	if err != nil {
 		return Retry, err
 	}
-	return f.inbound.HandleNotice(ctx, m, ended)
+	v, err := f.inbound.HandleNotice(ctx, m, explained)
+	if v == Written {
+		f.mu.Lock()
+		f.noteNotice(m.To.Key)
+		f.mu.Unlock()
+	}
+	return v, err
+}
+
+// noteDeliveryFailure records that a card of the endpoint ended because the node
+// said its message did not arrive. The caller holds mu.
+func (f *laneFlows) noteDeliveryFailure(endpoint string) {
+	f.noteEndpoint(endpoint, func(e *state.Endpoint) { e.FailedAt = f.env.Now() })
+}
+
+// noteNotice records that a notice about the endpoint was handled. The caller holds mu.
+func (f *laneFlows) noteNotice(endpoint string) {
+	f.noteEndpoint(endpoint, func(e *state.Endpoint) { e.NoticedAt = f.env.Now() })
+}
+
+func (f *laneFlows) noteEndpoint(endpoint string, fn func(e *state.Endpoint)) {
+	err := f.env.State.Update(func(d *state.Data) error {
+		if e, ok := d.Endpoints[endpoint]; ok {
+			fn(e)
+		}
+		return nil
+	})
+	if err != nil {
+		f.env.Log.Error("recording an event of an endpoint", "endpoint", endpoint, "error", err)
+	}
+}
+
+// failureNotNoticed reports whether a card of the endpoint ended for a failed
+// delivery since the last notice about the endpoint was handled. The caller holds mu.
+func (f *laneFlows) failureNotNoticed(endpoint string) bool {
+	d := f.env.State.View()
+	e, ok := d.Endpoints[endpoint]
+	return ok && e.FailedAt.After(e.NoticedAt)
 }
 
 // reply matches the message to a card and writes it there. inbound says the
