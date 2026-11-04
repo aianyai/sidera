@@ -1,7 +1,8 @@
 # state
 
 What the adapter has done, on disk: `Data` (cards, endpoints, remote sessions,
-processed inbound messages) and `Store` (`Open`, `View`, `Update`).
+requests made of inbound messages, processed inbound messages) and `Store` (`Open`,
+`View`, `Update`).
 
 - `Update` writes before it returns. Call it before the effect the change describes,
   never after.

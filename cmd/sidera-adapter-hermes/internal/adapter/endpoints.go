@@ -118,6 +118,16 @@ func (e *endpoints) list() []Endpoint {
 	return out
 }
 
+// ref returns the daemon's reference to the open endpoint of the key.
+func (e *endpoints) ref(key string) (adapterproto.EndpointRef, bool) {
+	for _, ep := range e.list() {
+		if ep.Key == key {
+			return ep.Ref, true
+		}
+	}
+	return "", false
+}
+
 // setup registers the instance endpoint and makes sure every recorded endpoint is
 // hidden, waiting for the daemon as long as it takes. It runs after adapter.start
 // is answered. Hiding is repeated for the recorded endpoints because a process

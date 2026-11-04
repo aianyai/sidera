@@ -14,11 +14,13 @@ type Candidate struct {
 // of a parent that is done is ready at once, and Hermes copies the parent's
 // subscription, with every routing field the command line cannot set, so the
 // wake-up reaches the same chat and thread. A parent that is not done would leave
-// the child waiting. It returns "" when there is none, and always for the shared
-// orphan endpoint, whose cards come from unrelated places and would wake the
-// wrong one; the caller then subscribes the fields recorded with the endpoint.
+// the child waiting. It returns "" when there is none, and always for an endpoint
+// that is not a conversation: the shared orphan endpoint holds cards from unrelated
+// places, and a cron job's messages wake the home target, not whatever subscription
+// its last card was made with. The caller then subscribes the fields recorded with
+// the endpoint, or the home target.
 func ParentFor(endpointKey string, candidates []Candidate) string {
-	if endpointKey == OrphanKey {
+	if KindOf(endpointKey) != KindConversation {
 		return ""
 	}
 	best := -1

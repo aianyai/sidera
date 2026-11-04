@@ -1,7 +1,7 @@
 # config
 
 The settings of one adapter instance, decoded from the flat values the daemon hands
-over (`Decode`), and the alias table (`ParseAliases`, `Aliases.Lookup`).
+over (`Decode`), and the alias table (`ParseAliases`, `Aliases.Lookup`, and `Aliases.NameOf` to show a sender by its alias).
 
 - Every key is a setting or an error; defaults are named constants with the reason for
   the number.

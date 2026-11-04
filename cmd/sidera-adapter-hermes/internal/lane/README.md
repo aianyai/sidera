@@ -13,7 +13,7 @@ does I/O. The caller records the transition with `state.Store.Update`, then acts
 | `OnFailure`, `BlockKindOf`, `NoReplyDue` | Block or complete a card that cannot go on; the Hermes block kind of a category; whether the wait has run out. |
 | `RouteFollowUp` | Where a follow-up that names no alias goes. |
 | `SessionsToClose` | Which remote sessions to ask to close now. |
-| `ParentFor` | The parent of an inbound continuation's request card. |
+| `ParentFor` | The parent of an inbound continuation's request card; none for an endpoint that is not a conversation. |
 
 Rules: `Reason` and `state.Category` are this adapter's own vocabulary and say nothing
 about how the board names a block; `BlockKindOf` is the only place that maps one to

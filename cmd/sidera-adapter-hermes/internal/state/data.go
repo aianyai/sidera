@@ -163,6 +163,29 @@ type Session struct {
 	CloseMessage string `json:"close_message,omitempty"`
 }
 
+// Request is a message another node sent to this one, as the card the adapter made
+// of it. The reply path needs it: a card that answers the request names the card,
+// and the answer goes back to the sender from the endpoint that received the message.
+type Request struct {
+	// CardID is the request card on the board.
+	CardID string `json:"card_id"`
+	// Endpoint is the key of the endpoint that received the message.
+	Endpoint string `json:"endpoint"`
+	// MessageID is the Sidera id of the message, which a reply names.
+	MessageID string `json:"message_id"`
+	// Sender is the address the message came from and the answer goes to.
+	Sender    string    `json:"sender"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// RequestRetention is how long a Request is kept. The node admits a reply as a reply
+// only for a day after the delivery and forgets the message a few hours later, so
+// past that an answer goes out as a plain message; the record is still needed then,
+// for the address and for the line that says which message is answered. Hermes
+// clears the subscriptions of cards done and idle for 30 days (and with them the
+// way to wake anybody), so a request older than that is not answered any more.
+const RequestRetention = 30 * 24 * time.Hour
+
 // currentVersion is the version of the state file.
 const currentVersion = 1
 
@@ -173,6 +196,8 @@ type Data struct {
 	Cards     map[string]*Card     `json:"cards"`
 	Endpoints map[string]*Endpoint `json:"endpoints"`
 	Sessions  map[string]*Session  `json:"sessions"`
+	// Requests maps the id of a request card to the message it was made of.
+	Requests map[string]*Request `json:"requests"`
 	// Processed maps the id of an inbound message to the time its record may be
 	// dropped. A message the channel redelivers is recognized by it.
 	Processed map[string]time.Time `json:"processed"`
@@ -184,6 +209,7 @@ func newData() Data {
 		Cards:     map[string]*Card{},
 		Endpoints: map[string]*Endpoint{},
 		Sessions:  map[string]*Session{},
+		Requests:  map[string]*Request{},
 		Processed: map[string]time.Time{},
 	}
 }
@@ -211,8 +237,13 @@ func (d *Data) MarkProcessed(messageID string, now time.Time) {
 
 // Prune drops the records of cards that finished more than keep ago, except those
 // whose remote session is still open: a follow-up needs its parent's peer for as
-// long as the session lives.
+// long as the session lives. It drops the requests older than RequestRetention too.
 func (d *Data) Prune(now time.Time, keep time.Duration) {
+	for id, r := range d.Requests {
+		if now.Sub(r.CreatedAt) > RequestRetention {
+			delete(d.Requests, id)
+		}
+	}
 	for id, c := range d.Cards {
 		if c.Phase != PhaseFinished || now.Sub(c.FinishedAt) <= keep {
 			continue

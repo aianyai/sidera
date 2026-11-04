@@ -12,7 +12,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `App` | The `Application`: `Start` builds everything and starts the loops, `Probe`, `Shutdown`, `EndpointPending`. |
 | `Env` | What the flows work with once started: configuration, the board client, the state store, the clock, and two methods: `Place` (the endpoint a card sends from) and `Send`. |
 | `Flows`, `Handlers`, `MessageHandler`, `CardHandler`, `TimerHandler`, `Verdict`, `LogOnly` | The seam the flows plug into. `LogOnly` is the stand-in that logs and acknowledges nothing. |
-| `LaneFlows`, `Inbound` | The lane's flows (delegating cards, writing replies, timers) and the seam of the inbound half: `HandleInbound(ctx, Message) (Verdict, error)` receives every message the delegation flows do not own, `HandleReplyCard(ctx, kanban.Card)` every ready card whose mode is `reply`. |
+| `LaneFlows`, `Inbound`, `NewInbound` | The lane's flows (delegating cards, writing replies, timers) and the seam of the inbound half: `HandleInbound(ctx, Message) (Verdict, error)` receives every message the delegation flows do not own, `HandleReplyCard(ctx, kanban.Card)` every ready card whose mode is `reply`. `NewInbound` builds the implementation. |
 
 ## Files
 
@@ -25,6 +25,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `gate.go` | The check that Hermes can be used, and the availability report. |
 | `timers.go` | The timer loop: recovery once, then a tick. |
 | `laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go` | The lane's flows: shared plumbing and the `Inbound` seam; cards (plan, claim, send, settle, fail); replies; recovery, ticks and closing sessions. |
+| `inbound.go` | The inbound half: request cards made of messages, continuations of conversations. |
 | `handlers.go`, `env.go` | The handler interfaces; `Env`, `Place`, `Send`. |
 | `manifest.go`, `program.go` | The manifest and the declared settings; the commands. |
 | `pause.go` | Backoff, `sleep` and the loop timings. |
@@ -60,6 +61,11 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   (`clip`).
 - **The inbound half owns every message that matches no card the lane can complete**,
   and every ready card whose mode is `reply`; the delegation flows never claim those.
+- **A message to the inbound half is `Written` only once its card is created,
+  subscribed and completed** (`inbound.HandleInbound`), in that order: the completion
+  wakes only the subscribers that exist by then. The first line of the summary and the
+  title are the adapter's words; the sender's text is only in the body, in a fence it
+  cannot close.
 - The timings are fields (`timing`) so tests run in milliseconds; they are not settings.
 - Tests drive the real `App` over pipes against a stub daemon (`harness_test.go`) and
   use `kanban/kanbantest` as `hermes`.

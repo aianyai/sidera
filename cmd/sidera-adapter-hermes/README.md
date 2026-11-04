@@ -13,8 +13,9 @@ hands them to three handler interfaces (`adapter.MessageHandler`,
 `adapter.CardHandler`, `adapter.TimerHandler`). The lane's flows (`adapter.LaneFlows`)
 implement them: they delegate cards, write replies back and close remote sessions.
 What other nodes start (a message to the instance endpoint or to a conversation, a
-reply card) is the `adapter.Inbound` seam, which has no implementation yet: such a
-message is left unacknowledged and such a card stays ready.
+reply card) is the `adapter.Inbound` seam, implemented by `adapter.NewInbound`: a
+message becomes a card assigned to `sidera-inbox`, completed at once to wake the
+conversation it belongs to.
 
 ## Layout
 

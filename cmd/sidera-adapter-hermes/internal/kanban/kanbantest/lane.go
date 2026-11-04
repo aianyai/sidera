@@ -16,8 +16,10 @@ import (
 // ModeLane is a board that remembers: the cards the test put in the control
 // directory (Update), changed by the commands the adapter runs the way Hermes
 // 0.22.2 changes them. It answers list, show, claim, block, comment, complete,
-// attach, attachments, notify-list and notify-subscribe, and everything else
-// like ModeBoard. Every command it receives is recorded (Commands). A command
+// attach, attachments, notify-list, notify-subscribe and create (a second create
+// with one idempotency key returns the first card; a card with a parent that is
+// not done is todo; the subscriptions of the parents are copied), and everything
+// else like ModeBoard. Every command it receives is recorded (Commands). A command
 // named in a file `fail-<command>` of the control directory fails: with the file
 // holding "transient" like a locked database, with "permanent" like an unknown
 // or finished card.
@@ -39,7 +41,9 @@ type Card struct {
 	CreatedBy string   `json:"created_by"`
 	SessionID string   `json:"session_id"`
 	Parents   []string `json:"parents"`
-	Result    string   `json:"result"`
+	// IdempotencyKey is the key the card was created with.
+	IdempotencyKey string `json:"idempotency_key"`
+	Result         string `json:"result"`
 	// BlockKind is the kind of the block in force.
 	BlockKind string `json:"block_kind"`
 	// Blocks counts how often the card was blocked, as Hermes does per kind.
@@ -184,7 +188,7 @@ func lane(args []string, dir string) int {
 	}
 	cmd, rest := args[3], args[4:]
 	switch cmd {
-	case "list", "show", "claim", "block", "comment", "complete", "attach", "attachments", "notify-list", "notify-subscribe":
+	case "list", "show", "claim", "block", "comment", "complete", "attach", "attachments", "notify-list", "notify-subscribe", "create":
 	default:
 		return recorded(args, dir)
 	}
@@ -214,7 +218,7 @@ func lane(args []string, dir string) int {
 		return 1
 	}
 	b := load(dir)
-	code := runLane(&b, dir, cmd, rest)
+	code := runLane(&b, dir, cmd, rest, stdin)
 	save(dir, b)
 	return code
 }
@@ -255,7 +259,7 @@ func fail(format string, a ...any) int {
 	return 1
 }
 
-func runLane(b *Board, dir, cmd string, args []string) int {
+func runLane(b *Board, dir, cmd string, args []string, stdin string) int {
 	now := time.Now().Unix()
 	if cmd == "list" {
 		status, _ := option(args, "--status")
@@ -266,6 +270,9 @@ func runLane(b *Board, dir, cmd string, args []string) int {
 			}
 		}
 		return emit(out)
+	}
+	if cmd == "create" {
+		return create(b, args, stdin)
 	}
 	id := firstPositional(args)
 	c := b.Cards[id]
@@ -399,6 +406,39 @@ func runLane(b *Board, dir, cmd string, args []string) int {
 		fmt.Println("subscribed", id)
 	}
 	return 0
+}
+
+// create makes a card the way `hermes kanban create --json` does.
+func create(b *Board, args []string, stdin string) int {
+	key, _ := option(args, "--idempotency-key")
+	if key != "" {
+		for _, id := range sortedIDs(b) {
+			if b.Cards[id].IdempotencyKey == key {
+				return emit(cardJSON(b.Cards[id]))
+			}
+		}
+	}
+	c := &Card{ID: fmt.Sprintf("n_%d", len(b.Cards)+1), Title: afterDashes(args), Body: stdin, Status: "ready", IdempotencyKey: key}
+	c.Assignee, _ = option(args, "--assignee")
+	c.CreatedBy, _ = option(args, "--created-by")
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if p, ok := strings.CutPrefix(a, "--parent="); ok {
+			parent := b.Cards[p]
+			if parent == nil {
+				return fail("no such task: %s", p)
+			}
+			c.Parents = append(c.Parents, p)
+			c.Subs = append(c.Subs, parent.Subs...)
+			if parent.Status != "done" {
+				c.Status = "todo"
+			}
+		}
+	}
+	b.Cards[c.ID] = c
+	return emit(cardJSON(c))
 }
 
 func sortedIDs(b *Board) []string {

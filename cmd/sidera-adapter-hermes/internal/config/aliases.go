@@ -51,6 +51,19 @@ func (t Aliases) Lookup(name string) (Alias, bool) {
 	return a, ok
 }
 
+// NameOf returns the alias that stands for the address, for showing a sender by the
+// name its owner gave it. When several aliases name one address the smallest name is
+// returned, so the answer does not depend on map order.
+func (t Aliases) NameOf(addr adapterproto.Address) (string, bool) {
+	best, found := "", false
+	for name, a := range t {
+		if a.Address == addr && (!found || name < best) {
+			best, found = name, true
+		}
+	}
+	return best, found
+}
+
 // ParseAliases reads one alias per entry, written
 //
 //	<name>=<address>;modes=<mode>[,<mode>];presets=<preset>[,<preset>]

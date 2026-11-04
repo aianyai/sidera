@@ -405,7 +405,7 @@ func TestParentFor(t *testing.T) {
 		{"the most recent done card", "chat:p:x:y", cs, "b"},
 		{"a card that is not done is no parent", "chat:p:x:y", cs[2:3], ""},
 		{"no cards", "chat:p:x:y", nil, ""},
-		{"a cron job's latest card", "cron:p:j", cs, "b"},
+		{"a cron job has none", "cron:p:j", cs, ""},
 		{"the orphan has none", OrphanKey, cs, ""},
 	} {
 		if got := ParentFor(tc.key, tc.cs); got != tc.want {

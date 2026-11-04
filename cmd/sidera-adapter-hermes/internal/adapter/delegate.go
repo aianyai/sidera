@@ -294,12 +294,7 @@ func (f *laneFlows) source(ctx context.Context, id string, c kanban.Card) (lane.
 		return lane.Source{Profile: s.NotifierProfile, Platform: s.Platform, ChatID: s.ChatID, ThreadID: s.ThreadID}, target, nil
 	}
 	home := f.env.Config.Home
-	err = f.env.Board.NotifySubscribe(ctx, id, kanban.Subscription{
-		Platform: home.Platform, ChatID: home.ChatID, ThreadID: home.ThreadID, UserID: home.UserID,
-		UserIDAlt: home.UserIDAlt, ChatType: home.ChatType, ParentChatID: home.ParentChatID, GuildID: home.GuildID,
-		NotifierProfile: home.Profile, DeliveryMode: kanban.DeliveryNotifyWake,
-	})
-	if err != nil {
+	if err = f.env.Board.NotifySubscribe(ctx, id, subscriptionFor(home)); err != nil {
 		return lane.Source{}, config.Target{}, err
 	}
 	src := lane.Source{Profile: home.Profile}

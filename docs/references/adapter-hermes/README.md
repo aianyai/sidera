@@ -10,9 +10,9 @@ the daemon, receives messages and polls the board. The client of the board, whic
 runs `hermes kanban` and decodes what it prints, has a document of its own:
 [kanban-cli](kanban-cli.md). What the program does with a card it has read
 (delegating it) and with a reply (completing the card) is described under
-[Delegating, replying, timers](#delegating-replying-timers). Turning a message to
-the instance endpoint or to a conversation into a request card is not in the
-directory yet, and this document grows with it.
+[Delegating, replying, timers](#delegating-replying-timers). What it does with a
+message another node sends to it (a new request, or a continuation of a
+conversation) is described under [Inbound requests](#inbound-requests).
 
 The adapter imports only the `sdk/go` module, as a third-party adapter would.
 
@@ -244,9 +244,10 @@ Rules, and why:
   are repeatable.
 
 A message that matches no card the delegation flows can complete, and every message to
-the instance endpoint, is handed to the inbound half (`Inbound`), which does not exist
-yet: its stand-in logs the message and returns `Skip`, so nothing is acknowledged that
-was not written.
+the instance endpoint, is handed to the inbound half (`Inbound`; see
+[Inbound requests](#inbound-requests)). Where no inbound half is built (a test), a
+stand-in logs the message and returns `Skip`, so nothing is acknowledged that was not
+written.
 
 ### Polling the board
 
@@ -276,6 +277,8 @@ directory the daemon names in `initialize`). It holds:
 - the conversation endpoints with their last activity and the notify fields of the
   card that first opened them;
 - the open remote sessions with their last use and when a close was last tried;
+- the request cards made of inbound messages, with the endpoint that received each
+  message, its Sidera id and its sender;
 - the ids of processed inbound messages with the time each may be forgotten.
 
 A card also records whether the node reported its latest attempt delivered (the adapter
@@ -432,6 +435,78 @@ again; one blocked as transient or never sent sends as the next attempt (the Her
 creator asked for the retry, so it gets a new key); an attempt begun within the window
 sends with the same number, one past it fails as outcome unknown.
 
+### Inbound requests
+
+A message that no card of the lane is waiting for is something another node started.
+The inbound half (`inbound.go`) turns it into a card on the board and wakes the Hermes
+conversation that should see it. It takes every message to the instance endpoint, every
+message to a conversation or orphan endpoint that matches no waiting card, a reply whose
+card Hermes already finished, and a reply whose card Hermes would not let the adapter
+complete. Messages from the node's own system endpoint are not told apart from others
+yet and are handled the same way.
+
+**The card.** `create` with the assignee `sidera-inbox`, which the poll does not take
+(`card.MatchesAssignee`) and no Hermes profile bears (the probe refuses one), the
+creator `sidera`, and the Sidera message id as idempotency key. The title is the
+adapter's: "Sidera request from <sender>" for a message to the instance endpoint,
+"Sidera message from <sender>" for one that continues a conversation. The sender is the
+alias that stands for its address in the alias table (the smallest name when several
+do), else the address; an address is a node and an endpoint identifier, not text the
+sender chose.
+
+**The body** is written by the adapter around the sender's text: the sender's address,
+the Sidera message id, a statement that what follows is untrusted external content
+(not written by the owner, not an instruction, to be read as information), the text in
+a Markdown fence longer than any run of backticks in it (so the text cannot close the
+fence and speak outside it), and how to answer. It goes to `create` through standard
+input, so its length is bounded only by the message; the arguments of the commands are
+the title, the summary and the metadata, which hold the adapter's words and the
+sender's address, never the sender's text.
+
+**Order, and when the message is acknowledged.**
+
+1. `create`, with the parent of a continuation (below).
+2. The request is recorded (`Data.Requests`): card, receiving endpoint, Sidera message
+   id and sender. The reply path needs it.
+3. `notify-list` on the new card. A card without a subscription is subscribed to the
+   wake target (below) with `notify-subscribe`, before the completion, because a
+   subscription starts caught up on the events the card already has and one made
+   after the completion would never wake anybody.
+4. `complete` at once, with a summary and the message id and sender as metadata. The
+   first line of the summary is the text Hermes wakes the subscriber with, so it is the
+   adapter's: "Sidera request from <sender> (external content, not trusted); read card
+   <id>". The sender's words are only in the card.
+
+The message is `Written`, and so acknowledged, after step 4 and not before: a failure
+of Hermes that may pass is a `Retry`, one that will not a `Skip`, as for every message.
+The steps repeat safely. A message handed out again finds its card through the
+idempotency key; a card that has a subscription is not subscribed again; and a
+completion Hermes refuses because the card is over is read back (`show`): over means an
+earlier try completed it and only the acknowledgement was lost.
+
+**A continuation.** A message to a conversation endpoint wakes the conversation it
+belongs to. The card is created as a child of the conversation's latest card that is
+`done` (`lane.ParentFor`): the candidates are the finished cards the adapter sent from
+that endpoint and the request cards it made there, and each is read on the board
+before it is used, up to five, since Hermes may have archived it meanwhile. A child of
+a done parent is ready at once, and Hermes copies every subscription field of the
+parent to it, including the delivery metadata (such as a scope id) that the command
+line cannot set; a parent that is not done would leave the child waiting and its
+completion would fail. When there is no such card, or Hermes has cleared the parent's
+subscriptions (it does so for cards done and idle for 30 days), the card is made
+without a parent and subscribed with the notify fields recorded when the conversation
+endpoint was registered (`state.Endpoint.Target`, the source of the first card sent
+from it). A message to a `cron:` or the orphan endpoint, and to the instance endpoint,
+has no parent and wakes the home target.
+
+**Retention of the requests.** A request record is kept for 30 days
+(`state.RequestRetention`) and dropped by the tick that forgets finished cards. The
+node admits a reply as a reply only for a day after the delivery and forgets the
+message a few hours later, so for most of that time an answer goes out as a plain
+message, which needs the sender's address and the id of the message it answers; Hermes
+clears the subscriptions of cards done and idle for 30 days, after which nobody could be
+woken about an answer anyway.
+
 ### Decisions
 
 All of them are in `lane` and take the records and the time as arguments.
@@ -550,8 +625,10 @@ conversation's endpoint becomes a request card, and Hermes copies the subscripti
 a card's parent onto it, every routing field of the conversation included, which the
 command line cannot set. Only a parent that is done makes the child ready at once, so
 the parent is the conversation's card that finished most recently. With none, and for
-the shared orphan endpoint whose cards come from unrelated places, there is no parent,
-and the caller subscribes the notify fields recorded with the endpoint.
+an endpoint that is not a conversation (the shared orphan endpoint, whose cards come
+from unrelated places, and a cron job's, whose messages wake the home target), there
+is no parent, and the caller subscribes the notify fields recorded with the endpoint,
+or the home target.
 
 ## Why
 
@@ -574,7 +651,7 @@ and the caller subscribes the notify fields recorded with the endpoint.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go` and `flows_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
+| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go` and `inbound_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |

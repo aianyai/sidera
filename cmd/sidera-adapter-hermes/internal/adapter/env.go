@@ -33,6 +33,12 @@ func (e *Env) Place(ctx context.Context, src lane.Source, target config.Target) 
 	return e.endpoints.Place(ctx, src, target)
 }
 
+// EndpointRef returns the reference to the open endpoint of the key, the instance
+// endpoint included; it is false for a key that is not open.
+func (e *Env) EndpointRef(key string) (adapterproto.EndpointRef, bool) {
+	return e.endpoints.ref(key)
+}
+
 // Outgoing is a message to send. It has no delivery deadline on purpose: see Send.
 type Outgoing struct {
 	// From is the endpoint that sends.

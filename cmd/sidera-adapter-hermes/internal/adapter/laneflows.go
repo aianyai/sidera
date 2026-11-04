@@ -8,6 +8,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/lane"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
@@ -131,6 +132,15 @@ func sessionAddress(recipients []adapterproto.RecipientStatus, endpoint adapterp
 		}
 	}
 	return string(endpoint)
+}
+
+// subscriptionFor is the subscription that wakes the target when a card ends.
+func subscriptionFor(t config.Target) kanban.Subscription {
+	return kanban.Subscription{
+		Platform: t.Platform, ChatID: t.ChatID, ThreadID: t.ThreadID, UserID: t.UserID,
+		UserIDAlt: t.UserIDAlt, ChatType: t.ChatType, ParentChatID: t.ParentChatID, GuildID: t.GuildID,
+		NotifierProfile: t.Profile, DeliveryMode: kanban.DeliveryNotifyWake,
+	}
 }
 
 // update applies fn to the record of the card, if there is one.
