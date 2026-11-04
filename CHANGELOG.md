@@ -8,6 +8,26 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-04
+
+Nodes now keep the connections they need and close the ones they do not, an instance's
+adapter is told why it ends so that disabling or removing an instance leaves nothing behind,
+and the Codex adapter replaces its App Server after a Codex upgrade. State written by 0.12.x
+needs no migration by hand. The Codex adapter adds the process's start key and container to
+`app-server.json` and recognises a record 0.12.x wrote; removing an instance now also moves
+its state directory aside in the same configuration change, and `instances.json` is
+unchanged. The one record that is settled at the first start is an endpoint record whose
+display name holds a control or direction-changing character, which is treated as damaged
+(see Fixed). The adapter protocol stays at version 1, extended in place: the `shutdown`
+request carries an `intent` only to an adapter that declares `shutdown_intent`, the time for
+a handshake call is the constant `HandshakeLimit`, and a display name is refused when it
+holds a control or direction-changing character. The node-to-node `send`, `pull` and
+`directory` protocols move to 2.0.0; 0.13.0 still speaks 1.0.0 with 0.12.x nodes, and 1.0.0
+is to be removed in a later release. **The Go SDK has a breaking change**:
+`adapterkit.Application.Shutdown` takes the shutdown parameters and returns an error. An
+installation of 0.12.0 or later updates with `sidera update`, and the nodes of a cluster can
+be upgraded one at a time, in any order.
+
 ### Added
 
 - **Go SDK: `process.Terminate`.** An adapter that runs a native process can end it by its
@@ -661,7 +681,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/aianyai/sidera/releases/tag/v0.13.0
 [0.12.2]: https://github.com/aianyai/sidera/releases/tag/v0.12.2
 [0.12.1]: https://github.com/aianyai/sidera/releases/tag/v0.12.1
 [0.12.0]: https://github.com/aianyai/sidera/releases/tag/v0.12.0
