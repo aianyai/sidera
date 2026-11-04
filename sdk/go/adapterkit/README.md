@@ -56,6 +56,10 @@ package does not build it:
   an `adapter.start` that lists an attached session is answered `1003`, unless the
   runtime in `Config.Capabilities` declares `attach`. Nothing of attached sessions
   reaches an application that did not declare it.
+- **`Start` and `Probe` have a deadline.** Their context ends 2 seconds short of
+  `adapterproto.HandshakeLimit` after the request arrived, because the daemon ends the
+  connection of an adapter that has not answered by then. An application that has more
+  to do than fits answers by the deadline and does the rest after the answer.
 - **Errors are the application's to choose.** A `*peer.Error` is answered as it is;
   any other error is `-32603` with a fixed message, as the peer does for every
   handler.

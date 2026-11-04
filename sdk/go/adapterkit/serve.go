@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -118,7 +119,7 @@ func (s *server) register() {
 
 	app := s.cfg.App
 	serve(s, adapterproto.MethodAdapterStart, nil, s.start)
-	serve(s, adapterproto.MethodAdapterProbe, nil, app.Probe)
+	serve(s, adapterproto.MethodAdapterProbe, nil, s.probe)
 	serve(s, adapterproto.MethodSessionCreate, declaresRuntime, app.CreateSession)
 	serve(s, adapterproto.MethodPromptDeliver, declaresRuntime, app.DeliverPrompt)
 	serve(s, adapterproto.MethodPromptReconcile, declaresRuntime, app.Reconcile)
@@ -149,7 +150,29 @@ func (s *server) start(ctx context.Context, p adapterproto.StartParams) (adapter
 	if !declaresAttach(s.cfg.Capabilities) && slices.ContainsFunc(p.Sessions, attached) {
 		return adapterproto.StartResult{}, notDeclared(adapterproto.MethodAdapterStart + " with an attached session")
 	}
+	ctx, cancel := answerWithinLimit(ctx)
+	defer cancel()
 	return s.cfg.App.Start(ctx, p)
+}
+
+// probe passes adapter.probe to the application, which has to answer inside the
+// limit of a handshake call.
+func (s *server) probe(ctx context.Context, p adapterproto.ProbeParams) (adapterproto.ProbeResult, error) {
+	ctx, cancel := answerWithinLimit(ctx)
+	defer cancel()
+	return s.cfg.App.Probe(ctx, p)
+}
+
+// answerMargin is what the deadline of Start and Probe leaves of
+// adapterproto.HandshakeLimit for the answer to reach the daemon and for the daemon
+// to read it.
+const answerMargin = 2 * time.Second
+
+// answerWithinLimit gives ctx the deadline by which Start and Probe must have
+// answered, counted from the receipt of the request, which is when the daemon
+// started its clock, give or take the transport.
+func answerWithinLimit(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, adapterproto.HandshakeLimit-answerMargin)
 }
 
 // notify registers the handler of a notification of the daemon, behind the same

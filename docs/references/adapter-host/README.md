@@ -37,7 +37,8 @@ instance at once.
 ### Taking an adapter on
 
 In this order, each call to the adapter limited by `Params.HandshakeTimeout` on the
-host's clock:
+host's clock (by default `adapterproto.HandshakeLimit`, the time the protocol gives an
+adapter to answer, which the kit's deadline for `Start` and `Probe` is derived from):
 
 1. `initialize`: the protocol range the daemon supports, its version, the instance
    id and the lock path, and no capabilities of its own. The answer is decoded

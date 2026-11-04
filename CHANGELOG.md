@@ -10,6 +10,11 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Adapter protocol and Go SDK: the time an adapter has to answer a handshake call is
+  one constant.** The 20 seconds the daemon waits for `initialize`, `adapter.start` and
+  `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,
+  and the Go SDK gives the context of an application's `Start` and `Probe` a deadline 2 seconds
+  short of it, so an adapter can tell how long it has. The limit itself is unchanged.
 - **Closing an attached session now needs `--allow-attached`.** `sidera endpoint close`
   used to close the endpoint of a controller session a person is using exactly as it closes
   any other, so a cleanup that closed endpoints by address could end it by mistake. The

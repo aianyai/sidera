@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"time"
 
 	"github.com/aianyai/sidera/sdk/go/peer"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
@@ -18,6 +19,12 @@ const MaxTimestampMS = 1<<53 - 1
 // latest time any record of the channel carries. A second count is not held to
 // the millisecond bound, which would admit times billions of years away.
 const MaxTimestampS = 253402300799
+
+// HandshakeLimit is how long an adapter has to answer each of initialize,
+// adapter.start and adapter.probe, counted from the moment the daemon sends the
+// request: the daemon waits at least this long, and an adapter answers inside it,
+// leaving work that would not fit to run after the answer.
+const HandshakeLimit = 20 * time.Second
 
 func timestampMS(v int64) error { return intRange(v, 1, MaxTimestampMS) }
 

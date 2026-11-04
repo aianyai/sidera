@@ -512,3 +512,56 @@ func TestServeRefusesAnInvalidIdentity(t *testing.T) {
 		t.Error("a nil application was served")
 	}
 }
+
+// deadlineApp records how long the contexts of Start and Probe have left.
+type deadlineApp struct {
+	adapterkit.Base
+	left chan time.Duration
+}
+
+func (a *deadlineApp) record(ctx context.Context) {
+	d, ok := ctx.Deadline()
+	if !ok {
+		a.left <- -1
+		return
+	}
+	a.left <- time.Until(d)
+}
+
+func (a *deadlineApp) Start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error) {
+	a.record(ctx)
+	return a.Base.Start(ctx, p)
+}
+
+func (a *deadlineApp) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterproto.ProbeResult, error) {
+	a.record(ctx)
+	return a.Base.Probe(ctx, p)
+}
+
+// Start and Probe must answer inside the limit the daemon waits for a handshake
+// call, so their contexts end a little before it, counted from the request.
+func TestStartAndProbeContextsEndBeforeTheHandshakeLimit(t *testing.T) {
+	app := &deadlineApp{left: make(chan time.Duration, 2)}
+	s := serveOn(t, config(app, adapterproto.Capabilities{}))
+	if err := s.initialize(filepath.Join(t.TempDir(), "work.lock")); err != nil {
+		t.Fatal(err)
+	}
+	start := adapterproto.StartParams{
+		Node: "node", Config: adapterproto.ConfigValues{}, Presets: []adapterproto.PresetConfig{},
+		Sessions: []adapterproto.SessionAttach{}, DirectEndpoints: []adapterproto.DirectAttach{},
+	}
+	var started adapterproto.StartResult
+	if err := s.call(adapterproto.MethodAdapterStart, start, &started); err != nil {
+		t.Fatal(err)
+	}
+	var probed adapterproto.ProbeResult
+	if err := s.call(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{}}, &probed); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{adapterproto.MethodAdapterStart, adapterproto.MethodAdapterProbe} {
+		left := <-app.left
+		if want := adapterproto.HandshakeLimit; left <= 0 || left >= want-time.Second || left < want-5*time.Second {
+			t.Errorf("%s: the context has %v left, want a little under %v", method, left, want)
+		}
+	}
+}

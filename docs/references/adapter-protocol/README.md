@@ -570,7 +570,8 @@ above, the capability gate of the methods that need one (a runtime, and `attach`
 `session.attach`, `session.detached` and an `adapter.start` that lists an attached session;
 a request without it is answered `1003`, a notification is dropped), strict decoding of
 every request, validation of every result before it is sent, and typed calls and
-notifications to the daemon. The adapter implements the methods that remain as an
+notifications to the daemon, and a deadline on the context of `Start` and `Probe` (see
+"The time to answer"). The adapter implements the methods that remain as an
 `adapterkit.Application`. An adapter in another language implements the same rules from
 this reference.
 
@@ -635,6 +636,18 @@ starts monitors before it returns), and the result then already counts or no lon
 that turn. The daemon keeps the two in order by delivering the notifications the adapter
 sent while `adapter.start` was outstanding only after it has applied the result, in the
 order they arrived; an adapter needs nothing special for it, and need not wait to send them.
+
+**The time to answer.** The daemon waits for the answer to each of `initialize`,
+`adapter.start` and `adapter.probe` at least `adapterproto.HandshakeLimit`, 20 seconds,
+from the moment it sends the request; an answer later than that ends the connection (the
+process is killed and started again). The limit is one constant of the protocol and is not
+raised for an adapter that is slow: work that grows with what the adapter holds, such as
+taking sessions back, does not belong inside the call but after it. `adapter.start` has the
+means for it: a session the adapter has not taken back by then is answered with the state
+it is in (`unreachable`, no turn active) and reported again when it is, as for a runtime
+that cannot be reached. The kit gives the context of `Start` and `Probe` a deadline 2
+seconds short of the limit, counted from the receipt of the request, so that the answer
+reaches the daemon in time; an adapter in another language keeps to the limit itself.
 
 **The order of a creation's events.** A session works on its first prompt as soon as
 it exists, so the first `turn.started` of a session (with the attempt of the first
@@ -925,7 +938,8 @@ is authoritative.
   `TestInitializeWithoutACommonVersionIsRefusedAndTakesNoLock`,
   `TestInitializeAnswersInstanceLockedWhileAnotherAdapterHoldsTheLock`,
   `TestAfterShutdownOnlyPingIsServed`, `TestRequestsAndAnswersAreHeldToTheProtocol`,
-  `TestAttachMethodsNeedTheAttachCapability`, `TestAServedAdapterAnswersAndSends`.
+  `TestAttachMethodsNeedTheAttachCapability`, `TestStartAndProbeContextsEndBeforeTheHandshakeLimit`,
+  `TestAServedAdapterAnswersAndSends`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy. Nearly every
   input error names the path of the offending value, a wrong JSON type included, so a

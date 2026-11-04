@@ -34,9 +34,11 @@ type Application interface {
 	Shutdown(ctx context.Context)
 
 	// Start takes the adapter on: it attaches the sessions and the direct endpoints
-	// the daemon lists.
+	// the daemon lists. The context ends 2 seconds before adapterproto.HandshakeLimit
+	// has passed since the request arrived; the answer is expected by then, and work
+	// that would not fit is left to run after it.
 	Start(ctx context.Context, p adapterproto.StartParams) (adapterproto.StartResult, error)
-	// Probe judges what the adapter depends on.
+	// Probe judges what the adapter depends on. Its context ends as Start's does.
 	Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterproto.ProbeResult, error)
 
 	// The five methods of a runtime adapter. The kit answers them with

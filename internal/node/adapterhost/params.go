@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
@@ -37,7 +38,7 @@ type Params struct {
 	// begin again at its minimum; zero means 5 minutes.
 	StableAfter time.Duration
 	// HandshakeTimeout is how long initialize, adapter.start and adapter.probe may
-	// each take to be answered; zero means 20 seconds.
+	// each take to be answered; zero means adapterproto.HandshakeLimit.
 	HandshakeTimeout time.Duration
 	// StartWait is how long Start waits for the enabled instances to answer
 	// adapter.start before it judges the rest offline and goes on; zero means 30
@@ -60,7 +61,7 @@ func DefaultParams() Params {
 		RestartBackoffMin:  time.Second,
 		RestartBackoffMax:  time.Minute,
 		StableAfter:        5 * time.Minute,
-		HandshakeTimeout:   20 * time.Second,
+		HandshakeTimeout:   adapterproto.HandshakeLimit,
 		StartWait:          30 * time.Second,
 		ShutdownWait:       5 * time.Second,
 	}
