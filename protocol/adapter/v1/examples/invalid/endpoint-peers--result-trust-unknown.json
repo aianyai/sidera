@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.peers",
+  "note": "trust relayed",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "nodes": [
+        {
+          "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "self": false,
+          "trust": "relayed",
+          "connected": true
+        }
+      ]
+    }
+  }
+}

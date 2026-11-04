@@ -294,3 +294,267 @@ func (r MessageStatusResult) Validate() error {
 	}
 	return c.err
 }
+
+// Limits of the directory.
+const (
+	// MaxDirectoryLimit is the most entries one page of endpoint.directory holds.
+	// A remote directory page can hold up to 256 entries of up to 5 KiB each, which
+	// is more than a line of the protocol (1 MiB) can carry, and a description is
+	// held to its length only, so that even 128 entries with their control
+	// characters escaped come close to the line. A hundred leave room.
+	MaxDirectoryLimit = 100
+	// DefaultDirectoryLimit is the page size the node reads when the request names
+	// no limit. The node applies it, so a test holds it equal to the node's own.
+	DefaultDirectoryLimit = 100
+	// MaxCursorLen bounds a directory cursor, an opaque position the target made.
+	MaxCursorLen = 256
+)
+
+// DirectoryParams asks for a page of the endpoints a node shows to a direct
+// endpoint. What it shows is judged by the node asked, for the endpoint that
+// asks, as for an agent's session endpoint.
+type DirectoryParams struct {
+	Endpoint EndpointRef `json:"endpoint"`
+	// Node names the node to ask, as a PeersResult names it. Absent means this
+	// node. It is opaque to the adapter, and the daemon resolves it.
+	Node string `json:"node,omitempty"`
+	// Cursor continues a listing: the next_cursor of the page before. It is opaque,
+	// is good only for the endpoint and the daemon process it was made for, and
+	// grants nothing: every page is judged anew.
+	Cursor string `json:"cursor,omitempty"`
+	// Limit is the most entries wanted, 1 to MaxDirectoryLimit. Absent means
+	// DefaultDirectoryLimit.
+	Limit int `json:"limit,omitempty"`
+}
+
+// Validate checks the parameters.
+func (p DirectoryParams) Validate() error {
+	var c checker
+	c.field("endpoint", p.Endpoint.Validate())
+	if p.Node != "" {
+		c.field("node", strLen(p.Node, 1, MaxIdentLen))
+	}
+	if p.Cursor != "" {
+		c.field("cursor", strLen(p.Cursor, 1, MaxCursorLen))
+	}
+	if p.Limit != 0 {
+		c.field("limit", intRange(p.Limit, 1, MaxDirectoryLimit))
+	}
+	return c.err
+}
+
+// DirectoryReason says why a directory read did not give a page. It is an open
+// word, as the reason of a send-refused error is: a reader that does not know
+// one takes the outcome alone. For DirectoryUnavailable it is the name this
+// version of the node sends (DirectoryReasons); for DirectoryRefused it is the
+// name the target gave its refusal, passed on unchanged. A name once sent is
+// never renamed, removed or reused.
+type DirectoryReason string
+
+// DirectoryReasonUnavailable is the reason of DirectoryUnavailable: the target
+// gave no answer within the time allowed, could not be reached, or failed
+// without saying why. The node does not tell these apart.
+const DirectoryReasonUnavailable DirectoryReason = "directory_unavailable"
+
+// DirectoryReasons lists the reasons this version of the node sends with
+// DirectoryUnavailable, in order. A refusal's reason is the target's and is not
+// listed.
+func DirectoryReasons() []string { return []string{string(DirectoryReasonUnavailable)} }
+
+// DirectoryEntry describes one endpoint a node shows.
+type DirectoryEntry struct {
+	// Address is the endpoint's address, '<node>/<endpoint>'.
+	Address Address      `json:"address"`
+	Kind    EndpointKind `json:"kind"`
+	// DisplayName is what the endpoint is called; absent when it has none.
+	DisplayName string `json:"display_name,omitempty"`
+	// Description is absent when the endpoint has none.
+	Description string `json:"description,omitempty"`
+	// Accepts are the actions the endpoint accepts. A required list that may be
+	// empty.
+	Accepts []EndpointAction `json:"accepts"`
+}
+
+// Validate checks the entry.
+func (e DirectoryEntry) Validate() error {
+	var c checker
+	c.field("address", e.Address.Validate())
+	c.field("kind", enumOK(e.Kind, endpointKinds))
+	c.field("display_name", ValidateOptionalDisplayName(e.DisplayName))
+	if e.Description != "" {
+		c.field("description", strLen(e.Description, 1, MaxDescription))
+	}
+	c.field("accepts", present(e.Accepts))
+	for i, a := range e.Accepts {
+		c.field("accepts"+index(i), enumOK(a, endpointActions))
+	}
+	c.field("accepts", unique(e.Accepts))
+	return c.err
+}
+
+// DirectoryResult is the outcome of a directory read and, with DirectoryOK, the
+// page.
+//
+//   - DirectoryOK: Endpoints is the page, in endpoint order, and NextCursor is
+//     present when more follow.
+//   - DirectoryUnavailable and DirectoryRefused: Reason says why, and the page
+//     is empty with no cursor.
+type DirectoryResult struct {
+	Outcome   DirectoryOutcome `json:"outcome"`
+	Reason    DirectoryReason  `json:"reason,omitempty"`
+	Endpoints []DirectoryEntry `json:"endpoints"`
+	// NextCursor continues the listing; absent at its end.
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// Validate checks that a reason appears exactly without a page, and that a page
+// fits a line.
+func (r DirectoryResult) Validate() error {
+	var c checker
+	c.field("outcome", enumOK(r.Outcome, directoryOutcomes))
+	if c.err != nil {
+		return c.err
+	}
+	c.field("endpoints", present(r.Endpoints))
+	c.ok(len(r.Endpoints) <= MaxDirectoryLimit, "endpoints: %d entries, at most %d", len(r.Endpoints), MaxDirectoryLimit)
+	list(&c, "endpoints", r.Endpoints)
+	if r.NextCursor != "" {
+		c.field("next_cursor", strLen(r.NextCursor, 1, MaxCursorLen))
+	}
+	if r.Outcome == DirectoryOK {
+		c.ok(r.Reason == "", "reason: a page has none")
+	} else {
+		c.field("reason", reasonWordOK(string(r.Reason)))
+		c.ok(len(r.Endpoints) == 0, "endpoints: %s gives no page", r.Outcome)
+		c.ok(r.NextCursor == "", "next_cursor: %s gives no page", r.Outcome)
+	}
+	return c.err
+}
+
+// PeersParams asks which nodes a direct endpoint can address.
+type PeersParams struct {
+	Endpoint EndpointRef `json:"endpoint"`
+}
+
+// Validate checks the endpoint.
+func (p PeersParams) Validate() error { return at("endpoint", p.Endpoint.Validate()) }
+
+// PeerNode names a node the daemon's node can address.
+type PeerNode struct {
+	// Node is the name to put in DirectoryParams.Node. It is opaque.
+	Node string `json:"node"`
+	// Self is true for the daemon's own node, whose Trust is PeerSelf.
+	Self  bool      `json:"self"`
+	Trust PeerTrust `json:"trust"`
+	// Connected says whether a connection to the node is up now. It is read
+	// without waiting and says nothing about whether a send would succeed.
+	Connected bool `json:"connected"`
+}
+
+// Validate checks the node and that self and trust agree.
+func (n PeerNode) Validate() error {
+	var c checker
+	c.field("node", strLen(n.Node, 1, MaxIdentLen))
+	c.field("trust", enumOK(n.Trust, peerTrusts))
+	if c.err == nil {
+		c.ok(n.Self == (n.Trust == PeerSelf), "trust: %s does not go with self=%v", n.Trust, n.Self)
+	}
+	return c.err
+}
+
+// PeersResult lists the nodes: this node first, then every node it trusts
+// directly, in the order of their names.
+type PeersResult struct {
+	Nodes []PeerNode `json:"nodes"`
+}
+
+// Validate checks the entries.
+func (r PeersResult) Validate() error {
+	var c checker
+	c.field("nodes", present(r.Nodes))
+	list(&c, "nodes", r.Nodes)
+	return c.err
+}
+
+// DeclareParams changes the declaration of a direct endpoint: what it will take
+// and whether it shows in directories, as the declare of the Agent interface does
+// for a session endpoint. It is a patch: a member that is absent stays as it is.
+// The patch must change something, and the node judges that and the bound of
+// AcceptFrom, which are the node's rules, with ParamsEmptyPatch and
+// ParamsTooManySenders.
+type DeclareParams struct {
+	Endpoint EndpointRef `json:"endpoint"`
+	// Paused: the endpoint takes no new message while it is set.
+	Paused *bool `json:"paused,omitempty"`
+	// RefuseMultiRecipient: a message with several recipients is refused.
+	RefuseMultiRecipient *bool `json:"refuse_multi_recipient,omitempty"`
+	// RestrictSenders: only the senders of AcceptFrom may send.
+	RestrictSenders *bool `json:"restrict_senders,omitempty"`
+	// AcceptFrom replaces the whole list of senders. An explicit empty list clears
+	// it; absent leaves it.
+	AcceptFrom *[]Address `json:"accept_from,omitempty"`
+	// HiddenFromDirectory: the endpoint does not show in the directory.
+	HiddenFromDirectory *bool `json:"hidden_from_directory,omitempty"`
+}
+
+// Validate checks the endpoint and the addresses.
+func (p DeclareParams) Validate() error {
+	var c checker
+	c.field("endpoint", p.Endpoint.Validate())
+	if p.AcceptFrom != nil {
+		c.field("accept_from", present(*p.AcceptFrom))
+		list(&c, "accept_from", *p.AcceptFrom)
+	}
+	return c.err
+}
+
+// Declaration is what an endpoint declares about itself.
+type Declaration struct {
+	Paused               bool      `json:"paused"`
+	RefuseMultiRecipient bool      `json:"refuse_multi_recipient"`
+	RestrictSenders      bool      `json:"restrict_senders"`
+	AcceptFrom           []Address `json:"accept_from"`
+	HiddenFromDirectory  bool      `json:"hidden_from_directory"`
+}
+
+// Validate checks the list of senders.
+func (d Declaration) Validate() error {
+	var c checker
+	c.field("accept_from", present(d.AcceptFrom))
+	list(&c, "accept_from", d.AcceptFrom)
+	return c.err
+}
+
+// DeclareResult is the declaration after the patch was applied.
+type DeclareResult struct {
+	Declaration Declaration `json:"declaration"`
+}
+
+// Validate checks the declaration.
+func (r DeclareResult) Validate() error { return at("declaration", r.Declaration.Validate()) }
+
+// ParamsReason says which misuse a -32602 error of endpoint.directory or
+// endpoint.declare stands for, in the member reason of its data. The node adds
+// it where an adapter can act on it; every other invalid-params error carries
+// text for a person only.
+type ParamsReason string
+
+const (
+	// ParamsCursorInvalid: the cursor is malformed, was made for another endpoint
+	// or by another process of the daemon. Start the listing again.
+	ParamsCursorInvalid ParamsReason = "cursor_invalid"
+	// ParamsEmptyPatch: the declaration patch changes nothing.
+	ParamsEmptyPatch ParamsReason = "empty_patch"
+	// ParamsTooManySenders: accept_from would hold more senders than a node allows.
+	ParamsTooManySenders ParamsReason = "too_many_senders"
+	// ParamsDuplicateSender: accept_from names a sender twice.
+	ParamsDuplicateSender ParamsReason = "duplicate_sender"
+)
+
+var paramsReasons = []ParamsReason{ParamsCursorInvalid, ParamsEmptyPatch, ParamsTooManySenders, ParamsDuplicateSender}
+
+// ParamsReasons lists the reasons this version of the node sends in the data of
+// an invalid-params error, in order. Like the reason of a node-busy error they
+// are words a reader may act on, and a reader that does not know one treats the
+// error as a plain invalid-params.
+func ParamsReasons() []string { return strs(paramsReasons) }

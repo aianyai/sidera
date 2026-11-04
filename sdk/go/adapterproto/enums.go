@@ -551,6 +551,79 @@ var controlSignals = []ControlSignal{SignalSessionCreate, SignalSessionClose, Si
 // Valid reports whether s is a known signal.
 func (s ControlSignal) Valid() bool { return slices.Contains(controlSignals, s) }
 
+// EndpointKind says how an endpoint is read, as a directory entry states it. The
+// names are those of the kinds the daemon gives endpoints.
+type EndpointKind string
+
+const (
+	// EndpointRuntime: a runtime endpoint takes no ordinary messages.
+	EndpointRuntime EndpointKind = "runtime"
+	// EndpointSession: a session endpoint is read by the native agent itself.
+	EndpointSession EndpointKind = "session"
+	// EndpointDirect: a direct endpoint is read by an adapter.
+	EndpointDirect EndpointKind = "direct"
+)
+
+var endpointKinds = []EndpointKind{EndpointRuntime, EndpointSession, EndpointDirect}
+
+// Valid reports whether k is a known kind.
+func (k EndpointKind) Valid() bool { return slices.Contains(endpointKinds, k) }
+
+// EndpointAction names an action a directory entry says its endpoint accepts.
+// The names are those of the authorization actions of the same meaning. It is
+// not ControlSignal: that is the signals a message may carry as control, where
+// message.send, a plain message, is not one and must stay refused.
+type EndpointAction string
+
+const (
+	ActionMessageSend      EndpointAction = "message.send"
+	ActionSessionCreate    EndpointAction = "session.create"
+	ActionSessionClose     EndpointAction = "session.close"
+	ActionSessionInterrupt EndpointAction = "session.interrupt"
+	ActionEndpointStatus   EndpointAction = "endpoint.status"
+)
+
+var endpointActions = []EndpointAction{ActionMessageSend, ActionSessionCreate, ActionSessionClose, ActionSessionInterrupt, ActionEndpointStatus}
+
+// Valid reports whether a is a known action.
+func (a EndpointAction) Valid() bool { return slices.Contains(endpointActions, a) }
+
+// DirectoryOutcome says how a directory read ended. A read that did not get a
+// page is a result, not an error: the request was well formed and the answer is
+// a fact about the node asked.
+type DirectoryOutcome string
+
+const (
+	// DirectoryOK: the page is the target's.
+	DirectoryOK DirectoryOutcome = "ok"
+	// DirectoryUnavailable: no answer came, within the time allowed or because
+	// the target could not be reached. A later read may succeed.
+	DirectoryUnavailable DirectoryOutcome = "unavailable"
+	// DirectoryRefused: the target answered that it would not give a page, and
+	// the reason is the one it named.
+	DirectoryRefused DirectoryOutcome = "refused"
+)
+
+var directoryOutcomes = []DirectoryOutcome{DirectoryOK, DirectoryUnavailable, DirectoryRefused}
+
+// Valid reports whether o is a known outcome.
+func (o DirectoryOutcome) Valid() bool { return slices.Contains(directoryOutcomes, o) }
+
+// PeerTrust says how the node asked about trusts a peer node.
+type PeerTrust string
+
+const (
+	// PeerSelf: the node itself.
+	PeerSelf PeerTrust = "self"
+	// PeerDirect: a node this node trusts directly, through a credential it holds.
+	PeerDirect PeerTrust = "direct"
+)
+
+var peerTrusts = []PeerTrust{PeerSelf, PeerDirect}
+
+// Valid reports whether t is a known trust.
+func (t PeerTrust) Valid() bool { return slices.Contains(peerTrusts, t) }
+
 // EnumTables returns the values of every wire enum, keyed by the name of its
 // Go type, which is also the name of its definition in the schema.
 func EnumTables() map[string][]string {
@@ -586,5 +659,9 @@ func EnumTables() map[string][]string {
 		"DeliveryState":         strs(deliveryStates),
 		"RejectReason":          strs(rejectReasons),
 		"ControlSignal":         strs(controlSignals),
+		"EndpointKind":          strs(endpointKinds),
+		"EndpointAction":        strs(endpointActions),
+		"DirectoryOutcome":      strs(directoryOutcomes),
+		"PeerTrust":             strs(peerTrusts),
 	}
 }

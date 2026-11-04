@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 183,
+  "error": {
+    "code": -32602,
+    "message": "a value of the request is not acceptable: patch",
+    "data": {
+      "reason": "empty_patch"
+    }
+  }
+}

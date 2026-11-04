@@ -163,6 +163,59 @@
       "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full"]
     },
     "ControlSignal": { "type": "string", "enum": ["session.create", "session.close", "session.interrupt", "endpoint.status"] },
+    "EndpointKind": { "type": "string", "enum": ["runtime", "session", "direct"] },
+    "EndpointAction": {
+      "description": "An action a directory entry says its endpoint accepts. Not ControlSignal: message.send, a plain message, is not a control signal.",
+      "type": "string", "enum": ["message.send", "session.create", "session.close", "session.interrupt", "endpoint.status"]
+    },
+    "DirectoryOutcome": { "type": "string", "enum": ["ok", "unavailable", "refused"] },
+    "PeerTrust": { "type": "string", "enum": ["self", "direct"] },
+    "DirectoryCursor": {
+      "description": "An opaque position in a directory listing, made by the node asked. It is good only for the endpoint and the daemon process it was made for, and grants nothing.",
+      "type": "string", "minLength": 1, "maxLength": 256
+    },
+    "DirectoryEntry": {
+      "description": "One endpoint a node shows. display_name and description are omitted when the endpoint has none.",
+      "type": "object",
+      "required": ["address", "kind", "accepts"],
+      "additionalProperties": false,
+      "properties": {
+        "address": { "$ref": "#/$defs/Address" },
+        "kind": { "$ref": "#/$defs/EndpointKind" },
+        "display_name": { "$ref": "#/$defs/DisplayName" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "accepts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/EndpointAction" } }
+      }
+    },
+    "PeerNode": {
+      "description": "A node the daemon's node can address. self goes with trust self, and only with it.",
+      "type": "object",
+      "required": ["node", "self", "trust", "connected"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "self": { "type": "boolean" },
+        "trust": { "$ref": "#/$defs/PeerTrust" },
+        "connected": { "type": "boolean" }
+      },
+      "oneOf": [
+        { "properties": { "self": { "const": true }, "trust": { "const": "self" } } },
+        { "properties": { "self": { "const": false }, "trust": { "const": "direct" } } }
+      ]
+    },
+    "Declaration": {
+      "description": "What an endpoint declares about itself.",
+      "type": "object",
+      "required": ["paused", "refuse_multi_recipient", "restrict_senders", "accept_from", "hidden_from_directory"],
+      "additionalProperties": false,
+      "properties": {
+        "paused": { "type": "boolean" },
+        "refuse_multi_recipient": { "type": "boolean" },
+        "restrict_senders": { "type": "boolean" },
+        "accept_from": { "type": "array", "items": { "$ref": "#/$defs/Address" } },
+        "hidden_from_directory": { "type": "boolean" }
+      }
+    },
 
     "Container": {
       "description": "What isolates a native process from the adapter. A process with kind none has no name; every other kind has one.",
@@ -235,8 +288,11 @@
       }
     },
     "DaemonCapabilities": {
-      "description": "What the daemon supports beyond the bare version, declared in initialize so that an adapter knows which additions it may use. Open like Capabilities: a reader ignores members it does not know, and an adapter must not use an addition the daemon did not declare. Version 1 defines no member yet, so the object is empty, but it is always sent.",
-      "type": "object"
+      "description": "What the daemon supports beyond the bare version, declared in initialize so that an adapter knows which additions it may use. Open like Capabilities: a reader ignores members it does not know, and an adapter must not use an addition the daemon did not declare. The object is always sent, empty when the daemon declares nothing. Members that are defined are checked as usual.",
+      "type": "object",
+      "properties": {
+        "direct_endpoint_access": { "type": "boolean", "description": "The daemon serves endpoint.directory, endpoint.peers and endpoint.declare to a direct endpoint. Optional; absent means false." }
+      }
     },
     "Grounds": {
       "type": "object",

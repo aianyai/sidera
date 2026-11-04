@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.declare",
+  "note": "the declaration is not the patch: all members are present",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "declaration": {
+        "hidden_from_directory": true
+      }
+    }
+  }
+}

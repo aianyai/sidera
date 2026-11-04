@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 185,
+  "error": {
+    "code": -32602,
+    "message": "a value of the request is not acceptable: accept_from",
+    "data": {
+      "reason": "duplicate_sender"
+    }
+  }
+}

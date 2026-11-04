@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.peers",
+  "note": "an unknown member",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.peers",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "node": "x"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.directory",
+  "note": "node is a number",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.directory",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "node": 7
+    }
+  }
+}

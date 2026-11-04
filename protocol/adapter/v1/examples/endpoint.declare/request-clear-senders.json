@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 182,
+  "method": "endpoint.declare",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "accept_from": []
+  }
+}

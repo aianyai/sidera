@@ -320,6 +320,7 @@ func (s *server) begin(ctx context.Context, p adapterproto.InitializeParams) (in
 	case err != nil:
 		return 0, fmt.Errorf("adapterkit: taking the instance lock: %w", err)
 	}
+	s.conn.setDaemonCapabilities(p.Capabilities)
 	if err := s.cfg.App.Initialize(ctx, s.conn, p.Instance); err != nil {
 		s.dropLock()
 		return 0, err

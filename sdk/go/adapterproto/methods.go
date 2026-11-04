@@ -36,6 +36,9 @@ const (
 	MethodEndpointAck           = "endpoint.ack"
 	MethodEndpointSend          = "endpoint.send"
 	MethodEndpointMessageStatus = "endpoint.message_status"
+	MethodEndpointDirectory     = "endpoint.directory"
+	MethodEndpointPeers         = "endpoint.peers"
+	MethodEndpointDeclare       = "endpoint.declare"
 )
 
 // Direction says which peer may call a method.
@@ -160,6 +163,9 @@ func Methods() []MethodInfo {
 		request[AckParams, AckResult](MethodEndpointAck, AdapterToDaemon),
 		request[SendParams, SendResult](MethodEndpointSend, AdapterToDaemon),
 		request[MessageStatusParams, MessageStatusResult](MethodEndpointMessageStatus, AdapterToDaemon),
+		request[DirectoryParams, DirectoryResult](MethodEndpointDirectory, AdapterToDaemon),
+		request[PeersParams, PeersResult](MethodEndpointPeers, AdapterToDaemon),
+		request[DeclareParams, DeclareResult](MethodEndpointDeclare, AdapterToDaemon),
 	}
 }
 

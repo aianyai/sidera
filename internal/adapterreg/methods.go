@@ -90,6 +90,16 @@ var requirements = map[string]rule{
 
 	adapterproto.MethodEndpointUnregister:    {Forbidden, Forbidden, Optional, gateNone},
 	adapterproto.MethodEndpointMessageStatus: {Forbidden, Forbidden, Optional, gateNone},
+
+	// Reading the directory and the nodes, and declaring, are what the agent of a
+	// session endpoint does through the Agent interface. A direct endpoint has no
+	// agent, so its adapter does them for it; a runtime endpoint has no messages
+	// and no declaration. An adapter uses them only when the daemon declared
+	// direct_endpoint_access. That is a capability of the daemon and not of the
+	// adapter, so it is no gate here: the gates name what the adapter declared.
+	adapterproto.MethodEndpointDirectory: {Forbidden, Forbidden, Optional, gateNone},
+	adapterproto.MethodEndpointPeers:     {Forbidden, Forbidden, Optional, gateNone},
+	adapterproto.MethodEndpointDeclare:   {Forbidden, Forbidden, Optional, gateNone},
 }
 
 func (r rule) of(k EndpointKind) Requirement {

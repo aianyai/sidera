@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 180,
+  "result": {
+    "declaration": {
+      "paused": false,
+      "refuse_multi_recipient": false,
+      "restrict_senders": false,
+      "accept_from": [],
+      "hidden_from_directory": true
+    }
+  }
+}

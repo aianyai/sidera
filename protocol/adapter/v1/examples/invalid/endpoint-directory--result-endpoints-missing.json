@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "endpoints missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "ok"
+    }
+  }
+}

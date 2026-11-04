@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.declare",
+  "note": "accept_from is null",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.declare",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "accept_from": null
+    }
+  }
+}

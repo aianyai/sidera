@@ -29,6 +29,7 @@ func TestMethodTable(t *testing.T) {
 		"recv.observed": {a2d, false}, "native_request.handled": {a2d, true},
 		"endpoint.register": {a2d, false}, "endpoint.unregister": {a2d, false}, "endpoint.pending": {d2a, true},
 		"endpoint.recv": {a2d, false}, "endpoint.ack": {a2d, false}, "endpoint.send": {a2d, false}, "endpoint.message_status": {a2d, false},
+		"endpoint.directory": {a2d, false}, "endpoint.peers": {a2d, false}, "endpoint.declare": {a2d, false},
 	}
 	got := adapterproto.Methods()
 	if len(got) != len(want) {
@@ -382,6 +383,23 @@ func TestCapabilitiesAreOpen(t *testing.T) {
 			"null":                 `{` + rest + `,"capabilities":null}`,
 			"a list":               `{` + rest + `,"capabilities":[]}`,
 			"an unknown parameter": `{` + rest + `,"capabilities":{},"extra":1}`,
+		} {
+			if err := adapterproto.Decode([]byte(in), new(adapterproto.InitializeParams)); err == nil {
+				t.Errorf("%s: Decode accepted %s", name, in)
+			}
+		}
+		var declared adapterproto.InitializeParams
+		if err := adapterproto.Decode([]byte(`{`+rest+`,"capabilities":{"direct_endpoint_access":true,"push_status":true}}`), &declared); err != nil || !declared.Capabilities.DirectEndpointAccess {
+			t.Fatalf("direct_endpoint_access: %v, read as %+v", err, declared.Capabilities)
+		}
+		if err := adapterproto.Decode([]byte(`{`+rest+`,"capabilities":{"direct_endpoint_access":false}}`), &declared); err != nil || declared.Capabilities.DirectEndpointAccess {
+			t.Fatalf("direct_endpoint_access false: %v, read as %+v", err, declared.Capabilities)
+		}
+		for name, in := range map[string]string{
+			"a known member has its type": `{` + rest + `,"capabilities":{"direct_endpoint_access":"yes"}}`,
+			"a known member is not null":  `{` + rest + `,"capabilities":{"direct_endpoint_access":null}}`,
+			"a known member twice":        `{` + rest + `,"capabilities":{"direct_endpoint_access":true,"direct_endpoint_access":true}}`,
+			"an unknown member twice":     `{` + rest + `,"capabilities":{"x":1,"x":2}}`,
 		} {
 			if err := adapterproto.Decode([]byte(in), new(adapterproto.InitializeParams)); err == nil {
 				t.Errorf("%s: Decode accepted %s", name, in)

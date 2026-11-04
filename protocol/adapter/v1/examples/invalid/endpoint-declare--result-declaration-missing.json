@@ -1,0 +1,11 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.declare",
+  "note": "declaration missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {}
+  }
+}

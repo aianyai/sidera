@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "a reason that is not a snake_case word",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "refused",
+      "reason": "Not A Word",
+      "endpoints": []
+    }
+  }
+}

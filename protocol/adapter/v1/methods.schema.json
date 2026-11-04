@@ -28,7 +28,10 @@
         { "x-direction": "adapter_to_daemon", "x-result": "endpoint.recv.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.recv" }, "params": { "$ref": "#/$defs/endpoint.recv.params" } } },
         { "x-direction": "adapter_to_daemon", "x-result": "endpoint.ack.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.ack" }, "params": { "$ref": "#/$defs/endpoint.ack.params" } } },
         { "x-direction": "adapter_to_daemon", "x-result": "endpoint.send.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.send" }, "params": { "$ref": "#/$defs/endpoint.send.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.message_status.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.message_status" }, "params": { "$ref": "#/$defs/endpoint.message_status.params" } } }
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.message_status.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.message_status" }, "params": { "$ref": "#/$defs/endpoint.message_status.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.directory.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.directory" }, "params": { "$ref": "#/$defs/endpoint.directory.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.peers.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.peers" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.declare.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.declare" }, "params": { "$ref": "#/$defs/endpoint.declare.params" } } }
       ]
     },
     "notifications": {
@@ -705,6 +708,60 @@
         },
         "control_reply": { "$ref": "types.schema.json#/$defs/ControlReply" }
       }
+    },
+    "endpoint.directory.params": {
+      "description": "Only on a direct endpoint, and only when the daemon declared direct_endpoint_access. node is opaque and resolved by the daemon; absent means this node. limit defaults to 100: a page of more would not fit a line.",
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "node": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "cursor": { "$ref": "types.schema.json#/$defs/DirectoryCursor" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "endpoint.directory.result": {
+      "description": "ok: the page; unavailable: the target gave no answer in time or could not be reached; refused: the target named a reason. A read that gets no page is a result and not an error. The reason is an open word, and a page that is not ok is empty with no cursor.",
+      "type": "object",
+      "required": ["outcome", "endpoints"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "$ref": "types.schema.json#/$defs/DirectoryOutcome" },
+        "reason": { "$ref": "types.schema.json#/$defs/ReasonWord" },
+        "endpoints": { "type": "array", "maxItems": 100, "items": { "$ref": "types.schema.json#/$defs/DirectoryEntry" } },
+        "next_cursor": { "$ref": "types.schema.json#/$defs/DirectoryCursor" }
+      },
+      "oneOf": [
+        { "properties": { "outcome": { "const": "ok" }, "reason": false } },
+        { "properties": { "outcome": { "enum": ["unavailable", "refused"] }, "endpoints": { "maxItems": 0 }, "next_cursor": false }, "required": ["reason"] }
+      ]
+    },
+    "endpoint.peers.result": {
+      "type": "object",
+      "required": ["nodes"],
+      "additionalProperties": false,
+      "properties": { "nodes": { "type": "array", "items": { "$ref": "types.schema.json#/$defs/PeerNode" } } }
+    },
+    "endpoint.declare.params": {
+      "description": "A patch: a member that is absent stays as it is, accept_from replaces the whole list and an empty list clears it. A patch that names nothing and an accept_from over the node's bound are refused by the node, with -32602 and a reason in the data (empty_patch, too_many_senders), so the schema does not state them.",
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "paused": { "type": "boolean" },
+        "refuse_multi_recipient": { "type": "boolean" },
+        "restrict_senders": { "type": "boolean" },
+        "accept_from": { "type": "array", "items": { "$ref": "types.schema.json#/$defs/Address" } },
+        "hidden_from_directory": { "type": "boolean" }
+      }
+    },
+    "endpoint.declare.result": {
+      "type": "object",
+      "required": ["declaration"],
+      "additionalProperties": false,
+      "properties": { "declaration": { "$ref": "types.schema.json#/$defs/Declaration" } }
     }
   }
 }

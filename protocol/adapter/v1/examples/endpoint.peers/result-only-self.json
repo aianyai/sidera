@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 171,
+  "result": {
+    "nodes": [
+      {
+        "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "self": true,
+        "trust": "self",
+        "connected": true
+      }
+    ]
+  }
+}

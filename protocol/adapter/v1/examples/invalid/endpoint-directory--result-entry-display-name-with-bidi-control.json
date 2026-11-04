@@ -1,0 +1,24 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "entry display name holding a bidirectional control",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "ok",
+      "endpoints": [
+        {
+          "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+          "kind": "runtime",
+          "display_name": "work‮",
+          "accepts": [
+            "session.create",
+            "endpoint.status"
+          ]
+        }
+      ]
+    }
+  }
+}

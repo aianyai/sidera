@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "outcome failed is not an outcome of this method",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "failed",
+      "reason": "directory_unavailable",
+      "endpoints": []
+    }
+  }
+}

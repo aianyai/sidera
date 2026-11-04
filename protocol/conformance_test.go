@@ -15,8 +15,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/nodeproto"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -214,6 +217,7 @@ func TestSchemaMethodsMatchGo(t *testing.T) {
 		adapterproto.MethodRecvObserved, adapterproto.MethodNativeRequestHandled, adapterproto.MethodEndpointRegister,
 		adapterproto.MethodEndpointUnregister, adapterproto.MethodEndpointPending, adapterproto.MethodEndpointRecv,
 		adapterproto.MethodEndpointAck, adapterproto.MethodEndpointSend, adapterproto.MethodEndpointMessageStatus,
+		adapterproto.MethodEndpointDirectory, adapterproto.MethodEndpointPeers, adapterproto.MethodEndpointDeclare,
 	}
 	if len(consts) != len(fromSchema) {
 		t.Errorf("%d method constants, %d methods", len(consts), len(fromSchema))
@@ -713,6 +717,61 @@ func TestEveryBusyReasonAppearsInAnExample(t *testing.T) {
 	}
 }
 
+// TestEveryDirectoryAndParamsReasonAppearsInAnExample: each reason this version
+// of the node sends is in a golden message: the reasons of an unavailable
+// directory read in a result, the reasons of invalid params in the data of an
+// error. The schema takes any reason word and the data of an error is raw, so
+// neither the schema nor the enum test sees these lists.
+func TestEveryDirectoryAndParamsReasonAppearsInAnExample(t *testing.T) {
+	directory, params := map[string]bool{}, map[string]bool{}
+	for _, d := range decodePositive(t) {
+		switch v := d.value.(type) {
+		case *adapterproto.DirectoryResult:
+			if v.Outcome == adapterproto.DirectoryUnavailable {
+				directory[string(v.Reason)] = true
+			}
+		case adapterproto.ErrorObject:
+			if v.Code != peer.CodeInvalidParams || v.Data == nil {
+				continue
+			}
+			var data struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(v.Data, &data); err != nil {
+				t.Fatalf("%s: %v", d.Path, err)
+			}
+			params[data.Reason] = true
+		}
+	}
+	for _, why := range adapterproto.DirectoryReasons() {
+		if !directory[why] {
+			t.Errorf("no golden result holds an unavailable directory read with reason %q", why)
+		}
+	}
+	for _, why := range adapterproto.ParamsReasons() {
+		if !params[why] {
+			t.Errorf("no golden error holds invalid_params with reason %q", why)
+		}
+	}
+}
+
+// TestDirectoryRefusedAndEmptyPagesAreExamples: a refused read, an empty page and
+// a last page without a cursor are each shown, as the three ways a read that is
+// not a full page ends.
+func TestDirectoryRefusedAndEmptyPagesAreExamples(t *testing.T) {
+	var refused, empty, last bool
+	for _, d := range decodePositive(t) {
+		if v, ok := d.value.(*adapterproto.DirectoryResult); ok {
+			refused = refused || v.Outcome == adapterproto.DirectoryRefused
+			empty = empty || (v.Outcome == adapterproto.DirectoryOK && len(v.Endpoints) == 0)
+			last = last || (v.Outcome == adapterproto.DirectoryOK && len(v.Endpoints) > 0 && v.NextCursor == "")
+		}
+	}
+	if !refused || !empty || !last {
+		t.Errorf("examples missing: refused %v, empty page %v, last page %v", refused, empty, last)
+	}
+}
+
 // TestInvalidExamples: every invalid example is rejected at the layer it says.
 // "schema": the schema rejects it. "go": the schema cannot state the rule, so
 // the schema accepts it and the Go validation rejects it with a rule beyond the
@@ -922,14 +981,40 @@ func TestEnumNamesMatchContractPackages(t *testing.T) {
 		reasons = append(reasons, r.String())
 	}
 	signals := []string{authz.ActionSessionCreate.String(), authz.ActionSessionClose.String(), authz.ActionSessionInterrupt.String(), authz.ActionEndpointStatus.String()}
+	// The actions a directory entry advertises are the signals and the plain
+	// message: the actions of the daemon's authorization that an endpoint accepts.
+	actions := append([]string{authz.ActionMessageSend.String()}, signals...)
+	kinds := []string{adapterreg.KindRuntime.String(), adapterreg.KindSession.String(), adapterreg.KindDirect.String()}
+	trusts := []string{string(engine.PeerTrustSelf), string(engine.PeerTrustDirect)}
 	tables := adapterproto.EnumTables()
-	for name, want := range map[string][]string{"DeliveryState": states, "RejectReason": reasons, "ControlSignal": signals} {
+	for name, want := range map[string][]string{"DeliveryState": states, "RejectReason": reasons, "ControlSignal": signals,
+		"EndpointAction": actions, "EndpointKind": kinds, "PeerTrust": trusts} {
 		if !sameSet(tables[name], want) {
 			t.Errorf("%s: protocol %v, contract package %v", name, sorted(tables[name]), sorted(want))
 		}
 	}
 	if len(states) != 7 || len(reasons) == 0 {
 		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 states and at least one reason", len(states), len(reasons))
+	}
+}
+
+// TestDirectoryBoundsMatchTheNode: the cursor the protocol carries is as long as
+// the nodes' directory protocol makes one, and a page of the largest size the
+// protocol allows is smaller than the page a node can make, which is why the
+// protocol has a limit of its own. The page the protocol says is read when a
+// request names no limit is the one the engine reads.
+func TestDirectoryBoundsMatchTheNode(t *testing.T) {
+	if adapterproto.MaxCursorLen != nodeproto.MaxCursorLen {
+		t.Errorf("cursor: protocol %d, node protocol %d", adapterproto.MaxCursorLen, nodeproto.MaxCursorLen)
+	}
+	if adapterproto.MaxDirectoryLimit >= nodeproto.MaxDirectoryPage {
+		t.Errorf("the adapter protocol's page limit %d is not below the node page %d, so it bounds nothing", adapterproto.MaxDirectoryLimit, nodeproto.MaxDirectoryPage)
+	}
+	if adapterproto.DefaultDirectoryLimit > adapterproto.MaxDirectoryLimit {
+		t.Errorf("the default page of the protocol, %d, is over its limit %d", adapterproto.DefaultDirectoryLimit, adapterproto.MaxDirectoryLimit)
+	}
+	if engine.DefaultDirectoryLimit != adapterproto.DefaultDirectoryLimit {
+		t.Errorf("the default page of the engine is %d, the protocol says %d", engine.DefaultDirectoryLimit, adapterproto.DefaultDirectoryLimit)
 	}
 }
 

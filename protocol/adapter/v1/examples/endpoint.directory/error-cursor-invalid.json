@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 165,
+  "error": {
+    "code": -32602,
+    "message": "the cursor is not one this endpoint was given",
+    "data": {
+      "reason": "cursor_invalid"
+    }
+  }
+}

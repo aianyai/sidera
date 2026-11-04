@@ -3,7 +3,9 @@ package adapterkit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -16,7 +18,27 @@ import (
 //
 // An error from a request is the peer's: use peer.NoEffect and peer.ResultUnknown
 // to tell whether the request did nothing. Conn is safe for concurrent use.
-type Conn struct{ p *peer.Peer }
+type Conn struct {
+	p      *peer.Peer
+	daemon atomic.Pointer[adapterproto.DaemonCapabilities]
+}
+
+// ErrDirectEndpointAccess is returned, without a request being sent, by a helper
+// that needs the daemon's capability direct_endpoint_access when the daemon did
+// not declare it: Directory, Peers and Declare.
+var ErrDirectEndpointAccess = errors.New("adapterkit: the daemon did not declare direct_endpoint_access")
+
+// DaemonCapabilities are the additions to version 1 that the daemon declared in
+// initialize. They are empty until the daemon has initialized the adapter, and
+// the kit has them before it calls Application.Initialize.
+func (c *Conn) DaemonCapabilities() adapterproto.DaemonCapabilities {
+	if d := c.daemon.Load(); d != nil {
+		return *d
+	}
+	return adapterproto.DaemonCapabilities{}
+}
+
+func (c *Conn) setDaemonCapabilities(d adapterproto.DaemonCapabilities) { c.daemon.Store(&d) }
 
 // Call sends a request the adapter may make and decodes its result into result,
 // which is a pointer to the result type of the method. A method that is a
@@ -112,6 +134,39 @@ func (c *Conn) Send(ctx context.Context, p adapterproto.SendParams) (adapterprot
 func (c *Conn) MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
 	var r adapterproto.MessageStatusResult
 	return r, c.Call(ctx, adapterproto.MethodEndpointMessageStatus, p, &r)
+}
+
+// Directory reads a page of the endpoints a node shows to a direct endpoint. It
+// needs the daemon's capability direct_endpoint_access and returns
+// ErrDirectEndpointAccess, sending nothing, without it. A read that got no page
+// is not an error: the outcome of the result says so.
+func (c *Conn) Directory(ctx context.Context, p adapterproto.DirectoryParams) (adapterproto.DirectoryResult, error) {
+	var r adapterproto.DirectoryResult
+	if !c.DaemonCapabilities().DirectEndpointAccess {
+		return r, ErrDirectEndpointAccess
+	}
+	return r, c.Call(ctx, adapterproto.MethodEndpointDirectory, p, &r)
+}
+
+// Peers lists the nodes a direct endpoint can address. It needs the daemon's
+// capability direct_endpoint_access, as Directory does.
+func (c *Conn) Peers(ctx context.Context, p adapterproto.PeersParams) (adapterproto.PeersResult, error) {
+	var r adapterproto.PeersResult
+	if !c.DaemonCapabilities().DirectEndpointAccess {
+		return r, ErrDirectEndpointAccess
+	}
+	return r, c.Call(ctx, adapterproto.MethodEndpointPeers, p, &r)
+}
+
+// Declare changes the declaration of a direct endpoint and returns it as it is
+// after the patch. It needs the daemon's capability direct_endpoint_access, as
+// Directory does.
+func (c *Conn) Declare(ctx context.Context, p adapterproto.DeclareParams) (adapterproto.DeclareResult, error) {
+	var r adapterproto.DeclareResult
+	if !c.DaemonCapabilities().DirectEndpointAccess {
+		return r, ErrDirectEndpointAccess
+	}
+	return r, c.Call(ctx, adapterproto.MethodEndpointDeclare, p, &r)
 }
 
 // Availability sends the full snapshot of what keeps the adapter from working.

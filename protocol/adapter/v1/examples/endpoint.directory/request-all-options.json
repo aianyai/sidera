@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 161,
+  "method": "endpoint.directory",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "node": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "cursor": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "limit": 100
+  }
+}

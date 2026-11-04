@@ -1,0 +1,18 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.declare",
+  "note": "a member of the declaration missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "declaration": {
+        "refuse_multi_recipient": false,
+        "restrict_senders": false,
+        "accept_from": [],
+        "hidden_from_directory": true
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "refused without a reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "refused",
+      "endpoints": []
+    }
+  }
+}

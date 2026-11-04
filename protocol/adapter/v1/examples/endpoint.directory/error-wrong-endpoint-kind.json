@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 166,
+  "error": {
+    "code": 1002,
+    "message": "the endpoint's kind cannot use this method"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 163,
+  "result": {
+    "outcome": "unavailable",
+    "reason": "directory_unavailable",
+    "endpoints": []
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "initialize",
+  "note": "direct_endpoint_access is null",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocol": {
+        "min": 1,
+        "max": 1
+      },
+      "daemon": {
+        "version": "0.1.0"
+      },
+      "instance": {
+        "id": "work",
+        "lock_path": "/home/dev/.local/state/sidera/adapters/work/instance.lock",
+        "state_dir": "/home/dev/.local/state/sidera/adapter-state/work"
+      },
+      "capabilities": {
+        "direct_endpoint_access": null
+      }
+    }
+  }
+}

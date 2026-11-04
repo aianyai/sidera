@@ -21,6 +21,7 @@ var matrix = map[string]string{
 	"session.interrupt": "OOF", "recv.observed": "FOF", "native_request.handled": "RRF",
 	"endpoint.register": "FFR", "endpoint.recv": "FFR", "endpoint.ack": "FFR", "endpoint.send": "FFR", "endpoint.pending": "FFR",
 	"endpoint.unregister": "FFO", "endpoint.message_status": "FFO",
+	"endpoint.directory": "FFO", "endpoint.peers": "FFO", "endpoint.declare": "FFO",
 }
 
 func requirementOf(c byte) adapterreg.Requirement {

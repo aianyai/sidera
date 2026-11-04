@@ -40,7 +40,7 @@ bridge.
 
 ## Sidera to ACP
 
-All 27 methods and notifications of the committed method table, in table order.
+All 30 methods and notifications of the committed method table, in table order.
 
 | Sidera method | Direction, kind | ACP counterpart | Status | Transformation, or why none |
 | ------------- | --------------- | --------------- | ------ | --------------------------- |
@@ -71,8 +71,11 @@ All 27 methods and notifications of the committed method table, in table order.
 | `endpoint.ack` | A to D, request | none | none | As `endpoint.register`; the acknowledgement settles delivery records, which ACP does not have. |
 | `endpoint.send` | A to D, request | none | none | As `endpoint.register`. ACP has no messaging between agents or nodes. |
 | `endpoint.message_status` | A to D, request | none | none | As `endpoint.register`. |
+| `endpoint.directory` | A to D, request | none | none | As `endpoint.register`. ACP has no directory of other agents; a client knows the agents it started. |
+| `endpoint.peers` | A to D, request | none | none | As `endpoint.directory`. |
+| `endpoint.declare` | A to D, request | none | none | As `endpoint.register`. An ACP agent declares nothing about who may message it. |
 
-Counts: 1 same, 9 mappable, 17 none (27 in all).
+Counts: 1 same, 9 mappable, 20 none (30 in all).
 
 ## ACP to Sidera
 

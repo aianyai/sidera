@@ -85,17 +85,24 @@ func (i InstanceInfo) Validate() error {
 // declared in initialize so that an adapter knows which of them it may use. It
 // is an open object, like Capabilities: a reader ignores the members it does
 // not know, and an adapter that does not find a capability here must not use
-// the behaviour it stands for. Version 1 has no such member yet; the object is
-// always sent, empty, so that the first one can be added without a new version.
-type DaemonCapabilities struct{}
+// the behaviour it stands for. The object is always sent, empty when the daemon
+// declares nothing, so that a member could be added without a new version.
+type DaemonCapabilities struct {
+	// DirectEndpointAccess: the daemon serves endpoint.directory, endpoint.peers
+	// and endpoint.declare to a direct endpoint. It is optional: an explicit false
+	// is accepted and means the same as leaving it out.
+	DirectEndpointAccess bool `json:"direct_endpoint_access,omitempty"`
+}
 
-// UnmarshalJSON decodes the object and ignores every member.
+// UnmarshalJSON decodes the declaration strictly, except that members it has no
+// field for are ignored.
 func (c *DaemonCapabilities) UnmarshalJSON(data []byte) error {
 	type plain DaemonCapabilities
 	return strictjson.DecodeOpen(data, (*plain)(c))
 }
 
-// Validate accepts every declaration: there is nothing to check yet.
+// Validate accepts every declaration: a member that is defined is a boolean,
+// which decoding has already seen.
 func (DaemonCapabilities) Validate() error { return nil }
 
 // InitializeParams is the first request, from the daemon.

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 164,
+  "result": {
+    "outcome": "refused",
+    "reason": "shutting_down",
+    "endpoints": []
+  }
+}

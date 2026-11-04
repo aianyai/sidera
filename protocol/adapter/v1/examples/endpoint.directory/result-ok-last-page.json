@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 161,
+  "result": {
+    "outcome": "ok",
+    "endpoints": [
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/33333333333333333333333333333333",
+        "kind": "direct",
+        "display_name": "Owner console",
+        "description": "Reads and sends for the owner.\nHidden endpoints are not listed.",
+        "accepts": [
+          "message.send",
+          "endpoint.status"
+        ]
+      }
+    ]
+  }
+}

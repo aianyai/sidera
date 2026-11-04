@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "refused with a cursor",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "refused",
+      "reason": "shutting_down",
+      "endpoints": [],
+      "next_cursor": "c"
+    }
+  }
+}

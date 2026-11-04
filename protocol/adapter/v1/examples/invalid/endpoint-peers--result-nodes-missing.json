@@ -1,0 +1,11 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.peers",
+  "note": "nodes missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {}
+  }
+}

@@ -353,7 +353,7 @@ only says the request was not understood or not allowed.
 
 | Method | Direction | Kind | Params | Result |
 | ------ | --------- | ---- | ------ | ------ |
-| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`, `state_dir`), `capabilities` (the daemon's own, empty for now) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
+| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`, `state_dir`), `capabilities` (the daemon's own: `direct_endpoint_access`) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
 | `ping` | both | request | none | none |
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | `intent?` (`restart`, `stop` or `retire`), sent only to an adapter that declared `shutdown_intent` | none |
@@ -380,6 +380,9 @@ only says the request was not understood or not allowed.
 | `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type?` (present exactly when `body` is not empty), `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
+| `endpoint.directory` | A to D | request | `endpoint`, `node?`, `cursor?`, `limit?` (1 to 100), sent only when the daemon declared `direct_endpoint_access` | `outcome` (`ok`, `unavailable` or `refused`), `reason?`, `endpoints`, `next_cursor?` |
+| `endpoint.peers` | A to D | request | `endpoint`, sent only when the daemon declared `direct_endpoint_access` | `nodes` (`node`, `self`, `trust`, `connected`) |
+| `endpoint.declare` | A to D | request | `endpoint` and a patch of `paused`, `refuse_multi_recipient`, `restrict_senders`, `accept_from`, `hidden_from_directory`, sent only when the daemon declared `direct_endpoint_access` | `declaration`, the five members after the patch |
 
 **The intent of `shutdown`.** The daemon ends an adapter for three reasons, and the
 adapter needs to know which, because it may have started processes that outlive it:
@@ -511,7 +514,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Six
+reader of an earlier shape is deployed that the change could break. Seven
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -537,7 +540,12 @@ have sent to a new version:
 - the member `intent` of `shutdown`, behind the capability `shutdown_intent`. The capability
   alone would need no new version, but a new member of the parameters would. The daemon sends the
   member only to an adapter that declared the capability, so an adapter that decodes `shutdown`
-  strictly never meets it, and an older daemon never sees a declaration it would act on.
+  strictly never meets it, and an older daemon never sees a declaration it would act on;
+- direct endpoint access, behind the daemon capability `direct_endpoint_access`: the requests
+  `endpoint.directory`, `endpoint.peers` and `endpoint.declare`. The capability alone would
+  need no new version, but the new methods would. An adapter that does not find the capability
+  never sends them, and an older daemon never declares it, so no deployed reader meets them;
+  the record is kept because rule 3 would otherwise have sent them to a new version.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -593,7 +601,9 @@ above, the capability gate of the methods that need one (a runtime, and `attach`
 `session.attach`, `session.detached` and an `adapter.start` that lists an attached session;
 a request without it is answered `1003`, a notification is dropped), strict decoding of
 every request, validation of every result before it is sent, and typed calls and
-notifications to the daemon, and a deadline on the context of `Start` and `Probe` (see
+notifications to the daemon (the daemon's capabilities are kept on the connection, and
+`Directory`, `Peers` and `Declare` refuse, sending nothing, when the daemon did not declare
+`direct_endpoint_access`), and a deadline on the context of `Start` and `Probe` (see
 "The time to answer"). The adapter implements the methods that remain as an
 `adapterkit.Application`. An adapter in another language implements the same rules from
 this reference.
@@ -828,6 +838,60 @@ the adapter, so an adapter must not depend on receiving it and reads with
 becomes ready to be handed out to the endpoint, and not for a message that a waiting
 `endpoint.recv` of the endpoint took.
 
+**Direct endpoint access.** The agent of a session endpoint reads the directory and the
+nodes, and sets what its endpoint declares, through the Agent interface; a direct endpoint
+has no agent, so its adapter does the same with `endpoint.directory`, `endpoint.peers` and
+`endpoint.declare`. They are the same operations of the same engine, with the direct endpoint
+as the caller, so a node shows it the endpoints it shows a session endpoint. The methods
+are for direct endpoints only (on a runtime or session endpoint they are `1002`), and an
+adapter uses them only when the daemon declared `direct_endpoint_access` in the
+`capabilities` of `initialize`; the kit's helpers refuse without it and send nothing.
+
+- `endpoint.directory` asks the node named by `node` (absent: this node; the value is one
+  `endpoint.peers` returned and is opaque to the adapter) for a page of the endpoints it
+  shows to the asking endpoint, in endpoint order, and `next_cursor` continues the listing.
+  An entry has `address`, `kind` (`runtime`, `session` or `direct`), `display_name` and
+  `description` (each left out when the endpoint has none) and `accepts`, the actions the
+  endpoint takes (`message.send`, `session.create`, `session.close`, `session.interrupt`,
+  `endpoint.status`). A cursor is good for the endpoint and the daemon process it was made
+  for and grants nothing: every page is read and judged anew, so entries may appear or
+  disappear between pages. `limit` is 1 to 100 and 100 when absent, below the 256 a
+  node page can hold because a page of 256 entries of up to 5 KiB each can be over
+  the line (1 MiB) of the protocol, and a description is held to its length only, so that
+  even 128 entries with their control characters escaped come close to it; with 100 the
+  largest page the result accepts is about 650 KiB.
+- **A directory read that got no page is a result.** The request was well formed, and what
+  it found out is a fact about the node asked, which is what a result is for; an error only
+  says the request was misused. `outcome` is `ok` with the page, `unavailable` when the
+  target gave no answer within the time allowed or could not be reached (a later read may
+  succeed; the reason the node sends is `directory_unavailable`, which does not tell a
+  timeout from an unreachable node) or `refused` when the target answered that it would not,
+  and `reason` is the name the target gave its refusal, passed on unchanged (`shutting_down`,
+  say). The `reason` of both is an open word: a reader that does not know one takes the
+  outcome alone. A page that is not `ok` has no entries and no cursor. The daemon refusing
+  to read at all because of its own state (starting, or its clock set back) is not a result
+  but the existing `1012` `node_busy`, as for every other `endpoint.*` request. A cursor the
+  node does not accept is `-32602` with `data.reason` `cursor_invalid`: the adapter started
+  or continued a listing wrongly, and starts it again.
+- `endpoint.peers` lists this node first (`self` true, `trust` `self`), then every node it
+  trusts directly (`trust` `direct`), in the order of their names. `connected` is whether a
+  connection to the node is up now; it is read without waiting and says nothing about
+  whether a send would succeed.
+- `endpoint.declare` is a patch with the members of the declaration directly in the
+  parameters, as the Agent interface has it: a member left out stays as it is, `accept_from`
+  replaces the whole list and an explicit empty list clears it. The result is the whole
+  `declaration` after the patch, all five members. The node judges the patch, because the
+  declaration is its own: a patch that names nothing is `-32602` with `data.reason`
+  `empty_patch`, an `accept_from` over 256 senders `too_many_senders`, and one that names a
+  sender twice `duplicate_sender`. `ParamsReasons` lists these words; like the reason of
+  `node_busy` they are names an adapter may act on, and one it does not know is a plain
+  invalid-params error.
+
+A read goes through the node's one outbound queue, in turn with sends, so a slow node holds
+up the other sends of this node for up to the connect budget of a few seconds. The adapter
+does not rate-limit itself, but it does not read the directory on a schedule either: it is
+for answering a person who asks.
+
 **Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
 to `-32004`, `-32022` and `-32800` are the implementation-defined range; both
 groups are defined by the peer layer (`peer.Code*`) and listed here to be read
@@ -861,7 +925,10 @@ with the rest. `1001` to `1012` are the protocol's own (`adapterproto.Code*`):
 
 An error may carry `data`, always an object. The four codes marked above define
 its shape and require it; any other code may carry an object of the sender's
-choosing, which a reader may show or log but must not act on.
+choosing, which a reader may show or log but must not act on. The one exception to
+"must not act on" is the `reason` of a `-32602` from `endpoint.directory` or
+`endpoint.declare` (`adapterproto.ParamsReasons`), named in the section on direct endpoint
+access above.
 
 Whether a failed request had an effect is the peer layer's effect rule, applied
 to the error a call returned (`peer.NoEffect`, `peer.ResultUnknown`; the daemon
@@ -950,6 +1017,30 @@ is authoritative.
   renamed, removed or reused, because a sender that stored one must still read
   it later. A failure whose outcome is not known (a fatal storage error) is not
   back pressure and stays `-32603`.
+- **Direct endpoint access is three requests behind a capability of the daemon.** Without
+  the reads a direct endpoint cannot find anything to send to, and without `endpoint.declare`
+  it cannot be hidden: the declaration starts open, and a chat bridge's endpoint for one
+  person is not for other nodes' directories. A flag on `endpoint.register` was not taken:
+  a register that is sent again replaces, so one omitted flag would unhide the endpoint, and
+  it would cover one of five members of the declaration. The capability is the daemon's, not
+  the adapter's, because what is new is something the daemon must serve; it is declared in
+  the `initialize` params, an object that exists for it, and so needs no new version and no
+  probing by a failed call. Version 1 is extended in place for the methods themselves, as
+  `attach` was.
+- **A directory read that fails is a result.** An error here would mean the adapter did
+  something wrong, which it did not: the node asked was slow or said no. As results, the
+  adapter reads `unavailable` and `refused` beside `ok`, tells them from `node_busy` (this
+  node's own state) and from `-32603` (an outcome nobody knows), and shows the target's
+  reason to the person. `reason` is an open word because the target's refusals are the names
+  of a node's reasons, which grow without a version of this protocol, and an adapter has
+  nothing to do with one it does not know but show it.
+- **The page of a directory read is 100 at most.** See the bound above: it exists because
+  the largest page a node can hold does not fit a line, and a result over the line is answered
+  `-32603`, the one failure that says nothing about what to do.
+- **An entry advertises `EndpointAction`, not `ControlSignal`.** A directory says what an
+  endpoint takes, and a plain message, `message.send`, is the commonest; it is not a control
+  signal and `endpoint.send` must go on refusing it as one, so adding it to `ControlSignal`
+  would have made every use of that enum accept what it must refuse.
 - **Rejected:** per-request version metadata (the connection is long-lived and
   stateful, so one negotiation is enough); streaming the model's output (the
   channel does not read it); forwarding permission requests to the daemon
@@ -989,7 +1080,9 @@ is authoritative.
   `TestBusyReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,
   `TestEnumNamesMatchContractPackages` (the reasons are the delivery package's
   own names), `TestErrorObjectKnowsEveryCode`,
-  `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`,
+  `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDirectoryResultRules`,
+  `TestDirectoryPageFitsALine`, `TestDeclareRules`, `TestParamsReasonTable`,
+  `TestDirectEndpointAccessNeedsTheDaemonsCapability` (adapterkit), `TestDecodeStrictness`,
   the `Test*Rules` tables (one row per rule), `FuzzDecodeMessages`.
 
 ## Capabilities and endpoint kinds
@@ -1007,8 +1100,13 @@ An adapter declares what it supports in the result of `initialize`:
 The declaration is an open object, as are `runtime` and `direct` inside it: a key
 this version does not know is ignored, so a newer adapter can declare a
 capability to an older daemon. The daemon declares its own capabilities in the
-`capabilities` of the `initialize` params, an open object that version 1 sends
-empty; an adapter uses a daemon-side addition only when it finds it there.
+`capabilities` of the `initialize` params, an open object that is always sent and that holds
+a member only for what the daemon supports; an adapter uses a daemon-side addition only when
+it finds it there. Version 1 has one: `direct_endpoint_access`, optional like the adapter's
+flags (an explicit `false` is accepted and means the same as leaving it out), which says that
+the daemon serves `endpoint.directory`, `endpoint.peers` and `endpoint.declare` to a direct
+endpoint. A daemon that predates it sends the object empty, and the adapter then does not
+send those requests, so it learns at `initialize` and not from a `-32601` after a call.
 
 `runtime` and `direct` are each absent when the adapter provides no such
 endpoints. `frontends` lists the agent tool front ends a session can be set up
@@ -1094,6 +1192,7 @@ send it, which the signals an endpoint accepts (above) already state, and
 | `native_request.handled` | required when `server_requests` is declared | forbidden |
 | `endpoint.register`, `endpoint.recv`, `endpoint.ack`, `endpoint.send`, `endpoint.pending` | forbidden | required |
 | `endpoint.unregister`, `endpoint.message_status` | forbidden | optional |
+| `endpoint.directory`, `endpoint.peers`, `endpoint.declare` | forbidden | optional, and only when the daemon declared `direct_endpoint_access` |
 
 Both kinds can be declared at once; the requirements add up.
 

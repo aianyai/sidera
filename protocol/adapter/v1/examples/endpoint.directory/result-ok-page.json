@@ -1,0 +1,39 @@
+{
+  "jsonrpc": "2.0",
+  "id": 160,
+  "result": {
+    "outcome": "ok",
+    "endpoints": [
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+        "kind": "runtime",
+        "display_name": "work (codex)",
+        "accepts": [
+          "session.create",
+          "endpoint.status"
+        ]
+      },
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+        "kind": "session",
+        "accepts": [
+          "message.send",
+          "session.close",
+          "endpoint.status",
+          "session.interrupt"
+        ]
+      },
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/33333333333333333333333333333333",
+        "kind": "direct",
+        "display_name": "Owner console",
+        "description": "Reads and sends for the owner.\nHidden endpoints are not listed.",
+        "accepts": [
+          "message.send",
+          "endpoint.status"
+        ]
+      }
+    ],
+    "next_cursor": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  }
+}

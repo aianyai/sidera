@@ -27,7 +27,7 @@ package does not build it:
 | `Config` | The identity and capabilities answered in `initialize`, the `Application`, and the limits and logger of the peer. They are checked before anything is served: an identity or a set of capabilities that would make `initialize` answer something invalid is refused. |
 | `Application` | What the adapter implements: `Initialize`, `Shutdown`, `Start`, `Probe`, the five runtime methods, `AttachSession`, `SessionDetached` and `EndpointPending`. |
 | `Base` | Embed it to implement only the methods the adapter has: an empty start and probe, and `capability_not_declared` for the runtime methods and `session.attach`, with `session.detached` ignored. |
-| `Conn` | What the adapter sends: `Call` and `Notify` for any method it may send, and typed helpers for each (`CheckpointPut`, `Register`, `Recv`, `Ack`, `Send`, `MessageStatus`, `RecvObserved`, `Availability`, `PromptPersisted`, `TurnStarted`, `TurnEnded`, `NativeRequestHandled`). |
+| `Conn` | What the adapter sends: `Call` and `Notify` for any method it may send, and typed helpers for each (`CheckpointPut`, `Register`, `Recv`, `Ack`, `Send`, `MessageStatus`, `Directory`, `Peers`, `Declare`, `RecvObserved`, `Availability`, `PromptPersisted`, `TurnStarted`, `TurnEnded`, `NativeRequestHandled`); `DaemonCapabilities()` returns what the daemon declared in `initialize`. |
 
 ## Rules
 
@@ -67,6 +67,13 @@ package does not build it:
   application is not told. The error `Shutdown` returns is the answer to the request
   (build it with `peer.NewError` to choose the message the daemon logs); the adapter
   is shutting down either way.
+- **The daemon's capabilities are the kit's to keep.** `Application.Initialize` is
+  unchanged: the kit stores the `capabilities` of the `initialize` params on the `Conn`
+  before it calls `Initialize`, and `Conn.DaemonCapabilities()` reads them (empty
+  before then). `Directory`, `Peers` and `Declare` need `direct_endpoint_access`: when
+  the daemon did not declare it they return `ErrDirectEndpointAccess` and send
+  nothing, so an adapter written for a daemon that has the capability fails with a
+  plain error, not a `-32601` after a round trip, on one that does not.
 - **Errors are the application's to choose.** A `*peer.Error` is answered as it is;
   any other error is `-32603` with a fixed message, as the peer does for every
   handler.

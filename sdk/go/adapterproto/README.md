@@ -24,6 +24,9 @@ for what each message means and why the protocol is shaped this way.
 | `EnumTables()`, `Patterns()`, `ApplicationCodes()` | The vocabularies the schema is compared with |
 | `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
 | `CodeNodeBusy`, `BusyData`, `BusyReasons()` | The code of a request the node refused before any effect and that may be sent again later, its required data `{reason}` (any reason word is accepted) and the reasons this version of the node sends |
+| `DirectoryParams`, `DirectoryResult`, `PeersParams`, `PeersResult`, `DeclareParams`, `DeclareResult`, `MaxDirectoryLimit` | The three requests a direct endpoint makes to read the directory and the nodes and to set its declaration, only when the daemon declared `direct_endpoint_access` (`DaemonCapabilities`). A directory read that got no page is a result (`DirectoryOutcome`, `DirectoryReason`), not an error; a page holds at most `MaxDirectoryLimit` (100) entries so that it fits a line |
+| `ParamsReason`, `ParamsReasons()` | The words in the `reason` of the data of a `-32602` of `endpoint.directory` or `endpoint.declare` that an adapter may act on (`cursor_invalid`, `empty_patch`, `too_many_senders`, `duplicate_sender`) |
+| `EndpointKind`, `EndpointAction`, `PeerTrust` | Enums of a directory entry and a peer. `EndpointAction` is not `ControlSignal`: an entry advertises `message.send`, which is not a signal a message may carry as control |
 | `TrueOnly` | A flag that is sent as `true` or omitted; its decoder refuses an explicit `false` |
 | `WakeInfo`, `MaxWakeEntries` | What an adapter needs to deliver a prompt to an attached session: at most 16 entries keyed like environment variables, opaque to the daemon, never written down or logged; carried by `SessionAttachParams` and by an attached `SessionAttach` entry |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
@@ -39,7 +42,7 @@ for what each message means and why the protocol is shaped this way.
   zero included.
 - **Open capability declarations.** The one exception to the unknown-field rule:
   `Capabilities` (`shutdown_intent` among its members), `RuntimeCapabilities`,
-  `DirectCapabilities` and `DaemonCapabilities` ignore the members they have no field for, so a newer
+  `DirectCapabilities` and `DaemonCapabilities` (`direct_endpoint_access`) ignore the members they have no field for, so a newer
   peer can declare a capability that this version does not know. Their known
   members are decoded as strictly as everything else, and a repeated key is
   refused even inside an ignored member. Ignoring a capability means not using

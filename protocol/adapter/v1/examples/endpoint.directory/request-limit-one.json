@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 162,
+  "method": "endpoint.directory",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "limit": 1
+  }
+}

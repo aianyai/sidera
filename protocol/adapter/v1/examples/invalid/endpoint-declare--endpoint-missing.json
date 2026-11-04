@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.declare",
+  "note": "endpoint missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.declare",
+    "params": {
+      "paused": true
+    }
+  }
+}

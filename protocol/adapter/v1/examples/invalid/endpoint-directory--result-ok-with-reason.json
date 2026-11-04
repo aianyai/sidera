@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "a page with a reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "ok",
+      "reason": "directory_unavailable",
+      "endpoints": []
+    }
+  }
+}
