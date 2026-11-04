@@ -3,8 +3,10 @@ package config_test
 import (
 	"bytes"
 	"errors"
+	"path"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // Enabling creates the instance when it is new (named after the adapter when
@@ -164,7 +169,7 @@ func TestRemoveInstanceNeedsADisabledInstanceWithNoOpenSession(t *testing.T) {
 	t.Run("a disabled instance with no open session", func(t *testing.T) {
 		rg, c := loaded(t)
 		disable(t, c)
-		after, err := c.RemoveInstance(request(2, 5), "example", sessions(0), nil, result(&seen, `{}`))
+		after, _, err := c.RemoveInstance(request(2, 5), "example", "", sessions(0), nil, result(&seen, `{}`))
 		if err != nil {
 			t.Fatalf("RemoveInstance: %v", err)
 		}
@@ -193,8 +198,9 @@ func TestRemoveInstanceNeedsADisabledInstanceWithNoOpenSession(t *testing.T) {
 		t.Run(r.name, func(t *testing.T) {
 			rg, c := loaded(t)
 			r.prepare(t, c)
+			putState(t, rg.mem, "example")
 			before := snapshot(t, rg.mem)
-			_, err := c.RemoveInstance(request(2, c.Instances().Version), r.name2, sessions(r.session), nil, result(&seen, `{}`))
+			_, _, err := c.RemoveInstance(request(2, c.Instances().Version), r.name2, "adapter-state/"+r.name2, sessions(r.session), nil, result(&seen, `{}`))
 			ce := changeReason(t, err)
 			if ce.Reason != r.want || !strings.Contains(err.Error(), r.message) {
 				t.Errorf("error = %v, want %v naming %q", err, r.want, r.message)
@@ -512,4 +518,139 @@ func TestEndpointIDsAreTakenOverOnlyAfterCommit(t *testing.T) {
 	if !c.EndpointIDs("example").Direct["fresh"].IsZero() {
 		t.Error("memory took an id over without a commit")
 	}
+}
+
+// putState makes the state directory of an instance with a file and a nested one, as
+// an adapter leaves it.
+func putState(t testing.TB, mem *fsxtest.Mem, instance string) {
+	t.Helper()
+	for _, f := range []string{"app.json", "turns/one/out.jsonl"} {
+		p := "adapter-state/" + instance + "/" + f
+		mkdirAll(t, mem, path.Dir(p))
+		if err := fsx.Replace(mem, setupTag, p, []byte("state of "+instance), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Removing an instance takes its state directory with it, and only its own: the
+// directory is moved aside in the transaction that removes the instance, so the
+// instance never exists without the guarantee that the directory is going, and what
+// is moved is deleted afterwards by DropTrash. Another instance's directory is never
+// touched, and an instance that never started has no directory to move.
+func TestRemoveInstanceTakesItsStateDirectoryAndOnlyThat(t *testing.T) {
+	var seen []config.Instances
+	disabled := func(t *testing.T) (*rig, *config.Config) {
+		rg, c := loaded(t)
+		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(&seen, `{}`)); err != nil {
+			t.Fatal(err)
+		}
+		return rg, c
+	}
+	t.Run("the directory goes, the others stay", func(t *testing.T) {
+		rg, c := disabled(t)
+		putState(t, rg.mem, "example")
+		putState(t, rg.mem, "other")
+		beforeOther := snapshotUnder(t, rg.mem, "adapter-state/other")
+		_, trash, err := c.RemoveInstance(request(2, 5), "example", "adapter-state/example", nil, nil, result(&seen, `{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if exists(rg.mem, "adapter-state/example") {
+			t.Error("the state directory is still under its name when the removal returns")
+		}
+		if len(mustCleanup(t, rg.mem)) != 1 {
+			t.Errorf("the directory moved aside is not the one garbage name: %v", mustCleanup(t, rg.mem))
+		}
+		if err := c.DropTrash(trash); err != nil {
+			t.Fatal(err)
+		}
+		if work := mustCleanup(t, rg.mem); len(work) != 0 {
+			t.Errorf("DropTrash left %v", work)
+		}
+		if got := snapshotUnder(t, rg.mem, "adapter-state/other"); !reflect.DeepEqual(got, beforeOther) {
+			t.Errorf("the state of another instance changed: %v, was %v", got, beforeOther)
+		}
+		if !exists(rg.mem, config.EndpointIDsPath("example")) {
+			t.Error("the endpoint ids went with the state directory")
+		}
+	})
+	t.Run("an instance with no state directory", func(t *testing.T) {
+		_, c := disabled(t)
+		_, trash, err := c.RemoveInstance(request(2, 5), "example", "adapter-state/example", nil, nil, result(&seen, `{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.DropTrash(trash); err != nil {
+			t.Errorf("DropTrash of nothing: %v", err)
+		}
+	})
+	t.Run("no path means nothing is moved", func(t *testing.T) {
+		rg, c := disabled(t)
+		putState(t, rg.mem, "example")
+		if _, _, err := c.RemoveInstance(request(2, 5), "example", "", nil, nil, result(&seen, `{}`)); err != nil {
+			t.Fatal(err)
+		}
+		if !exists(rg.mem, "adapter-state/example") {
+			t.Error("a removal without a path moved a directory")
+		}
+	})
+	for _, bad := range []string{"/adapter-state/example", "../example", ".", "adapter-state/../x"} {
+		t.Run("a path that leaves the data directory: "+bad, func(t *testing.T) {
+			rg, c := disabled(t)
+			before := snapshot(t, rg.mem)
+			_, _, err := c.RemoveInstance(request(2, 5), "example", bad, nil, nil, result(&seen, `{}`))
+			if changeReason(t, err).Reason != config.ChangeInvalid || !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
+				t.Errorf("error = %v, want invalid with nothing written", err)
+			}
+		})
+	}
+}
+
+// A directory that cannot be moved aside (on Windows a file in it is still open)
+// refuses the removal, names the path, and leaves the configuration, the disk and
+// memory as they were; once whatever held it is gone the removal goes through.
+func TestRemoveInstanceRefusedWhenTheStateDirectoryCannotBeMoved(t *testing.T) {
+	mem := fsxtest.NewMem()
+	putTree(t, mem, validTree(t))
+	putState(t, mem, "example")
+	faulty := fsxtest.NewFaulty(t, mem)
+	w := txn.New(faulty, newTable(t), nil)
+	recoverWriter(t, w)
+	c, err := config.Load(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []config.Instances
+	if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(&seen, `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, mem)
+	faulty.Fail(fsxtest.Match{Tx: "adapter-remove", Role: "state", Step: fsx.StepRenameDir, Hit: 1}, syscall.EBUSY)
+	_, _, err = c.RemoveInstance(request(2, 5), "example", "adapter-state/example", nil, nil, result(&seen, `{}`))
+	ce := changeReason(t, err)
+	if ce.Reason != config.ChangeInstanceStateBusy || ce.Field != "example" || !strings.Contains(err.Error(), "adapter-state/example") || !errors.Is(err, syscall.EBUSY) {
+		t.Fatalf("error = %v, want instance_state_busy for example naming the path", err)
+	}
+	if _, there := c.Instances().Items["example"]; !there || c.Instances().Version != 5 {
+		t.Error("memory took over a removal that was refused")
+	}
+	if !reflect.DeepEqual(before, snapshot(t, mem)) {
+		t.Error("a refused removal changed the disk")
+	}
+	if _, _, err := c.RemoveInstance(request(2, 5), "example", "adapter-state/example", nil, nil, result(&seen, `{}`)); err != nil {
+		t.Fatalf("the removal after the holder was gone: %v", err)
+	}
+}
+
+// snapshotUnder is snapshot of one directory.
+func snapshotUnder(t testing.TB, r fsx.Reader, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for p, v := range snapshot(t, r) {
+		if strings.HasPrefix(p, dir) {
+			out[p] = v
+		}
+	}
+	return out
 }

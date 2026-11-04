@@ -108,6 +108,9 @@ type crashCase struct {
 	invisible bool
 	// done checks the disk after the transaction ran to its end, without a crash.
 	done func(t *testing.T, rg *rig, c *config.Config)
+	// afterRestart, when set, judges the disk a next start leaves after a crash, with the
+	// state the configuration read from it is in.
+	afterRestart func(t *testing.T, where, state string, disk fsx.Reader)
 }
 
 func versionState(read func(c *config.Config) admin.Version, before admin.Version) func(*testing.T, string, *config.Config) string {
@@ -220,13 +223,48 @@ func crashCases(t *testing.T) []crashCase {
 			state: versionState(func(c *config.Config) admin.Version { return c.Instances().Version }, 4),
 		},
 		{
+			// The removal moves the state directory aside, replaces instances.json,
+			// and the directory is deleted after it. Whatever the crash, a start that
+			// finds the instance removed finds its state directory gone, one that
+			// finds it still configured finds the directory whole or gone, never half
+			// deleted under its own name, and the state of another instance is never
+			// touched.
 			name: "adapter-remove",
-			disk: disabledTree,
+			disk: func(t *testing.T) *fsxtest.Mem {
+				mem := disabledTree(t)
+				putState(t, mem, "example")
+				putState(t, mem, "other")
+				return mem
+			},
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
-				_, err := c.RemoveInstance(request(1, 4), "example", nil, isOpen(t), result(new([]config.Instances), `{"ok":true}`))
-				return err
+				_, trash, err := c.RemoveInstance(request(1, 4), "example", "adapter-state/example", nil, isOpen(t), result(new([]config.Instances), `{"ok":true}`))
+				if err != nil {
+					return err
+				}
+				return c.DropTrash(trash)
 			},
 			state: versionState(func(c *config.Config) admin.Version { return c.Instances().Version }, 4),
+			afterRestart: func(t *testing.T, where, state string, disk fsx.Reader) {
+				present := exists(disk, "adapter-state/example")
+				if state == "after" && present {
+					t.Errorf("%s: the instance is removed and its state directory is still there", where)
+				}
+				if present {
+					for _, f := range []string{"app.json", "turns/one/out.jsonl"} {
+						if got, err := disk.ReadFile("adapter-state/example/" + f); err != nil || string(got) != "state of example" {
+							t.Errorf("%s: %s of the state directory = %q, %v", where, f, got, err)
+						}
+					}
+				}
+				if got, err := disk.ReadFile("adapter-state/other/app.json"); err != nil || string(got) != "state of other" {
+					t.Errorf("%s: the state of another instance = %q, %v", where, got, err)
+				}
+			},
+			done: func(t *testing.T, rg *rig, c *config.Config) {
+				if exists(rg.mem, "adapter-state/example") || len(mustCleanup(t, rg.mem)) != 0 {
+					t.Error("the state directory or its garbage name survived the removal")
+				}
+			},
 		},
 		{
 			name: "adapter-disable",
@@ -574,6 +612,9 @@ func TestEveryConfigTransactionSurvivesACrashAtEveryPoint(t *testing.T) {
 					return
 				}
 				got := tc.state(t, where, c2)
+				if tc.afterRestart != nil {
+					tc.afterRestart(t, where, got, clone)
+				}
 				if processCrash {
 					if seen == "after" && got == "before" {
 						t.Errorf("%s: the transaction was visible at an earlier point and is gone", where)

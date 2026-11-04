@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -401,10 +402,13 @@ func (o *disableAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 // endpoint still being closed are waited for, as enabling waits for them, so that the
 // closing never meets an instance that is gone. The version is that of the
 // instances, checked inside the change, the operation and its result kept in the same
-// replacement. What the adapter keeps in its state directory, and the stable
-// endpoint ids of the instance, are not touched: the adapter may have a process that
-// outlives it and still uses that directory, and only the adapter knows. encode makes
-// the result; it runs in the loop and must not wait.
+// replacement. The state directory of the instance goes with it: the adapter was
+// told to release everything that uses it when the instance was disabled, so the
+// removal waits for the adapter to have ended (and for the release round of an
+// adapter that was not running) and then moves the directory aside, in the same
+// transaction as the removal, and deletes it afterwards outside the loop. The
+// stable endpoint ids of the instance are not touched. encode makes the result;
+// it runs in the loop and must not wait.
 func RemoveAdapterInstanceOp(instance string, encode func(InstanceChange) ([]byte, error)) Operation {
 	return &removeAdapterInstanceOp{instance: instance, encode: encode}
 }
@@ -412,6 +416,39 @@ func RemoveAdapterInstanceOp(instance string, encode func(InstanceChange) ([]byt
 type removeAdapterInstanceOp struct {
 	instance string
 	encode   func(InstanceChange) ([]byte, error)
+	// trash is the state directory the removal moved aside, for settle to delete.
+	// run sets it in the loop; settle reads it after the loop has answered.
+	trash config.Trash
+}
+
+// stoppedPoll is how often prepare asks the host whether a process of the instance
+// is still being ended. The host has no event for it, and an adapter ends within
+// seconds.
+const stoppedPoll = 100 * time.Millisecond
+
+func (o *removeAdapterInstanceOp) alone() bool { return false }
+
+// prepare waits until no process of the instance is being ended, so that the loop
+// moves the state directory aside only when nothing of the instance uses it. It
+// runs outside the loop and ends with the engine.
+func (o *removeAdapterInstanceOp) prepare(ctx context.Context, e *Engine, _ io.Reader) {
+	for e.instanceStopping(o.instance) {
+		t := clock.System().NewTimer(stoppedPoll)
+		select {
+		case <-t.C():
+		case <-ctx.Done():
+			t.Stop()
+			return
+		}
+	}
+}
+
+// settle deletes the state directory the removal moved aside. A failure is logged
+// and not repeated: the directory has a garbage name and the next start removes it.
+func (o *removeAdapterInstanceOp) settle(e *Engine) {
+	if err := e.d.Config.DropTrash(o.trash); err != nil {
+		e.log.Warn("the state directory of a removed instance could not be deleted; the next start removes it", "instance", o.instance, "error", err.Error())
+	}
 }
 
 // Admin judges the removal as disabling the instance: it only withdraws.
@@ -425,10 +462,11 @@ func (o *removeAdapterInstanceOp) run(e *Engine, x *opRun) ([]byte, error) {
 			return nil, &waitForDrain{endpoint: id}
 		}
 	}
-	after, err := e.d.Config.RemoveInstance(x.configRequest(), o.instance, e.openSessions, e.endpointOpen, instanceResult(o.encode, o.instance, x))
+	after, trash, err := e.d.Config.RemoveInstance(x.configRequest(), o.instance, adapterhost.StateDirIn(o.instance), e.openSessions, e.endpointOpen, instanceResult(o.encode, o.instance, x))
 	if err != nil {
 		return nil, err
 	}
+	o.trash = trash
 	return after.LastOperation.Result, nil
 }
 

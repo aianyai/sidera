@@ -19,7 +19,14 @@ const StateRoot = "adapter-state"
 // adapter-state/<instance> in the data directory. It is the one definition; the
 // host sends it in initialize and in Instance.
 func StateDir(home, instance string) string {
-	return filepath.Join(home, StateRoot, instance)
+	return filepath.Join(home, filepath.FromSlash(StateDirIn(instance)))
+}
+
+// StateDirIn is StateDir as a slash-separated path inside the data directory,
+// which is how the storage layer names a path: what removes the directory with
+// the instance asks for it here, so that the path has one definition.
+func StateDirIn(instance string) string {
+	return StateRoot + "/" + instance
 }
 
 // makeStateDir makes the state directory of an instance, and adapter-state/ when

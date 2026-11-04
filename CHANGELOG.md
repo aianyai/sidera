@@ -27,6 +27,11 @@ protocol has a version of its own.
   instance is disabled. When an instance is disabled while its adapter is not running (it
   is waiting to be started again after a failure), the daemon starts the adapter once only
   so that it can release what it started.
+- **Removing an instance deletes its state directory.** `sidera adapter remove` used to leave
+  `~/.sidera/adapter-state/<instance>/` for you to delete. The daemon now waits for the
+  adapter to have ended, then deletes the directory with the instance. On Windows the removal
+  is refused with `instance_state_busy`, naming the directory, while a process still holds a
+  file in it; end that process and run the command again.
 
 ### Changed
 

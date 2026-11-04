@@ -169,6 +169,10 @@ const (
 	// ChangeInstanceInUse: removing an instance that session endpoints made through
 	// it are still open on.
 	ChangeInstanceInUse
+	// ChangeInstanceStateBusy: removing an instance whose state directory could not
+	// be moved aside, because something still holds a file in it (on Windows a
+	// process that was not ended); Field names the instance and Err the path.
+	ChangeInstanceStateBusy
 )
 
 var changeNames = [...]string{
@@ -186,6 +190,7 @@ var changeNames = [...]string{
 	ChangePeerUnknown:             "peer_unknown",
 	ChangeInstanceEnabled:         "instance_enabled",
 	ChangeInstanceInUse:           "instance_in_use",
+	ChangeInstanceStateBusy:       "instance_state_busy",
 }
 
 // String names the reason.
@@ -204,7 +209,7 @@ type ChangeError struct {
 	// the offending file in it. For the reasons about a name it is that name: the
 	// preset (ChangePresetExists, ChangePresetUnknown), the instance
 	// (ChangeInstanceUnknown, ChangeInstanceExists, ChangeInstanceAdapterMismatch,
-	// ChangeInstanceEnabled, ChangeInstanceInUse),
+	// ChangeInstanceEnabled, ChangeInstanceInUse, ChangeInstanceStateBusy),
 	// the adapter (ChangeAdapterNotInstalled), "instances.<name>" for
 	// ChangeAdapterInUse and the endpoint id for ChangeEndpointUnknown and the node id for
 	// ChangePeerUnknown. It is

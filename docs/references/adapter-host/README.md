@@ -134,9 +134,13 @@ there (the Codex adapter's `ws-token`), and only the owner knows who already rea
 Only the host makes it, so no adapter has to make a directory of the data directory.
 `StateDir(home, instance)` is the one definition, sent in `initialize` and in
 `Instance.StateDir`; a directory that cannot be made fails the pass like a launch that
-failed, and the next pass waits for the backoff. Nothing in it is read, counted or
-removed by the daemon, and `adapter remove` leaves it as well: what an adapter started may
-still be running and using it, and the host does not know.
+failed, and the next pass waits for the backoff. Nothing in it is read or counted by the
+daemon, and it removes the directory only when the owner removes the instance
+(`adapter remove`): the adapter was told to release everything that uses it when the
+instance was disabled (`shutdown` with `retire`, through a release round when no adapter was
+running), and the removal waits until `Stopping(instance)` is false before it moves the
+directory aside. `StateDirIn(instance)` is the same path as a slash-separated path inside the
+data directory, for the transaction that removes it.
 
 ### Requests of the adapter
 

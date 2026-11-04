@@ -30,4 +30,5 @@ var NotYetWalked = map[string]string{
 	"network-set":              "the network configuration write is not yet walked by the acceptance recipes",
 	"adapter-config":           "not yet walked by the acceptance recipes; the crash walk of config covers it",
 	"adapter-remove":           "not yet walked by the acceptance recipes; the crash walk of config covers it",
+	"adapter-state-drop":       "not yet walked by the acceptance recipes; the crash walk of config covers it",
 }

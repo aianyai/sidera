@@ -261,8 +261,9 @@ that session endpoints made through it are open on (`instance_in_use`, saying ho
 the caller that holds the endpoints counts them for `config`). The stable endpoint ids
 in `endpoint-ids/<instance>.json` stay, as they do when an instance is disabled, so that an
 instance made later under the same name keeps the same endpoints; loading does not require
-an instance for an id file. The state directory of the adapter is outside `config/` and is
-left alone (the adapter-protocol reference says why).
+an instance for an id file. The state directory of the adapter is outside `config/`, and the
+removal moves it aside in the same transaction (see `adapter-remove` below) and deletes it
+afterwards.
 
 `endpoints` holds the settings an owner gave single endpoints: `max_queue_s` and
 `backlog_limit`, each optional, at least one present. A field that is absent is
@@ -481,7 +482,7 @@ change writes nothing and builds no result.
 | `nothing_to_change` | a patch that names no setting |
 | `preset_exists`, `preset_unknown` | adding a name that is taken, removing one that is not there |
 | `peer_unknown` | removing a node that has no address in the book |
-| `instance_enabled`, `instance_in_use` | removing an instance that is enabled; removing one that has session endpoints open |
+| `instance_enabled`, `instance_in_use`, `instance_state_busy` | removing an instance that is enabled; removing one that has session endpoints open; removing one whose state directory cannot be moved aside because something still holds a file in it |
 | `instance_unknown`, `instance_exists`, `instance_adapter_mismatch` | the instance named is not there (also for `adapter config` and `adapter remove`); an existing instance given a configuration by `enable`; an existing instance of another adapter |
 | `adapter_not_installed` | enabling an adapter with no package |
 | `adapter_in_use` | none: no change returns it now (a package is installed whatever the instances of its adapter do), and the code stays in the vocabulary, which never loses a code |
@@ -542,7 +543,9 @@ Each is declared as data; the table of the program is built from
 | `node-set` | normal | `node` replace | `node.json` rename |
 | `network-set` | normal | `network-config` replace | `network.json` rename |
 | `presets-change` | normal | `presets` replace | `presets.json` rename |
-| `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable`, `adapter-remove` | normal | `instances` replace | `instances.json` rename |
+| `endpoint-set`, `adapter-enable`, `adapter-config`, `adapter-disable` | normal | `instances` replace | `instances.json` rename |
+| `adapter-remove` | normal | `state` rename-dir (P, O), `instances` replace | `instances.json` rename |
+| `adapter-state-drop` | normal | `trash` remove-all (P), `trash-parent` sync-dir (P) | none: all preparation |
 | `adapter-stage` | normal | `parent` mkdir (P, O, M), `stage` mkdir (P), `subdir` mkdir (P, O, M), `file` replace (P, M) | none: all preparation |
 | `adapter-unstage` | normal | `stage` discard (O), `parent` discard (O) | the first discard |
 | `adapter-gc` | recovery | `dir` discard (M) | the first discard |
@@ -561,6 +564,13 @@ which a restart finds old or new and nothing between, or preparation that a
 restart removes:
 
 - the single-file changes leave `X` or `X'`;
+- `adapter-remove` moves the state directory of the instance aside before it replaces
+  `instances.json`: a crash between the two leaves the instance configured with an empty
+  state (the adapter makes it anew at its next start) and a garbage name the next start
+  removes; after the replacement the directory is under a garbage name and the instance is
+  gone. `adapter-state-drop`, which deletes that name afterwards, is all preparation and may
+  be cut anywhere. An instance removed with its state directory under its own name is never
+  left;
 - staging leaves preparation: staging directories and, for a first installation,
   an adapter directory with no `current`, all of which the repair removes at the
   next load; unstaging may be cut anywhere, and what is left is removed the same
@@ -752,6 +762,7 @@ endpoints and not to others for a reason nobody remembers.
 | Expected versions, recording the operation | `TestExpectedVersionConflictPerCollection`, `TestVersionedChangeRecordsTheOperation`, `TestStaleVersionIsReportedBeforeAnInvalidValue` |
 | No file is written that its decoder refuses | `TestChangeWithoutOperationIDWritesNothing`, `TestEncodeRefusesAZeroOperationID`, `TestEncodeRefusesVersionZero`, `TestChangeRefusesToWrapTheVersion` |
 | Settings and their owners | `TestSettingsValidationDelegatesToOwningContract`, `TestEndpointSettingsValidationDelegatesToOwningContract`, `TestDefaultsComeFromTheirOwners`, `TestNodeSettingRanges`, `TestDiskReserveCoversTheQueueAndTheLogs`, `TestNodeSettingsPatch` |
+| Removing an instance takes its state directory and only that; a directory that cannot be moved refuses the removal | `TestRemoveInstanceTakesItsStateDirectoryAndOnlyThat`, `TestRemoveInstanceRefusedWhenTheStateDirectoryCannotBeMoved` |
 | Crash states and replay | `TestEveryConfigTransactionSurvivesACrashAtEveryPoint`, `TestCrashDuringAdapterGCReplay`, `TestInitSurvivesACrashAtEveryPoint`, `TestInitCrashNeverReplacesAnOwnersFile`, `TestEveryDeclaredCrashPointIsReached` |
 | Staging does not hold up the loop; modes of staged files; manifests are copies | `TestStagingDoesNotHoldUpTheWriterLoop`, `TestStagedFilesKeepTheirModes`, `TestAdaptersReturnsCopiesOfTheManifests` |
 | Names that begin with a dot | `TestNamesBeginningWithADotAreIgnored` (and the stray-file rows of `TestInvalidFileRefusesStartupAndNamesTheFile`) |

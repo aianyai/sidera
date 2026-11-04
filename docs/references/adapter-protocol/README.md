@@ -705,12 +705,19 @@ daemon's data directory, that the daemon has made, reachable only by its owner, 
 started the adapter. The adapter keeps there what must outlive its process and belongs to the
 instance: a socket, a log, a state file. The path is the same after every restart of the adapter
 and of the daemon, so it is also where a lock or a socket that a restarted adapter must find
-again lives. The daemon never reads or writes inside it, removes nothing from it and does not
-count its size; what the adapter leaves there is the adapter's to clean. The directory exists
+again lives. The daemon never reads or writes inside it and does not count its size; what the
+adapter leaves there is the adapter's to clean while the instance exists. The directory exists
 for the life of the instance's configuration, not of one process: it is not removed when the
-adapter stops, nor when the owner removes the instance from the configuration, because a
-process the adapter started (a detached server, a turn) may outlive the adapter and still use it. It is a path the adapter is given, not a place it chooses, because the layout of
-the data directory is the daemon's.
+adapter stops, nor when the owner disables the instance (it may be enabled again and finds its
+state), but when the owner removes the instance from the configuration the daemon deletes it. An
+adapter must therefore, on `shutdown` with the intent `retire` (the instance was disabled, so
+the removal can follow), end every process it started that outlives it and release every file
+of the directory it holds; the daemon removes the directory only after the adapter process, and
+the release round it makes for an instance that was not running, have ended. A process that
+still uses the directory is the adapter's fault: on Windows the removal is refused naming the
+path (`instance_state_busy`), on Unix the directory is gone from under it. The directory is a
+path the adapter is given, not a place it chooses, because the layout of the data directory is
+the daemon's.
 
 **Checkpoints and state across versions.** The daemon installs another version of an
 adapter while its instances are enabled: it restarts them on the new program, keeps their

@@ -424,9 +424,19 @@ when it is. Removing an instance (`adapters.remove`) is one replacement too, jud
 disabling. It needs the instance disabled (`instance_enabled`) and no session endpoint of
 it open (`instance_in_use`, with how many; disabling closes them, so this is the closing
 not having reached one), and, like enabling, it waits for the records of the instance's
-endpoints still being closed. It removes the instance from the configuration and nothing
-else: the adapter's state directory may be in use by a process the adapter started and
-outlived, which only the adapter knows, and the stable endpoint ids stay with the name.
+endpoints still being closed. It is a prepared operation: before the loop runs it, a worker
+waits until the host no longer reports a process of the instance being ended (`Stopping`,
+the release round of a retired instance included), because until then the adapter may still
+use its state directory. In the loop the same transaction moves
+`adapter-state/<instance>` aside, to a `.trash-` name in its own directory, and replaces
+`instances.json`; the move is O(1), is not made when there is no directory, and is
+the only thing that can refuse the removal: when it fails (on Windows a file in the
+directory is still open) nothing is removed and the answer is `instance_state_busy`, naming
+the path. After the loop has answered, and before the request is, the worker deletes the
+moved directory (`Config.DropTrash`); a failure is logged, and the start that follows
+removes any `.trash-` name. The stable endpoint ids stay with the name. A crash leaves
+the instance configured with its directory whole or gone, or removed with the directory
+gone: never removed with the directory under its own name.
 
 **The probe of an instance.** The adapter's report that its tool probes ran is
 necessary and not enough: the node believes it only for the tokens it has seen
@@ -2103,6 +2113,7 @@ reproducible).
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
 | A replacement is installed while the process of a disabled instance is still ending, which is not started, and the files it may hold are left | `operations_adapters.go` (`instanceStopping`), `config` (`PlanInstall`) | `TestReplacingThePackageWhileTheProcessOfADisabledInstanceIsStillEndingHoldsItsFiles` |
+| Removing an instance deletes its state directory and only that, after waiting for the adapter to have ended | `operations_adapters.go` (`removeAdapterInstanceOp`) | `TestRemovingAnInstanceDeletesItsStateDirectory`, `TestRemovingAnInstanceWaitsForItsAdapterToHaveEnded` |
 | Disabling stops the instance as retired, marks it offline, closes its endpoints; a restart is a restart | `operations_adapters.go` (`instanceDisabled`, `restartInstance`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints`, `TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns` |
 | A request of the adapter after the disabling is refused, and enabling again completes | `operations_adapters.go` (`instanceDisabled`) | `TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes` |
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |

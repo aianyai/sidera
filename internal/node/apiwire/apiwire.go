@@ -421,6 +421,12 @@ func fromChange(c *config.ChangeError) *Error {
 			e.with("reason", c.Err.Error())
 		}
 		return e
+	case config.ChangeInstanceStateBusy:
+		e := New(CategoryConflict, "instance_state_busy", "the state directory of the instance could not be moved aside; end whatever still uses it and try again").named(c)
+		if c.Err != nil {
+			e.with("reason", c.Err.Error())
+		}
+		return e
 	case config.ChangeNothingToChange:
 		return New(CategoryInvalidArgument, "empty_patch", "the patch names no setting")
 	}

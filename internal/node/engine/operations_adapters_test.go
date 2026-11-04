@@ -30,6 +30,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
+	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -1348,6 +1349,104 @@ func TestAnInstanceIsRemovedOnlyOnceItIsDisabled(t *testing.T) {
 	}
 	if _, err := e.Execute(ctx, enableCommand(84, "enable again", r.cfg.Instances().Version, "chat", "agent", "")); err != nil {
 		t.Errorf("making the instance again under its name: %v", err)
+	}
+}
+
+// putAdapterState writes a file into the state directory of an instance, as an
+// adapter does.
+func putAdapterState(t testing.TB, r *rig, instance string) {
+	t.Helper()
+	dir := "adapter-state/" + instance
+	for _, d := range []string{"adapter-state", dir} {
+		if _, err := r.mem.Stat(d); err != nil {
+			if err := fsx.MakeDir(r.mem, fsx.Tag{Tx: "setup", Role: "dir"}, d); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := fsx.Replace(r.mem, fsx.Tag{Tx: "setup", Role: "file"}, dir+"/app.json", []byte("state of "+instance), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hasState(r *rig, instance string) bool {
+	_, err := r.mem.Stat("adapter-state/" + instance)
+	return err == nil
+}
+
+// Removing an instance deletes its state directory by the time the request is
+// answered; a refused removal (the instance is enabled) and a disable touch nothing.
+// That only its own directory goes is the configuration's to show.
+func TestRemovingAnInstanceDeletesItsStateDirectory(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	r := newRig(t, 10, withAdapters(host))
+	r.enableInstance("agent", `{"program":"old"}`)
+	putAdapterState(t, r, "agent")
+	e := r.start()
+
+	if _, err := e.Execute(ctx, removeInstanceCommand(90, "enabled", r.cfg.Instances().Version, "agent")); err == nil {
+		t.Fatal("an enabled instance was removed")
+	}
+	if !hasState(r, "agent") {
+		t.Fatal("a refused removal touched the state directory")
+	}
+	if _, err := e.Execute(ctx, disableCommand(91, "disable", r.cfg.Instances().Version, "agent")); err != nil {
+		t.Fatal(err)
+	}
+	if !hasState(r, "agent") {
+		t.Fatal("disabling an instance deleted its state directory: the owner can enable it again")
+	}
+	if _, err := e.Execute(ctx, removeInstanceCommand(92, "remove", r.cfg.Instances().Version, "agent")); err != nil {
+		t.Fatal(err)
+	}
+	if hasState(r, "agent") {
+		t.Error("the state directory is still there when the removal is answered")
+	}
+	if work, err := txn.CleanupWork(r.mem); err != nil || len(work) != 0 {
+		t.Errorf("a garbage name was left: %v, %v", work, err)
+	}
+}
+
+// The removal waits for the process of the instance to have ended, release round
+// included, before it moves anything: until then the adapter may still use the
+// directory.
+func TestRemovingAnInstanceWaitsForItsAdapterToHaveEnded(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	r := newRig(t, 10, withAdapters(host))
+	r.enableInstance("agent", `{"program":"old"}`)
+	putAdapterState(t, r, "agent")
+	e := r.start()
+	if _, err := e.Execute(ctx, disableCommand(93, "disable", r.cfg.Instances().Version, "agent")); err != nil {
+		t.Fatal(err)
+	}
+	host.setStopping("agent", true)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.Execute(ctx, removeInstanceCommand(94, "remove", r.cfg.Instances().Version, "agent"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("the removal was answered while the adapter was still ending: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if _, there := r.cfg.Instances().Items["agent"]; !there || !hasState(r, "agent") {
+		t.Fatal("the removal began before the adapter had ended")
+	}
+	host.setStopping("agent", false)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the removal did not go on when the adapter had ended")
+	}
+	if hasState(r, "agent") {
+		t.Error("the state directory is still there")
 	}
 }
 

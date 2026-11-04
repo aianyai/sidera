@@ -490,8 +490,10 @@ sidera adapter remove codex
 ```
 
 `remove` is refused while the instance is enabled or has open session endpoints;
-the message gives the count. It does not delete the adapter's own directory under
-`~/.sidera/adapter-state/<instance>/`; delete that yourself if you want it gone.
+the message gives the count. It deletes the adapter's own directory,
+`~/.sidera/adapter-state/<instance>/`, with the instance, once the adapter has ended. On
+Windows it is refused with `instance_state_busy`, naming the directory, while a process
+still holds a file in it: end that process and run the command again.
 
 ## Back up the self-revocation
 

@@ -28,7 +28,7 @@ func TestTransactionsAreValid(t *testing.T) {
 	want := map[string]txn.Kind{
 		"node-set": txn.Normal, "network-set": txn.Normal, "presets-change": txn.Normal, "endpoint-set": txn.Normal,
 		"adapter-enable": txn.Normal, "adapter-config": txn.Normal, "adapter-disable": txn.Normal, "adapter-remove": txn.Normal,
-		"adapter-stage": txn.Normal, "adapter-unstage": txn.Normal,
+		"adapter-state-drop": txn.Normal, "adapter-stage": txn.Normal, "adapter-unstage": txn.Normal,
 		"adapter-gc": txn.Recovery,
 	}
 	for name, kind := range want {
@@ -82,8 +82,12 @@ func TestEveryDeclaredCrashPointIsReached(t *testing.T) {
 	must(err)
 	_, err = c.DisableAdapter(request(6, 8), "example", open, result(new([]config.Instances), `{}`))
 	must(err)
-	_, err = c.RemoveInstance(request(9, 9), "second", nil, open, result(new([]config.Instances), `{}`))
+	// A removal that moves the state directory of the instance aside, and the
+	// deletion of what it moved.
+	mkdirAll(t, rg.mem, "adapter-state/second")
+	_, trash, err := c.RemoveInstance(request(9, 9), "second", "adapter-state/second", nil, open, result(new([]config.Instances), `{}`))
 	must(err)
+	must(c.DropTrash(trash))
 
 	// A first installation that is refused after staging: parent, stage, subdir,
 	// file and the unstage of the whole adapter directory.

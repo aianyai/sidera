@@ -171,7 +171,7 @@ func prepareTransactionAdapterRemove(b *testing.B, observer txn.Observer) transa
 	req := transactionBenchmarkRequest(cfg.Instances().Version)
 	return transactionBenchmarkFixture{
 		invoke: func() error {
-			_, err := cfg.RemoveInstance(req, harness.Instance, nil, nil, transactionBenchmarkResult[config.Instances])
+			_, _, err := cfg.RemoveInstance(req, harness.Instance, "", nil, nil, transactionBenchmarkResult[config.Instances])
 			return err
 		},
 		verify: func() error {

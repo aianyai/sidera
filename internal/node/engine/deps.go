@@ -122,8 +122,9 @@ type Config interface {
 		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
 	SetInstanceConfig(req config.Request, instance string, instanceConfig []byte,
 		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
-	RemoveInstance(req config.Request, instance string, sessions config.OpenSessions,
-		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+	RemoveInstance(req config.Request, instance, stateDir string, sessions config.OpenSessions,
+		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, config.Trash, error)
+	DropTrash(t config.Trash) error
 	DisableAdapter(req config.Request, instance string, open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
 
 	// StageAdapter and Unstage copy a package next to the versions and drop what an

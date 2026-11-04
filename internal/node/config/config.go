@@ -46,6 +46,9 @@ type Config struct {
 	// unstaging take no part in it. They copy a package, which can take long,
 	// into a directory no change reads, and the loop must not wait for them.
 	wmu sync.Mutex
+	// dmu serialises DropTrash: one transaction of a declaration is open at a
+	// time, and the deletions run outside the loop, so two may meet.
+	dmu sync.Mutex
 	// mu guards st, which a read takes a copy of.
 	mu sync.RWMutex
 	st state

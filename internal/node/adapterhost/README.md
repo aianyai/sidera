@@ -20,12 +20,12 @@ and its own log goes through the handle the daemon gives it.
 | Name | Purpose |
 | ---- | ------- |
 | `New(Config)`, `Host.Start`, `Host.Shutdown`, `Host.Abort` | Make the host, start the supervision of every enabled instance once, end it gracefully, end it at once. |
-| `Host.EnsureRunning`, `Host.Stop` | Start and end the supervision of one instance. Both are idempotent. |
+| `Host.EnsureRunning`, `Host.Stop(instance, intent)` | Start and end the supervision of one instance, the end for the reason the intent names (`Shutdown(ctx, intent)` for all). Both are idempotent. Retiring an instance with no adapter in service runs a release round: see the adapter-host reference. |
 | `Host.Stopping` | Whether a process of the instance is still being ended after `Stop`, which returns at once. It stays true when the instance was restarted and stopped again before the new adapter launched, until the process before it has ended too: a supervisor does not finish before the process it waits for. |
 | `Host.CreateSession`, `DeliverPrompt`, `Reconcile`, `Interrupt`, `Close`, `Attach`, `NotifyPending`, `NotifyDetached` | The calls the engine makes on an adapter. They are the host's half of the interface the engine defines for it. |
 | `Host.Counts` | What the host counts of the connection of an instance, for the question whether the system is quiet. |
 | `LockPath(home, instance)` | The file an instance's adapter locks: the one definition. |
-| `StateDir(home, instance)` | The directory an instance's adapter keeps its state in, `adapter-state/<instance>`: the one definition. The host makes it owner-only before every launch, and refuses one that someone else can reach. |
+| `StateDir(home, instance)`, `StateDirIn(instance)` | The directory an instance's adapter keeps its state in, `adapter-state/<instance>`: the one definition, as an operating-system path and as a path inside the data directory. The host makes it owner-only before every launch, and refuses one that someone else can reach; the removal of the instance deletes it. |
 | `ExecLauncher` | The launcher that runs an adapter as a child process. |
 | `Engine`, `EndpointCalls`, `ObservedCalls` | What the host asks of the engine: the life of a connection, notifications, and the requests an adapter makes. The last two are optional parts the engine takes on as it learns to answer them. |
 | `Notification`, `GoneCause` | A notification of the adapter as the engine receives it, and why an adapter is reported as gone. |

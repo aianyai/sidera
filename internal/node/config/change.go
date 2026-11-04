@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
+	"path"
 	"slices"
 	"strings"
 
@@ -196,23 +198,39 @@ func (c *Config) commitPresets(req Request, next Presets, result ResultFunc[Pres
 // commitInstances writes a new instances.json. The settings of session
 // endpoints that have closed go with it; see dropClosedSessionSettings.
 func (c *Config) commitInstances(decl *txn.Decl, req Request, next Instances, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
-	next = dropClosedSessionSettings(next, c.read().endpointIDs, open)
-	op, err := operationOf(req, result, next)
-	if err != nil {
-		return Instances{}, err
-	}
-	next.LastOperation = op
-	data, err := next.Encode()
+	next, data, err := c.encodeInstances(req, next, open, result)
 	if err != nil {
 		return Instances{}, err
 	}
 	if err := c.replaceFile(decl, RoleInstances, InstancesPath, data); err != nil {
 		return Instances{}, err
 	}
+	return c.publishInstances(next), nil
+}
+
+// encodeInstances is the part of a change of instances.json that precedes the
+// write: the instances with the operation recorded in them, and their encoding.
+func (c *Config) encodeInstances(req Request, next Instances, open OpenEndpoints, result ResultFunc[Instances]) (Instances, []byte, error) {
+	next = dropClosedSessionSettings(next, c.read().endpointIDs, open)
+	op, err := operationOf(req, result, next)
+	if err != nil {
+		return Instances{}, nil, err
+	}
+	next.LastOperation = op
+	data, err := next.Encode()
+	if err != nil {
+		return Instances{}, nil, err
+	}
+	return next, data, nil
+}
+
+// publishInstances makes next the instances the configuration shows, once the
+// write has been committed.
+func (c *Config) publishInstances(next Instances) Instances {
 	c.mu.Lock()
 	c.st.instances = next
 	c.mu.Unlock()
-	return c.Instances(), nil
+	return c.Instances()
 }
 
 // EnableAdapter enables the instance named instance of an installed adapter. A
@@ -344,6 +362,11 @@ func (c *Config) DisableAdapter(req Request, instance string, open OpenEndpoints
 // still open. Config does not hold endpoints, so the caller that does tells it.
 type OpenSessions func(instance string) int
 
+// Trash is a directory that a removal moved aside and that DropTrash deletes. The
+// zero value is nothing to delete. Only RemoveInstance makes one, so DropTrash can
+// delete nothing else.
+type Trash struct{ dir string }
+
 // RemoveInstance removes the instance named instance from the configuration, with
 // the settings it holds for endpoints. The instance has to be disabled, so that no
 // process of it is meant to run, and no session endpoint made through it may be open:
@@ -351,34 +374,103 @@ type OpenSessions func(instance string) int
 // there are. The stable endpoint ids of the instance stay in endpoint-ids/, as they
 // do when it is disabled: an instance later made under the same name finds the same
 // endpoints. sessions may be nil, which says there are none.
-func (c *Config) RemoveInstance(req Request, instance string, sessions OpenSessions, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
+//
+// stateDir, a path in the data directory, is the state directory of the instance:
+// the adapter's own files, which belong to the instance and go with it. It is moved
+// aside, to a garbage name in its own directory, in the transaction that removes the
+// instance and before the file is replaced, which is O(1) whatever it holds, and
+// the Trash returned names it for DropTrash to delete once the removal has been
+// answered. A directory that is not there is nothing to move. When it cannot be
+// moved (on Windows a file in it is still open) nothing is removed and the
+// refusal is ChangeInstanceStateBusy, naming the path. An empty stateDir moves
+// nothing.
+func (c *Config) RemoveInstance(req Request, instance, stateDir string, sessions OpenSessions, open OpenEndpoints, result ResultFunc[Instances]) (Instances, Trash, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	st := c.read()
 	if err := checkVersion(req, st.instances.Version); err != nil {
-		return Instances{}, err
+		return Instances{}, Trash{}, err
 	}
 	in, ok := st.instances.Items[instance]
 	switch {
 	case !ok:
-		return Instances{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
+		return Instances{}, Trash{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
 	case in.Enabled:
-		return Instances{}, &ChangeError{Reason: ChangeInstanceEnabled, Field: instance}
+		return Instances{}, Trash{}, &ChangeError{Reason: ChangeInstanceEnabled, Field: instance}
 	}
 	if sessions != nil {
 		if n := sessions(instance); n > 0 {
-			return Instances{}, &ChangeError{Reason: ChangeInstanceInUse, Field: instance,
+			return Instances{}, Trash{}, &ChangeError{Reason: ChangeInstanceInUse, Field: instance,
 				Err: fmt.Errorf("%d session endpoints made through the instance are still open", n)}
 		}
 	}
 	next := cloneInstances(st.instances)
 	version, err := nextVersion(next.Version)
 	if err != nil {
-		return Instances{}, err
+		return Instances{}, Trash{}, err
 	}
 	next.Version = version
 	delete(next.Items, instance)
-	return c.commitInstances(adapterRemove, req, next, open, result)
+	next, data, err := c.encodeInstances(req, next, open, result)
+	if err != nil {
+		return Instances{}, Trash{}, err
+	}
+
+	var trash Trash
+	if stateDir != "" {
+		if !fs.ValidPath(stateDir) || stateDir == "." {
+			return Instances{}, Trash{}, invalidChange(&FieldError{Field: "state_dir", Err: fmt.Errorf("%q is not a path inside the data directory", stateDir)})
+		}
+		there, err := fsx.Exists(c.w.Reader(), stateDir)
+		if err != nil {
+			return Instances{}, Trash{}, err
+		}
+		if there {
+			// The name is unique to this removal: the version it produces is new, and a
+			// leftover of an earlier one is removed by the start that follows it.
+			trash = Trash{dir: path.Join(path.Dir(stateDir), fmt.Sprintf("%sstate-%s-%d", fsx.TrashPrefix, instance, next.Version))}
+		}
+	}
+	tx := c.w.Begin(adapterRemove)
+	defer tx.Close()
+	if trash.dir != "" {
+		if err := tx.RenameDir(roleState, stateDir, trash.dir); err != nil {
+			if txn.IsFatal(err) {
+				return Instances{}, Trash{}, err
+			}
+			return Instances{}, Trash{}, &ChangeError{Reason: ChangeInstanceStateBusy, Field: instance,
+				Err: fmt.Errorf("the state directory %s could not be moved aside: %w", stateDir, err)}
+		}
+	}
+	if err := tx.Replace(RoleInstances, InstancesPath, data, fsx.ModePrivate); err != nil {
+		return Instances{}, Trash{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Instances{}, Trash{}, err
+	}
+	return c.publishInstances(next), trash, nil
+}
+
+// DropTrash deletes what a removal moved aside, and syncs the directory it was in.
+// It is meant to run outside the loop that made the removal, after the removal has
+// been answered, because the directory can be large. A failure is the caller's to
+// log: the directory has a garbage name, and the next start removes it. The zero
+// Trash is nothing to delete.
+func (c *Config) DropTrash(t Trash) error {
+	if t.dir == "" {
+		return nil
+	}
+	c.dmu.Lock()
+	defer c.dmu.Unlock()
+	tx := c.w.Begin(adapterStateDrop)
+	defer tx.Close()
+	if err := tx.RemoveAll(roleTrash, t.dir); err != nil {
+		return err
+	}
+	if err := tx.SyncDir(roleTrashParent, path.Dir(t.dir)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetEndpointSettings changes the settings of one endpoint of an instance: the

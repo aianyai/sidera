@@ -86,6 +86,11 @@ const (
 	roleStage  = "stage"
 	roleSubdir = "subdir"
 	roleFile   = "file"
+
+	// The roles of adapter-remove and adapter-state-drop.
+	roleState       = "state"
+	roleTrash       = "trash"
+	roleTrashParent = "trash-parent"
 )
 
 var (
@@ -114,9 +119,22 @@ var (
 	adapterConfig = &txn.Decl{Name: "adapter-config", Kind: txn.Normal, Writes: []txn.Write{
 		{Role: RoleInstances, Op: txn.OpReplace},
 	}}
-	// adapterRemove removes a disabled instance from instances.json.
+	// adapterRemove removes a disabled instance from instances.json. Before that
+	// it moves the state directory of the instance aside, to a garbage name: what
+	// is left of a crash between the two is a directory the next start removes, and
+	// the instance still configured with an empty state, which a start of its
+	// adapter makes anew.
 	adapterRemove = &txn.Decl{Name: "adapter-remove", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: roleState, Op: txn.OpRenameDir, Optional: true, Prepare: true},
 		{Role: RoleInstances, Op: txn.OpReplace},
+	}}
+	// adapterStateDrop deletes the state directory that adapter-remove moved
+	// aside, after the removal was committed and outside the loop that committed
+	// it. It is all preparation: what a crash leaves is the garbage name the next
+	// start removes, so no point of it can lose anything.
+	adapterStateDrop = &txn.Decl{Name: "adapter-state-drop", Kind: txn.Normal, Writes: []txn.Write{
+		{Role: roleTrash, Op: txn.OpRemoveAll, Prepare: true},
+		{Role: roleTrashParent, Op: txn.OpSyncDir, Prepare: true},
 	}}
 	// adapterDisable disables an instance. The instance stays, with its
 	// endpoint ids.
@@ -145,5 +163,5 @@ var (
 // Transactions lists the transactions this package runs itself. The composition
 // root puts them in the table of the program.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{nodeSet, networkSet, presetsChange, endpointSet, adapterEnable, adapterConfig, adapterDisable, adapterRemove, adapterStage, adapterUnstage, adapterGC}
+	return []*txn.Decl{nodeSet, networkSet, presetsChange, endpointSet, adapterEnable, adapterConfig, adapterDisable, adapterRemove, adapterStateDrop, adapterStage, adapterUnstage, adapterGC}
 }
