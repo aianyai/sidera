@@ -20,6 +20,9 @@ type Env struct {
 	State  *state.Store
 	Log    *slog.Logger
 	Now    func() time.Time
+	// StateDir is the instance's state directory; files the adapter writes at
+	// runtime (the text of an attachment before Hermes copies it) go below it.
+	StateDir string
 
 	conn      *adapterkit.Conn
 	endpoints *endpoints
@@ -68,4 +71,10 @@ func (e *Env) Send(ctx context.Context, o Outgoing) (adapterproto.MessageID, err
 	}
 	res, err := e.conn.Send(ctx, p)
 	return res.MessageID, err
+}
+
+// Status reads the delivery state of a message an endpoint sent, and the reply to
+// its control signal once there is one.
+func (e *Env) Status(ctx context.Context, from adapterproto.EndpointRef, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error) {
+	return e.conn.MessageStatus(ctx, adapterproto.MessageStatusParams{Endpoint: from, MessageID: id})
 }

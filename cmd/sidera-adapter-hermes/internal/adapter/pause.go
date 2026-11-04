@@ -45,6 +45,8 @@ type timing struct {
 	receivePoll time.Duration
 	// idleCheck is how often the endpoints are looked at for idle retirement.
 	idleCheck time.Duration
+	// tick is how often the timer handler runs.
+	tick time.Duration
 	// retryMin and retryMax bound the pause of a loop whose Hermes is unusable or
 	// whose handler asked to retry. The pause grows with every failure in a row
 	// and stays well under the lease of a message, which is 15 minutes at most.
@@ -57,6 +59,7 @@ type timing struct {
 var defaultTiming = timing{
 	receivePoll: 30 * time.Second,
 	idleCheck:   10 * time.Minute,
+	tick:        10 * time.Second,
 	retryMin:    time.Second,
 	retryMax:    2 * time.Minute,
 	registerMin: 200 * time.Millisecond,

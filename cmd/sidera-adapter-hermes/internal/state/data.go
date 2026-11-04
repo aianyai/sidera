@@ -63,6 +63,10 @@ type Card struct {
 	AttemptAt time.Time `json:"attempt_at"`
 	// MessageID is the channel's id of the message the latest attempt created.
 	MessageID string `json:"message_id,omitempty"`
+	// Delivered says the channel reported the latest attempt as delivered (or, for
+	// a new session, that its control reply was read), so the adapter stops asking
+	// about it.
+	Delivered bool `json:"delivered,omitempty"`
 
 	Phase Phase `json:"phase"`
 	// BlockedFor is the category of the block in force, in PhaseBlocked.
@@ -99,7 +103,7 @@ func (c Card) Unfinished() bool { return c.Phase != PhaseFinished }
 // BeginAttempt records the start of attempt number n. The record is written
 // before the send, because the idempotency key is built from it.
 func (c *Card) BeginAttempt(n int, now time.Time) {
-	c.Attempt, c.AttemptAt, c.MessageID = n, now, ""
+	c.Attempt, c.AttemptAt, c.MessageID, c.Delivered = n, now, "", false
 	c.Phase, c.BlockedFor = PhaseAttempting, ""
 }
 
@@ -117,6 +121,10 @@ func (c *Card) Block(cat Category) {
 	c.Blocks[cat]++
 	c.Phase, c.BlockedFor = PhaseBlocked, cat
 }
+
+// Unblock records that Hermes released the card again and the adapter took it
+// back before anything is sent: it waits for its turn like a card just claimed.
+func (c *Card) Unblock() { c.Phase, c.BlockedFor = PhaseNew, "" }
 
 // Finish records that the card is completed.
 func (c *Card) Finish(now time.Time) { c.Phase, c.BlockedFor, c.FinishedAt = PhaseFinished, "", now }
@@ -143,6 +151,9 @@ type Session struct {
 	LastUse time.Time `json:"last_use"`
 	// CloseTriedAt is when a close was last asked and not confirmed.
 	CloseTriedAt time.Time `json:"close_tried_at"`
+	// CloseMessage is the message that carried the close signal and whose reply has
+	// not been read yet.
+	CloseMessage string `json:"close_message,omitempty"`
 }
 
 // currentVersion is the version of the state file.

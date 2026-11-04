@@ -8,16 +8,19 @@ the rules the adapter follows are in
 
 `main.go` is the program: `serve` is the adapter the daemon starts, `package` writes
 an installable package and `version` prints the build. Everything else is in the
-packages below. The program receives messages and polls the board and hands both to
-two handler interfaces (`adapter.MessageHandler`, `adapter.CardHandler`); the flows
-that act on them are not part of this directory yet, and until they are the program
-logs what it reads and acknowledges nothing.
+packages below. The program receives messages, polls the board and runs timers, and
+hands them to three handler interfaces (`adapter.MessageHandler`,
+`adapter.CardHandler`, `adapter.TimerHandler`). The lane's flows (`adapter.LaneFlows`)
+implement them: they delegate cards, write replies back and close remote sessions.
+What other nodes start (a message to the instance endpoint or to a conversation, a
+reply card) is the `adapter.Inbound` seam, which has no implementation yet: such a
+message is left unacknowledged and such a card stays ready.
 
 ## Layout
 
 | Path | Holds |
 | ---- | ----- |
-| `internal/adapter/` | The adapter program: the `Application`, the direct endpoints, the receive loop, the board poll loop, the probe, the manifest and the package. The handler interfaces the flows implement. |
+| `internal/adapter/` | The adapter program: the `Application`, the direct endpoints, the receive loop, the board poll loop, the timer loop, the probe, the manifest and the package. The handler interfaces and the lane flows that implement them. |
 | `internal/config/` | The instance configuration and its checks; the alias allow-list. |
 | `internal/card/` | The card envelope, strict decoding, validation against the aliases, the assignee rule, the creator check. |
 | `internal/kanban/` | The client of the board: runs `hermes kanban --json`, decodes the answers, classifies failures, names the block kinds and checks the Hermes release. Described in [`kanban-cli`](../../docs/references/adapter-hermes/kanban-cli.md). |

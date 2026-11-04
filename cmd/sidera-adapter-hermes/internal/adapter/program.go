@@ -67,7 +67,7 @@ func runServe(env ProgramEnv) int {
 	if !ok {
 		out = nopCloser{env.Stdout}
 	}
-	if err := Serve(ctx, env.Stdin, out, log, LogOnly); err != nil {
+	if err := Serve(ctx, env.Stdin, out, log, LaneFlows(nil)); err != nil {
 		fmt.Fprintln(env.Stderr, "sidera-adapter-hermes:", err)
 		return exitFailed
 	}

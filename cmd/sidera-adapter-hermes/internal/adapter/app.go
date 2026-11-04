@@ -124,7 +124,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		return adapterproto.StartResult{}, fmt.Errorf("recording the endpoints the daemon lists: %w", err)
 	}
 	gate := &gate{board: board, report: a.conn.Availability, log: a.log}
-	a.env = &Env{Config: cfg, Board: board, State: store, Log: a.log, Now: a.now, conn: a.conn, endpoints: eps}
+	a.env = &Env{Config: cfg, Board: board, State: store, Log: a.log, Now: a.now, StateDir: a.stateDir, conn: a.conn, endpoints: eps}
 	handlers := a.flows(a.env)
 	a.receiver = newReceiver(a.conn, eps, store, gate, handlers.Messages, a.log, a.now, a.tm)
 	poll := &poller{board: board, gate: gate, handler: handlers.Cards, log: a.log, interval: cfg.PollInterval, tm: a.tm}
@@ -134,6 +134,10 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	a.goLoop(func() { eps.runIdle(a.ctx, cfg.EndpointIdle) })
 	a.goLoop(func() { a.receiver.run(a.ctx) })
 	a.goLoop(func() { poll.run(a.ctx) })
+	if handlers.Timers != nil {
+		timers := &timerLoop{handler: handlers.Timers, gate: gate, log: a.log, tm: a.tm}
+		a.goLoop(func() { timers.run(a.ctx) })
+	}
 	return a.Base.Start(ctx, p)
 }
 

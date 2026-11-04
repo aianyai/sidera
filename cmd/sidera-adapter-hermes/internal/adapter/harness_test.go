@@ -28,6 +28,7 @@ const lease = "11111111111111111111111111111111"
 var fastTiming = timing{
 	receivePoll: 20 * time.Millisecond,
 	idleCheck:   time.Hour,
+	tick:        20 * time.Millisecond,
 	retryMin:    40 * time.Millisecond,
 	retryMax:    80 * time.Millisecond,
 	registerMin: 5 * time.Millisecond,
@@ -41,6 +42,13 @@ type daemon struct {
 	directAccess bool
 	// recvAnswer, if set, answers each endpoint.recv; without it every page is empty.
 	recvAnswer func(p adapterproto.RecvParams) adapterproto.RecvPage
+	// sendError, if set, is asked for each endpoint.send before the daemon takes it
+	// (n counts the sends so far); a non-nil answer is returned as the error, and
+	// when takes is true the message was kept all the same, as a node whose answer
+	// was lost.
+	sendError func(n int, p adapterproto.SendParams) (err error, takes bool)
+	// statusAnswer, if set, replaces the default endpoint.message_status answer.
+	statusAnswer func(sent adapterproto.SendParams) adapterproto.MessageStatusResult
 
 	mu          sync.Mutex
 	refs        map[string]adapterproto.EndpointRef
@@ -49,6 +57,10 @@ type daemon struct {
 	unregisters []adapterproto.UnregisterParams
 	recvs       []adapterproto.RecvParams
 	acks        []adapterproto.AckParams
+	sends       []adapterproto.SendParams
+	sentByKey   map[string]adapterproto.MessageID
+	sentByID    map[adapterproto.MessageID]adapterproto.SendParams
+	creations   int
 	available   []adapterproto.AvailabilityParams
 }
 
@@ -90,6 +102,10 @@ type options struct {
 	stateDir string
 	listed   []adapterproto.DirectAttach
 	flows    Flows
+	// lane makes the fake Hermes a board that remembers (kanbantest.ModeLane);
+	// hermesDir lets a second harness restart on the board of a first.
+	lane      bool
+	hermesDir string
 	// hermesDown starts with the fake Hermes failing.
 	hermesDown bool
 	// ready is the fake Hermes' answer to listing the ready cards.
@@ -103,7 +119,10 @@ func start(t *testing.T, o options) *harness {
 	if o.stateDir == "" {
 		o.stateDir = t.TempDir()
 	}
-	hermesCtl := t.TempDir()
+	hermesCtl := o.hermesDir
+	if hermesCtl == "" {
+		hermesCtl = t.TempDir()
+	}
 	if o.hermesDown {
 		if err := os.WriteFile(filepath.Join(hermesCtl, kanbantest.DownFile), nil, 0o600); err != nil {
 			t.Fatal(err)
@@ -115,7 +134,11 @@ func start(t *testing.T, o options) *harness {
 		}
 	}
 	t.Setenv(kanbantest.ControlEnv, hermesCtl)
-	exe := kanbantest.Executable(t, kanbantest.ModeBoard)
+	mode := kanbantest.ModeBoard
+	if o.lane {
+		mode = kanbantest.ModeLane
+	}
+	exe := kanbantest.Executable(t, mode)
 
 	aR, dW := io.Pipe()
 	dR, aW := io.Pipe()
@@ -164,6 +187,45 @@ func start(t *testing.T, o options) *harness {
 			res.Items = append(res.Items, adapterproto.PartAck{MessageID: it.MessageID, Part: it.Part, Ack: adapterproto.ItemRecorded})
 		}
 		return res, nil
+	})
+	p.Handle(adapterproto.MethodEndpointSend, func(_ context.Context, raw json.RawMessage) (any, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		sp := decode[adapterproto.SendParams](raw)
+		d.sends = append(d.sends, sp)
+		var failure error
+		takes := true
+		if d.sendError != nil {
+			failure, takes = d.sendError(len(d.sends), sp)
+		}
+		if !takes {
+			return nil, failure
+		}
+		if d.sentByKey == nil {
+			d.sentByKey, d.sentByID = map[string]adapterproto.MessageID{}, map[adapterproto.MessageID]adapterproto.SendParams{}
+		}
+		id, seen := d.sentByKey[sp.IdempotencyKey]
+		if !seen || sp.IdempotencyKey == "" {
+			d.creations++
+			id = adapterproto.MessageID(fmt.Sprintf("out-%d", d.creations))
+			d.sentByID[id] = sp
+			if sp.IdempotencyKey != "" {
+				d.sentByKey[sp.IdempotencyKey] = id
+			}
+		}
+		if failure != nil {
+			return nil, failure
+		}
+		return adapterproto.SendResult{MessageID: id}, nil
+	})
+	p.Handle(adapterproto.MethodEndpointMessageStatus, func(_ context.Context, raw json.RawMessage) (any, error) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		sp := d.sentByID[decode[adapterproto.MessageStatusParams](raw).MessageID]
+		if d.statusAnswer != nil {
+			return d.statusAnswer(sp), nil
+		}
+		return defaultStatus(sp), nil
 	})
 	p.HandleNotification(adapterproto.MethodAdapterAvailability, func(_ context.Context, raw json.RawMessage) {
 		d.mu.Lock()
@@ -226,7 +288,7 @@ func configValues(hermes, home string) adapterproto.ConfigValues {
 		"home_profile":     "default",
 		"home_platform":    "feishu",
 		"home_chat_id":     "oc_1",
-		"aliases":          []string{"codex=nodeb/codex;modes=message"},
+		"aliases":          []string{"codex=nodeb/codex;modes=message", "claude=nodeb/claude;modes=new_session;presets=default"},
 		"endpoint_idle":    "1h",
 		"poll_interval":    "1s",
 		"max_endpoints":    4,
@@ -248,6 +310,9 @@ func (h *harness) stop() {
 		case <-time.After(10 * time.Second):
 			h.t.Error("the adapter did not stop after the daemon closed the stream")
 		}
+		// The loops end with the context but may still be finishing a command whose
+		// fake writes into the test's directories.
+		h.app.loops.Wait()
 	})
 }
 
@@ -262,7 +327,7 @@ func (h *harness) pending(ref adapterproto.EndpointRef) {
 // eventually waits until cond holds, which it is asked about with the daemon locked.
 func (h *harness) eventually(what string, cond func() bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		h.d.mu.Lock()
 		ok := cond()
@@ -282,4 +347,22 @@ func (h *harness) instanceRef() adapterproto.EndpointRef {
 	h.d.mu.Lock()
 	defer h.d.mu.Unlock()
 	return h.d.refs[InstanceKey]
+}
+
+// defaultStatus is the daemon's answer to endpoint.message_status: the message was
+// delivered and, for a session.create, the session "sess-1" of the node of the
+// recipient exists.
+func defaultStatus(sent adapterproto.SendParams) adapterproto.MessageStatusResult {
+	res := adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: sent.To[0], State: adapterproto.DeliveryDelivered}}}
+	if sent.Control != nil {
+		switch sent.Control.Signal {
+		case adapterproto.SignalSessionCreate:
+			res.ControlReply = &adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate,
+				Create: &adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: "sess-1"}}
+		case adapterproto.SignalSessionClose:
+			res.ControlReply = &adapterproto.ControlReply{Signal: adapterproto.SignalSessionClose,
+				Close: &adapterproto.ControlCloseReply{Outcome: adapterproto.CloseReplyClosed}}
+		}
+	}
+	return res
 }

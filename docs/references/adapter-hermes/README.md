@@ -8,9 +8,11 @@ instance configuration, the card and its validation, the endpoint model, the sta
 directory, the decisions the adapter makes over them, and the program that talks to
 the daemon, receives messages and polls the board. The client of the board, which
 runs `hermes kanban` and decodes what it prints, has a document of its own:
-[kanban-cli](kanban-cli.md). What the program does with a message or a card it has
-read (delegating a card, completing one with a reply, turning a message into a
-request card) is not in the directory yet, and this document grows with it.
+[kanban-cli](kanban-cli.md). What the program does with a card it has read
+(delegating it) and with a reply (completing the card) is described under
+[Delegating, replying, timers](#delegating-replying-timers). Turning a message to
+the instance endpoint or to a conversation into a request card is not in the
+directory yet, and this document grows with it.
 
 The adapter imports only the `sdk/go` module, as a third-party adapter would.
 
@@ -241,14 +243,16 @@ Rules, and why:
   after the card was written and before the id was recorded), so a handler's effects
   are repeatable.
 
-Until the flows that write cards land, the program's handler logs each message and
-returns `Skip`, so nothing is acknowledged that was not written.
+A message that matches no card the delegation flows can complete, and every message to
+the instance endpoint, is handed to the inbound half (`Inbound`), which does not exist
+yet: its stand-in logs the message and returns `Skip`, so nothing is acknowledged that
+was not written.
 
 ### Polling the board
 
 Every `poll_interval` the adapter lists the ready cards, keeps those whose assignee
-matches the lane (`card.MatchesAssignee`) and hands each to the card handler. It
-claims nothing: the same card is listed again until the handler claims it. The loop
+matches the lane (`card.MatchesAssignee`) and hands each to the card handler. The poll
+itself claims nothing: the same card is listed again until the handler claims it. The loop
 pauses under the same rule as receiving when Hermes cannot be used.
 
 ### Sending
@@ -274,6 +278,10 @@ directory the daemon names in `initialize`). It holds:
 - the open remote sessions with their last use and when a close was last tried;
 - the ids of processed inbound messages with the time each may be forgotten.
 
+A card also records whether the node reported its latest attempt delivered (the adapter
+then stops asking), and a session the message id of a close whose reply has not been
+read.
+
 `Update` applies a function to a copy of the data, writes the result and returns
 only then, so the caller writes a transition before it does what the transition
 says, and an update that fails leaves nothing behind. The file is replaced through a
@@ -293,6 +301,123 @@ for a card blocked for no reply or by a transient failure, since the peer may on
 have been late.
 `Prune` forgets a finished card after the retention, except one whose remote session
 is still open, because a follow-up needs its parent's peer.
+
+### Delegating, replying, timers
+
+The flows are `LaneFlows` in `cmd/sidera-adapter-hermes/internal/adapter`
+(`laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go`). One mutex serializes the
+card handler, the message handler and the timers: all three read and move the same
+cards, and each is a short run of commands.
+
+**A card seen ready.** A card the state does not know is read (`show`), decoded and
+validated against the alias table and the creator list, then placed, claimed,
+recorded and started. A known card goes by `OnReady`. Everything that only reads or
+can be repeated comes before the claim: a card claimed and then left on a transient
+failure would stay claimed, unrecorded, for the whole claim time, and the poll would
+never show it again. So the order is: read the card; resolve the source (below);
+register the endpoint (`Env.Place`); `claim --ttl` with the configured claim time;
+write the record; send. An invalid card is claimed and blocked as `capability` with
+the reason; a card whose mode is `reply` is the inbound half's and is not claimed
+(its stand-in logs it once per card id and leaves it ready).
+
+*Source.* The first row of `notify-list` names the conversation (profile, platform,
+chat, thread). A card with none is subscribed to the home target (`notify-subscribe`)
+before it is claimed: the subscription starts caught up on the card's events, so one
+made after the card was completed would never wake anybody. A cron job's card is
+recognised by its session id (`cron_<job>_<date>_<time>`), anything else with no
+subscription sends from the shared orphan endpoint.
+
+*Sending.* The record is written first (attempt number and start), then the message is
+sent with the key `<card>:<attempt>` (`lane.IdempotencyKey`). The key is built from the
+persisted number, so a send repeated after a crash is the same message to the node and
+cannot create a second remote session; a number written only after the send would give
+the repeat a new key. A `new_session` card sends `session.create` with the preset and
+the task as body to the alias's address; a `message` card sends the task to the
+alias's address. A follow-up (the card has parents and names no alias) goes to the
+peer of its parent from the parent's endpoint (`lane.RouteFollowUp`), because a remote
+session answers only the endpoint that created it. A card whose peer is already
+awaited by another card on the endpoint waits (`lane.ShouldQueue`), is commented as
+queued once, and goes when the earlier card ends.
+
+A send the node refuses with an application error (invalid address, refused) fails the
+card as delivery failed. Any other error leaves the attempt as it is: the next tick
+sends the same attempt with the same key while the window lasts
+(`adapterproto.SentKeyWindow`), then the outcome is unknown. A card is always sent
+through `Env.Send`, which never sets a delivery deadline, which the window relies on.
+
+*What became of the message.* Until the node reports the message delivered, each tick
+reads `endpoint.message_status`. The control reply of a `session.create` names the
+session: `created` and `unconfirmed` both make it the card's peer and record it as an
+open session (an unconfirmed one is commented, and its replies must still match the
+card); `failed` fails the card as delivery failed. A rejected or expired delivery
+fails the card as delivery failed, a delivery of unknown outcome as outcome unknown.
+
+*Failing a card.* `fail` blocks the card with the Hermes kind of the category
+(`lane.BlockKindOf`) and the reason as the block's reason, the first time, and
+completes it with the reason as result the second time (`lane.OnFailure`). When Hermes
+refuses the block, the card is read: if it is blocked already (the adapter blocked it
+just before it ended, or its creator did) the record catches up, if it is finished the
+record ends. A block that failed transiently is simply tried again at the next tick
+since the record has not changed.
+
+**A reply.** The message handler takes messages of conversation and orphan endpoints
+(messages to the instance endpoint are the inbound half's). `MatchReply` finds the
+card; if it asks to read again, the pending session creations of that endpoint are
+read first (their control replies name the sessions) and it is asked once more. A
+message that matches no card goes to the inbound half. For the card:
+
+1. `show` the card. Finished or archived by Hermes: the message is a new message of the
+   conversation and goes to the inbound half, unless a run of the card carries this
+   message's id in its metadata, in which case this very reply completed it and only
+   the acknowledgement was lost: the verdict is `Written`.
+2. A reply over `MaxArgBytes` (less a margin) is written to a file under
+   `<state dir>/attach/`, attached under the Sidera message id as its name after
+   `attachments` showed no file of that name (Hermes stores a second file of one name
+   as `name (1).ext`, so a replay that attached again would leave the reply twice), and
+   the result is a pointer to it.
+3. `complete` with the summary, the reply as result and metadata holding the message
+   id. The summary's first line is written by the adapter ("Sidera reply from
+   <alias>; full text in the result" or "... in the attachment <name>"), never
+   remote text: Hermes wakes the creator with the first line of the summary, and a
+   peer must not be able to put its words into the wake-up. The remote text is only in
+   the result or the attachment, where the creator reads it as a result.
+4. The record ends; the card queued behind it goes.
+
+A failure of Hermes in these steps that may pass is `Retry`: the message stays
+unacknowledged, receiving pauses, Hermes is asked again. One that will not (the card is
+gone, its state does not allow the completion) ends the card here and hands the message
+to the inbound half. A message is never acknowledged for a card that was not written.
+
+*Why a blocked card takes its late reply.* The peer was late, not wrong, and the
+creator is already being asked about the card. Handing the reply to the conversation as
+a new message would answer a request with something nobody asked for. Hermes completes
+a blocked card directly, so no unblock and no claim come first (see above).
+
+**Timers.** `Recover` runs once after start (and again after a failure): every
+unfinished card is read; one Hermes has finished or no longer knows ends in the record.
+Cards listed ready again go through the poll. `Tick` runs every ten seconds while Hermes
+is usable, under the same pause rule as the other loops: it moves every card on
+(`advance`: send what is due, resend an interrupted attempt or declare its outcome
+unknown, read what became of a message, block a card whose wait ran out), closes
+remote sessions and forgets finished records after `session_retention`.
+
+*No reply.* A card whose wait has reached `no_reply_timeout` is blocked as
+`needs_input`; unblocked it waits again with the timer reset and nothing is resent; the
+second time it is completed with "the peer still did not reply after <duration>".
+
+*Closing sessions.* `lane.SessionsToClose` names the sessions due. For each, a
+`session.close` control signal goes from the endpoint that created it, and its message id
+is recorded. A later tick reads the reply: `closed` (or `unsupported`, which asking
+again would not change), or a rejection because the endpoint is closed or missing,
+forgets the session; `close_unconfirmed` keeps it, asked again after
+`lane.CloseRetryInterval`. A close is not waited for, since the other node may answer
+late.
+
+**A card that comes back.** `OnReady` as in the table above, with the claim made first:
+a card blocked as invalid is read and validated again; one blocked for no reply waits
+again; one blocked as transient or never sent sends as the next attempt (the Hermes
+creator asked for the retry, so it gets a new key); an attempt begun within the window
+sends with the same number, one past it fails as outcome unknown.
 
 ### Decisions
 
@@ -436,7 +561,7 @@ and the caller subscribes the notify fields recorded with the endpoint.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| The program: commands, manifest, endpoints, receiving, polling, probe | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
+| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go` and `flows_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |

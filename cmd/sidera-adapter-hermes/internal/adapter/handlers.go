@@ -63,10 +63,23 @@ type CardHandler interface {
 	HandleCard(ctx context.Context, c kanban.Card)
 }
 
-// Handlers are the two flows the loops feed.
+// TimerHandler does the work that is due by the clock rather than by an event:
+// recovery after a start, waits that ran out, sends that were interrupted,
+// remote sessions to close.
+type TimerHandler interface {
+	// Recover runs once after start, before the first Tick, and again after a
+	// failure. It reconciles the records of the adapter with the board.
+	Recover(ctx context.Context) error
+	// Tick does what is due now. It is called every timing.tick while Hermes can be
+	// used.
+	Tick(ctx context.Context)
+}
+
+// Handlers are the flows the loops feed. Timers may be nil: no timer loop runs.
 type Handlers struct {
 	Messages MessageHandler
 	Cards    CardHandler
+	Timers   TimerHandler
 }
 
 // Flows builds the handlers once the adapter has what they work with.
