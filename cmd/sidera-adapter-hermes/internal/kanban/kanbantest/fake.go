@@ -91,6 +91,8 @@ func run(mode string, args []string) int {
 		return recorded(args, "")
 	case ModeBoard:
 		return recorded(args, os.Getenv(ControlEnv))
+	case ModeLane:
+		return lane(args, os.Getenv(ControlEnv))
 	case ModeHang:
 		time.Sleep(time.Minute)
 		return 0

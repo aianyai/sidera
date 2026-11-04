@@ -42,7 +42,11 @@ hermes (`kanbantest.MaybeRun` in `TestMain`, `kanbantest.Executable` for the pat
 to give the client) and answers from the recordings in `testdata/`. Its `board` mode
 also answers listing the ready cards and fails like a locked database while a file
 in its control directory says so. The adapter's tests use it as well, so there is one
-fake and it follows the samples.
+fake and it follows the samples. Its `lane` mode is a board that remembers: tests put
+cards in it (`kanbantest.Update`) and read it back (`Read`, `Commands`); it changes
+the cards the way Hermes 0.22.2 does for claim, block, comment, complete, attach and
+the subscription commands, and a file `fail-<command>` in the control directory makes
+that command fail as a locked database or as a finished card.
 
 ## Re-recording the samples
 
