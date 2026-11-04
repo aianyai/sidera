@@ -25,6 +25,7 @@ const (
 	KeyHermesHome       = "hermes_home"
 	KeyKanbanHome       = "kanban_home"
 	KeyBoard            = "board"
+	KeyDisplayName      = "display_name"
 	KeyHomeProfile      = "home_profile"
 	KeyHomePlatform     = "home_platform"
 	KeyHomeChatID       = "home_chat_id"
@@ -89,6 +90,9 @@ var boardRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 var chatTypes = []string{"dm", "group", "channel", "thread"}
 
+// ChatTypes lists the values of the chat type of a notify subscription.
+func ChatTypes() []string { return slices.Clone(chatTypes) }
+
 // Target says where a wake-up goes: the fields of a Hermes notify subscription,
 // always with the delivery mode that wakes the agent.
 type Target struct {
@@ -132,6 +136,9 @@ type Config struct {
 	KanbanHome string
 	// Board is the slug of the one board the instance serves.
 	Board string
+	// DisplayName is what the instance endpoint is called in the directory. Empty
+	// leaves the choice to the adapter, which names it after the host.
+	DisplayName string
 	// Home is where a wake-up goes when a card has no conversation to wake and
 	// where an inbound request from a stranger lands.
 	Home Target
@@ -163,6 +170,7 @@ func Decode(values adapterproto.ConfigValues) (Config, error) {
 		HermesHome:       r.str(KeyHermesHome, ""),
 		KanbanHome:       r.str(KeyKanbanHome, ""),
 		Board:            r.str(KeyBoard, ""),
+		DisplayName:      r.str(KeyDisplayName, ""),
 		CreatorProfiles:  r.list(KeyCreatorProfiles),
 		NoReplyTimeout:   r.duration(KeyNoReplyTimeout, DefaultNoReplyTimeout, time.Minute),
 		ClaimTTL:         r.duration(KeyClaimTTL, DefaultClaimTTL, time.Hour),
@@ -206,6 +214,11 @@ func Decode(values adapterproto.ConfigValues) (Config, error) {
 	}
 	if c.KanbanHome != "" && !filepath.IsAbs(c.KanbanHome) {
 		r.problem("%s: must be an absolute path", KeyKanbanHome)
+	}
+	if c.DisplayName != "" {
+		if err := adapterproto.ValidateDisplayName(c.DisplayName); err != nil {
+			r.problem("%s: %v", KeyDisplayName, err)
+		}
 	}
 	if !boardRE.MatchString(c.Board) {
 		r.problem("%s: want a board slug (lowercase letters, digits, - and _)", KeyBoard)

@@ -10,4 +10,5 @@ over (`Decode`), and the alias table (`ParseAliases`, `Aliases.Lookup`).
   update the reference.
 - `Target` is the set of fields of a Hermes notify subscription; the state package
   keeps it with each endpoint.
-- Settings must be declared in the package manifest with the same keys and defaults.
+- Settings must be declared in the package manifest with the same keys and defaults
+  (`internal/adapter/manifest.go`; its test decodes the declared defaults).

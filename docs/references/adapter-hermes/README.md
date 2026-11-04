@@ -30,6 +30,7 @@ at once.
 | `hermes_home` | `HERMES_HOME` given to every Hermes process; absolute, required | none |
 | `kanban_home` | Optional `HERMES_KANBAN_HOME`; absolute | none |
 | `board` | The slug of the one board served (`[a-z0-9][a-z0-9_-]{0,63}`) | none |
+| `display_name` | What the instance endpoint is called in the directory | `Hermes (<host name>)` |
 | `home_profile`, `home_platform`, `home_chat_id` | Where a wake-up goes when a card has no conversation; required | none |
 | `home_chat_type`, `home_thread_id`, `home_user_id`, `home_user_id_alt`, `home_parent_chat_id`, `home_guild_id` | The other fields of that notify subscription | none |
 | `aliases` | The allow-list of names a card may address, one entry each (below); at least one | none |
