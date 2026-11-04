@@ -177,8 +177,9 @@ func (f *laneFlows) begin(ctx context.Context, id string, p *plan) {
 // reconcileClaiming settles a record that was written before a claim, at a start
 // and on every tick. A card the board shows running was claimed by this adapter
 // (nothing else claims a card of this lane): it is adopted as if the claim had just
-// been made. A card still ready was not claimed, and the poll takes it again. Any
-// other card is not the adapter's, and the record is dropped. The returned error
+// been made; one it cannot serve is blocked with the reason, so that its creator
+// knows. A card still ready was not claimed, and the poll takes it again. Any other
+// card is not the adapter's, and the record is dropped. The returned error
 // is a failure of Hermes that may pass.
 func (f *laneFlows) reconcileClaiming(ctx context.Context, id string) error {
 	detail, err := f.env.Board.Show(ctx, id)
@@ -196,8 +197,11 @@ func (f *laneFlows) reconcileClaiming(ctx context.Context, id string) error {
 		case err != nil && !isPermanent(err):
 			return err
 		case err != nil || p.reply:
-			f.env.Log.Warn("a card claimed by this adapter cannot be served; it stays claimed", "card", id, "error", err)
-			f.forgetCard(id)
+			// Left alone the card would stay claimed for the whole claim time with nobody
+			// told. Its creator is, by blocking it with the reason; a card Hermes no
+			// longer has ends in the record instead (fail reads it back).
+			f.env.Log.Warn("a card claimed by this adapter cannot be served; it is blocked", "card", id, "error", err)
+			return f.fail(ctx, id, lane.ReasonInvalidCard, "The Sidera adapter claimed this card but cannot serve it. Unblock it to try again.")
 		default:
 			f.begin(ctx, id, p)
 		}

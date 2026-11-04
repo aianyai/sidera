@@ -349,9 +349,11 @@ claim for the whole claim time (seven days by default) while the poll, which lis
 ready cards, never shows it again: the card would sit there unnoticed. At a start, and
 on every tick for as long as a record is in that phase, the card is read. Running: the
 adapter claimed it (nothing else claims a card of this lane), so it is placed and
-started as if the claim had just been made. Still ready: the claim never happened, and
-the poll takes the card like a new one. Anything else, or a card Hermes no longer
-knows: the record is dropped. Only a card the adapter did not know is covered; a known
+started as if the claim had just been made; if it cannot be served (it cannot be read
+any more, or it turns out to be a reply card, which the adapter never claims) it is
+blocked as `capability` with the reason, so its creator knows, and ends in the record
+when Hermes no longer has it. Still ready: the claim never happened, and the poll takes
+the card like a new one. Any other status: the record is dropped. Only a card the adapter did not know is covered; a known
 card that comes back and is claimed again keeps its earlier record until the record
 is completed.
 
