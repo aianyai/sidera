@@ -1,0 +1,2 @@
+exit 2
+kanban: invalid board slug 'Bad Slug!': must be 1-64 chars, lowercase alphanumerics / hyphens / underscores, not starting with '-' or '_'

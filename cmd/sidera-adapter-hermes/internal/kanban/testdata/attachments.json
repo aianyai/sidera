@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "filename": "msg_01.txt",
+    "content_type": "text/plain",
+    "size": 22,
+    "uploaded_by": "sidera",
+    "stored_path": "/home/hermes/.hermes/kanban/kanban/boards/lane/attachments/t_fa6b0cea/msg_01.txt",
+    "created_at": 1793797324
+  },
+  {
+    "id": 2,
+    "filename": "msg_01 (1).txt",
+    "content_type": "text/plain",
+    "size": 22,
+    "uploaded_by": "sidera",
+    "stored_path": "/home/hermes/.hermes/kanban/kanban/boards/lane/attachments/t_fa6b0cea/msg_01 (1).txt",
+    "created_at": 1793797325
+  }
+]

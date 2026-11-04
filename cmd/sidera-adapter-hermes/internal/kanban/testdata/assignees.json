@@ -1,0 +1,32 @@
+[
+  {
+    "name": "default",
+    "on_disk": true,
+    "counts": {}
+  },
+  {
+    "name": "work",
+    "on_disk": true,
+    "counts": {}
+  },
+  {
+    "name": "worker",
+    "on_disk": true,
+    "counts": {}
+  },
+  {
+    "name": "sidera",
+    "on_disk": false,
+    "counts": {
+      "ready": 2,
+      "todo": 1
+    }
+  },
+  {
+    "name": "sidera:node-b",
+    "on_disk": false,
+    "counts": {
+      "done": 1
+    }
+  }
+]

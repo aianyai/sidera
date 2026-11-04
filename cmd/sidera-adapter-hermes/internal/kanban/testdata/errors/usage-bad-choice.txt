@@ -1,0 +1,8 @@
+exit 2
+usage: hermes kanban list [-h] [--mine] [--assignee ASSIGNEE]
+                          [--status {archived,blocked,done,ready,review,running,scheduled,todo,triage}]
+                          [--tenant TENANT] [--session SESSION] [--archived]
+                          [--json]
+                          [--sort {assignee,completed-desc,created,created-desc,priority,priority-desc,status,title,updated}]
+                          [--workflow-template-id ID] [--step-key KEY]
+hermes kanban list: error: argument --status: invalid choice: 'bogus' (choose from 'archived', 'blocked', 'done', 'ready', 'review', 'running', 'scheduled', 'todo', 'triage')

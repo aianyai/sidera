@@ -1,0 +1,221 @@
+{
+  "task": {
+    "id": "t_fa6b0cea",
+    "title": "Ask node-b",
+    "body": "{\"sidera\":1,\"to\":\"node-b\",\"mode\":\"message\",\"task\":\"hello — ünï\\ncode\"}",
+    "assignee": "sidera:node-b",
+    "status": "done",
+    "priority": 0,
+    "tenant": null,
+    "workspace_kind": "scratch",
+    "workspace_path": "/home/hermes/.hermes/kanban/kanban/boards/lane/workspaces/t_fa6b0cea",
+    "branch_name": null,
+    "project_id": null,
+    "created_by": "user",
+    "created_at": 1793797274,
+    "started_at": 1793797287,
+    "completed_at": 1793797309,
+    "result": "r",
+    "skills": [],
+    "max_runtime_seconds": null,
+    "max_retries": null,
+    "model_override": null,
+    "provider_override": null,
+    "session_id": null,
+    "workflow_template_id": null,
+    "current_step_key": null,
+    "completion_contract": "local-only",
+    "last_failure_error": null
+  },
+  "latest_summary": "s",
+  "parents": [],
+  "children": [
+    "t_b811595e"
+  ],
+  "comments": [
+    {
+      "author": "sidera",
+      "body": "-leading dash comment",
+      "created_at": 1793797290
+    },
+    {
+      "author": "worker",
+      "body": "BLOCKED: delivery failed",
+      "created_at": 1793797302
+    },
+    {
+      "author": "worker",
+      "body": "BLOCKED: again",
+      "created_at": 1793797304
+    },
+    {
+      "author": "worker",
+      "body": "while locked",
+      "created_at": 1793797452
+    },
+    {
+      "author": "sidera",
+      "body": "--x",
+      "created_at": 1793797626
+    },
+    {
+      "author": "sidera",
+      "body": "-- y -z",
+      "created_at": 1793797626
+    }
+  ],
+  "events": [
+    {
+      "kind": "created",
+      "payload": {
+        "assignee": "sidera:node-b",
+        "status": "ready",
+        "parents": [],
+        "creator_task_id": null,
+        "tenant": null,
+        "workspace_kind": "scratch",
+        "workspace_path": null,
+        "branch_name": null,
+        "project_id": null,
+        "skills": null,
+        "goal_mode": null,
+        "model_override": null,
+        "provider_override": null
+      },
+      "created_at": 1793797274,
+      "run_id": null
+    },
+    {
+      "kind": "claimed",
+      "payload": {
+        "lock": "host:1234",
+        "expires": 1794402087,
+        "run_id": 1
+      },
+      "created_at": 1793797287,
+      "run_id": 1
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "sidera",
+        "len": 21
+      },
+      "created_at": 1793797290,
+      "run_id": null
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "worker",
+        "len": 24
+      },
+      "created_at": 1793797302,
+      "run_id": null
+    },
+    {
+      "kind": "blocked",
+      "payload": {
+        "reason": "delivery failed",
+        "kind": "transient",
+        "recurrences": 1,
+        "source_status": "ready"
+      },
+      "created_at": 1793797302,
+      "run_id": 1
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "worker",
+        "len": 14
+      },
+      "created_at": 1793797304,
+      "run_id": null
+    },
+    {
+      "kind": "completed",
+      "payload": {
+        "result_len": 1,
+        "summary": "s"
+      },
+      "created_at": 1793797309,
+      "run_id": 2
+    },
+    {
+      "kind": "attached",
+      "payload": {
+        "filename": "msg_01.txt",
+        "size": 22,
+        "by": "sidera"
+      },
+      "created_at": 1793797324,
+      "run_id": null
+    },
+    {
+      "kind": "attached",
+      "payload": {
+        "filename": "msg_01 (1).txt",
+        "size": 22,
+        "by": "sidera"
+      },
+      "created_at": 1793797325,
+      "run_id": null
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "worker",
+        "len": 12
+      },
+      "created_at": 1793797452,
+      "run_id": null
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "sidera",
+        "len": 3
+      },
+      "created_at": 1793797626,
+      "run_id": null
+    },
+    {
+      "kind": "commented",
+      "payload": {
+        "author": "sidera",
+        "len": 7
+      },
+      "created_at": 1793797626,
+      "run_id": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "profile": "sidera:node-b",
+      "step_key": null,
+      "status": "blocked",
+      "outcome": "blocked",
+      "summary": "delivery failed",
+      "error": null,
+      "metadata": null,
+      "worker_pid": null,
+      "started_at": 1793797287,
+      "ended_at": 1793797302
+    },
+    {
+      "id": 2,
+      "profile": "sidera:node-b",
+      "step_key": null,
+      "status": "completed",
+      "outcome": "completed",
+      "summary": "s",
+      "error": null,
+      "metadata": null,
+      "worker_pid": null,
+      "started_at": 1793797309,
+      "ended_at": 1793797309
+    }
+  ]
+}

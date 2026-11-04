@@ -1,0 +1,2 @@
+exit 1
+kanban: unknown parent task(s): t_nope

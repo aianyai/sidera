@@ -1,0 +1,2 @@
+exit 1
+kanban: could not initialize database: database is locked

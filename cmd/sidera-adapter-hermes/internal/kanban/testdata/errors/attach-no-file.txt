@@ -1,0 +1,2 @@
+exit 1
+kanban: no such file: /nonexistent/missing.txt

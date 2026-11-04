@@ -1,0 +1,2 @@
+exit 1
+kanban: attachment exceeds 25 MB limit

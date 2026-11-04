@@ -1,0 +1,35 @@
+[
+  {
+    "task_id": "t_fa6b0cea",
+    "platform": "telegram",
+    "chat_id": "oc_chat1",
+    "thread_id": "th1",
+    "user_id": "ou_u1",
+    "user_id_alt": "on_u1",
+    "chat_type": "group",
+    "notifier_profile": "work",
+    "delivery_mode": "notify+wake",
+    "delivery_metadata": {
+      "guild_id": "g1",
+      "parent_chat_id": "pc1"
+    },
+    "created_at": 1793797344,
+    "last_event_id": 10,
+    "last_ping_event_id": 0
+  },
+  {
+    "task_id": "t_fa6b0cea",
+    "platform": "cron",
+    "chat_id": "jobx",
+    "thread_id": "",
+    "user_id": null,
+    "user_id_alt": null,
+    "chat_type": "dm",
+    "notifier_profile": "default",
+    "delivery_mode": "wake",
+    "delivery_metadata": {},
+    "created_at": 1793797353,
+    "last_event_id": 10,
+    "last_ping_event_id": 0
+  }
+]

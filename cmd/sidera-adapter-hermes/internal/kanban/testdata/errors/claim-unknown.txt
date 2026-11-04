@@ -1,0 +1,2 @@
+exit 1
+no such task: t_nope

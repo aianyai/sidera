@@ -1,0 +1,2 @@
+exit 1
+kanban: board 'nosuch' does not exist. Create it with `hermes kanban boards create nosuch`.

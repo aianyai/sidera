@@ -1,0 +1,70 @@
+{
+  "task": {
+    "id": "t_b811595e",
+    "title": "child of done",
+    "body": null,
+    "assignee": "sidera",
+    "status": "ready",
+    "priority": 0,
+    "tenant": null,
+    "workspace_kind": "scratch",
+    "workspace_path": null,
+    "branch_name": null,
+    "project_id": null,
+    "created_by": "sidera",
+    "created_at": 1793797511,
+    "started_at": null,
+    "completed_at": null,
+    "result": null,
+    "skills": [],
+    "max_runtime_seconds": null,
+    "max_retries": null,
+    "model_override": null,
+    "provider_override": null,
+    "session_id": null,
+    "workflow_template_id": null,
+    "current_step_key": null,
+    "completion_contract": "local-only",
+    "last_failure_error": null
+  },
+  "latest_summary": null,
+  "parents": [
+    "t_fa6b0cea"
+  ],
+  "children": [],
+  "comments": [],
+  "events": [
+    {
+      "kind": "created",
+      "payload": {
+        "assignee": "sidera",
+        "status": "ready",
+        "parents": [
+          "t_fa6b0cea"
+        ],
+        "creator_task_id": null,
+        "tenant": null,
+        "workspace_kind": "scratch",
+        "workspace_path": null,
+        "branch_name": null,
+        "project_id": null,
+        "skills": null,
+        "goal_mode": null,
+        "model_override": null,
+        "provider_override": null
+      },
+      "created_at": 1793797511,
+      "run_id": null
+    },
+    {
+      "kind": "completion_blocked_empty_result",
+      "payload": {
+        "result_preview": null,
+        "summary_preview": null
+      },
+      "created_at": 1793797524,
+      "run_id": null
+    }
+  ],
+  "runs": []
+}

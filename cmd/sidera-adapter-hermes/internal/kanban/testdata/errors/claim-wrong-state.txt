@@ -1,0 +1,2 @@
+exit 1
+cannot claim t_fa6b0cea: status=done lock=(none)

@@ -1,0 +1,36 @@
+[
+  {
+    "slug": "default",
+    "name": "Default",
+    "description": "",
+    "icon": "",
+    "color": "",
+    "default_workdir": null,
+    "project_id": null,
+    "created_at": null,
+    "archived": false,
+    "db_path": "/home/hermes/.hermes/kanban/kanban.db",
+    "is_current": true,
+    "counts": {},
+    "total": 0
+  },
+  {
+    "slug": "lane",
+    "name": "lane",
+    "description": "",
+    "icon": "",
+    "color": "",
+    "default_workdir": null,
+    "project_id": null,
+    "created_at": 1793797263,
+    "archived": false,
+    "db_path": "/home/hermes/.hermes/kanban/kanban/boards/lane/kanban.db",
+    "is_current": false,
+    "counts": {
+      "done": 1,
+      "ready": 2,
+      "todo": 1
+    },
+    "total": 4
+  }
+]

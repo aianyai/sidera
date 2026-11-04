@@ -1,0 +1,2 @@
+exit 1
+kanban: title is required
