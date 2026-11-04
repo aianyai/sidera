@@ -115,7 +115,8 @@ func (c *Client) Claim(ctx context.Context, id string, ttl time.Duration) error 
 // Block marks a card blocked with a typed reason. Hermes also records the reason
 // as a comment before it tries the block, so a refused block (the card is not
 // ready or running, or already blocked) can still leave a "BLOCKED: ..." comment.
-// A second block of the same kind on a card sends it to triage.
+// A block with the kind the card was last blocked with, which Hermes keeps through
+// an unblock, sends the card to triage.
 func (c *Client) Block(ctx context.Context, id string, kind BlockKind, reason string) error {
 	if !kind.Valid() {
 		return fmt.Errorf("kanban: %q is not a block kind Hermes accepts", kind)

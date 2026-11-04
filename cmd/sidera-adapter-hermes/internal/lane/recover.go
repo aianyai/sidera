@@ -54,9 +54,9 @@ func (r Reason) Category() state.Category {
 // vocabulary: an invalid card cannot be done as written (capability), a failure
 // that may be gone on the next try is transient, and a card waiting for a peer
 // that has not answered waits for input. The three stay distinct because Hermes
-// counts blocks per kind and sends a card to triage, where nobody is woken, on the
-// second block of one kind; mapping two categories to one kind would spend that
-// second block on a different cause.
+// sends a card to triage, where nobody is woken, when it is blocked again with the
+// kind it was last blocked with; mapping two categories to one kind would spend that
+// repeat on a different cause.
 func BlockKindOf(cat state.Category) kanban.BlockKind {
 	switch cat {
 	case state.CategoryInvalidCard:
@@ -75,8 +75,9 @@ const (
 	// VerdictBlock: block the card and let its creator decide.
 	VerdictBlock Verdict = iota + 1
 	// VerdictComplete: complete the card and say in the result why it failed. A
-	// second block of the same kind would send the card to a state in which nobody
-	// is woken, so a card is blocked once per category and ends the second time.
+	// repeat of the kind the card was last blocked with would send it to a state in
+	// which nobody is woken, so a card is blocked once per category and ends the
+	// second time.
 	VerdictComplete
 )
 

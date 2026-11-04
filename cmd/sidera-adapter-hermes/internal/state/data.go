@@ -35,9 +35,9 @@ const (
 	PhaseFinished Phase = "finished"
 )
 
-// Category groups the reasons a card is blocked as Hermes does: a second block of
-// the same kind sends a card to triage, where nobody is woken, so the adapter
-// counts blocks per category and never blocks twice for the same one.
+// Category groups the reasons a card is blocked as Hermes does: a block with the
+// kind the card was last blocked with sends it to triage, where nobody is woken, so
+// the adapter counts blocks per category and never blocks twice for the same one.
 type Category string
 
 const (

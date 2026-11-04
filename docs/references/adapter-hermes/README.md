@@ -849,11 +849,13 @@ remote session closed; no reply. Each category has its own Hermes block kind
 | Transient | `transient`: a failure that may be gone on the next try |
 | No reply | `needs_input`: the card waits for an answer that has not come |
 
-Hermes counts blocks per kind and sends a card to triage on the second block of one
-kind, so two categories sharing a kind would use up the one block of the other. A
-card is blocked once per category. The second
-time it is completed, saying why, because Hermes puts a card blocked twice for the same
-kind into a state where nobody is woken. So: a first timeout blocks the card; once
+Hermes stores the kind a card was last blocked with, keeps it through an unblock and
+clears it only when the card is completed, and sends the card to triage, where nobody
+is woken, when it is blocked again with the stored kind (`_route_block`, limit 2). Two
+categories sharing a kind would use up the one block of the other. Blocking with
+another kind in between would reset Hermes' count, but the adapter does not rely on
+that: a card is blocked once per category. The second time it is completed, saying
+why, because a repeat of the stored kind would put it where nobody is woken. So: a first timeout blocks the card; once
 unblocked it waits again, and a second timeout completes it saying the peer still
 did not reply. A first delivery failure blocks it; once unblocked it is sent again,
 and a second failure completes it with the reason.
@@ -894,8 +896,8 @@ or the home target.
 - **Strict decoding.** A card or a setting that is slightly wrong is refused with the
   reason, not guessed at; the creator of a card is an agent that can read the reason
   and correct it.
-- **Block once, then complete.** Hermes counts blocks of one kind per card and a
-  second goes to a state no agent is woken from. The adapter spends the one block it
+- **Block once, then complete.** Hermes sends a card blocked again with the kind it was
+  last blocked with to a state no agent is woken from. The adapter spends the one block it
   has on each category and finishes the card the second time, which wakes the creator.
 - **No fsync.** The adapter is a link in a chain whose ends already report failure. A
   transition lost with a power cut shows to the sender as a delivery of unknown

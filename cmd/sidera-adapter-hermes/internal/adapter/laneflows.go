@@ -125,7 +125,7 @@ func failureSummary(cat state.Category, replyCard bool) string {
 // endFailed ends what a card that cannot go on was doing, once per cause, for a
 // delegated card and a reply card alike: the first time it is blocked so that its
 // creator decides, the second time it is completed with the reason, since Hermes
-// sends a card blocked twice for one kind to a state in which nobody is woken
+// sends a card blocked again with its last kind to a state in which nobody is woken
 // (lane.OnFailure). blocks are the blocks the card has had; text is the reason, and
 // completionText replaces it when the card is completed and the second time has
 // something else to say. blocked says which of the two was tried, and the error

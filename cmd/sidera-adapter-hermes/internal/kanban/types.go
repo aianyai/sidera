@@ -25,7 +25,7 @@ const (
 
 // BlockKind is the typed reason of a block. It is the one home of Hermes'
 // vocabulary (VALID_BLOCK_KINDS): `block --kind` accepts exactly these four, and
-// a second block of the same kind on a card sends it to triage.
+// a block with the kind a card was last blocked with sends it to triage.
 type BlockKind string
 
 const (

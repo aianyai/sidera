@@ -18,8 +18,8 @@ does I/O. The caller records the transition with `state.Store.Update`, then acts
 Rules: `Reason` and `state.Category` are this adapter's own vocabulary and say nothing
 about how the board names a block; `BlockKindOf` is the only place that maps one to
 the other (invalid card to `capability`, transient to `transient`, no reply to
-`needs_input`). The three kinds stay distinct because Hermes sends a card to triage on
-the second block of one kind. A card that awaits a reply (`state.Card.AwaitsReply`)
+`needs_input`). The three kinds stay distinct because Hermes sends a card to triage when it
+is blocked again with the kind it was last blocked with. A card that awaits a reply (`state.Card.AwaitsReply`)
 is matched to the reply even when blocked, and is completed from the blocked state
 as it stands, with no unblock or new claim before; a blocked card does not hold its
 peer for `ShouldQueue` and `NextQueued`. Cards are passed in claim order (`Data.CardList`).
