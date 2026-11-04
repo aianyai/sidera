@@ -24,7 +24,7 @@ module=github.com/aianyai/sidera
 platforms="darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
 # The adapters, each shipped as a package for every platform above: an adapter
 # whose manifest lists fewer makes its `package` subcommand refuse and the script stop.
-adapters="claude codex console"
+adapters="claude codex console hermes"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <version> <outdir>" >&2

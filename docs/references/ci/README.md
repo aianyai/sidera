@@ -280,7 +280,8 @@ carries the script that signs, so who may create a tag `v*` is who may sign; pro
 version, the commit and the distribution `archive` stamped into every program (see
 [`internal/release`](../../../internal/release/README.md)), for darwin/arm64,
 darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64: `sidera`,
-`sidera-adapter-claude`, `sidera-adapter-codex` and `sidera-adapter-console`. Each adapter's
+`sidera-adapter-claude`, `sidera-adapter-codex`, `sidera-adapter-console` and
+`sidera-adapter-hermes`. Each adapter's
 `package` subcommand then writes its package (and refuses a platform its manifest does not list),
 which is where a package gets the release version in its manifest. An adapter's program is shipped inside its package and
 nowhere else, except the console's, which is also the top-level
@@ -289,7 +290,7 @@ client and the owner runs it from the archive. `<outdir>` ends up with exactly:
 
 | File | Holds |
 | ---- | ----- |
-| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/` and `adapters/claude/`) |
+| `sidera_<version>_<os>_<arch>.tar.gz` (`.zip` for Windows), six of them | at the top level, with no directory around them: `sidera` and `sidera-adapter-console` (`.exe` on Windows), `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt`, which names the install guide of that version, `https://github.com/aianyai/sidera/blob/v<version>/docs/guide/install.md`, and `adapters/<name>/` with the package of each adapter built (`sidera-adapter.json` and `bin/<program>`; `adapters/console/`, `adapters/codex/`, `adapters/claude/` and `adapters/hermes/`) |
 | `checksums.txt` | `sha256sum`-style lines, the SHA-256 and the name of every archive |
 
 Before it builds anything the script checks that both install guides,
@@ -401,8 +402,8 @@ from the files as `sign` downloaded them, after their checksums were checked aga
 
 `THIRD_PARTY_NOTICES` is written by `scripts/third-party-notices.sh` before anything
 is built, and every archive holds the same file. It lists the Go standard library
-and every module that `go list -deps` reports for the four programs
-(`sidera` and the three adapters) on all six platforms, built with
+and every module that `go list -deps` reports for the five programs
+(`sidera` and the four adapters) on all six platforms, built with
 `CGO_ENABLED=0` as the release is, so a module that only one platform or one
 program links is listed. For each it gives the path, the version, the name of the
 licence and the text of every licence file (`LICENSE*`, `COPYING*`) and notice file

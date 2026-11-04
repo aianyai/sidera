@@ -179,7 +179,7 @@ release before 0.12.0 are upgraded with these steps.
    and [the Codex App Server after an upgrade](#the-codex-app-server-after-an-upgrade)).
 
 2. Replace the programs on your `PATH` with the new release's: `sidera` and
-   `sidera-adapter-console`. The adapter programs of Codex and Claude Code are
+   `sidera-adapter-console`. The adapter programs of Codex, Claude Code and Hermes are
    replaced by installing their packages in step 4. Extract the new archive into a
    directory of its own, for example `~/sidera-release`
    (`mkdir -p ~/sidera-release && tar -xzf <archive> -C ~/sidera-release`; on
@@ -247,7 +247,7 @@ release before 0.12.0 are upgraded with these steps.
    of the adapter or the same version rebuilt, and restarts the enabled instances of
    that adapter, which then run the new files. Nothing is disabled: the instances keep
    their session endpoints, and the new adapter takes the sessions back as it does
-   after any restart. Run it for every adapter you use (`console`, `codex`, `claude`).
+   after any restart. Run it for every adapter you use (`console`, `codex`, `claude`, `hermes`).
    Replacing the package of an adapter that runs is a request the owner makes on the
    node itself.
 

@@ -60,9 +60,10 @@ An archive holds:
 | `adapters/codex/` | The ready-to-install package of the Codex adapter. |
 | `adapters/claude/` | The package of the Claude Code adapter. |
 | `adapters/console/` | The package of the console bridge. |
+| `adapters/hermes/` | The package of the Hermes adapter. |
 | `LICENSE`, `THIRD_PARTY_NOTICES`, `README.txt` | The license, the notices of bundled software and a short note. |
 
-The adapter programs for Codex and Claude Code are inside their packages; you
+The adapter programs for Codex, Claude Code and Hermes are inside their packages; you
 install a package with `sidera adapter install <directory>/adapters/<name>` and do
 not copy those programs yourself. On Windows the programs end in `.exe`. The
 release notes are on the release page, not in the archive.
@@ -201,14 +202,14 @@ You need Go 1.26 or newer and the repository checked out.
 git clone https://github.com/aianyai/sidera.git
 cd sidera
 mkdir -p bin
-CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex ./cmd/sidera-adapter-claude
+CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex ./cmd/sidera-adapter-claude ./cmd/sidera-adapter-hermes
 ```
 
 Then make the adapter packages that `sidera adapter install` reads. Each adapter
 program has a `package` command for this:
 
 ```sh
-for a in console codex claude; do
+for a in console codex claude hermes; do
   bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" \
     --binary bin/sidera-adapter-$a --out packages/$a
 done

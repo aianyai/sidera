@@ -218,10 +218,10 @@ Choose A (release archive) or B (source).
 
    Changing the user `PATH` is a persistent change (see "Ask your owner before").
    If the archive extracted into a subdirectory, copy from there. The adapter
-   packages (Codex, Claude Code, console) are in the extracted
+   packages (Codex, Claude Code, Hermes, console) are in the extracted
    `adapters/<name>/` directories, `~/sidera-release/adapters/<name>` on macOS and
    Linux and `%USERPROFILE%\sidera-release\adapters\<name>` on Windows; the adapter
-   programs for Codex and Claude Code are inside them and are not copied by hand.
+   programs for Codex, Claude Code and Hermes are inside them and are not copied by hand.
 
    From 0.12.0 on, upgrade a node installed this way with `sidera update` (ask your owner first: it
    replaces the programs, restarts the daemon and installs the new adapter packages;
@@ -237,8 +237,8 @@ You need Go 1.26 or newer.
 git clone https://github.com/aianyai/sidera.git && cd sidera
 mkdir -p bin packages ~/.local/bin
 CGO_ENABLED=0 go build -o bin/ ./cmd/sidera ./cmd/sidera-adapter-console ./cmd/sidera-adapter-codex
-CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude
-for a in console codex claude; do bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-$a --out packages/$a; done
+CGO_ENABLED=0 go build -o bin/ ./cmd/sidera-adapter-claude ./cmd/sidera-adapter-hermes
+for a in console codex claude hermes; do bin/sidera-adapter-$a package --goos "$(go env GOOS)" --goarch "$(go env GOARCH)" --binary bin/sidera-adapter-$a --out packages/$a; done
 cp bin/sidera bin/sidera-adapter-console ~/.local/bin/
 ```
 
