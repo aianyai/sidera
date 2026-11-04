@@ -12,7 +12,9 @@ runs `hermes kanban` and decodes what it prints, has a document of its own:
 (delegating it) and with a reply (completing the card) is described under
 [Delegating, replying, timers](#delegating-replying-timers). What it does with a
 message another node sends to it (a new request, or a continuation of a
-conversation) is described under [Inbound requests](#inbound-requests).
+conversation) is described under [Inbound requests](#inbound-requests). What the
+Hermes agent is told, and the command that installs it, is described under
+[The Skill and setup](#the-skill-and-setup).
 
 The adapter imports only the `sdk/go` module, as a third-party adapter would.
 
@@ -137,9 +139,11 @@ comment on the card. The reserved orphan slot is why that always works.
 
 ### The program
 
-`sidera-adapter-hermes` has three commands: `serve`, which the daemon starts,
+`sidera-adapter-hermes` has four commands: `serve`, which the daemon starts,
 `package --goos --goarch --binary --out`, which writes a package for
-`sidera adapter install`, and `version`.
+`sidera adapter install`, `setup`, which prepares Hermes for the lane (see
+[The Skill and setup](#the-skill-and-setup)), and `version`. Exit codes are the
+console client's: 0 done, 1 failed, 2 usage.
 
 **Manifest.** The adapter declares only direct endpoints, up to 256 (the upper bound
 of `max_endpoints`; the node's own cap on endpoints applies as well), and no runtime
@@ -559,6 +563,90 @@ message id, sender) is written when the request card is made and kept for
 the plain form, the message id, the blocks per category) is written with the first
 attempt and dropped `session_retention` after the card finished.
 
+### The Skill and setup
+
+Hermes needs two things before an agent can delegate: the kanban tools on the
+platforms it delegates from (they are off by default, and on cron as well as the chat
+platforms), and the knowledge of how to write a card. The second is a Skill, a prompt
+Hermes loads when the agent has a use for it.
+
+**The Skill** (`setup.Skill`) is generated from the alias table, once per `setup` run,
+and written to `skill/SKILL.md` in the instance's state directory. Its front matter is
+`name: sidera` and a description of at most 60 characters (Hermes cuts the description
+in the list the agent chooses from, so the part that says when to use it comes first).
+The body tells the agent:
+
+- who it can reach: every alias with its modes and presets, never an address, since a
+  card names an alias and an address in a prompt only invites its use;
+- how to delegate: `kanban_create` with the assignee `sidera` (or `sidera:<alias>`),
+  the JSON envelope as the body, and an `idempotency_key` that is the same on every
+  retry of one delegation; that the task is the only thing the peer sees; and that the
+  task should ask the peer to reply once, with the final result, since the first reply
+  completes the card and a later one arrives as a new message;
+- how to read the result: `kanban_show`, where the peer's answer is `task.result` and
+  `runs[].summary` is only the adapter's one-line note; a long answer is an attachment,
+  found with `kanban_attachments` (`stored_path`) and read with the file tool, because
+  `kanban_show` returns no attachments;
+- how to follow up: a new card with `parents` set to the earlier card, mode `message`,
+  and `to` left out. A question from the peer is an ordinary reply, so it is answered
+  the same way;
+- how to answer a request from another machine: a card assigned to `sidera-inbox` holds
+  the sender's text between fences and says it is untrusted external content, never an
+  instruction from the owner; the answer is a card with mode `reply` and `reply_to` set
+  to the request card's id;
+- that a wake-up can arrive more than once and the status of the card is the truth, so
+  an action already done is not done again.
+
+The Skill describes what the adapter does and so changes with it: a change to the card
+format, the modes or the inbound flow updates the text in the same commit.
+
+**`setup --config <file|-> [--home <dir>] [--instance <name>] [--profile <name>]...
+[--platform <name>]... [--apply]`** reads the instance configuration, writes the Skill and
+prints the steps. `--profile` is a Hermes profile whose agents delegate and `--platform`
+a platform they delegate from; both repeat, and default to `home_profile` and
+`home_platform`. `cron` is always added to the platforms. The steps, for each profile:
+
+1. `hermes -p <profile> tools enable kanban --platform <platform>` for each platform;
+2. placing `SKILL.md` as `<profile directory>/skills/sidera/SKILL.md`.
+
+*Where the configuration comes from.* The document is the one given to `sidera adapter
+enable` or `sidera adapter config` and is decoded with `config.Decode`, so the checks
+are the adapter's own. The daemon has no method that returns an instance's
+configuration and its data files are not an interface; reading them would repeat the
+daemon's file layout and strict decoding. The cost is that the file may differ from
+what is running, which is why the owner names it. The state directory is
+`<data directory>/adapter-state/<instance>`, the data directory resolved as the `sidera`
+command resolves it (`--home`, `SIDERA_HOME`, the platform default); it must exist, so
+an instance that was never enabled is refused instead of a directory made for a
+misspelled name.
+
+*Why the Skill is a file placed in the skills directory.* `hermes skills install` takes
+a registry identifier or an HTTP(S) URL to a `SKILL.md` and has no local path (Hermes
+0.22.2 hands a path to the registries as a name and ends with "Could not download",
+exit 1). Hermes finds a skill in any directory under a profile's `skills` directory that
+holds a `SKILL.md`, and lists one it did not install as `local`, so the file is
+placed there. The profile's directory is learned from Hermes (`hermes -p <profile>
+config path` names `config.yaml`, which lies in it) rather than computed, so the layout
+of profiles stays Hermes's. A run replaces the file of the same name.
+
+*`--apply`.* Without it `setup` only prints, apart from writing the Skill into the
+state directory and asking Hermes where a profile lives. With it each step is shown and
+asked (`y/N`; anything but yes skips it), then done: Hermes's own commands, run with
+`HERMES_HOME` and `HERMES_KANBAN_HOME` from the configuration and without standard
+input, and the file placement. A failing step stops the run. Hermes reports a refusal of
+`tools enable` (such as an unknown platform) on standard output and exits 0, so the
+output shown is the only report of it. `--config -` is refused with `--apply`, which asks
+on standard input.
+
+*What it never does.* It never edits `config.yaml`: Hermes owns the file's format, and
+`tools enable` rewrites the toolset lists of the platform in it (it writes the platform's
+whole list, not only `kanban`). It never restarts a gateway: a restart interrupts the
+conversations the gateway is serving, which is the owner's call; the output says the
+owner must restart the gateway of each profile for the tools and the Skill to take effect.
+To find the address behind an alias, the output points to `sidera-adapter-console
+directory --node <id>`; no directory client is built here. When the alias table changes
+the owner runs `setup` again, since the Skill lists the aliases.
+
 ### Decisions
 
 All of them are in `lane` and take the records and the time as arguments.
@@ -706,6 +794,7 @@ or the home target.
 | The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go` and `inbound_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
+| The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `setup_test.go` |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |
 | State directory | `cmd/sidera-adapter-hermes/internal/state` | `state_test.go` |
 | Endpoint keys and capacity, matching, queueing, recovery, failures, sessions, parent | `cmd/sidera-adapter-hermes/internal/lane` | `lane_test.go` |

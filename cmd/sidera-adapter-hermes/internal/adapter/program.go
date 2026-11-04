@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/setup"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -27,6 +28,9 @@ commands:
   serve      the adapter role; the daemon starts it, a person does not
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
              write an adapter package for 'sidera adapter install'
+  setup --config <file|-> [--apply] [...]
+             write the Sidera Skill for the instance's aliases and print the steps that
+             let Hermes use it; --apply runs them after asking ('setup --help')
   version    the version, the commit and the Go version of this program
 `
 
@@ -51,6 +55,8 @@ func Main(args []string, env ProgramEnv) int {
 		return runServe(env)
 	case "package":
 		return runPackage(args[1:], env)
+	case "setup":
+		return setup.Run(args[1:], setup.Env{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr, Getenv: os.Getenv})
 	case "version":
 		fmt.Fprintln(env.Stdout, release.Read().Describe(ProgramName))
 		return exitOK
