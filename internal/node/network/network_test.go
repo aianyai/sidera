@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -235,13 +236,17 @@ func TestMemberProtocolsWaitForTheExchange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		framed, err := nodeproto.AppendFrame(nil, req, 1<<16)
+		if err != nil {
+			t.Fatal(err)
+		}
 		// A reset can fail the write before the read reports it, and only the
 		// read carries the peer's reset code.
-		if _, err := s.Write(req); err == nil {
-			s.CloseWrite()
+		_, _ = s.Write(framed)
+		if _, err = nodeproto.ReadFrame(bufio.NewReader(s), 1<<16); err != nil {
+			return err
 		}
-		_, err = nodeproto.ReadMessage(s, 1<<16)
-		return err
+		return s.Close()
 	}
 	if err := callRaw(); !errors.Is(err, gatedByPeer) {
 		t.Fatalf("a send before the exchange completed ended with %v, want the peer's gate reset", err)

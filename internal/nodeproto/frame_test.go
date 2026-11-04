@@ -120,16 +120,37 @@ func TestLimits(t *testing.T) {
 	}
 }
 
-// The largest legal message of each kind fits its limit: a limit below it would
-// make a node refuse what the protocol lets a peer send.
+// TestOfferedIdentifiers: a call proposes the current identifier of a protocol
+// first and its legacy one second, and both are held to the same limits, which
+// bound the payload of a frame as they bound the message of a legacy stream.
+func TestOfferedIdentifiers(t *testing.T) {
+	for _, current := range []string{ProtocolSend, ProtocolPull, ProtocolDirectory} {
+		offered := Offer(current)
+		if len(offered) != 2 || offered[0] != current || IsLegacy(current) || !IsLegacy(offered[1]) {
+			t.Fatalf("%s is offered as %v", current, offered)
+		}
+		if a, b := limit(offered[0]), limit(offered[1]); a != b {
+			t.Errorf("%s: limits %+v and %+v differ", current, a, b)
+		}
+	}
+	for _, other := range []string{LegacyProtocolSend, "/sidera/pairing/1.0.0"} {
+		if Offer(other) != nil {
+			t.Errorf("%s is offered", other)
+		}
+	}
+}
+
+// The largest legal message of each kind fits its limit, as the frame that
+// carries it: a limit below it would make a node refuse what the protocol lets a
+// peer send.
 func TestLargestMessagesFit(t *testing.T) {
 	t.Run("send request with the longest envelope", func(t *testing.T) {
 		b, err := SendRequest{Sender: ep1, Envelope: make([]byte, envelope.MaxEncoded())}.Encode()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(b) > limit(ProtocolSend).Request {
-			t.Errorf("%d bytes over the limit %d", len(b), limit(ProtocolSend).Request)
+		if _, err := AppendFrame(nil, b, limit(ProtocolSend).Request); err != nil {
+			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolSend).Request, err)
 		}
 	})
 	t.Run("directory answer with a full page of the longest entries", func(t *testing.T) {
@@ -145,8 +166,8 @@ func TestLargestMessagesFit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(b) > limit(ProtocolDirectory).Answer {
-			t.Errorf("%d bytes over the limit %d", len(b), limit(ProtocolDirectory).Answer)
+		if _, err := AppendFrame(nil, b, limit(ProtocolDirectory).Answer); err != nil {
+			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolDirectory).Answer, err)
 		}
 	})
 	t.Run("send answer with a report per recipient and a control reply", func(t *testing.T) {
@@ -162,8 +183,8 @@ func TestLargestMessagesFit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(b) > limit(ProtocolSend).Answer {
-			t.Errorf("%d bytes over the limit %d", len(b), limit(ProtocolSend).Answer)
+		if _, err := AppendFrame(nil, b, limit(ProtocolSend).Answer); err != nil {
+			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolSend).Answer, err)
 		}
 	})
 }

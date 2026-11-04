@@ -29,9 +29,9 @@ type streamHandler func(ctx context.Context, s lnet.Stream, e *connEntry)
 // registerHandlers registers every protocol this package serves, through the gate.
 func (n *Network) registerHandlers() {
 	n.handle(string(preauth.ProtocolCertExchange), n.serveExchange)
-	n.handle(nodeproto.ProtocolSend, n.serveSend)
-	n.handle(nodeproto.ProtocolPull, n.servePull)
-	n.handle(nodeproto.ProtocolDirectory, n.serveDirectory)
+	n.handleCall(nodeproto.ProtocolSend, runSend)
+	n.handleCall(nodeproto.ProtocolPull, runPull)
+	n.handleCall(nodeproto.ProtocolDirectory, runDirectory)
 	n.handle(string(preauth.ProtocolPairing), n.servePairing)
 }
 
@@ -66,31 +66,40 @@ func (n *Network) serve(proto string, s lnet.Stream, h streamHandler) {
 	h(n.ctx, s, e)
 }
 
-// openStream opens a stream of a protocol on one connection, the one this side
-// judged to may use it; the host's own stream function would pick any
-// connection to the peer. A protocol the state does not allow is not opened.
-func (n *Network) openStream(ctx context.Context, e *connEntry, proto string) (lnet.Stream, error) {
-	access := preauth.Allowed(n.stateOf(e), preauth.Use{Protocol: preauth.ProtocolID(proto)})
-	if access.Verdict != preauth.VerdictAllow {
-		return nil, fmt.Errorf("%w (%s)", errNotAllowed, access.Reason)
+// openStream opens a stream on one connection, the one this side judged to may
+// use the protocol; the host's own stream function would pick any connection to
+// the peer. The protocols are proposed in order and the first the peer serves is
+// the stream's (lnet.Stream.Protocol). A protocol the state does not allow is not
+// opened.
+func (n *Network) openStream(ctx context.Context, e *connEntry, protos ...string) (lnet.Stream, error) {
+	state := n.stateOf(e)
+	for _, proto := range protos {
+		if access := preauth.Allowed(state, preauth.Use{Protocol: preauth.ProtocolID(proto)}); access.Verdict != preauth.VerdictAllow {
+			return nil, fmt.Errorf("%w (%s)", errNotAllowed, access.Reason)
+		}
 	}
-	return openRaw(ctx, e.conn, proto)
+	return openRaw(ctx, e.conn, protos...)
 }
 
-// openRaw opens a stream on the connection and negotiates the protocol, under
-// the context. Nothing of the request has been written when it returns.
-func openRaw(ctx context.Context, c lnet.Conn, proto string) (lnet.Stream, error) {
+// openRaw opens a stream on the connection and negotiates the first of the
+// protocols the peer serves, under the context. Nothing of the request has been
+// written when it returns.
+func openRaw(ctx context.Context, c lnet.Conn, protos ...string) (lnet.Stream, error) {
 	s, err := c.NewStream(ctx)
 	if err != nil {
 		return nil, err
 	}
 	stop := context.AfterFunc(ctx, func() { s.Reset() })
-	err = msmux.SelectProtoOrFail(protocol.ID(proto), s)
+	ids := make([]protocol.ID, len(protos))
+	for i, p := range protos {
+		ids[i] = protocol.ID(p)
+	}
+	selected, err := msmux.SelectOneOf(ids, s)
 	if !stop() {
 		err = errors.Join(ctx.Err(), err)
 	}
 	if err == nil {
-		err = s.SetProtocol(protocol.ID(proto))
+		err = s.SetProtocol(selected)
 	}
 	if err != nil {
 		s.Reset()

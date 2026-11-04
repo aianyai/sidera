@@ -13,14 +13,15 @@ to the engine.
 
 | Name | Purpose |
 | ---- | ------- |
-| `ProtocolSend`, `ProtocolPull`, `ProtocolDirectory`, `Protocols()` | The identifiers, defined here and nowhere else. They are not in the pre-authentication access table, so only members may use them. |
-| `LimitOf(protocol)`, `Limit` | The byte limit of the request a server reads and of the answer a client reads. |
+| `ProtocolSend`, `ProtocolPull`, `ProtocolDirectory`, `LegacyProtocolSend`, `LegacyProtocolPull`, `LegacyProtocolDirectory`, `Protocols()` | The identifiers (2.0.0, framed; and the 1.0.0 ones of the nodes before it, kept until no such node is in use), defined here and nowhere else. They are not in the pre-authentication access table, so only members may use them. |
+| `Offer(protocol)`, `IsLegacy(protocol)` | The identifiers a client proposes for a call, current first and legacy second; whether an identifier is a legacy one, whose streams are not framed. |
+| `LimitOf(protocol)`, `Limit` | The byte limit of the request a server reads and of the answer a client reads, the same under both identifiers of a protocol; on a framed stream, the limit of the frame's payload. |
 | `Outcome`, `OutcomeOK`, `OutcomeRefused`, `OutcomeFailed` | How the target handled a request; the first field of every answer. |
 | `SendRequest`, `SendAnswer`, `DecodeSendRequest`, `DecodeSendAnswer` | Send: an envelope as bytes; the receipt. |
 | `PullRequest`, `PullAnswer`, `DecodePullRequest`, `DecodePullAnswer` | Pull: a message and its recipients; reports, no-record endpoints and the control reply. |
 | `DirectoryRequest`, `DirectoryAnswer`, `DirectoryEntry`, `DecodeDirectoryRequest`, `DecodeDirectoryAnswer` | Directory: a cursor and a page size; a page of entries. |
-| `ReadMessage(r, max)` | Reads the one message of a single-message stream to its end, at most `max` bytes. |
-| `AppendFrame`, `ReadFrame` | One frame of a multi-frame stream: an unsigned varint length, then the payload. |
+| `ReadMessage(r, max)` | Reads the one message of a legacy (1.0.0) stream to its end, at most `max` bytes. |
+| `AppendFrame`, `ReadFrame` | One frame: an unsigned varint length, then the payload. A 2.0.0 member stream is one frame each way; the pairing protocol's streams are many. |
 
 Every message has an `Encode` method and a `Decode…` function. Errors wrap
 `ErrInvalid` for a rule of the protocol, `ErrFrame` for the framing, and the

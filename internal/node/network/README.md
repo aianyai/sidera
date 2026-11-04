@@ -32,7 +32,7 @@ clock), touches no file and takes no randomness of its own.
 | `Network.CheckAddresses(node, addrs)` | The rule for addresses the owner enters: judged by `config.ValidatePeerAddress`, then one must name the peer while no certificate is held, and every `/p2p/` must be the held certificate's peer once one is. The error is a `*config.FieldError` with the path of the address. |
 | `Network.ContactAddrs()` | The addresses to give another owner: the open listeners, unspecified ones expanded into the interfaces' addresses, no loopback or link-local (IPv4 or IPv6), each ending in `/p2p/<peer id>`. |
 | `Network.StartPairing(ctx, node, addrs, sid)` | The initiator's end of a pairing stream: finds or dials a connection to exactly that node (member or non-member; `addrs` are hints for this pairing, never kept), opens the stream, and returns the `PairingPeer` and the `PairingStream` the engine writes to. The node's frames reach `Node.PairingFrame(sid, ...)`, an end that is not the engine's own `PairingClosed(sid)`. Call it from a worker, never from the engine's loop. |
-| `Network.PairingFetch(ctx, node, addrs, frame)` | One frame out, half-close, one frame back, within the fetch timeout from the stream's opening; returns the answer and the `PairingPeer` of the connection. |
+| `Network.PairingFetch(ctx, node, addrs, frame)` | One frame out, one frame back (no half-close before it), then the stream closed, within the fetch timeout from the stream's opening; returns the answer and the `PairingPeer` of the connection. |
 | `PairingPeer`, `PairingStream` | The facts of a pairing connection (both parties, protocol, the accepted remote certificate with its record and serial state), and the engine's queue-backed end of a stream: `Send` never blocks, `Close` half-closes the stream once the queue is written; the stream, its handler and the connection's busy count stay until the peer ends its side. |
 | `Node.PairingOpened`, `PairingFrame`, `PairingClosed` | The target's side of a pairing stream, and the frames and ends of both sides. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback (each logs the first failure of a run of failed calls to a node and the first success after it, `callhealth.go`); whether a member connection to a node is up. |
@@ -55,12 +55,20 @@ clock), touches no file and takes no randomness of its own.
   after `PairingFrame` returned; the engine's writes are queued for the stream's
   writer goroutine, and a full queue resets the stream. `PairingClosed` is called
   once for an end the engine did not make, and never after its own `Close`.
-- **A pairing stream is kept until the peer has ended its side.** The writer only
-  half-closes; the handler returns (and releases its connection) after the read has
-  seen the peer's end, a reset or the online deadline, so a connection marked to
-  close when idle is not closed under a frame still in flight. Every initiator
-  closes its stream after the last frame it wants, and `PairingFetch` does not
-  half-close before it has read the answer.
+- **A request-and-answer stream is kept until the peer has ended its side.** A pairing
+  stream's writer only half-closes, and its handler returns (and releases its
+  connection) after the read has seen the peer's end, a reset or the online deadline;
+  a member call's `serveCall` writes its answer frame, half-closes, and waits for the
+  client's end, a reset or the call's budget in the same way. So a connection marked
+  to close when idle is not closed under a frame still in flight. Every initiator
+  closes its stream after the last frame it wants, and `PairingFetch` and a member
+  call do not half-close before they have read the answer. Only a 1.0.0 stream (the
+  legacy identifiers, served for nodes before 2.0.0) is released as soon as it is
+  answered.
+- **A member protocol is registered under both identifiers, by `handleCall`.** All
+  three servers go through `serveCall`, which takes the form from the identifier the
+  stream negotiated; the client proposes the current identifier and then the legacy
+  one (`nodeproto.Offer`) and takes the form of the one the stream got.
 - **The exchange runs on the connection, not through the host.** The host picks
   the best connection to a peer, which is not necessarily the one being judged.
 - **A member's certificate reaches the engine first.** The connection becomes a

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -16,8 +17,13 @@ import (
 	"github.com/aianyai/sidera/internal/record"
 )
 
-// A call to another node is one stream: the request is one message and a half
-// close, the answer one message and the end of the stream.
+// A call to another node is one stream: the request is one frame and the answer
+// one frame. The client does not half-close after its request: it reads the
+// answer and only then closes the stream, and the server keeps the stream, and
+// with it the connection's busy count, until it sees that close. A node before
+// 2.0.0 of the protocols uses the end of the stream as the end of the message,
+// the request's half-close included, and releases the stream as soon as it has
+// answered; both forms are served, and the client falls back to it.
 
 var errFailed = errors.New("network: the target could not handle the call")
 
@@ -124,7 +130,9 @@ func outcomeError(o nodeproto.Outcome, reason string) error {
 }
 
 // call makes one request to the target node and returns the bytes of its
-// answer. It maps what goes wrong to the transport's two kinds of "no answer":
+// answer. The protocol is proposed under its current identifier first and its
+// legacy one second, and the call takes the form of the identifier the target
+// serves. It maps what goes wrong to the transport's two kinds of "no answer":
 //
 //   - nothing the target could have seen was sent (no connection within the
 //     budget, a connection the node judges not to be a member's, a protocol the
@@ -137,6 +145,10 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	if !ok {
 		return nil, fmt.Errorf("network: %s is not a node protocol", proto)
 	}
+	framed, err := nodeproto.AppendFrame(nil, req, limit.Request)
+	if err != nil {
+		return nil, fmt.Errorf("network: request: %w", err)
+	}
 	e, err := n.connect(ctx, target)
 	if err != nil {
 		return nil, err
@@ -148,7 +160,7 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 
 	cctx, cancel := context.WithTimeout(ctx, n.cfg.CallTimeout)
 	defer cancel()
-	s, err := n.openStream(cctx, e, proto)
+	s, err := n.openStream(cctx, e, nodeproto.Offer(proto)...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -172,10 +184,18 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	// A failed write is not judged by itself: the stream is dead, and the read
 	// that follows says why with the library's own error, which carries the
 	// peer's reset code; a write or half-close error does not always.
-	if _, err := s.Write(req); err == nil {
-		s.CloseWrite()
+	var answer []byte
+	if nodeproto.IsLegacy(string(s.Protocol())) {
+		if _, err := s.Write(req); err == nil {
+			s.CloseWrite()
+		}
+		answer, err = nodeproto.ReadMessage(s, limit.Answer)
+	} else {
+		// Not half-closed: the server keeps the stream, and with it its
+		// connection, until it sees the close that follows the answer.
+		_, _ = s.Write(framed)
+		answer, err = nodeproto.ReadFrame(bufio.NewReader(s), limit.Answer)
 	}
-	answer, err := nodeproto.ReadMessage(s, limit.Answer)
 	if err != nil {
 		return nil, failed(err)
 	}
@@ -187,7 +207,7 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 // the call ran out of time, or the error is not one that a live connection
 // gives. A live connection also gives a stream the peer reset (its gate, or its
 // handler giving up), a protocol the peer does not serve, a state that may not
-// use the protocol and an answer over the limit. A peer that has gone away
+// use the protocol and an answer over the limit or in a frame that is not one. A peer that has gone away
 // gives none of them: its streams do not open or do not answer, and without this
 // the connection would be kept and every call to the node would wait out the
 // call timeout on it.
@@ -198,7 +218,7 @@ func connectionFault(callCtx context.Context, err error) bool {
 	var reset *lnet.StreamError
 	var unsupported msmux.ErrNotSupported[protocol.ID]
 	switch {
-	case errors.Is(err, errNotAllowed), errors.Is(err, record.ErrOversize),
+	case errors.Is(err, errNotAllowed), errors.Is(err, record.ErrOversize), errors.Is(err, nodeproto.ErrFrame),
 		errors.As(err, &reset), errors.As(err, &unsupported):
 		return false
 	}
@@ -224,65 +244,60 @@ func noAnswer(ctx context.Context, s lnet.Stream, err error) error {
 // The server side. A handler runs only on a connection the gate judged a
 // member's, so the node the request comes from is the one the exchange accepted.
 
-// serveSend reads one envelope and answers with the receipt.
-func (n *Network) serveSend(ctx context.Context, s lnet.Stream, e *connEntry) {
-	n.serveCall(ctx, s, e, nodeproto.ProtocolSend, func(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
-		req, err := nodeproto.DecodeSendRequest(raw)
-		if err != nil {
-			return nil, errInvalidRequest{err}
-		}
-		receipt, err := node.Inbound(ctx, from, req.Sender, req.Envelope)
-		if err != nil {
-			return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
-				return nodeproto.SendAnswer{Outcome: o, Reason: reason}.Encode()
-			})
-		}
-		return nodeproto.SendAnswer{Outcome: nodeproto.OutcomeOK, Reports: receipt.Reports, ControlReply: receipt.ControlReply}.Encode()
-	})
+// runSend handles a send request: it hands the envelope to the engine and
+// answers with the receipt.
+func runSend(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+	req, err := nodeproto.DecodeSendRequest(raw)
+	if err != nil {
+		return nil, errInvalidRequest{err}
+	}
+	receipt, err := node.Inbound(ctx, from, req.Sender, req.Envelope)
+	if err != nil {
+		return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
+			return nodeproto.SendAnswer{Outcome: o, Reason: reason}.Encode()
+		})
+	}
+	return nodeproto.SendAnswer{Outcome: nodeproto.OutcomeOK, Reports: receipt.Reports, ControlReply: receipt.ControlReply}.Encode()
 }
 
-// servePull reads a pull and answers with the reports and the no-record endpoints.
-func (n *Network) servePull(ctx context.Context, s lnet.Stream, e *connEntry) {
-	n.serveCall(ctx, s, e, nodeproto.ProtocolPull, func(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
-		req, err := nodeproto.DecodePullRequest(raw)
-		if err != nil {
-			return nil, errInvalidRequest{err}
-		}
-		ans, err := node.Pull(ctx, from, transport.PullRequest{Message: req.Message, Recipients: req.Recipients})
-		if err != nil {
-			return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
-				return nodeproto.PullAnswer{Outcome: o, Reason: reason}.Encode()
-			})
-		}
-		return nodeproto.PullAnswer{Outcome: nodeproto.OutcomeOK, Reports: ans.Reports, NoRecord: ans.NoRecord, ControlReply: ans.ControlReply}.Encode()
-	})
+// runPull handles a pull request and answers with the reports and the no-record endpoints.
+func runPull(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+	req, err := nodeproto.DecodePullRequest(raw)
+	if err != nil {
+		return nil, errInvalidRequest{err}
+	}
+	ans, err := node.Pull(ctx, from, transport.PullRequest{Message: req.Message, Recipients: req.Recipients})
+	if err != nil {
+		return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
+			return nodeproto.PullAnswer{Outcome: o, Reason: reason}.Encode()
+		})
+	}
+	return nodeproto.PullAnswer{Outcome: nodeproto.OutcomeOK, Reports: ans.Reports, NoRecord: ans.NoRecord, ControlReply: ans.ControlReply}.Encode()
 }
 
-// serveDirectory reads a directory request and answers with a page.
-func (n *Network) serveDirectory(ctx context.Context, s lnet.Stream, e *connEntry) {
-	n.serveCall(ctx, s, e, nodeproto.ProtocolDirectory, func(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
-		req, err := nodeproto.DecodeDirectoryRequest(raw)
-		if err != nil {
-			return nil, errInvalidRequest{err}
-		}
-		page, err := node.QueryDirectory(ctx, from, req.Sender, transport.DirectoryRequest{Cursor: req.Cursor, Limit: req.Limit})
-		if err != nil {
-			return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
-				return nodeproto.DirectoryAnswer{Outcome: o, Reason: reason}.Encode()
-			})
-		}
-		ans := nodeproto.DirectoryAnswer{Outcome: nodeproto.OutcomeOK, NextCursor: page.NextCursor}
-		for _, ep := range page.Endpoints {
-			ans.Entries = append(ans.Entries, nodeproto.DirectoryEntry{
-				Endpoint:    ep.Address.Endpoint,
-				Kind:        ep.Kind,
-				DisplayName: ep.DisplayName,
-				Description: ep.Description,
-				Actions:     ep.Accepts,
-			})
-		}
-		return ans.Encode()
-	})
+// runDirectory handles a directory request and answers with a page.
+func runDirectory(ctx context.Context, node Node, from transport.Origin, raw []byte) ([]byte, error) {
+	req, err := nodeproto.DecodeDirectoryRequest(raw)
+	if err != nil {
+		return nil, errInvalidRequest{err}
+	}
+	page, err := node.QueryDirectory(ctx, from, req.Sender, transport.DirectoryRequest{Cursor: req.Cursor, Limit: req.Limit})
+	if err != nil {
+		return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
+			return nodeproto.DirectoryAnswer{Outcome: o, Reason: reason}.Encode()
+		})
+	}
+	ans := nodeproto.DirectoryAnswer{Outcome: nodeproto.OutcomeOK, NextCursor: page.NextCursor}
+	for _, ep := range page.Endpoints {
+		ans.Entries = append(ans.Entries, nodeproto.DirectoryEntry{
+			Endpoint:    ep.Address.Endpoint,
+			Kind:        ep.Kind,
+			DisplayName: ep.DisplayName,
+			Description: ep.Description,
+			Actions:     ep.Accepts,
+		})
+	}
+	return ans.Encode()
 }
 
 // errInvalidRequest is a request that does not decode; the stream is reset.
@@ -300,13 +315,38 @@ func answerFor(node Node, err error, encode func(nodeproto.Outcome, string) ([]b
 	return encode(nodeproto.OutcomeFailed, "")
 }
 
+// callFunc is what a server of a member protocol does with a decoded-by-nobody
+// request: it decodes it, runs it as a request from the node that was called
+// and encodes the answer. A request that does not decode is an errInvalidRequest.
+type callFunc func(ctx context.Context, node Node, from transport.Origin, request []byte) ([]byte, error)
+
+// handleCall registers the server of a member protocol under every identifier
+// it is spoken under, the current one and the legacy one. All three servers are
+// served by serveCall, so what a stream is held for is decided once.
+func (n *Network) handleCall(current string, run callFunc) {
+	for _, proto := range nodeproto.Offer(current) {
+		n.handle(proto, func(ctx context.Context, s lnet.Stream, e *connEntry) {
+			n.serveCall(ctx, s, e, proto, run)
+		})
+	}
+}
+
 // serveCall is the frame of every server: read the one request within the call's
-// budget, run the handler as a request from the connection's node, write the
-// one answer and close.
-func (n *Network) serveCall(
-	ctx context.Context, s lnet.Stream, e *connEntry, proto string,
-	run func(ctx context.Context, node Node, from transport.Origin, request []byte) ([]byte, error),
-) {
+// budget, run the handler as a request from the connection's node and write the
+// one answer.
+//
+// On a framed stream (a current identifier) the stream is then kept until the
+// client has closed its side, which it does only once it has the answer: the
+// handler returning is what lets the connection's busy count fall, and a
+// connection marked to close when idle (a renewed certificate, a promotion, a
+// call that found the connection at fault) is closed at that moment, which
+// discards an answer still on its way. The wait ends when the client's side
+// ends, the stream is reset or the connection goes, and at the call's budget,
+// from the start of the stream, at the latest. A client that sends anything
+// after its request breaks the protocol. A legacy stream is released as soon as
+// the answer is written, because its client cannot signal that it has the
+// answer: the half-close it made came with its request.
+func (n *Network) serveCall(ctx context.Context, s lnet.Stream, e *connEntry, proto string, run callFunc) {
 	node := n.currentNode()
 	if node == nil {
 		s.Reset()
@@ -317,12 +357,20 @@ func (n *Network) serveCall(
 		s.Reset()
 		return
 	}
+	framed := !nodeproto.IsLegacy(proto)
 	ctx, cancel := context.WithTimeout(ctx, n.cfg.CallTimeout)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { s.Reset() })
 	defer stop()
 
-	raw, err := nodeproto.ReadMessage(s, limit.Request)
+	in := bufio.NewReader(s)
+	var raw []byte
+	var err error
+	if framed {
+		raw, err = nodeproto.ReadFrame(in, limit.Request)
+	} else {
+		raw, err = nodeproto.ReadMessage(s, limit.Request)
+	}
 	if err != nil {
 		s.Reset()
 		return
@@ -341,9 +389,35 @@ func (n *Network) serveCall(
 		s.ResetWithError(lnet.StreamProtocolViolation)
 		return
 	}
-	if _, err := s.Write(answer); err != nil && !errors.Is(err, io.EOF) {
+	if !framed {
+		if _, err := s.Write(answer); err != nil && !errors.Is(err, io.EOF) {
+			s.Reset()
+			return
+		}
+		s.Close()
+		return
+	}
+	frame, err := nodeproto.AppendFrame(nil, answer, limit.Answer)
+	if err != nil {
+		n.log.Warn("the answer does not fit its frame", "protocol", proto, "peer", e.conn.RemotePeer(), "err", err)
 		s.Reset()
 		return
 	}
-	s.Close()
+	if _, err := s.Write(frame); err != nil {
+		s.Reset()
+		return
+	}
+	s.CloseWrite()
+	switch _, err := in.ReadByte(); {
+	case err == io.EOF:
+		s.Close()
+	case err == nil:
+		n.log.Debug("the client sent more than its request", "protocol", proto, "peer", e.conn.RemotePeer())
+		s.ResetWithError(lnet.StreamProtocolViolation)
+	default:
+		if ctx.Err() != nil {
+			n.log.Debug("the client did not close the stream within the call's budget", "protocol", proto, "peer", e.conn.RemotePeer())
+		}
+		s.Reset()
+	}
 }

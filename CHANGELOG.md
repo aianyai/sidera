@@ -38,6 +38,14 @@ protocol has a version of its own.
   record an earlier version wrote is recognised when its start time equals the process's
   exactly, and the key is then added; otherwise the adapter treats the process as one it
   cannot prove is its own and leaves it alone.
+- **Node-to-node requests are delimited, protocol 2.0.0.** The `send`, `pull` and
+  `directory` protocols between nodes move to `/sidera/{send,pull,directory}/2.0.0`: the request
+  and the answer are each one length-prefixed frame, and the server keeps the stream, and the
+  connection with it, until the caller has read the answer and closed. A node serves both 2.0.0
+  and the 1.0.0 of earlier releases and a caller proposes 2.0.0 first, so nodes can be upgraded
+  one at a time in any order; a pair of nodes where either is still on an earlier release keeps
+  using 1.0.0 and the problem described under Fixed. The 1.0.0 protocols are to be removed in a
+  later release, after which a node of an earlier release can no longer be reached.
 - **The log says when calls to a node start failing and when they work again.** The first
   call to a node that fails, after calls worked, is logged at info level with its kind
   (`unreachable`, `timeout`, `refused` with the reason, `failed`) and where it stopped, such as
@@ -69,6 +77,12 @@ protocol has a version of its own.
   takes sessions back in the background, four at a time, and answers by the deadline. A session
   not taken back by then is reported unreachable, as when Codex cannot be reached, and a turn
   found running in it afterwards is reported when it is found.
+- **A message or query to another node is no longer lost when that node renews its
+  certificate.** A node renewing its certificate (about every 20 days) closes its connections as
+  soon as they are idle, and the close could discard the answer of a request that had just been
+  handled. The sender got a timeout and sent again 30 seconds later, so nothing was lost, but
+  a message was delayed and a directory query failed with `directory_unavailable`. The fix
+  takes effect between two nodes that both run this release.
 - **A name with a line break or an escape sequence can no longer reach your terminal.** The
   names that `sidera directory` and `sidera me` print come from adapters and, now, from other
   nodes. The node applied only a length limit to them, so a name could forge extra lines or

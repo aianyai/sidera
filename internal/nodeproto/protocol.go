@@ -10,21 +10,71 @@ import (
 )
 
 // The protocol identifiers of the member protocols. Each is one request and one
-// answer on one stream. They are defined here and nowhere else; the
-// pre-authentication access table lists no protocol of this package, so each
-// falls under "every other protocol", which only members may use.
+// answer on one stream, each a frame of its own (AppendFrame, ReadFrame): the
+// client does not half-close after its request, so the server cannot take the
+// end of the stream for the end of the request, and it keeps the stream until
+// the client has taken the answer and closed. They are defined here and nowhere
+// else; the pre-authentication access table lists no protocol of this package,
+// so each falls under "every other protocol", which only members may use.
 const (
 	// ProtocolSend carries one envelope to a recipient's node.
-	ProtocolSend = "/sidera/send/1.0.0"
+	ProtocolSend = "/sidera/send/2.0.0"
 	// ProtocolPull asks for the current reports of the deliveries of one message.
-	ProtocolPull = "/sidera/pull/1.0.0"
+	ProtocolPull = "/sidera/pull/2.0.0"
 	// ProtocolDirectory asks for a page of the endpoints a node shows the asker.
-	ProtocolDirectory = "/sidera/directory/1.0.0"
+	ProtocolDirectory = "/sidera/directory/2.0.0"
 )
 
-// Protocols lists the protocol identifiers in a stable order.
+// The identifiers a node before 2.0.0 speaks, kept so that nodes upgraded one
+// at a time still understand each other. On such a stream the request is
+// everything up to the client's half-close (ReadMessage), the answer
+// everything up to the end of the stream, and the server releases the stream
+// as soon as it has answered. Messages, limits and access are those of the
+// current identifier of the protocol. A node serves both and a client offers
+// the current identifier first (Offer); the legacy ones are dropped once no
+// node that speaks only them remains in use.
+const (
+	LegacyProtocolSend      = "/sidera/send/1.0.0"
+	LegacyProtocolPull      = "/sidera/pull/1.0.0"
+	LegacyProtocolDirectory = "/sidera/directory/1.0.0"
+)
+
+// legacyOf maps each current identifier to the legacy one of the same protocol.
+var legacyOf = map[string]string{
+	ProtocolSend:      LegacyProtocolSend,
+	ProtocolPull:      LegacyProtocolPull,
+	ProtocolDirectory: LegacyProtocolDirectory,
+}
+
+// Protocols lists every identifier a node serves, the current ones first, in a
+// stable order.
 func Protocols() []string {
-	return []string{ProtocolSend, ProtocolPull, ProtocolDirectory}
+	return []string{
+		ProtocolSend, ProtocolPull, ProtocolDirectory,
+		LegacyProtocolSend, LegacyProtocolPull, LegacyProtocolDirectory,
+	}
+}
+
+// Offer returns the identifiers a client proposes for a call to a protocol, in
+// the order of preference: the current identifier, then the legacy one. It is
+// nil for an identifier that is not a current one.
+func Offer(protocol string) []string {
+	legacy, ok := legacyOf[protocol]
+	if !ok {
+		return nil
+	}
+	return []string{protocol, legacy}
+}
+
+// IsLegacy reports whether the identifier is one of the legacy ones, whose
+// streams are not framed.
+func IsLegacy(protocol string) bool {
+	for _, legacy := range legacyOf {
+		if protocol == legacy {
+			return true
+		}
+	}
+	return false
 }
 
 // Limit is the byte limit of the two messages of one protocol: the longest
@@ -65,8 +115,9 @@ const (
 	maxPullRequest = 2048
 )
 
-// LimitOf returns the byte limits of a protocol, and false for an identifier
-// that is not one of this package's.
+// LimitOf returns the byte limits of a protocol, the same for its current and
+// its legacy identifier, and false for an identifier that is not one of this
+// package's. On a framed stream the limit bounds the payload of the frame.
 //
 // A send request holds one envelope. A send or pull answer holds a report per
 // recipient and a control reply, each at the most the record limit. A directory
@@ -74,11 +125,11 @@ const (
 func LimitOf(protocol string) (Limit, bool) {
 	records := (MaxRecipients + 1) * record.DefaultMaxInput
 	switch protocol {
-	case ProtocolSend:
+	case ProtocolSend, LegacyProtocolSend:
 		return Limit{Request: envelope.MaxEncoded() + requestSlack, Answer: records + answerSlack}, true
-	case ProtocolPull:
+	case ProtocolPull, LegacyProtocolPull:
 		return Limit{Request: maxPullRequest, Answer: records + answerSlack}, true
-	case ProtocolDirectory:
+	case ProtocolDirectory, LegacyProtocolDirectory:
 		return Limit{Request: maxDirectoryRequest, Answer: MaxDirectoryPage*maxDirectoryEntry + answerSlack + MaxCursorLen}, true
 	}
 	return Limit{}, false
