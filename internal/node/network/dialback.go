@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -75,6 +76,7 @@ func (n *Network) runDialBack(ctx context.Context, _ Node, e *connEntry, _ trans
 	addrs := n.dialBackAddrs(asker)
 	if len(addrs) == 0 {
 		n.log.Debug("no address is held to dial a node back on", "peer", asker)
+		n.noteDialedBack(e.node, false)
 		return nodeproto.DialBackAnswer{Outcome: nodeproto.OutcomeOK, Result: nodeproto.DialBackNoAddress}.Encode()
 	}
 	dctx, cancel := context.WithTimeout(ctx, n.cfg.ConnectTimeout)
@@ -85,10 +87,26 @@ func (n *Network) runDialBack(ctx context.Context, _ Node, e *connEntry, _ trans
 			return nil, ctx.Err()
 		}
 		n.log.Debug("a node could not be dialed back", "peer", asker, "err", err)
+		n.noteDialedBack(e.node, false)
 		return nodeproto.DialBackAnswer{Outcome: nodeproto.OutcomeOK, Result: nodeproto.DialBackNotReached}.Encode()
 	}
 	n.log.Debug("a node was dialed back", "peer", asker, "address", conn.Remote, "from", conn.Local)
+	n.noteDialedBack(e.node, true)
 	return nodeproto.DialBackAnswer{Outcome: nodeproto.OutcomeOK, Result: nodeproto.DialBackReached, Address: conn.Remote}.Encode()
+}
+
+// noteDialedBack records what answering a member's question showed this node: that
+// it can, or cannot, dial the member. The member cannot know that, and needs the
+// connection between them until it does (see closeUnneeded).
+func (n *Network) noteDialedBack(node ident.NodeID, reached bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	r := n.recordLocked(node)
+	if reached {
+		r.dialedAt = n.clock.Now()
+	} else {
+		r.dialedAt = time.Time{}
+	}
 }
 
 // dialBackAddrs are the addresses to dial a peer back on: the ones the address

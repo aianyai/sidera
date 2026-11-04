@@ -77,6 +77,7 @@ func (n *Network) keepSetLocked(now time.Time) []keepTarget {
 func (n *Network) tickMembers(now time.Time) {
 	n.askMembers(now, len(n.lib.host.Network().ListenAddresses()) > 0)
 	n.keepMembers(now)
+	n.closeUnneeded(now)
 }
 
 func (n *Network) keepMembers(now time.Time) {

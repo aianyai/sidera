@@ -1,6 +1,8 @@
 package network
 
 import (
+	"time"
+
 	"github.com/libp2p/go-libp2p/core/control"
 	lnet "github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -49,6 +51,8 @@ type connEntry struct {
 	// closeIdle asks for the connection to be closed as soon as none is.
 	busy      int
 	closeIdle bool
+	// idleSince is when busy last fell to zero, or when the connection came up.
+	idleSince time.Time
 	// seq orders the connections by when they were established.
 	seq uint64
 	// ready is closed when the outcome of the exchange is known or the
@@ -128,6 +132,7 @@ func (n *Network) connected(c lnet.Conn) {
 	}
 	n.connSeq++
 	e.seq = n.connSeq
+	e.idleSince = n.clock.Now()
 	e.tracked = n.acct.Connected(e.key, n.clock.Now())
 	n.conns[c] = e
 	if e.tracked {
@@ -218,6 +223,9 @@ func (n *Network) acquire(e *connEntry) bool {
 func (n *Network) release(e *connEntry) {
 	n.mu.Lock()
 	e.busy--
+	if e.busy == 0 {
+		e.idleSince = n.clock.Now()
+	}
 	closeNow := e.busy == 0 && e.closeIdle
 	n.mu.Unlock()
 	if closeNow {

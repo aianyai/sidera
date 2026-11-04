@@ -110,6 +110,13 @@ clock), touches no file and draws randomness only from the reader it is given (f
   most one dial per member and eight in all, 5, 10, 20, 40 then 60 seconds apart after
   failures, through `dialWithin` like a call and without the unreachable memo or the
   engine's worker. A member that does not serve the question counts as unknown.
+- **A member connection nobody needs is closed through the table's close-when-idle, in
+  one place.** `closeUnneeded` (`idle.go`), on the tick, marks a member connection that
+  has been idle for five minutes (`connEntry.idleSince`) to close when idle when this
+  node's record says the member can dial it and this node has shown the member (the
+  `dialedAt` of the member's record, set when it answered the member's question) that it
+  can dial the member. There is no connection manager and no second closer; a count
+  limit, if one is needed, is one more reason in the same function.
 - **Timers are the clock's.** The accounting's deadlines, the unreachable memo, the
   answers' age and the waits between dials and questions use the injected clock; a
   test advances it. A timer only wakes the loop; the
@@ -136,6 +143,6 @@ clock), touches no file and draws randomness only from the reader it is given (f
 
 ## Where the tests are
 
-`network_test.go`, `member_test.go`, `dialback_test.go`, `keep_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
+`network_test.go`, `member_test.go`, `dialback_test.go`, `keep_test.go`, `idle_test.go`, `pairing_test.go` and `helpers_test.go` run nodes in one process on the loopback,
 each with its own fake engine and a static snapshot, and the fake clock where time
 matters. `docs/references/network/README.md` lists what each test shows.

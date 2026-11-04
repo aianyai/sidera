@@ -76,6 +76,12 @@ type reachRecord struct {
 	failures int
 	nextAsk  time.Time
 
+	// dialedAt is when this node last reached the member for the member's own
+	// dial-back question, zero when it has not or its last attempt failed: this
+	// node knows then that it can dial the member, which the member does not
+	// know otherwise. It stands for an hour, like an answer.
+	dialedAt time.Time
+
 	// cannotAsk is set when the member does not serve the question, as a node of
 	// an earlier release does not. Asking again on the same connection would get
 	// the same answer, so it is asked again only on a connection newer than
@@ -91,6 +97,23 @@ func (r *reachRecord) stateAt(now time.Time) reachState {
 		return reachUnknown
 	}
 	return r.state
+}
+
+// canDial reports whether this node knows it can dial the member, from the
+// member's own question: a connection to a member that cannot know it can dial
+// this node is one the member needs.
+func (r *reachRecord) canDial(now time.Time) bool {
+	return !r.dialedAt.IsZero() && now.Before(r.dialedAt.Add(reachabilityTTL))
+}
+
+// recordLocked is the record of the member, made when there is none.
+func (n *Network) recordLocked(node ident.NodeID) *reachRecord {
+	r := n.reach[node]
+	if r == nil {
+		r = &reachRecord{}
+		n.reach[node] = r
+	}
+	return r
 }
 
 // reachabilityLocked is what is known of the member at a time.
@@ -124,11 +147,7 @@ func (n *Network) askMembers(now time.Time, listening bool) {
 		}
 	}
 	for node, seq := range newest {
-		r := n.reach[node]
-		if r == nil {
-			r = &reachRecord{}
-			n.reach[node] = r
-		}
+		r := n.recordLocked(node)
 		switch {
 		case r.asking, now.Before(r.nextAsk), r.stateAt(now) != reachUnknown:
 		case r.cannotAsk && seq <= r.askedOn:
@@ -227,6 +246,10 @@ func (n *Network) localAddressesChanged() {
 	for _, r := range n.reach {
 		r.state, r.address = reachUnknown, nil
 		r.failures, r.nextAsk = 0, time.Time{}
+		// What answering a member showed is as old as the addresses it was
+		// about, and a connection kept while unsure costs less than one closed
+		// that the member needs.
+		r.dialedAt = time.Time{}
 	}
 	for _, k := range n.keeps {
 		k.failures, k.next = 0, time.Time{}

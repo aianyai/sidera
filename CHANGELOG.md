@@ -62,6 +62,14 @@ protocol has a version of its own.
   asked again after an hour and when the node's own addresses change. The log now says,
   at info level, when a member can or cannot dial the node, when the first dial to a kept
   member fails (with the error of each address) and when its connection is back.
+- **A connection nobody needs is closed after five minutes.** A connection between two
+  nodes stayed up for as long as both ran, so every node ended up connected to every
+  other. Now a connection that nothing has used for five minutes is closed when both
+  nodes know they can dial each other. A connection that one of them needs (it cannot
+  dial the other, has not been told it can, or the other is a node of an earlier release)
+  is kept, and a closed one is made again when something is sent. `sidera network show`
+  therefore lists a peer that can dial you as `connected false` when you have not talked
+  for a while.
 - **Adapter protocol and Go SDK: the time an adapter has to answer a handshake call is
   one constant.** The 20 seconds the daemon waits for `initialize`, `adapter.start` and
   `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,

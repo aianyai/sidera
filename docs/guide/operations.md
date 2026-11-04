@@ -265,10 +265,12 @@ release before 0.12.0 are upgraded with these steps.
    address for as it starts, and keeps retrying (after 5, 10, 20 and 40 seconds, then
    every minute) the ones it cannot reach and the ones that cannot dial it, so nothing
    needs to be sent. Give it a minute, then run `sidera network show` on each node: the
-   peers are listed with `connected true`. A peer that stays
-   `connected false` is down, or neither side holds an address the other can be reached
-   on; `logs/daemon.log` says at info level why the first dial failed, with the error
-   of each address.
+   peers are listed with `connected true`. A connection that nothing uses for five
+   minutes is closed when both nodes can dial each other, so a peer may later show
+   `connected false` without being down; it is connected again when something is sent.
+   A peer that stays `connected false` right after the restart is down, or neither side
+   holds an address the other can be reached on; `logs/daemon.log` says at info level
+   why the first dial failed, with the error of each address.
 
 To upgrade Codex or Claude Code themselves, upgrade them as usual. On Windows,
 restart the daemon once (`sidera daemon restart`) so that it finds the new Codex release.
