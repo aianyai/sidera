@@ -51,6 +51,7 @@ func TestRecvPageFromHandoff(t *testing.T) {
 		return p
 	}
 	from := address(t, 3)
+	system := ident.Address{Node: from.Node, Endpoint: ident.SystemEndpoint()}
 	long := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 80)
 	msgs := map[string]handoff.Message{
 		"plain":        {ID: "m-1", From: from, Body: "Please run the migration."},
@@ -59,6 +60,8 @@ func TestRecvPageFromHandoff(t *testing.T) {
 		"long":         {ID: "m-long", From: from, Body: long},
 		"long resumed": {ID: "m-long2", From: from, Body: strings.Repeat(long, 8), NextPart: 2},
 		"long dup":     {ID: "m-long3", From: from, Body: long, PossiblyDuplicate: true},
+		"feedback":     {ID: "m-fb", From: system, Body: "Notice from the channel of this node."},
+		"long notice":  {ID: "m-fb-long", From: system, Body: long},
 	}
 	budgets := []handoff.Budget{
 		handoff.DefaultBudget(),
@@ -122,19 +125,19 @@ func TestRecvPageFromHandoff(t *testing.T) {
 		}
 	}
 	for bi, b := range budgets {
-		check("empty queue", must(handoff.Pack(nil, newLease(), b)))
+		check("empty queue", must(handoff.Pack(nil, newLease(), b, handoff.WriteFeedbackMember)))
 		for name, m := range msgs {
 			if name == "long resumed" && b.Limit >= 100000 {
 				continue // the message fits whole at this budget, so it has no part 2
 			}
 			label := name + "/" + string(rune('a'+bi))
-			check("Pack "+label, must(handoff.Pack([]handoff.Message{m}, newLease(), b)))
+			check("Pack "+label, must(handoff.Pack([]handoff.Message{m}, newLease(), b, handoff.WriteFeedbackMember)))
 			n := 1
 			if strings.HasPrefix(name, "long") {
 				n = 12
 			}
 			for k := 1; k <= n; k++ {
-				p, err := handoff.Part(m, k, newLease(), b)
+				p, err := handoff.Part(m, k, newLease(), b, handoff.WriteFeedbackMember)
 				if err != nil {
 					break // no such part: the message has fewer parts at this budget
 				}
@@ -142,9 +145,9 @@ func TestRecvPageFromHandoff(t *testing.T) {
 			}
 		}
 		queue := []handoff.Message{msgs["plain"], msgs["duplicate"], msgs["markup"]}
-		check("queue", must(handoff.Pack(queue, newLease(), b)))
-		check("queue with a long message", must(handoff.Pack([]handoff.Message{msgs["plain"], msgs["long"]}, newLease(), b)))
-		check("long message first", must(handoff.Pack([]handoff.Message{msgs["long"], msgs["plain"]}, newLease(), b)))
+		check("queue", must(handoff.Pack(queue, newLease(), b, handoff.WriteFeedbackMember)))
+		check("queue with a long message", must(handoff.Pack([]handoff.Message{msgs["plain"], msgs["long"]}, newLease(), b, handoff.WriteFeedbackMember)))
+		check("long message first", must(handoff.Pack([]handoff.Message{msgs["long"], msgs["plain"]}, newLease(), b, handoff.WriteFeedbackMember)))
 	}
 	t.Logf("pages seen: %+v", cov)
 	if cov.empty == 0 || cov.whole == 0 || cov.duplicate == 0 || cov.parts == 0 || cov.next == 0 || cov.lastPart == 0 || cov.more == 0 {

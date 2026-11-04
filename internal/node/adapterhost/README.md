@@ -92,7 +92,9 @@ and its own log goes through the handle the daemon gives it.
   used when the engine given to `Start` implements them, and are `-32601`
   otherwise. The production `apiwire.AdapterEngine` supplies all three optional
   interfaces and maps their errors before they reach this layer; endpoint
-  ownership stays in the engine.
+  ownership stays in the engine. The one change the host makes to an answer is in the
+  page of `endpoint.recv`: the member `feedback` of its messages is left out unless the
+  adapter declared the direct capability `feedback`.
 - **Notifications** are decoded and validated; an invalid one is logged and
   dropped. They go into a buffer of `NotificationBuffer` in arrival order and one
   forwarder per connection hands them to `Engine.AdapterNotified` one at a time,

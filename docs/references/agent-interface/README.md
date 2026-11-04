@@ -171,7 +171,12 @@ lease before handing out belong to the engine. One endpoint has at most one
 waiting receive; a newer receive ends the earlier one with an empty page. If a
 connection ends after a page was leased, the next receive can return the message
 marked possibly duplicate. A system endpoint sender identifies this node's own
-channel feedback; other endpoints and nodes cannot send as that endpoint.
+channel feedback; other endpoints and nodes cannot send as that endpoint. A page of
+this interface marks no message: the body of a message from the system endpoint is the
+node's notice about the agent's own sends, and the agent tells it by the sender. The
+page carries no `feedback` member because a client of an earlier version refuses a page
+with a member it does not know, and an agent session started before an update keeps its
+client while the daemon is replaced under it.
 
 **Acknowledgements.** Omit `items` to acknowledge the whole page, or provide 1
 through `adapterproto.MaxAckItems` (1024) `PartRef` values, each with `message_id`
@@ -290,7 +295,13 @@ and strict presence rules are unchanged.
 
 `Call` returns the following concrete Go result types after complete strict
 decoding. `recv` is validated as a page but returned as the original `[]byte`,
-including its newline. Invalid successful responses have `outcome_unknown`.
+including its newline. Invalid successful responses have `outcome_unknown`. The one
+leniency is in the page of `recv`: a message on it may carry members this version
+does not know, which the check ignores (the bytes returned still hold them), so that a
+member a later daemon adds to a message does not make an earlier client refuse the
+page and every message queued behind it. The members it does know, a repeated member
+of a message, and every other member of the page are checked as strictly as in any
+other response.
 
 | Method | Concrete Go result |
 | --- | --- |

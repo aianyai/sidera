@@ -75,6 +75,22 @@ var (
 	ErrNoSuchPart = errors.New("handoff: no such message part")
 )
 
+// FeedbackMember says whether a page writes the member `feedback` of a message
+// whose sender is the system endpoint. A reader that decodes a page strictly
+// refuses a page with a member it does not know, so the caller passes
+// WriteFeedbackMember only for a reader that is known to decode it. The choice
+// changes the bytes of the page and nothing else: the cut points of a message are
+// the same either way.
+type FeedbackMember bool
+
+const (
+	// OmitFeedbackMember leaves the member out of every message.
+	OmitFeedbackMember FeedbackMember = false
+	// WriteFeedbackMember writes `feedback: true` on a message from the system
+	// endpoint, whole or in every part.
+	WriteFeedbackMember FeedbackMember = true
+)
+
 // Pack builds the output of recv for the messages queued for an endpoint, in
 // queue order, within the budget. lease is the identifier the caller generated
 // for this recv, the one it passes to delivery.Record.Handout for every entry of
@@ -99,7 +115,7 @@ var (
 // through several front ends passes the budgets of the others, so that a message
 // is cut in the same parts whichever front end reads it: the parts are counted
 // and acknowledged one by one, and a part of one cut is not a part of another.
-func Pack(queue []Message, lease delivery.LeaseID, b Budget, cutFor ...Budget) (Page, error) {
+func Pack(queue []Message, lease delivery.LeaseID, b Budget, feedback FeedbackMember, cutFor ...Budget) (Page, error) {
 	budgets, err := cutBudgets(b, cutFor)
 	if err != nil {
 		return Page{}, err
@@ -123,13 +139,13 @@ func Pack(queue []Message, lease delivery.LeaseID, b Budget, cutFor ...Budget) (
 			if len(shown) > 0 {
 				break
 			}
-			return buildPage(m, parts, k, len(queue)-1, lease, b)
+			return buildPage(m, parts, k, len(queue)-1, lease, b, feedback)
 		}
-		encoded := encodePage(lease.String(), append(shown, wireOf(m, m.Body, 0, 0)), len(queue)-i-1)
+		encoded := encodePage(lease.String(), append(shown, wireOf(m, m.Body, 0, 0, feedback)), len(queue)-i-1)
 		if b.Measure(string(encoded)) > b.Limit {
 			break
 		}
-		shown = append(shown, wireOf(m, m.Body, 0, 0))
+		shown = append(shown, wireOf(m, m.Body, 0, 0, feedback))
 		out = encoded
 		handed = append(handed, Handout{ID: m.ID, Part: 1, Parts: 1})
 	}
@@ -147,7 +163,7 @@ func Pack(queue []Message, lease delivery.LeaseID, b Budget, cutFor ...Budget) (
 // of a message. A message that fits whole has the single part 1. The parts of
 // a message are fixed by its ID, sender and body and by the budget, so the
 // budget and cutFor must be the ones Pack used when it handed out the first part.
-func Part(m Message, k int, lease delivery.LeaseID, b Budget, cutFor ...Budget) (Page, error) {
+func Part(m Message, k int, lease delivery.LeaseID, b Budget, feedback FeedbackMember, cutFor ...Budget) (Page, error) {
 	budgets, err := cutBudgets(b, cutFor)
 	if err != nil {
 		return Page{}, err
@@ -162,7 +178,7 @@ func Part(m Message, k int, lease delivery.LeaseID, b Budget, cutFor ...Budget) 
 	if k < 1 || k > len(parts) {
 		return Page{}, fmt.Errorf("%w: %d of %d", ErrNoSuchPart, k, len(parts))
 	}
-	return buildPage(m, parts, k, 0, lease, b)
+	return buildPage(m, parts, k, 0, lease, b, feedback)
 }
 
 // cutBudgets are the budgets a message is cut for: the one of the page, then the
@@ -194,13 +210,13 @@ func startPart(m Message, n int) (int, error) {
 }
 
 // buildPage encodes a page holding part k of a message and checks that it fits.
-func buildPage(m Message, parts []string, k, more int, lease delivery.LeaseID, b Budget) (Page, error) {
+func buildPage(m Message, parts []string, k, more int, lease delivery.LeaseID, b Budget, feedback FeedbackMember) (Page, error) {
 	n := len(parts)
 	label := k
 	if n == 1 {
 		label, n = 0, 0 // a message that fits whole carries no part label
 	}
-	out := encodePage(lease.String(), []wireMessage{wireOf(m, parts[k-1], label, n)}, more)
+	out := encodePage(lease.String(), []wireMessage{wireOf(m, parts[k-1], label, n, feedback)}, more)
 	if b.Measure(string(out)) > b.Limit {
 		// splitBody reserves room for every number it can foresee; this is
 		// reached only by a queue longer than maxMore.
@@ -224,18 +240,21 @@ const maxMore = 999_999
 // a single part.
 //
 // The cut points depend only on the message's ID, sender and body and on the
-// budget. Everything else that varies from one recv to the next is sized at its
-// widest instead: the possibly-duplicate flag (a message gains it when a
-// lease on it expires, between two recv calls for its parts), the lease ID,
-// the count of other queued messages and the part numbers. A later recv for
-// another part, which knows none of these as they were, then cuts where part 1
-// did.
+// budget. The feedback member follows from the sender, so it is one of those: the
+// pages measured here always write it, whether or not the page that is handed out
+// does, and a reader that reads the parts of a message through pages with and
+// without it sees the same parts. Everything else that varies from
+// one recv to the next is sized at its widest instead: the possibly-duplicate
+// flag (a message gains it when a lease on it expires, between two recv calls
+// for its parts), the lease ID, the count of other queued messages and the part
+// numbers. A later recv for another part, which knows none of these as they
+// were, then cuts where part 1 did.
 func splitBody(m Message, budgets []Budget) ([]string, error) {
 	sized := m
 	sized.PossiblyDuplicate = true
 	reserved := strings.Repeat("x", MaxLeaseLen)
 	fits := func(body string, part, parts int) bool {
-		out := string(encodePage(reserved, []wireMessage{wireOf(sized, body, part, parts)}, maxMore))
+		out := string(encodePage(reserved, []wireMessage{wireOf(sized, body, part, parts, WriteFeedbackMember)}, maxMore))
 		for _, b := range budgets {
 			if b.Measure(out) > b.Limit {
 				return false
@@ -297,11 +316,15 @@ type wirePage struct {
 // wireMessage separates what the channel vouches for (id, from) from what the
 // sender wrote (body), so a body cannot pass itself off as a header.
 type wireMessage struct {
-	ID                string    `json:"id"`
-	From              string    `json:"from"`
-	PossiblyDuplicate bool      `json:"possibly_duplicate,omitempty"`
-	Part              *wirePart `json:"part,omitempty"`
-	Body              string    `json:"body"`
+	ID                string `json:"id"`
+	From              string `json:"from"`
+	PossiblyDuplicate bool   `json:"possibly_duplicate,omitempty"`
+	// Feedback marks a message that is the node's own channel feedback: its
+	// sender is the system endpoint, which no request can send as. It follows
+	// from From alone, and is written only when the page is asked to.
+	Feedback bool      `json:"feedback,omitempty"`
+	Part     *wirePart `json:"part,omitempty"`
+	Body     string    `json:"body"`
 }
 
 // wirePart labels a message that is handed out in parts.
@@ -322,8 +345,11 @@ type wireNext struct {
 
 // wireOf builds the wire form of m with the given body. A part number of 0
 // means the message is not split.
-func wireOf(m Message, body string, part, parts int) wireMessage {
-	w := wireMessage{ID: m.ID, From: m.From.String(), PossiblyDuplicate: m.PossiblyDuplicate, Body: body}
+func wireOf(m Message, body string, part, parts int, feedback FeedbackMember) wireMessage {
+	w := wireMessage{
+		ID: m.ID, From: m.From.String(), PossiblyDuplicate: m.PossiblyDuplicate,
+		Feedback: bool(feedback) && m.From.Endpoint.IsSystem(), Body: body,
+	}
 	if part > 0 {
 		w.Part = &wirePart{Index: part, Total: parts, Label: fmt.Sprintf("part %d/%d", part, parts)}
 		if part < parts {

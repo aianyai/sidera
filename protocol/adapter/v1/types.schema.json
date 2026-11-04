@@ -282,7 +282,10 @@
         "direct": {
           "type": "object",
           "required": ["max_endpoints"],
-          "properties": { "max_endpoints": { "type": "integer", "minimum": 1, "maximum": 1000 } }
+          "properties": {
+            "max_endpoints": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "feedback": { "type": "boolean", "description": "The adapter decodes the member feedback of a message on a page. The daemon leaves the member out of the pages it sends to an adapter that did not declare this. Optional; absent means false." }
+          }
         },
         "shutdown_intent": { "type": "boolean", "description": "The adapter understands the intent member of shutdown. Optional; absent means false." }
       }
@@ -349,6 +352,7 @@
               "id": { "$ref": "#/$defs/MessageID" },
               "from": { "$ref": "#/$defs/Address" },
               "possibly_duplicate": { "type": "boolean" },
+              "feedback": { "type": "boolean", "description": "The message is the node's own channel feedback; its sender is the system endpoint. Optional; absent means false." },
               "part": {
                 "type": "object",
                 "required": ["index", "total", "label"],

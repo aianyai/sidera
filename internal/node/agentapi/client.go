@@ -157,11 +157,34 @@ func clientDecode[T any](raw []byte) (any, error) {
 	return out, nil
 }
 
+// clientDecodePage checks a page of recv and returns it unchanged. It reads a
+// page as RecvPage except in one respect: a message on the page may carry members
+// this version does not know. The client of a long-running agent session outlives
+// the daemon, which is updated under it, so a page of a newer daemon must not be
+// refused whole, with every message queued behind it, for a member that only adds
+// to a message. Everything else stays strict: the other members of the page, and
+// the known members of a message, are decoded as every response is.
 func clientDecodePage(raw []byte) (any, error) {
-	if _, err := clientDecode[adapterproto.RecvPage](raw); err != nil {
+	if _, err := clientDecode[clientPage](raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
+}
+
+// clientPage is adapterproto.RecvPage with messages that tolerate unknown members.
+type clientPage struct {
+	Lease    adapterproto.LeaseRef `json:"lease"`
+	Messages []openPageMessage     `json:"messages"`
+	More     int                   `json:"more"`
+}
+
+// openPageMessage is adapterproto.PageMessage that ignores the members it has no
+// field for.
+type openPageMessage adapterproto.PageMessage
+
+func (m *openPageMessage) UnmarshalJSON(data []byte) error {
+	type plain openPageMessage
+	return strictjson.DecodeOpen(data, (*plain)(m))
 }
 
 func clientResult[T any](c *Client, ctx context.Context, method string, in any) (T, error) {

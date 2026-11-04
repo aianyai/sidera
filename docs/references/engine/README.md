@@ -641,6 +641,10 @@ adapter's upgrade changed its budgets: the hand-out, in a page or by part number
 closes it at once as `delivery_unknown` (it was handed out, so the sender is told once, as for
 any message that ends so), and a part asked for by number answers `message_unknown`. Left
 queued it would be prompted for at every turn end and read by no one.
+The page of a direct endpoint writes the member `feedback` of a message from the system
+endpoint, which its adapter reads and the host takes out for one that did not declare it;
+the page of any other endpoint is read on the Agent interface and never writes it, so a
+client of an earlier version, which refuses a page with a member it does not know, reads it.
 
 `Ack` takes the lease of the page and the parts, or no parts for all the page. A lease no
 record of the caller's endpoint holds is `lease_unknown`, whoever holds it: a record of

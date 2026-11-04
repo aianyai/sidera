@@ -196,7 +196,13 @@ reach the engine through this same host. Each operation binds `ByAdapter` to the
 connection's instance and the requested endpoint, with ownership checked inside
 its loop command. Direct sends use `SendDirect` to keep parsing, reply routing
 and acceptance in that command. Receive pages are decoded from the engine's
-JSON page into the protocol's typed result; no page fields are reconstructed.
+JSON page into the protocol's typed result; no page fields are reconstructed, and the
+type carries every member of a page, since a member it lacks would be dropped without a
+sign. The one thing the host changes in the page is the member `feedback` of its
+messages: it is left out unless the adapter declared the direct capability `feedback`,
+because an adapter that decodes a page strictly refuses a page with a member it does not
+know, and a notice would then hold up every message behind it. Taking a member away
+cannot make a page exceed its budget.
 
 For direct send intake, invalid address syntax is `1008` with `data.field` naming
 `to[index]`; content and reply-rule refusals, idempotency conflicts and a send after
@@ -506,6 +512,7 @@ check on every test):
 | `EnsureRunning` and `Stop` | `TestEnsureRunningAndStopOfAnInstance` |
 | `Stopping` is true from `Stop` until the process has ended, also for an instance stopped before its adapter launched, which waits for the previous process | `TestAnInstanceIsStoppingUntilItsProcessHasEnded`, `TestAnInstanceStoppedBeforeItLaunchedIsStoppingUntilThePreviousProcessHasEnded` |
 | `Shutdown` and `Abort` | `TestShutdownSendsShutdownWaitsThenKills`, `TestAbortKillsAtOnceAndSendsNoShutdown` |
+| The member `feedback` of a page reaches only an adapter that declared it | `TestRecvCarriesFeedbackOnlyToAnAdapterThatDeclaredIt` |
 | The intent goes only to an adapter that declared it, and the first one stands | `TestShutdownCarriesTheIntentOnlyToAnAdapterThatDeclaredIt`, `TestTheFirstIntentOfAStopStands` |
 | An error answered to `shutdown` is logged | `TestAnErrorOfShutdownIsLoggedAndTheAdapterEnds` |
 | The release round | `TestRetiringAnInstanceWithNoAdapterInServiceRunsAReleaseRound`, `TestAReleaseRoundThatFailsIsLoggedAndNotRepeated`, `TestAReleaseRoundWaitsForTheAdapterBeforeIt` |

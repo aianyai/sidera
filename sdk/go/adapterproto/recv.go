@@ -62,16 +62,22 @@ func (p PagePart) Validate() error {
 }
 
 // PageMessage is one message, or one part of a message, on a page. The channel
-// vouches for ID and From; Body is what the sender wrote, or a part of it, and is
-// never empty: a message has a body.
+// vouches for ID, From and Feedback; Body is what the sender wrote, or a part of
+// it, and is never empty: a message has a body.
 type PageMessage struct {
 	ID   MessageID `json:"id"`
 	From Address   `json:"from"`
 	// PossiblyDuplicate marks a part that was handed out before and never
 	// acknowledged.
-	PossiblyDuplicate bool      `json:"possibly_duplicate,omitempty"`
-	Part              *PagePart `json:"part,omitempty"`
-	Body              string    `json:"body"`
+	PossiblyDuplicate bool `json:"possibly_duplicate,omitempty"`
+	// Feedback marks a message that is the node's own channel feedback, such as the
+	// notice that a message the endpoint sent was refused or expired. Its body is
+	// text for the reader, not a request. The daemon sends the member only to an
+	// adapter that declared the direct capability feedback. It is optional: an
+	// explicit false is accepted.
+	Feedback bool      `json:"feedback,omitempty"`
+	Part     *PagePart `json:"part,omitempty"`
+	Body     string    `json:"body"`
 }
 
 // Validate checks the message, and that a part's next pointer names this message.

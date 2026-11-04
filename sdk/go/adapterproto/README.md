@@ -42,7 +42,8 @@ for what each message means and why the protocol is shaped this way.
   zero included.
 - **Open capability declarations.** The one exception to the unknown-field rule:
   `Capabilities` (`shutdown_intent` among its members), `RuntimeCapabilities`,
-  `DirectCapabilities` and `DaemonCapabilities` (`direct_endpoint_access`) ignore the members they have no field for, so a newer
+  `DirectCapabilities` (`feedback` among its members: the adapter decodes the `feedback`
+  member of a `PageMessage`, which the daemon otherwise leaves out of its pages) and `DaemonCapabilities` (`direct_endpoint_access`) ignore the members they have no field for, so a newer
   peer can declare a capability that this version does not know. Their known
   members are decoded as strictly as everything else, and a repeated key is
   refused even inside an ignored member. Ignoring a capability means not using

@@ -10,6 +10,15 @@ protocol has a version of its own.
 
 ### Added
 
+- **Receive pages mark the node's own channel feedback.** A message the node sent from its
+  system endpoint, such as the notice that a message was refused or expired, carries
+  `feedback: true` on a page an adapter receives, so the adapter can tell it from a message
+  another endpoint wrote. An agent tells it by the sender, as before: the pages of the Agent
+  interface carry no such member, and its client now ignores members of a page message it does
+  not know, so a client that outlives an update is not stranded by a member a later release
+  adds. An adapter receives the member only if it declares the new direct capability
+  `feedback`, which the Go SDK kit declares itself; the protocol stays at version 1. To learn what
+  happened to a message, an adapter asks `endpoint.message_status`.
 - **Direct endpoints can read the directory and the peer list and set their own declaration.**
   The adapter protocol gains `endpoint.directory`, `endpoint.peers` and `endpoint.declare`
   for a direct endpoint, behind the daemon capability `direct_endpoint_access` that

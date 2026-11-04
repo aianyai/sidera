@@ -34,7 +34,8 @@ type conn struct {
 	admission atomic.Pointer[adapterreg.Admission] // nil until admitted
 	// initialized holds what the adapter declared in an initialize the host
 	// accepted; nil until then. Only an adapter that answered initialize is sent
-	// shutdown, and what it declared decides whether the request carries the intent.
+	// shutdown, and what it declared decides whether the request carries the intent
+	// and whether a page carries the feedback member.
 	initialized atomic.Pointer[adapterproto.Capabilities]
 	closing     atomic.Bool // shutdown began: requests get -32002
 
@@ -475,7 +476,11 @@ func (c *conn) dispatchEndpoint(ctx context.Context, ec EndpointCalls, method st
 		})
 	case adapterproto.MethodEndpointRecv:
 		return serveRequest(c, method, raw, func(p *adapterproto.RecvParams) (adapterproto.Message, error) {
-			return ec.EndpointRecv(ctx, c.inst, *p)
+			res, err := ec.EndpointRecv(ctx, c.inst, *p)
+			if err == nil && !c.declaresFeedback() {
+				res.Page = withoutFeedback(res.Page)
+			}
+			return res, err
 		})
 	case adapterproto.MethodEndpointAck:
 		return serveRequest(c, method, raw, func(p *adapterproto.AckParams) (adapterproto.Message, error) {
@@ -485,6 +490,27 @@ func (c *conn) dispatchEndpoint(ctx context.Context, ec EndpointCalls, method st
 	return serveRequest(c, method, raw, func(p *adapterproto.MessageStatusParams) (adapterproto.Message, error) {
 		return ec.EndpointMessageStatus(ctx, c.inst, *p)
 	})
+}
+
+// declaresFeedback reports whether the adapter declared that it decodes the
+// feedback member of a message on a page.
+func (c *conn) declaresFeedback() bool {
+	caps := c.initialized.Load()
+	return caps != nil && caps.Direct != nil && caps.Direct.Feedback
+}
+
+// withoutFeedback returns the page with the feedback member left out of every
+// message, which is what an adapter that did not declare it is sent: an SDK that
+// predates the member decodes a page strictly and would refuse the whole page for
+// it, and with it every message queued behind a notice. The messages are copied,
+// not changed in place, because the engine's answer may share them. Only
+// bytes are taken away, so the page still fits the budget it was packed for.
+func withoutFeedback(p adapterproto.RecvPage) adapterproto.RecvPage {
+	p.Messages = slices.Clone(p.Messages)
+	for i := range p.Messages {
+		p.Messages[i].Feedback = false
+	}
+	return p
 }
 
 // serveRequest decodes the parameters strictly, calls the engine and checks its

@@ -29,7 +29,10 @@ records that carry keys and certificates are described in
 `ep1lllllllllllllllllllllllllusa628q`. `EndpointID.IsSystem()` reports it. It is
 the sender a node gives to its own channel feedback (a notice that a message was
 refused, expired or went unanswered), so a reader can tell feedback from a
-message another endpoint wrote by looking at the endpoint part alone.
+message another endpoint wrote by looking at the endpoint part alone. The page an
+adapter reads for a direct endpoint also marks such a message with `feedback: true`,
+derived from the same endpoint part; the page an agent reads does not, and the agent
+looks at the sender.
 
 - `NewEndpointID` fails with `ErrReserved` if the randomness is exactly this
   value, as it fails with `ErrZero` for all zeros. It does not draw again: a

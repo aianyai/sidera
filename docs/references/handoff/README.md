@@ -142,8 +142,24 @@ checks that the model saw it before acknowledging for the agent.
   for this `recv` and printed as 32 lowercase hex characters; the zero ID is
   refused, also for an empty queue, so a page always has one. Sender fields
   (`id`, `from`) are separate fields from `body`; a part handed out before
-  carries `possibly_duplicate`. Encoded with HTML escaping off and
+  carries `possibly_duplicate`, and a message from the system endpoint carries
+  `feedback` when the page is asked to write it. Encoded with HTML escaping off and
   non-ASCII text as is; Go always escapes U+2028 and U+2029.
+- `feedback: true` marks a message whose sender is the system endpoint, the
+  node's own channel feedback; no request can send as that endpoint, so the member
+  is as reliable as `from`. It is derived from the sender where the wire form of a
+  message is built, which `Pack` and `Part` both use, and every part of a message
+  carries it. It is absent otherwise. A reader that decodes a page strictly refuses a
+  member it does not know, so `Pack` and `Part` write the member only when the caller
+  passes `WriteFeedbackMember`; `OmitFeedbackMember` leaves it out. The cut points are
+  measured on pages that always carry it, so they are the same either way and still
+  depend only on the message's ID, sender and body: a reader that reads the parts of a
+  message through pages with and without the member sees the same parts, and a page
+  that writes it fits the budget the parts were cut for. The engine writes it for
+  a direct endpoint, whose adapter declares whether it decodes it, and never for a
+  session endpoint, which is read on the Agent interface.
+  It names no message and has no kind: what happened to a message is read with the
+  status of that message.
 - The budget is in the unit of the runtime path (characters or tokens) and is
   checked against the encoded output.
 - Whole messages are taken in queue order while they fit. A first message

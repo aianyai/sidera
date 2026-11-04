@@ -60,6 +60,12 @@ func ServeStdio(ctx context.Context, cfg Config) error {
 // instance lock, if it was taken, is released when Serve returns.
 func Serve(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) error {
 	cfg.Capabilities.ShutdownIntent = true
+	if d := cfg.Capabilities.Direct; d != nil {
+		// A copy, so that the caller's declaration is not changed.
+		declared := *d
+		declared.Feedback = true
+		cfg.Capabilities.Direct = &declared
+	}
 	if err := cfg.validate(); err != nil {
 		return err
 	}

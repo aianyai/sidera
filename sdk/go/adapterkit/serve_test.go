@@ -391,6 +391,33 @@ func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
 	}
 }
 
+// The kit declares that it decodes the feedback member of a page, so that the
+// daemon sends it to every adapter built on the kit, and does not change the
+// declaration it was given. An adapter without direct endpoints declares none.
+func TestTheKitDeclaresFeedbackForDirectEndpoints(t *testing.T) {
+	given := adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: 1}}
+	var init adapterproto.InitializeResult
+	s := serveOn(t, config(&stub{}, given))
+	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &init); err != nil {
+		t.Fatal(err)
+	}
+	if init.Capabilities.Direct == nil || !init.Capabilities.Direct.Feedback {
+		t.Errorf("the kit did not declare direct.feedback: %+v", init.Capabilities.Direct)
+	}
+	if given.Direct.Feedback {
+		t.Error("the kit changed the declaration it was given")
+	}
+
+	var runtimeOnly adapterproto.InitializeResult
+	s = serveOn(t, config(&stub{}, runtimeCaps()))
+	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &runtimeOnly); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeOnly.Capabilities.Direct != nil {
+		t.Errorf("the kit declared direct endpoints for a runtime adapter: %+v", runtimeOnly.Capabilities.Direct)
+	}
+}
+
 // The methods of attached sessions are answered only for an adapter that declared
 // attach, even when it declared a runtime.
 func TestAttachMethodsNeedTheAttachCapability(t *testing.T) {

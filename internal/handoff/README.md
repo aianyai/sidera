@@ -118,7 +118,14 @@ Delivery blocked:
 - The output is one JSON document and a newline:
   `{"lease":"...","messages":[...],"more":N}`. `lease` is the page identifier
   the caller generated for this `recv` (`delivery.LeaseID`). Sender fields (`id`, `from`,
-  and `possibly_duplicate` and `part` when they apply) are separate from `body`.
+  and `possibly_duplicate`, `feedback` and `part` when they apply) are separate from `body`.
+  `feedback` is `true` for a message whose sender is the system endpoint, the node's
+  own channel feedback; it follows from the sender where the wire form is built, so
+  every part of the message carries it. It is written only when the caller passes
+  `WriteFeedbackMember` to `Pack` or `Part`, because a reader that decodes a page
+  strictly refuses a member it does not know. The cut points are measured on pages
+  that always carry it, so a message is cut in the same parts whether or not a page
+  writes it.
   It is encoded with `SetEscapeHTML(false)`: non-ASCII text is emitted as is,
   except U+2028 and U+2029, which Go always escapes.
 - The budget is checked against the encoded output, in the unit of the budget.

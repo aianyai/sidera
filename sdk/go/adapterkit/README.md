@@ -60,6 +60,10 @@ package does not build it:
   `adapterproto.HandshakeLimit` after the request arrived, because the daemon ends the
   connection of an adapter that has not answered by then. An application that has more
   to do than fits answers by the deadline and does the rest after the answer.
+- **The kit declares `feedback` for direct endpoints.** When `Config.Capabilities`
+  has `Direct`, `Serve` declares `direct.feedback` on a copy, so the daemon sends the
+  member `feedback` of a page message to every adapter built on the kit, and an adapter
+  never sets it itself.
 - **The kit declares `shutdown_intent`.** `Serve` adds the capability to
   `Config.Capabilities`, reads the `intent` of `shutdown` and hands it to
   `Application.Shutdown`; a `shutdown` without one reaches the application as

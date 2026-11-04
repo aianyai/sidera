@@ -88,8 +88,8 @@ explicit `[]`, rejected by the server without acknowledgement. This encoding
 leaves the server's request type and presence rules unchanged.
 
 Successful `Call` results have these concrete Go types. Every response is
-strictly decoded before success; `recv` returns its original bytes after that
-check. An incomplete or invalid response is `outcome_unknown` for both APIs.
+strictly decoded before success, except that a message of a `recv` page may carry
+members the client does not know; `recv` returns its original bytes after that check. An incomplete or invalid response is `outcome_unknown` for both APIs.
 
 | Method | Concrete result |
 | --- | --- |

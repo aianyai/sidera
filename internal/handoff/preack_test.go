@@ -158,7 +158,7 @@ func TestCompileMarkers(t *testing.T) {
 // What Pack prints is what CheckBeforeAck expects, including non-ASCII text,
 // whatever the declared markers.
 func TestCheckBeforeAckAcceptsPackedOutput(t *testing.T) {
-	p, err := Pack([]Message{msg(t, "m1", "你好 <world> & 😀")}, testLease, DefaultBudget())
+	p, err := Pack([]Message{msg(t, "m1", "\u4f60\u597d <world> & \U0001F600")}, testLease, DefaultBudget(), WriteFeedbackMember)
 	if err != nil {
 		t.Fatal(err)
 	}

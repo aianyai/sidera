@@ -95,7 +95,9 @@ A long message is cut into parts that fit the page budget. A page that ends a
 part carries `"next":{"msg":"<id>","part":<k>}`; fetch it with
 `sidera recv --msg <id> --part <k>` (`msg` and `part` in MCP). Acknowledge each
 page. A message that is handed out again after an interrupted read is marked
-`possibly_duplicate`.
+`possibly_duplicate`. A message whose sender is the node's system endpoint (the
+address ends in `/ep1lllllllllllllllllllllllllusa628q`) is the node's own notice about a
+message you sent (refused, expired, unanswered), not a request from another endpoint.
 
 ## Answering and sending
 

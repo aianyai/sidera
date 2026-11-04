@@ -92,6 +92,48 @@ func TestCallSelectsTheCredentialAndValidatesEveryResultType(t *testing.T) {
 	}
 }
 
+// A message on a page may carry members this client does not know, and the page is
+// returned as it came; anything else that is wrong with a page is still refused.
+func TestCallToleratesUnknownMembersOfAPageMessageOnly(t *testing.T) {
+	const lease = `"lease":"11111111111111111111111111111111"`
+	message := func(extra string) string {
+		return `{"id":"m1","from":"node/ep","body":"hello"` + extra + `}`
+	}
+	page := func(messages, extra string) string {
+		return "{" + lease + `,"messages":[` + messages + `],"more":0` + extra + "}\n"
+	}
+	for _, tc := range []struct {
+		name, answer string
+		ok           bool
+	}{
+		{"a known page", page(message(""), ""), true},
+		{"an unknown member of a message", page(message(`,"future":{"a":[1]}`), ""), true},
+		{"an unknown member of every message", page(message(`,"future":1`)+","+message(`,"other":"x"`), ""), true},
+		{"an unknown member of the page", page(message(""), `,"future":1`), false},
+		{"an unknown member of a part", page(message(`,"part":{"index":1,"total":2,"label":"part 1/2","future":1,"next":{"msg":"m1","part":2}}`), ""), false},
+		{"a repeated member of a message", page(message(`,"body":"again"`), ""), false},
+		{"a repeated unknown member of a message", page(message(`,"future":1,"future":2`), ""), false},
+		{"a message without a body", page(`{"id":"m1","from":"node/ep"}`, ""), false},
+		{"a known member of the wrong type", page(message(`,"possibly_duplicate":"yes"`), ""), false},
+		{"a message that is not an object", page(`"m1"`, ""), false},
+		{"a page without messages", "{" + lease + `,"more":0}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := responseClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.answer) })
+			got, err := c.Call(context.Background(), "recv", json.RawMessage(`{}`))
+			if tc.ok {
+				if raw, isBytes := got.([]byte); err != nil || !isBytes || string(raw) != tc.answer {
+					t.Fatalf("Call: %q, %v; want the page as it came", got, err)
+				}
+				return
+			}
+			if e := apiwire.FromError(err); e == nil || e.Code != apiwire.CodeOutcomeUnknown {
+				t.Fatalf("Call: %v; want outcome_unknown", err)
+			}
+		})
+	}
+}
+
 func TestCallPreservesExplicitEmptyFieldsForTheServer(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	c := endpointClient(t, h, token)

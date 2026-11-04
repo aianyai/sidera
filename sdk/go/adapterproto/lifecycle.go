@@ -187,6 +187,11 @@ func (r RuntimeCapabilities) Validate() error {
 type DirectCapabilities struct {
 	// MaxEndpoints is the most direct endpoints the adapter registers.
 	MaxEndpoints int `json:"max_endpoints"`
+	// Feedback: the adapter decodes the member feedback of a message on a page
+	// endpoint.recv returns. The daemon leaves the member out of the pages it sends
+	// to an adapter that did not declare this. It is optional: an explicit false
+	// is accepted.
+	Feedback bool `json:"feedback,omitempty"`
 }
 
 // UnmarshalJSON decodes the declaration strictly, except that members it has no

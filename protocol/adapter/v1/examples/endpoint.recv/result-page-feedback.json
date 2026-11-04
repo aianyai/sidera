@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "id": 112,
+  "result": {
+    "page": {
+      "lease": "1a2b3c4d5e6f708192a3b4c5d6e7f809",
+      "messages": [
+        {
+          "id": "m-7f40",
+          "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/ffffffffffffffffffffffffffffffff",
+          "feedback": true,
+          "body": "Notice from the channel of this node: a message you sent was not delivered."
+        },
+        {
+          "id": "m-7f41",
+          "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "body": "Please run the migration."
+        }
+      ],
+      "more": 0
+    }
+  }
+}

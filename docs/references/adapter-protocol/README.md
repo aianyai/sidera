@@ -514,7 +514,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Seven
+reader of an earlier shape is deployed that the change could break. Eight
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -545,7 +545,12 @@ have sent to a new version:
   `endpoint.directory`, `endpoint.peers` and `endpoint.declare`. The capability alone would
   need no new version, but the new methods would. An adapter that does not find the capability
   never sends them, and an older daemon never declares it, so no deployed reader meets them;
-  the record is kept because rule 3 would otherwise have sent them to a new version.
+  the record is kept because rule 3 would otherwise have sent them to a new version;
+- the member `feedback` of a message on a page, behind the direct capability `feedback`. The
+  capability alone would need no new version, but a new member of the page message would.
+  The daemon sends the member only to an adapter that declared the capability, so an adapter
+  that decodes a page strictly never meets it, and an older daemon never sees a declaration it
+  would act on.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -827,6 +832,29 @@ envelope requires of every message: no node can hand out an empty one, so the
 schema (`minLength: 1`) and `PageMessage.Validate` refuse a page that holds it
 (`TestRecvPageRules`, `invalid/endpoint-recv--result-page-message-with-empty-body.json`).
 
+A message on a page carries `feedback: true` when it is the node's own channel feedback: the
+notice that a message the endpoint sent was refused, expired or went unanswered, or that
+delivery to a recipient is blocked or recovered. The node writes it from the sender, which is
+the node's reserved system endpoint, and no request can send as that endpoint, so the member
+is as reliable as `from`. The body of such a message is text for the reader, not a request
+to act on. The member is optional like `possibly_duplicate`: it is left out otherwise, and an
+explicit `false` is accepted. It is part of every part of a message that is handed out in
+parts, and it adds no cut point of its own, because it follows from the sender: the parts are
+cut as if the member were written, so they are the same whether or not a page writes it. A page
+whose adapter did not declare the direct capability `feedback` is sent without it (see
+Capabilities). Only the pages of a direct endpoint, which an adapter reads, can carry the member;
+the page that an agent reads on the Agent interface never does, and the agent tells the node's
+feedback by the sender.
+
+The marker says only that the message is the node's own notice. It carries no kind and
+names no message: an adapter that needs to know what happened to a message it sent asks
+`endpoint.message_status`, which gives the state and the reason of each recipient. A
+structure in the notice would not hold: the notices of one endpoint are merged into one
+message with no bound on its entries, and the header of a page is repeated in every part,
+so a long list of ids could outgrow the budget and the notice could not be handed out at
+all; and the store does not keep the ids of the messages a notice covers at the time it is
+handed out.
+
 The daemon tells the adapter of a direct endpoint, with the notification
 `endpoint.pending` (`endpoint`, `count`), that messages wait for the endpoint. `count`
 is the number of messages that wait, at least 1. The notification is
@@ -1103,7 +1131,7 @@ An adapter declares what it supports in the result of `initialize`:
 
 ```json
 {"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"], "attach": true},
- "direct": {"max_endpoints": 50},
+ "direct": {"max_endpoints": 50, "feedback": true},
  "shutdown_intent": true}
 ```
 
@@ -1127,7 +1155,11 @@ optional (absent means false, so an adapter that predates it still completes the
 and says that the adapter implements attached sessions: `session.attach`, the attached entries
 of `adapter.start`, `session.detached`, and their prompt and turn semantics. `shutdown_intent`, a
 member of the declaration itself and also optional, says that the adapter reads the `intent` of
-`shutdown`.
+`shutdown`. `feedback`, a member of `direct` and optional in the same way, says that the
+adapter decodes the member `feedback` of a message on a page. The daemon leaves that member out of
+every page it sends an adapter that did not declare it, because an adapter that decodes a page
+strictly would refuse the whole page, and with it every message queued behind a notice. The Go
+SDK's kit declares it for every adapter that declares direct endpoints.
 
 What an adapter declares is kept apart from what is currently usable. The
 declaration comes from `initialize` and the manifest and is recorded per
@@ -1756,8 +1788,8 @@ SDK module keeps no dependencies) checks:
    Go accepts there, found by bisection, so a limit missing from the schema is
    found too; and `FuzzDifferential` with the fuzzer's inputs;
 6. the output of `handoff.Pack` and `handoff.Part`, for whole messages, resumed
-   and last parts, duplicates and empty queues, is a valid `RecvPage` to both the
-   schema and the Go type;
+   and last parts, duplicates, the node's marked notices (whole and in parts) and
+   empty queues, is a valid `RecvPage` to both the schema and the Go type;
 7. the platform vocabulary of the manifest covers every platform the Go
    toolchain lists;
 8. every line the Go peer writes while its own tests run is a frame the message

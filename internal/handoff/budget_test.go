@@ -153,7 +153,7 @@ func TestBudgetValidate(t *testing.T) {
 			if (err == nil) != r.ok {
 				t.Fatalf("validate() = %v, want ok=%v", err, r.ok)
 			}
-			if _, perr := Pack(nil, testLease, r.b); (perr == nil) != r.ok {
+			if _, perr := Pack(nil, testLease, r.b, WriteFeedbackMember); (perr == nil) != r.ok {
 				t.Fatalf("Pack error = %v, want ok=%v", perr, r.ok)
 			}
 		})

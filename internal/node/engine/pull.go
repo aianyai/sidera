@@ -308,7 +308,7 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 	if err != nil {
 		return nil, 0, false, err
 	}
-	pageOf, retry, err := e.pack(now, st.rec.ID, lease, budget, cutFor, cands, skip)
+	pageOf, retry, err := e.pack(now, st.rec.ID, lease, budget, pageFeedback(st), cutFor, cands, skip)
 	if err != nil || retry {
 		return nil, 0, retry, err
 	}
@@ -361,7 +361,7 @@ type packed struct {
 // the page is built from the first few, and from more when it reached the last of
 // them. A message that cannot be handed out is put in skip and the attempt is made
 // again.
-func (e *Engine) pack(now time.Time, endpoint ident.EndpointID, lease delivery.LeaseID, budget handoff.Budget, cutFor []handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
+func (e *Engine) pack(now time.Time, endpoint ident.EndpointID, lease delivery.LeaseID, budget handoff.Budget, feedback handoff.FeedbackMember, cutFor []handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
 	bodies := make([]string, len(cands))
 	loaded := 0
 	load := func(upto int) (bool, error) {
@@ -401,7 +401,7 @@ func (e *Engine) pack(now time.Time, endpoint ident.EndpointID, lease delivery.L
 				Body: bodies[i], PossiblyDuplicate: c.in.Record.PossibleDuplicate(next), NextPart: c.in.Record.NextPart(),
 			}
 		}
-		page, err := handoff.Pack(msgs, lease, budget, cutFor...)
+		page, err := handoff.Pack(msgs, lease, budget, feedback, cutFor...)
 		if err != nil {
 			return packed{}, false, fmt.Errorf("engine: the page of %d messages: %w", len(cands), err)
 		}
@@ -537,9 +537,19 @@ func (e *Engine) handoutAuthorization(now time.Time, st *endpointState, in store
 	return auth, nil
 }
 
+// pageFeedback says whether the pages of the endpoint write the member `feedback`
+// of a message. A direct endpoint is read by its adapter, which declares whether it
+// decodes the member and is sent pages without it when it did not. Any other endpoint
+// is read on the Agent interface, by a client of any version that may refuse a page
+// with a member it does not know, so its pages never carry the member; an agent tells
+// the node's feedback by the sender.
+func pageFeedback(st *endpointState) handoff.FeedbackMember {
+	return handoff.FeedbackMember(st.rec.Kind == adapterreg.KindDirect)
+}
+
 // emptyPage is the page that holds no message, under the lease of the recv.
 func (e *Engine) emptyPage(lease delivery.LeaseID, budget handoff.Budget) ([]byte, error) {
-	empty, err := handoff.Pack(nil, lease, budget)
+	empty, err := handoff.Pack(nil, lease, budget, handoff.OmitFeedbackMember)
 	return empty.Output, err
 }
 
@@ -598,7 +608,7 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 	if err != nil {
 		return nil, err
 	}
-	page, err := handoff.Part(msg, r.Part, lease, budget, cutFor...)
+	page, err := handoff.Part(msg, r.Part, lease, budget, pageFeedback(st), cutFor...)
 	if errors.Is(err, handoff.ErrNoSuchPart) {
 		return nil, invalidArgument("part", err)
 	}

@@ -130,6 +130,8 @@ type engineDouble struct {
 	// the call is recorded.
 	onEvent func(kind string)
 
+	// recvPage, when set, is the page endpoint.recv answers with.
+	recvPage     *adapterproto.RecvPage
 	onRegister   func(adapterproto.RegisterParams) (adapterproto.RegisterResult, error)
 	onUnregister func(adapterproto.UnregisterParams) error
 	onCheckpoint func(adapterproto.CheckpointPutParams) error
@@ -294,6 +296,9 @@ func (d *engineDouble) EndpointSend(_ context.Context, instance string, p adapte
 
 func (d *engineDouble) EndpointRecv(_ context.Context, instance string, p adapterproto.RecvParams) (adapterproto.RecvResult, error) {
 	d.record(event{Kind: "recv", Instance: instance, Params: p})
+	if d.recvPage != nil {
+		return adapterproto.RecvResult{Page: *d.recvPage}, nil
+	}
 	return adapterproto.RecvResult{Page: adapterproto.RecvPage{
 		Lease:    "0123456789abcdef0123456789abcdef",
 		Messages: []adapterproto.PageMessage{{ID: "m-2", From: "bob/chat", Body: "hello"}},

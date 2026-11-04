@@ -819,7 +819,9 @@ them there without your owner's yes (see "Ask your owner before").
    should take about a minute; if it returns at once, the arguments are wrong.
 10. **A long message comes in parts.** When a page has `"next":{"msg":"<id>","part":<k>}`,
     fetch the rest with `recv` (`msg` and `part`) and acknowledge each page. A
-    message marked `possibly_duplicate` was handed out before; handle it once.
+    message marked `possibly_duplicate` was handed out before; handle it once. A
+    message whose `from` ends in `/ep1lllllllllllllllllllllllllusa628q` is the node's own
+    notice about a message you sent, not a request from another endpoint.
 11. **Tell sessions you create how to answer you.** A new session replies to the
     sender of its first message with `reply`. Its preset already carries the
     instructions to do so; ask for a short, concrete answer in the task text.

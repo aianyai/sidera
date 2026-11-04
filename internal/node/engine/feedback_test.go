@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -121,6 +123,43 @@ func TestAnAnomalyIsToldToTheSenderOnceInOneNotice(t *testing.T) {
 	quiet(t, h)
 	if got := noticesFor(t, h, "a"); len(got) != 1 {
 		t.Errorf("a holds %d notices an hour and a restart later, want 1", len(got))
+	}
+}
+
+// The page of a direct endpoint, read by its adapter, marks the node's notice with
+// `feedback: true`; the page of a session endpoint, read on the Agent interface by a
+// client of any version, never carries the member, and an agent tells the notice by
+// its sender.
+func TestOnlyThePageOfADirectEndpointMarksANotice(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a", "b")
+	declineAll(t, h, "b")
+	session, _ := newSession(t, h, "a")
+	for _, tc := range []struct {
+		name   string
+		sender fakeagent.Agent
+		marked bool
+	}{
+		{"a direct endpoint", h.Agent("a"), true},
+		{"a session endpoint", session, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.sender.Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b")}, Body: "to an endpoint that takes nothing"}); err != nil {
+				t.Fatal(err)
+			}
+			quiet(t, h)
+			h.Advance(mergeWindow)
+			quiet(t, h)
+			res := recvAs(t, h, tc.sender, fakeagent.RecvInput{})
+			if len(res.Page.Messages) != 1 {
+				t.Fatalf("the page holds %d messages, want the notice", len(res.Page.Messages))
+			}
+			if from, err := ident.ParseAddress(string(res.Page.Messages[0].From)); err != nil || !from.Endpoint.IsSystem() {
+				t.Fatalf("the message is from %q (%v), want the system endpoint", res.Page.Messages[0].From, err)
+			}
+			if got := strings.Contains(string(res.Raw), `"feedback"`); got != tc.marked {
+				t.Errorf("the page marks the notice: %v, want %v\n%s", got, tc.marked, res.Raw)
+			}
+		})
 	}
 }
 
