@@ -9,7 +9,7 @@ as the user that owns the data directory (`~/.sidera`, on Windows `%LOCALAPPDATA
 Run these on each node:
 
 ```sh
-sidera adapter list      # the probe state of each enabled instance (see the notes)
+sidera adapter list      # the probe state of each enabled instance and what its adapter reports as unavailable (see the notes)
 sidera trust list        # the nodes you paired with are under `trusted`
 sidera network show      # the first line is the contact line; peers show connected
 sidera alerts list       # normally empty

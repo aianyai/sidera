@@ -8,6 +8,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // InstalledAdapter is an adapter package that is installed, at the version that is
@@ -35,6 +36,12 @@ type InstanceView struct {
 	// reported, or was last lost for the sake of one connection. The names are those
 	// of adapterhost.GoneCause.
 	Fault string
+	// Availability is what the adapter of an enabled, online instance last said keeps
+	// something from working (adapter.availability), empty when it said nothing or
+	// has said everything is well. It is the adapter's word and describes a
+	// connection, so it is empty for an instance that is offline: that is a fact of
+	// its own, which the snapshot of the connection that ended cannot show.
+	Availability []adapterproto.Availability
 }
 
 // AdapterList is what the owner is shown of the adapters.
@@ -72,6 +79,9 @@ func (e *Engine) adapterList(now time.Time) AdapterList {
 				v.Probe = st.probeView(now)
 				if st.fault != 0 {
 					v.Fault = st.fault.String()
+				}
+				if st.online {
+					v.Availability = cloneAvailability(st.snapshot)
 				}
 			}
 		}

@@ -18,7 +18,7 @@ var helpEntries = map[string]helpEntry{
 	"preset add":                 {"preset add <name> --file <preset.json|-> [--expected-version <n>]", "Add an explicit preset document; omitted version is read first.", "sidera preset add review --file preset.json"},
 	"preset remove":              {"preset remove <name> [--expected-version <n>]", "Remove a preset.", "sidera preset remove review"},
 	"adapter install":            {"adapter install <package-directory>", "Install an adapter from a local directory, resolved to an absolute path.", "sidera adapter install ./package"},
-	"adapter list":               {"adapter list", "List installed adapters, instances, probes and faults.", "sidera adapter list --json"},
+	"adapter list":               {"adapter list", "List installed adapters, instances, probes, faults and availability.", "sidera adapter list --json"},
 	"adapter enable":             {"adapter enable <adapter-id> [--instance <name>] [--config <file|->] [--expected-version <n>]", "Enable an adapter instance, creating it if needed.", "sidera adapter enable claude --instance work"},
 	"adapter config":             {"adapter config <instance> --config <file|-> [--expected-version <n>]", "Replace the configuration of an instance, enabled or not; a running instance is restarted to take it.", "sidera adapter config codex --config codex.json"},
 	"adapter disable":            {"adapter disable <instance> [--expected-version <n>]", "Disable an instance and close its endpoints.", "sidera adapter disable work"},

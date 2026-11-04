@@ -1999,6 +1999,49 @@ func TestAnInstanceWhosePackageCannotRunShowsWhyUntilItIsOnline(t *testing.T) {
 	}
 }
 
+// The list shows what the adapter of an online instance last reported keeps from
+// working, so that the owner of an adapter with direct endpoints only (which has no
+// runtime endpoint to show it) can read it; a clearing snapshot and the end of the
+// connection take it away.
+func TestTheListShowsTheAvailabilityOfAnOnlineInstance(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	r.enableInstance("chat", "")
+	e := r.start()
+	shown := func() []adapterproto.Availability {
+		t.Helper()
+		list, err := e.AdapterList(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, in := range list.Instances {
+			if in.Name == "chat" {
+				return in.Availability
+			}
+		}
+		t.Fatal("the instance is not listed")
+		return nil
+	}
+	started(t, e, "chat")
+	if got := shown(); len(got) != 0 {
+		t.Fatalf("availability %v before anything was reported", got)
+	}
+	want := adapterproto.Availability{Condition: adapterproto.ConditionDependencyMissing, Detail: "the board does not exist"}
+	available(t, e, "chat", want)
+	if got := shown(); len(got) != 1 || got[0].Condition != want.Condition || got[0].Detail != want.Detail {
+		t.Errorf("availability = %v, want [%v]", got, want)
+	}
+	available(t, e, "chat")
+	if got := shown(); len(got) != 0 {
+		t.Errorf("availability = %v after an empty snapshot, want none", got)
+	}
+	available(t, e, "chat", want)
+	gone(t, e, "chat")
+	if got := shown(); len(got) != 0 {
+		t.Errorf("availability = %v of an offline instance, want none", got)
+	}
+}
+
 // faultedPackages is the configuration of the rig with the package of the adapter
 // "chat" unloadable, as the configuration reports a package whose pointer or manifest
 // is bad.

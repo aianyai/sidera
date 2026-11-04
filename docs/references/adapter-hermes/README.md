@@ -195,7 +195,8 @@ Hermes upgraded while the adapter runs is found within the interval. When a chec
 fails, the loop does not touch Sidera or the board, the daemon is told with
 `adapter.availability` (condition `dependency_missing`, the cause in the detail) and
 the loop tries again after a pause that doubles from one second to two minutes. A
-success clears the condition. Only the change is reported, and the reports reach the
+success clears the condition. This adapter declares no runtime endpoint, so the owner reads
+the condition in the `availability` of its instance in `sidera adapter list`. Only the change is reported, and the reports reach the
 daemon in the order of the changes (the gate holds its lock until the daemon has been
 told). A Windows batch shim is not a check of the gate: the client refuses to run it
 (`kanban-cli`), and the gate reports that refusal like any other.

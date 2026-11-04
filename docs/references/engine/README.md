@@ -473,7 +473,9 @@ probe and a `not_run` for the command line, while a front end that the preset of
 the adapter left out of the report fails the instance. A runtime endpoint becomes part of what the node declares the first time
 its probe passes, and is not withdrawn when the adapter later becomes unusable, so that
 the declaration does not flap; disabling the instance ends it. `AdapterList` reads the
-installed adapters, the instances and the probe of each enabled one at one command.
+installed adapters, the instances and the probe of each enabled one at one command, with
+the availability snapshot of an online instance (the last `adapter.availability` of its
+connection) and the fault of a package that cannot run.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's

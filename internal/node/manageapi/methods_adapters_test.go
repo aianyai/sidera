@@ -38,6 +38,10 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 			}},
 			{Name: "waiting", Adapter: "chat", Enabled: true, Probe: engine.ProbeView{State: engine.ProbePending}},
 			{Name: "broken", Adapter: "chat", Enabled: true, Probe: engine.ProbeView{State: engine.ProbePending}, Fault: "package_invalid"},
+			{Name: "direct", Adapter: "chat", Enabled: true, Probe: engine.ProbeView{State: engine.ProbePassed}, Availability: []adapterproto.Availability{
+				{Condition: adapterproto.ConditionDependencyMissing, Detail: "the board does not exist"},
+				{Condition: adapterproto.ConditionNativeUnavailable, Endpoints: []adapterproto.EndpointRef{"ep-a"}},
+			}},
 		},
 	}
 	status, out := r.post("adapters.list", `{}`)
@@ -46,7 +50,8 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 		`"instances":[{"instance":"old","adapter":"relay","enabled":false},` +
 		`{"instance":"relay","adapter":"relay","enabled":true,"probe":{"state":"passed","at":"2026-10-24T09:00:00Z","frontends":[{"preset":"default","frontend":"cli"}]}},` +
 		`{"instance":"waiting","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]}},` +
-		`{"instance":"broken","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]},"fault":{"reason":"package_invalid"}}]}}`
+		`{"instance":"broken","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]},"fault":{"reason":"package_invalid"}},` +
+		`{"instance":"direct","adapter":"chat","enabled":true,"probe":{"state":"passed","frontends":[]},"availability":[{"condition":"dependency_missing","detail":"the board does not exist"},{"condition":"native_unavailable","endpoints":["ep-a"]}]}]}}`
 	if status != 200 || strings.TrimSpace(string(out)) != want {
 		t.Errorf("%d\n%s\nwant\n%s", status, out, want)
 	}

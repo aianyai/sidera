@@ -117,6 +117,16 @@ type instanceJSON struct {
 	// Fault is there when the package of the enabled instance cannot run (see
 	// adapters.list in the daemon reference); the instance is offline then.
 	Fault *faultJSON `json:"fault,omitempty"`
+	// Availability is what the adapter of an online instance last reported keeps
+	// something from working; it is left out when there is nothing to report.
+	Availability []availabilityJSON `json:"availability,omitempty"`
+}
+
+// availabilityJSON is one condition of adapter.availability, as the adapter worded it.
+type availabilityJSON struct {
+	Condition string   `json:"condition"`
+	Endpoints []string `json:"endpoints,omitempty"`
+	Detail    string   `json:"detail,omitempty"`
 }
 
 type faultJSON struct {
@@ -156,6 +166,13 @@ func adapterListJSON(l engine.AdapterList) adapterListResult {
 			v.Probe = p
 			if in.Fault != "" {
 				v.Fault = &faultJSON{Reason: in.Fault}
+			}
+			for _, a := range in.Availability {
+				c := availabilityJSON{Condition: string(a.Condition), Detail: a.Detail}
+				for _, e := range a.Endpoints {
+					c.Endpoints = append(c.Endpoints, string(e))
+				}
+				v.Availability = append(v.Availability, c)
 			}
 		}
 		out.Instances = append(out.Instances, v)

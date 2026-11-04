@@ -10,6 +10,10 @@ protocol has a version of its own.
 
 ### Added
 
+- **`sidera adapter list` shows what an adapter reports as unavailable.** An enabled, online
+  instance carries `availability` (`adapters.list`; the conditions of `adapter.availability`
+  with their endpoints and detail), so the owner of a direct-only adapter, such as Hermes with
+  a missing board, can see why it is not working.
 - **A Hermes adapter.** `sidera-adapter-hermes` connects a long-running Hermes Agent to the
   other nodes through its own Kanban board. A card assigned to `sidera` asks an agent on
   another node to do the work, by starting a session there or by sending a message, and the

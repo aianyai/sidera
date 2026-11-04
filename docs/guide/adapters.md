@@ -398,7 +398,8 @@ a cron job an hour after the card finished.
 
 **When Hermes is down.** The adapter checks that Hermes answers before every round of
 reading and of polling. When it does not, it stops reading and tells the daemon the
-dependency is missing, and tries again after pauses that grow from a second to two
+dependency is missing (the `availability` column of `sidera adapter list` shows it for the
+instance, with the reason, for instance that the board does not exist), and tries again after pauses that grow from a second to two
 minutes. Messages for Hermes wait in the node's queue, and are neither lost nor used up;
 they wait as long as the endpoint's queue time allows (30 minutes by default; see
 [deadlines](../references/delivery/README.md#deadlines-and-retention)), and a sender whose
