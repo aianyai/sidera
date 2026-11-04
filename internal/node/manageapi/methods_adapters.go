@@ -91,14 +91,22 @@ var adaptersList = &method{
 }
 
 type adapterListResult struct {
-	Version   uint64          `json:"version"`
-	Adapters  []installedJSON `json:"adapters"`
-	Instances []instanceJSON  `json:"instances"`
+	Version   uint64              `json:"version"`
+	Adapters  []listedAdapterJSON `json:"adapters"`
+	Instances []instanceJSON      `json:"instances"`
 }
 
 type installedJSON struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
+}
+
+// listedAdapterJSON is an installed adapter in adapters.list: Fault is there when the
+// installed package cannot be loaded, whether or not an instance of the adapter is
+// enabled (see adapters.list in the daemon reference).
+type listedAdapterJSON struct {
+	installedJSON
+	Fault *faultJSON `json:"fault,omitempty"`
 }
 
 type instanceJSON struct {
@@ -127,9 +135,13 @@ type reachedJSON struct {
 }
 
 func adapterListJSON(l engine.AdapterList) adapterListResult {
-	out := adapterListResult{Version: uint64(l.Version), Adapters: []installedJSON{}, Instances: []instanceJSON{}}
+	out := adapterListResult{Version: uint64(l.Version), Adapters: []listedAdapterJSON{}, Instances: []instanceJSON{}}
 	for _, a := range l.Adapters {
-		out.Adapters = append(out.Adapters, installedJSON{ID: a.ID, Version: a.Version})
+		ia := listedAdapterJSON{installedJSON: installedJSON{ID: a.ID, Version: a.Version}}
+		if a.Fault != "" {
+			ia.Fault = &faultJSON{Reason: a.Fault}
+		}
+		out.Adapters = append(out.Adapters, ia)
 	}
 	for _, in := range l.Instances {
 		v := instanceJSON{Instance: in.Name, Adapter: in.Adapter, Enabled: in.Enabled}

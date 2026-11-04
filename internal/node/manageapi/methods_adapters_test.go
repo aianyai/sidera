@@ -28,6 +28,7 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 		Adapters: []engine.InstalledAdapter{
 			{ID: "chat", Version: "1.0.0"},
 			{ID: "relay", Version: "2.1.0"},
+			{ID: "stale", Version: "0.9.0", Fault: "package_invalid"},
 		},
 		Instances: []engine.InstanceView{
 			{Name: "old", Adapter: "relay"},
@@ -41,7 +42,7 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 	}
 	status, out := r.post("adapters.list", `{}`)
 	want := `{"result":{"version":4,` +
-		`"adapters":[{"id":"chat","version":"1.0.0"},{"id":"relay","version":"2.1.0"}],` +
+		`"adapters":[{"id":"chat","version":"1.0.0"},{"id":"relay","version":"2.1.0"},{"id":"stale","version":"0.9.0","fault":{"reason":"package_invalid"}}],` +
 		`"instances":[{"instance":"old","adapter":"relay","enabled":false},` +
 		`{"instance":"relay","adapter":"relay","enabled":true,"probe":{"state":"passed","at":"2026-10-24T09:00:00Z","frontends":[{"preset":"default","frontend":"cli"}]}},` +
 		`{"instance":"waiting","adapter":"chat","enabled":true,"probe":{"state":"pending","frontends":[]}},` +

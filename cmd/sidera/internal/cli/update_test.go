@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -91,11 +92,19 @@ func TestManagementNode(t *testing.T) {
 	})
 	t.Run("adapters", func(t *testing.T) {
 		n := &managementNode{node: &updateScript{answers: map[string][]func() (json.RawMessage, error){
-			"adapters.list": {answered(`{"result":{"version":3,"adapters":[{"id":"claude","version":"0.11.0","x":1},{"id":"codex","version":"0.12.0"}],"instances":[]}}`)},
+			"adapters.list": {answered(`{"result":{"version":3,"adapters":[{"id":"claude","version":"0.11.0","x":1},{"id":"codex","version":"0.12.0"},` +
+				`{"id":"console","version":"","fault":{"reason":"package_invalid"}},{"id":"relay","version":"0.12.0"},{"id":"chat","version":"0.12.0"}],` +
+				`"instances":[{"instance":"codex","adapter":"codex","enabled":true,"fault":{"reason":"program_missing"}},` +
+				`{"instance":"relay","adapter":"relay","enabled":true,"probe":{"state":"pending","frontends":[]}},` +
+				`{"instance":"chat","adapter":"chat","enabled":false}]}}`)},
 		}}}
 		got, err := n.Adapters(ctx)
-		if err != nil || len(got) != 2 || got[0] != (update.Adapter{ID: "claude", Version: "0.11.0"}) || got[1].ID != "codex" {
-			t.Errorf("Adapters = %+v, %v", got, err)
+		want := []update.Adapter{
+			{ID: "claude", Version: "0.11.0"}, {ID: "codex", Version: "0.12.0", Faulted: true},
+			{ID: "console", Faulted: true}, {ID: "relay", Version: "0.12.0"}, {ID: "chat", Version: "0.12.0"},
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("Adapters = %+v, %v\nwant %+v", got, err, want)
 		}
 	})
 	t.Run("install", func(t *testing.T) {
@@ -133,7 +142,7 @@ func TestConfirmUpdate(t *testing.T) {
 	plan := update.Plan{
 		Current: "0.11.0", Target: "0.12.0", ReleaseURL: "https://example.test/releases/tag/v0.12.0",
 		Replace: []string{"/bin/sidera"}, Daemon: true, Restart: true, DaemonVersion: "0.11.0",
-		Adapters: []string{"claude"}, Missing: []string{"codex"},
+		Adapters: []string{"claude"}, Missing: []string{"codex"}, Faulted: []string{"relay"}, FaultedMissing: []string{"chat"},
 	}
 	for _, tc := range []struct {
 		name, input string
@@ -157,7 +166,7 @@ func TestConfirmUpdate(t *testing.T) {
 			if asked := strings.Contains(out.String(), "Update? [y/N]"); asked != tc.asked {
 				t.Errorf("asked = %v, want %v", asked, tc.asked)
 			}
-			for _, line := range []string{"current 0.11.0", "target 0.12.0", "release https://example.test/releases/tag/v0.12.0", "replace /bin/sidera", "restart daemon (running 0.11.0)", "install adapters claude", "codex"} {
+			for _, line := range []string{"current 0.11.0", "target 0.12.0", "release https://example.test/releases/tag/v0.12.0", "replace /bin/sidera", "restart daemon (running 0.11.0)", "install adapters claude", "codex", "faulted adapters, installed again relay", "install them again by hand) chat"} {
 				if !strings.Contains(out.String(), line) {
 					t.Errorf("the plan does not show %q:\n%s", line, out.String())
 				}
@@ -168,10 +177,11 @@ func TestConfirmUpdate(t *testing.T) {
 
 func TestPrintUpdate(t *testing.T) {
 	rep := update.Report{
-		Release:  update.Release{Current: "0.11.0", Target: "0.12.0", ReleaseURL: "https://example.test/v0.12.0", Floor: "0.8.0", Admitted: true},
-		Program:  update.ProgramReport{Updated: true, Replaced: []string{"/bin/sidera"}},
-		Daemon:   update.DaemonReport{Running: true, Restarted: true, Version: "0.12.0"},
-		Adapters: []update.AdapterReport{{ID: "claude", Version: "0.12.0", Replaced: true}, {ID: "codex", Skipped: "the release has no package of this adapter"}},
+		Release: update.Release{Current: "0.11.0", Target: "0.12.0", ReleaseURL: "https://example.test/v0.12.0", Floor: "0.8.0", Admitted: true},
+		Program: update.ProgramReport{Updated: true, Replaced: []string{"/bin/sidera"}},
+		Daemon:  update.DaemonReport{Running: true, Restarted: true, Version: "0.12.0"},
+		Adapters: []update.AdapterReport{{ID: "claude", Version: "0.12.0", Replaced: true}, {ID: "codex", Skipped: "the release has no package of this adapter"},
+			{ID: "relay", Version: "0.12.0", Replaced: true, Faulted: true}},
 	}
 	t.Run("human run", func(t *testing.T) {
 		var out bytes.Buffer
@@ -179,7 +189,7 @@ func TestPrintUpdate(t *testing.T) {
 		if err := c.printUpdate(rep, nil); err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"program updated /bin/sidera", "daemon restarted version 0.12.0", "adapter claude version 0.12.0 replaced true", "adapter codex skipped", "removed at the next daemon start", ".old"} {
+		for _, want := range []string{"program updated /bin/sidera", "daemon restarted version 0.12.0", "adapter claude version 0.12.0 replaced true", "adapter codex skipped", "adapter relay was faulted, installed again version 0.12.0", "removed at the next daemon start", ".old"} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("missing %q in\n%s", want, out.String())
 			}

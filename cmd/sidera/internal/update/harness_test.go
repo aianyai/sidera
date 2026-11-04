@@ -301,7 +301,7 @@ func newRig(t *testing.T) *rig {
 	r.write("sidera-adapter-console", "old console")
 	r.node = &fakeNode{
 		t: t, running: true, version: oldVersion,
-		adapters: []Adapter{{"claude", oldVersion}, {"console", oldVersion}, {"codex", oldVersion}},
+		adapters: []Adapter{{ID: "claude", Version: oldVersion}, {ID: "console", Version: oldVersion}, {ID: "codex", Version: oldVersion}},
 	}
 	r.cfg = Config{
 		Installed: release.Info{Version: oldVersion, Distribution: release.DistributionArchive},

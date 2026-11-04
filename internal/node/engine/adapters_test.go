@@ -1996,3 +1996,39 @@ func TestAnInstanceWhosePackageCannotRunShowsWhyUntilItIsOnline(t *testing.T) {
 		t.Errorf("fault %q after the instance started", got)
 	}
 }
+
+// faultedPackages is the configuration of the rig with the package of the adapter
+// "chat" unloadable, as the configuration reports a package whose pointer or manifest
+// is bad.
+type faultedPackages struct{ engine.Config }
+
+func (f faultedPackages) Adapters() []config.Adapter {
+	return []config.Adapter{{ID: "chat", Fault: &config.FileError{Path: config.AdapterCurrentPath("chat"), Kind: config.KindAdapterCurrent, Reason: config.FileInvalid}}}
+}
+
+// The fault of a package is a fact of the configuration, so the list shows it on the
+// installed adapter even when no instance of it is enabled to report it.
+func TestAnInstalledAdapterWhosePackageIsBadShowsItWithoutAnInstance(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	r.disableInstance("chat")
+	d := r.deps()
+	d.Config = faultedPackages{Config: r.cfg}
+	e, _, err := engine.Open(ctx, d, r.params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	if err := e.RecoverDelivery(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.Serve()
+	t.Cleanup(func() { r.stop(e) })
+	list, err := e.AdapterList(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Instances) != 1 || list.Instances[0].Enabled || len(list.Adapters) != 1 || list.Adapters[0].ID != "chat" || list.Adapters[0].Fault != "package_invalid" {
+		t.Errorf("list = %+v, want chat faulted as package_invalid and its instance disabled", list)
+	}
+}

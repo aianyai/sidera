@@ -142,6 +142,12 @@ func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, e
 	if len(p.Missing) > 0 {
 		fmt.Fprintf(out, "not in this release (left as they are) %s\n", strings.Join(p.Missing, ", "))
 	}
+	if len(p.Faulted) > 0 {
+		fmt.Fprintf(out, "faulted adapters, installed again %s\n", strings.Join(p.Faulted, ", "))
+	}
+	if len(p.FaultedMissing) > 0 {
+		fmt.Fprintf(out, "faulted adapters not in this release (install them again by hand) %s\n", strings.Join(p.FaultedMissing, ", "))
+	}
 	if yes {
 		return true, nil
 	}
@@ -233,6 +239,9 @@ func (c *command) printUpdate(rep update.Report, runErr error) error {
 			line("adapter %s failed %s", a.ID, a.Error)
 		case a.Skipped != "":
 			line("adapter %s skipped %s", a.ID, a.Skipped)
+		case a.Faulted:
+			line("adapter %s was faulted, installed again version %s replaced %t", a.ID, a.Version, a.Replaced)
+			replaced = replaced || a.Replaced
 		default:
 			line("adapter %s version %s replaced %t", a.ID, a.Version, a.Replaced)
 			replaced = replaced || a.Replaced
@@ -309,18 +318,34 @@ func (n *managementNode) Adapters(ctx context.Context) ([]update.Adapter, error)
 	if err != nil {
 		return nil, err
 	}
+	// A package fault is the adapter's own, or one an instance of it reports; either
+	// way the adapter has to be installed again.
+	type fault struct {
+		Reason string `json:"reason"`
+	}
 	var out struct {
 		Adapters []struct {
 			ID      string `json:"id"`
 			Version string `json:"version"`
+			Fault   *fault `json:"fault"`
 		} `json:"adapters"`
+		Instances []struct {
+			Adapter string `json:"adapter"`
+			Fault   *fault `json:"fault"`
+		} `json:"instances"`
 	}
 	if err := decodeResult(raw, &out); err != nil {
 		return nil, err
 	}
+	faulted := map[string]bool{}
+	for _, in := range out.Instances {
+		if in.Fault != nil {
+			faulted[in.Adapter] = true
+		}
+	}
 	var adapters []update.Adapter
 	for _, a := range out.Adapters {
-		adapters = append(adapters, update.Adapter{ID: a.ID, Version: a.Version})
+		adapters = append(adapters, update.Adapter{ID: a.ID, Version: a.Version, Faulted: a.Fault != nil || faulted[a.ID]})
 	}
 	return adapters, nil
 }

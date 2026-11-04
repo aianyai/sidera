@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/config"
 )
 
@@ -14,6 +15,11 @@ import (
 type InstalledAdapter struct {
 	ID      string
 	Version string
+	// Fault is why the package cannot run, as the configuration found it when it was
+	// loaded: empty when the package is good. It is a fact of the package, so it is
+	// there whether or not an instance is enabled; the name is one of
+	// adapterhost.GoneCause.
+	Fault string
 }
 
 // InstanceView is one adapter instance of the configuration as the owner sees it.
@@ -50,7 +56,11 @@ func (e *Engine) adapterList(now time.Time) AdapterList {
 	instances := e.d.Config.Instances()
 	list := AdapterList{Version: instances.Version}
 	for _, a := range e.d.Config.Adapters() {
-		list.Adapters = append(list.Adapters, InstalledAdapter{ID: a.ID, Version: a.Version})
+		ia := InstalledAdapter{ID: a.ID, Version: a.Version}
+		if a.Fault != nil {
+			ia.Fault = adapterhost.GonePackageInvalid.String()
+		}
+		list.Adapters = append(list.Adapters, ia)
 	}
 	sort.Slice(list.Adapters, func(i, j int) bool { return list.Adapters[i].ID < list.Adapters[j].ID })
 	for _, name := range sortedKeys(instances.Items) {

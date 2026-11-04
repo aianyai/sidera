@@ -50,10 +50,16 @@ cut short by a crash, a power cut or Ctrl-C is finished by running again:
    restarted and the run says so.
 3. **The adapters.** Each installed adapter that is older than the target is installed from
    the release's package with `adapters.install`, in place: nothing is disabled, the
-   instances restart and keep their sessions. An installed adapter the release has no
-   package of is left as it is and reported. So is one that is not the release's to replace,
-   found before anything is downloaded: its version is newer than the target (update never
-   goes back), or is not a release version (a third-party or self-built adapter). Neither
+   instances restart and keep their sessions. An adapter whose package is faulted (its own
+   `fault` in `adapters.list`, or a package fault of any of its instances) is installed again
+   from the release's package whatever version it records, even when that is older than the
+   recorded one: a package that cannot be read records none, one at the target version is
+   still the broken one, and nothing of a broken package is worth keeping. If the release has
+   no package of it, it is reported as faulted and left for the owner to install by hand. An
+   installed adapter the release has no package of is left as it is and reported. So is a
+   working one that is not the release's to replace, found before anything is downloaded: its
+   version is newer than the target (update never moves a working adapter back), or is not a
+   release version (a third-party or self-built adapter). Neither
    keeps a node from being current. A third-party adapter with a release-shaped version older
    than the target cannot be told from the release's by its version, so such a run downloads
    the archive and then reports it as not in the release.
@@ -233,7 +239,7 @@ four methods `update` calls must read the same across versions:
 | ------ | --------------------- |
 | `status` | `node.version`; `daemon.state` and `daemon.start_id` (for the wait) |
 | `daemon.restart` | param `expect_version`; result `restarting`, `program`, `version`, `start_id` |
-| `adapters.list` | `adapters[].id` and `adapters[].version` |
+| `adapters.list` | `adapters[].id`, `adapters[].version` and `adapters[].fault`; `instances[].adapter` and `instances[].fault` |
 | `adapters.install` | param `source` (an absolute path); result `adapter.id`, `adapter.version`, `replaced`, `already_current` |
 
 `daemon.restart` exists from 0.12.0. A daemon older than that answers `method_unknown`;

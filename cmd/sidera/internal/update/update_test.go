@@ -202,7 +202,7 @@ func TestRunLeavesAdaptersThatAreNotTheReleases(t *testing.T) {
 	foreign := func(r *rig) {
 		r.cfg.Installed.Version = newVersion
 		r.node.version = newVersion
-		r.node.adapters = []Adapter{{"claude", newVersion}, {"codex", "1.0.0"}, {"mine", "local-build"}}
+		r.node.adapters = []Adapter{{ID: "claude", Version: newVersion}, {ID: "codex", Version: "1.0.0"}, {ID: "mine", Version: "local-build"}}
 	}
 	t.Run("nothing else to do", func(t *testing.T) {
 		r := newRig(t)
@@ -648,5 +648,50 @@ func TestExplainRollbackNamesAbsolutePaths(t *testing.T) {
 	}
 	if plain := errors.New("plain"); explainRollback(dir, plain) != plain {
 		t.Error("an error that is not a rollback failure was changed")
+	}
+}
+
+// An adapter whose package is faulted is reinstalled when the release has its package,
+// whatever version it records (a package that cannot be read records none, and one that
+// is current at the target is still broken), and it is never taken for current or for
+// one that is not the release's. When the release has no package of it, it is reported
+// as faulted and left for the owner.
+func TestRunReinstallsAFaultedAdapterWhateverItsVersion(t *testing.T) {
+	r := newRig(t)
+	r.release(newVersion)
+	r.cfg.Installed.Version = newVersion
+	r.node.version = newVersion
+	r.node.adapters = []Adapter{
+		{ID: "claude", Version: newVersion, Faulted: true},
+		{ID: "console", Version: "", Faulted: true},
+		{ID: "codex", Version: "", Faulted: true},
+		{ID: "fine", Version: newVersion},
+	}
+	rep, err := Run(context.Background(), r.cfg, newVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var installed []string
+	for _, dir := range r.node.installs {
+		installed = append(installed, filepath.Base(dir))
+	}
+	if rep.AlreadyCurrent || !reflect.DeepEqual(installed, []string{"claude", "console"}) {
+		t.Errorf("current %v, installed %v, want claude and console reinstalled", rep.AlreadyCurrent, installed)
+	}
+	if len(r.plans) != 1 || !reflect.DeepEqual(r.plans[0].Faulted, []string{"claude", "console"}) || !reflect.DeepEqual(r.plans[0].FaultedMissing, []string{"codex"}) || len(r.plans[0].Adapters) != 0 {
+		t.Errorf("plans = %+v", r.plans)
+	}
+	got := map[string]AdapterReport{}
+	for _, a := range rep.Adapters {
+		got[a.ID] = a
+	}
+	if a := got["claude"]; !a.Faulted || !a.Replaced || a.Skipped != "" {
+		t.Errorf("claude = %+v, want faulted and replaced", a)
+	}
+	if a := got["codex"]; !a.Faulted || !strings.Contains(a.Skipped, "faulted") || !strings.Contains(a.Skipped, "by hand") {
+		t.Errorf("codex = %+v, want faulted and left for the owner", a)
+	}
+	if _, ok := got["fine"]; ok {
+		t.Errorf("an adapter that is not faulted and is current is in the report: %+v", got["fine"])
 	}
 }

@@ -48,7 +48,7 @@ arguments, purpose and one example.
 | `daemon restart [--expect-version <version>] [--wait <duration>]` | Ask the running daemon to shut down and start the program again as it was started, then wait for the new daemon (default `--wait 2m`, `0` returns once the restart is accepted). See [Restarting the daemon](#restarting-the-daemon). |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. |
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. |
-| `adapter install <package-directory>` / `adapter list` | Install a local package by its absolute path (another version, like the same version with other contents, replaces the installed package and restarts the instances that run, which keep their sessions; the same contents change nothing), or list installed packages, instances, probe results and, for an instance whose package cannot run, the `fault` reason. |
+| `adapter install <package-directory>` / `adapter list` | Install a local package by its absolute path (another version, like the same version with other contents, replaces the installed package and restarts the instances that run, which keep their sessions; the same contents change nothing), or list installed packages, instances, probe results and the `fault` reason of an installed package that cannot be loaded or of an enabled instance whose package cannot run. |
 | `adapter enable <id> [--instance <name>] [--config <file>] [--expected-version <n>]` / `adapter disable <instance> [--expected-version <n>]` | Enable or disable an instance. A config file of `-` reads stdin; `enable` takes one only for an instance that does not exist yet. |
 | `adapter remove <instance> [--expected-version <n>]` | Remove a disabled instance and its settings. Refused while the instance is enabled and while session endpoints made through it are open (the message says how many). The adapter's state directory and the instance's endpoint ids stay. |
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
@@ -191,21 +191,24 @@ release it can believe, whether or not an update is available or admitted, and e
 it cannot reach or believe a release.
 
 The plan, the question and the progress go to standard error, so that standard output is
-the report. The human report is `key value` lines: before the
-question `current`, `target`, `release` (the page of the release), `replace`, `restart
-daemon`, `install adapters`; after the run `program updated` (the paths), `daemon restarted
-version` or `daemon running version` or a note that none runs, one `adapter <id> version <v>
-replaced <bool>` (or `skipped`, or `failed`) per installed adapter, and a note that the
-`.old` programs are the way back and that the old version directories of replaced adapters
-are removed at the next daemon start. A check looks at the release and the running program
-only (not the daemon or the adapters): it prints `current`, `target`, `release`, `floor`,
-`update_available`, `admitted` and, when a run would stop, `refusal`, and with `--json` it
-is one object of exactly those members. A run with `--json` is one object: `current`,
-`target`, `release`, `admitted`, `floor`, `already_current` (never true while no daemon
-runs), `program` (`updated`, `replaced`, `console_missing`, `restored`, `left`), `daemon`
-(`running`, `previous_version`, `restarted`, `version`) and `adapters`, and `error` when the
-run failed after it had done something (the exit code is then 1; a failure before anything was done
-prints the error on standard error only).
+the report. The human report is `key value` lines: before the question `current`, `target`,
+`release` (the page of the release), `replace`, `restart daemon`, `install adapters`,
+`faulted adapters, installed again` and `faulted adapters not in this release (install them
+again by hand)`; after the run `program updated` (the paths), `daemon restarted version` or
+`daemon running version` or a note that none runs, one `adapter <id> version <v> replaced
+<bool>` (or `skipped`, or `failed`; `was faulted, installed again` for an adapter whose
+package could not run) per installed adapter, and a note that the `.old` programs are the
+way back and that the old version directories of replaced adapters are removed at the next
+daemon start. A check looks at the release and the running program only (not the daemon or
+the adapters): it prints `current`, `target`, `release`, `floor`, `update_available`,
+`admitted` and, when a run would stop, `refusal`, and with `--json` it is one object of
+exactly those members. A run with `--json` is one object: `current`, `target`, `release`,
+`admitted`, `floor`, `already_current` (never true while no daemon runs), `program`
+(`updated`, `replaced`, `console_missing`, `restored`, `left`), `daemon` (`running`,
+`previous_version`, `restarted`, `version`) and `adapters` (each with `faulted` when its
+package could not run), and `error` when the run failed after it had done something (the
+exit code is then 1; a failure before anything was done prints the error on standard error
+only).
 
 ### Network commands
 

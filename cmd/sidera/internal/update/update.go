@@ -49,6 +49,10 @@ type NodeStatus struct {
 type Adapter struct {
 	ID      string
 	Version string
+	// Faulted is true when the installed package cannot run: the daemon reports a fault
+	// of the package itself, or of one of the adapter's instances for the sake of it.
+	// Its version then says nothing of what runs, and it may be empty.
+	Faulted bool
 }
 
 // Installed is the answer to an installation.
@@ -114,6 +118,11 @@ type Plan struct {
 	// whose package the release does not have.
 	Adapters []string
 	Missing  []string
+	// Faulted lists the adapters whose installed package cannot run and that are to be
+	// installed again whatever their version; FaultedMissing those whose package the
+	// release does not have, which the owner has to install by hand.
+	Faulted        []string
+	FaultedMissing []string
 }
 
 // Release is what is known of the release asked for and of the running program's
@@ -181,6 +190,9 @@ type AdapterReport struct {
 	Previous string `json:"previous_version"`
 	Version  string `json:"version,omitempty"`
 	Replaced bool   `json:"replaced,omitempty"`
+	// Faulted is true when the installed package could not run, which is why it is
+	// installed again whatever its version, or why it is skipped.
+	Faulted bool `json:"faulted,omitempty"`
 	// Skipped says why the adapter was left as it is, or is empty.
 	Skipped string `json:"skipped,omitempty"`
 	// Error is why its installation failed, or is empty.

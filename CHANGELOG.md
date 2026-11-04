@@ -50,7 +50,12 @@ protocol has a version of its own.
   whose package cannot run (`package_invalid`, `platform_unsupported`, `protocol_unsupported`,
   `program_missing` or `program_not_executable`), where before such an instance was only offline
   and the daemon log held the cause. The daemon logs a warning for a package it cannot load.
-  Installing the package again recovers the adapter without restarting the daemon.
+  Installing the package again recovers the adapter without restarting the daemon. The
+  fault of an installed package that cannot be loaded is also shown on its entry in the
+  `adapters` list, so a faulted package whose instances are all disabled is not hidden, and
+  `sidera update` installs an adapter with a faulted package again from the release whatever
+  version it records, even an older one, since nothing of a broken package is worth keeping
+  (when the release has no package of it, it says so and leaves it).
 - **Installing an adapter package for an adapter protocol this node does not speak is refused.**
   `sidera adapter install` used to accept a package whose manifest declares protocol versions
   that share none with the ones the node speaks, and an instance running the previous version

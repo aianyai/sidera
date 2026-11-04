@@ -265,7 +265,8 @@ type nodeState struct {
 	version string
 	// restart is true when the running daemon is older than the target.
 	restart bool
-	// stale lists the installed adapters that are older than the target.
+	// stale lists the installed adapters to install again: those older than the target,
+	// and those whose package is faulted, whatever their version.
 	stale []Adapter
 	// skipped lists the installed adapters that are left as they are, and why: those
 	// that are not the release's to replace.
@@ -276,7 +277,9 @@ type nodeState struct {
 // target. Nothing here goes back to an older version: a daemon newer than the target
 // stops the run, and an adapter newer than the target is left as it is. An adapter
 // whose version is not a release version is not one of this release's (a third-party
-// or self-built one) and is left as it is.
+// or self-built one) and is left as it is. An adapter whose package is faulted is none
+// of these: its recorded version, if any, says nothing of what runs, so it is installed
+// again from the release.
 func (s *session) readNode(ctx context.Context) (nodeState, error) {
 	var n nodeState
 	st, err := s.cfg.Node.Status(ctx)
@@ -305,6 +308,8 @@ func (s *session) readNode(ctx context.Context) (nodeState, error) {
 	for _, a := range adapters {
 		v, err := release.ParseVersion(a.Version)
 		switch {
+		case a.Faulted:
+			n.stale = append(n.stale, a)
 		case err != nil:
 			n.skipped = append(n.skipped, AdapterReport{ID: a.ID, Previous: a.Version,
 				Skipped: "its version is not a release version, so it is not one of this release's adapters"})
@@ -327,9 +332,14 @@ func (s *session) plan(files string, needProgram bool, n nodeState) Plan {
 		p.Replace = append(p.Replace, f.path)
 	}
 	for _, a := range n.stale {
-		if packaged(files, a.ID) {
+		switch has := packaged(files, a.ID); {
+		case a.Faulted && has:
+			p.Faulted = append(p.Faulted, a.ID)
+		case a.Faulted:
+			p.FaultedMissing = append(p.FaultedMissing, a.ID)
+		case has:
 			p.Adapters = append(p.Adapters, a.ID)
-		} else {
+		default:
 			p.Missing = append(p.Missing, a.ID)
 		}
 	}
@@ -420,15 +430,18 @@ func (s *session) restartDaemon(ctx context.Context) error {
 }
 
 // installAdapters installs the package of each installed adapter that is older than
-// the target, and reports those that are left as they are. Every one is tried; the
+// the target or faulted, and reports those that are left as they are. Every one is tried; the
 // failures are returned together.
 func (s *session) installAdapters(ctx context.Context, files string, n nodeState) error {
 	s.rep.Adapters = append(s.rep.Adapters, n.skipped...)
 	var errs []error
 	for _, a := range n.stale {
-		rep := AdapterReport{ID: a.ID, Previous: a.Version}
+		rep := AdapterReport{ID: a.ID, Previous: a.Version, Faulted: a.Faulted}
 		if !packaged(files, a.ID) {
 			rep.Skipped = "the release has no package of this adapter"
+			if a.Faulted {
+				rep.Skipped = "its package is faulted and the release has none of it; install it again by hand"
+			}
 			s.rep.Adapters = append(s.rep.Adapters, rep)
 			continue
 		}
