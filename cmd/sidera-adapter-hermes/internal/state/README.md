@@ -17,4 +17,8 @@ requests made of inbound messages, the answers to them, processed inbound messag
 - How long a processed message is remembered is the SDK's
   (`adapterproto.ReceivedRedeliveryWindow`), applied in `MarkProcessed`; it is not a
   setting.
+- A reply record keeps what the node's notices are matched against: the message id of the
+  answer, the request card it answers, when it was sent and whether its failure was
+  reported. `Reply.Watched` says whether a notice still looks at it (within
+  `adapterproto.SentKeyWindow` of the send); the window is the SDK's, not a setting.
 - This package decides nothing else; `lane` does.

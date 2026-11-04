@@ -44,6 +44,9 @@ func (r *recordingInbound) HandleInbound(_ context.Context, m Message) (Verdict,
 	r.got = append(r.got, m)
 	return Written, nil
 }
+func (r *recordingInbound) HandleNotice(_ context.Context, m Message, _ bool) (Verdict, error) {
+	return r.HandleInbound(context.Background(), m)
+}
 func (r *recordingInbound) HandleReplyCard(context.Context, kanban.Card) {}
 func (r *recordingInbound) messages() []Message {
 	r.mu.Lock()

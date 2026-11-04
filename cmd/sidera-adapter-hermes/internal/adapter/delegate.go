@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -350,7 +351,7 @@ func (f *laneFlows) advance(ctx context.Context, id string) {
 		}
 	case state.PhaseSent:
 		if !c.Delivered {
-			if err := f.settle(ctx, *c); err != nil {
+			if _, err := f.settle(ctx, *c); err != nil {
 				f.env.Log.Warn("reading what became of a message", "card", id, "error", err)
 			}
 		}
@@ -425,51 +426,86 @@ func (f *laneFlows) send(ctx context.Context, id string, attempt int) {
 
 // settle asks the node what became of the message of a card in phase sent, and acts
 // on it: the reply to a session creation names the session, a refusal or a lost
-// delivery fails the card.
-func (f *laneFlows) settle(ctx context.Context, c state.Card) error {
+// delivery fails the card. ended says the card was failed because its message did
+// not arrive; the error is a failure to read the status or to write the card that
+// may pass, and the card is then settled again by the next try.
+func (f *laneFlows) settle(ctx context.Context, c state.Card) (ended bool, err error) {
 	d := f.env.State.View()
 	ep, ok := d.Endpoints[c.Endpoint]
 	if !ok || c.MessageID == "" {
-		return nil
+		return false, nil
 	}
 	res, err := f.env.Status(ctx, adapterproto.EndpointRef(ep.Ref), adapterproto.MessageID(c.MessageID))
 	if err != nil {
-		return err
+		return false, err
 	}
 	creating := c.Mode == card.ModeNewSession && c.Peer == ""
 	if creating && res.ControlReply != nil && res.ControlReply.Create != nil {
-		f.created(ctx, c, res)
-		return nil
+		return f.created(ctx, c, res)
 	}
 	if len(res.Recipients) == 0 {
-		return nil
+		return false, nil
 	}
-	switch r := res.Recipients[0]; r.State {
-	case adapterproto.DeliveryDelivered:
+	r := res.Recipients[0]
+	if r.State == adapterproto.DeliveryDelivered {
 		if !creating {
 			_ = f.update(c.ID, func(_ *state.Data, r *state.Card) { r.Delivered = true })
 		}
-	case adapterproto.DeliveryRejected:
-		f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, fmt.Sprintf("The message was rejected (%s).", r.Reason))
-	case adapterproto.DeliveryExpiredUnconfirmed:
-		f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, "The message was not delivered in time.")
-	case adapterproto.DeliveryUnknown, adapterproto.DeliveryClosedUnconfirmed:
-		f.fail(ctx, c.ID, lane.ReasonOutcomeUnknown, fmt.Sprintf("Whether the message arrived is unknown (%s).", r.State))
+		return false, nil
 	}
-	return nil
+	if reason, text, failed := undelivered(r); failed {
+		return true, f.fail(ctx, c.ID, reason, text)
+	}
+	return false, nil
+}
+
+// undelivered tells whether the node reports that a message did not arrive, or that
+// it cannot tell, with the reason a card that sent it is failed for and the text
+// that says so. A message still on its way is neither.
+func undelivered(r adapterproto.RecipientStatus) (lane.Reason, string, bool) {
+	switch r.State {
+	case adapterproto.DeliveryRejected:
+		return lane.ReasonDeliveryFailed, fmt.Sprintf("The message was rejected (%s).", r.Reason), true
+	case adapterproto.DeliveryExpiredUnconfirmed:
+		return lane.ReasonDeliveryFailed, "The message was not delivered in time.", true
+	case adapterproto.DeliveryUnknown, adapterproto.DeliveryClosedUnconfirmed:
+		return lane.ReasonOutcomeUnknown, fmt.Sprintf("Whether the message arrived is unknown (%s).", r.State), true
+	}
+	return 0, "", false
+}
+
+// settleEndpoint settles, as the tick does, every card that sent from the endpoint
+// and whose message is not known to have been delivered, and reports whether any of
+// them ended. A status the node refuses for good (it no longer knows the message)
+// leaves that card to the tick; only a failure that may pass is returned.
+func (f *laneFlows) settleEndpoint(ctx context.Context, key string) (ended bool, err error) {
+	d := f.env.State.View()
+	for _, c := range d.CardList() {
+		if c.Endpoint != key || c.Phase != state.PhaseSent || c.Delivered {
+			continue
+		}
+		e, serr := f.settle(ctx, c)
+		switch {
+		case serr != nil && refused(serr):
+			f.env.Log.Warn("the node refused to say what became of a message", "card", c.ID, "error", serr)
+		case serr != nil:
+			err = errors.Join(err, serr)
+		}
+		ended = ended || e
+	}
+	return ended, err
 }
 
 // created acts on the reply to a session.create: a session that exists (confirmed
 // ready or not) becomes the card's peer and is recorded as open, so that its
 // replies match the card and it is closed in time; a failed creation fails the card.
-func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.MessageStatusResult) {
+func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.MessageStatusResult) (ended bool, err error) {
 	r := res.ControlReply.Create
 	if r.Outcome == adapterproto.CreateReplyFailed {
-		f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, fmt.Sprintf("The remote session could not be created (%s).", r.Reason))
-		return
+		return true, f.fail(ctx, c.ID, lane.ReasonDeliveryFailed, fmt.Sprintf("The remote session could not be created (%s).", r.Reason))
 	}
 	addr := sessionAddress(res.Recipients, r.SessionEndpoint)
-	err := f.env.State.Update(func(d *state.Data) error {
+	err = f.env.State.Update(func(d *state.Data) error {
 		rec, ok := d.Cards[c.ID]
 		if !ok {
 			return nil
@@ -481,21 +517,23 @@ func (f *laneFlows) created(ctx context.Context, c state.Card, res adapterproto.
 	})
 	if err != nil {
 		f.env.Log.Error("recording a remote session", "card", c.ID, "error", err)
-		return
+		return false, nil
 	}
 	if r.Outcome == adapterproto.CreateReplyUnconfirmed {
 		f.comment(ctx, c.ID, commentUnconfirm)
 	}
+	return false, nil
 }
 
 // fail ends what the card was doing, once per cause: the first time the card is
 // blocked so that its creator decides, the second time it is completed with the
 // reason, since Hermes would send a card blocked twice for one kind to a state in
-// which nobody is woken (lane.OnFailure).
-func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, text string) {
+// which nobody is woken (lane.OnFailure). The error is a failure of Hermes that may
+// pass: the card is then not ended and the caller sees to it again.
+func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, text string) error {
 	c, ok := f.env.State.View().Cards[id]
 	if !ok {
-		return
+		return nil
 	}
 	cat := reason.Category()
 	if lane.OnFailure(c.Blocks, reason) == lane.VerdictBlock {
@@ -507,8 +545,9 @@ func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, tex
 			f.reconcileBlock(ctx, id, cat, err)
 		default:
 			f.env.Log.Warn("blocking a card; it is tried again", "card", id, "error", err)
+			return err
 		}
-		return
+		return nil
 	}
 	summary := summaryNoDelivery
 	switch cat {
@@ -524,7 +563,9 @@ func (f *laneFlows) fail(ctx context.Context, id string, reason lane.Reason, tex
 		f.finishLocal(ctx, id)
 	default:
 		f.env.Log.Warn("completing a card; it is tried again", "card", id, "error", err)
+		return err
 	}
+	return nil
 }
 
 // reconcileBlock reads the card after Hermes refused to block it: if it is blocked
@@ -558,7 +599,7 @@ func (f *laneFlows) refreshCreations(ctx context.Context, endpoint string) {
 		if c.Endpoint != endpoint || c.Mode != card.ModeNewSession || c.Peer != "" || c.Phase != state.PhaseSent {
 			continue
 		}
-		if err := f.settle(ctx, c); err != nil {
+		if _, err := f.settle(ctx, c); err != nil {
 			f.env.Log.Warn("reading the reply to a session creation", "card", c.ID, "error", err)
 		}
 	}

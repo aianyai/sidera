@@ -193,7 +193,16 @@ type Reply struct {
 	// longer admitted the reply to the original message.
 	Plain bool `json:"plain,omitempty"`
 	// MessageID is the channel's id of the message the latest attempt created.
-	MessageID  string           `json:"message_id,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	// RequestCard is the request card the message answers, which says where the
+	// answer went and which endpoint sent it. Set with MessageID.
+	RequestCard string `json:"request_card,omitempty"`
+	// SentAt is when the message was sent. The node's notice about a failed delivery
+	// is looked for only within adapterproto.SentKeyWindow of it (Watched).
+	SentAt time.Time `json:"sent_at"`
+	// Reported says the failure of the message was reported to the conversation, so
+	// that it is reported once however many notices follow.
+	Reported   bool             `json:"reported,omitempty"`
 	Blocks     map[Category]int `json:"blocks,omitempty"`
 	FinishedAt time.Time        `json:"finished_at"`
 }
@@ -203,10 +212,21 @@ type Reply struct {
 // is built from the number.
 func (r *Reply) BeginAttempt(n int, plain bool, now time.Time) {
 	r.Attempt, r.AttemptAt, r.Plain, r.MessageID, r.Phase = n, now, plain, "", PhaseAttempting
+	r.Reported = false
 }
 
-// Sent records the message the attempt created.
-func (r *Reply) Sent(messageID string) { r.MessageID, r.Phase = messageID, PhaseSent }
+// Sent records the message the attempt created, which answers the request card.
+func (r *Reply) Sent(requestCard, messageID string, now time.Time) {
+	r.RequestCard, r.MessageID, r.SentAt, r.Phase = requestCard, messageID, now, PhaseSent
+}
+
+// Watched reports whether the delivery of the answer is still looked at when the
+// node sends a notice about the endpoint: the message was sent, its failure has not
+// been reported, and the node still holds what became of it. Past the window the
+// node may have forgotten the message, and a notice then explains nothing about it.
+func (r Reply) Watched(now time.Time) bool {
+	return r.MessageID != "" && !r.Reported && now.Sub(r.SentAt) <= adapterproto.SentKeyWindow
+}
 
 // Block records that Hermes now has the card blocked for the category.
 func (r *Reply) Block(cat Category) {

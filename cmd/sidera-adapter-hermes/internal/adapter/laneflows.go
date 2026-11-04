@@ -29,6 +29,11 @@ type Inbound interface {
 	// allows to be completed. It answers like MessageHandler.HandleMessage: Written
 	// only once everything the message is for is on the board.
 	HandleInbound(ctx context.Context, m Message) (Verdict, error)
+	// HandleNotice takes a notice of the node about the endpoint (a Message with
+	// Feedback set). settled says the delegation flows already ended a card because
+	// of it. The notice is explained to the conversation only when nothing else
+	// explained it. It answers like HandleInbound.
+	HandleNotice(ctx context.Context, m Message, settled bool) (Verdict, error)
 	// HandleReplyCard takes a ready card whose mode is reply. The delegation flows
 	// do not claim it; the poll lists it again until it is claimed.
 	HandleReplyCard(ctx context.Context, c kanban.Card)
@@ -58,6 +63,11 @@ type unhandledInbound struct {
 
 func (u *unhandledInbound) HandleInbound(_ context.Context, m Message) (Verdict, error) {
 	u.log.Warn("an inbound message is not handled", "id", m.ID, "from", m.From, "endpoint", m.To.Key)
+	return Skip, nil
+}
+
+func (u *unhandledInbound) HandleNotice(_ context.Context, m Message, _ bool) (Verdict, error) {
+	u.log.Warn("a notice of the node is not handled", "id", m.ID, "endpoint", m.To.Key)
 	return Skip, nil
 }
 

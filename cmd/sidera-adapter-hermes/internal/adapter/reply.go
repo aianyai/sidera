@@ -30,8 +30,13 @@ const (
 )
 
 // HandleMessage takes a message of a conversation or orphan endpoint: a reply is
-// written to its card, anything else is the inbound half's.
+// written to its card, anything else is the inbound half's. A notice of the node is
+// routed before anything else: it is no reply to a card and no request, whoever the
+// card of the endpoint is waiting for.
 func (f *laneFlows) HandleMessage(ctx context.Context, m Message) (Verdict, error) {
+	if m.Feedback {
+		return f.notice(ctx, m)
+	}
 	if m.ToInstance() {
 		return f.inbound.HandleInbound(ctx, m)
 	}
@@ -40,6 +45,20 @@ func (f *laneFlows) HandleMessage(ctx context.Context, m Message) (Verdict, erro
 		return f.inbound.HandleInbound(ctx, m)
 	}
 	return v, err
+}
+
+// notice explains the node's notice about an endpoint: first by ending the cards
+// that sent from it and whose message the node says did not arrive, then, when none
+// ended, by the inbound half. A card ended here is blocked or completed on the board
+// before the notice is acknowledged: a failure of Hermes that may pass is a Retry.
+func (f *laneFlows) notice(ctx context.Context, m Message) (Verdict, error) {
+	f.mu.Lock()
+	ended, err := f.settleEndpoint(ctx, m.To.Key)
+	f.mu.Unlock()
+	if err != nil {
+		return Retry, err
+	}
+	return f.inbound.HandleNotice(ctx, m, ended)
 }
 
 // reply matches the message to a card and writes it there. inbound says the

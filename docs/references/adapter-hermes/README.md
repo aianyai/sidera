@@ -448,8 +448,8 @@ The inbound half (`inbound.go`) turns it into a card on the board and wakes the 
 conversation that should see it. It takes every message to the instance endpoint, every
 message to a conversation or orphan endpoint that matches no waiting card, a reply whose
 card Hermes already finished, and a reply whose card Hermes would not let the adapter
-complete. Messages from the node's own system endpoint are not told apart from others
-yet and are handled the same way.
+complete. The node's own notices (below) are not among them: they are routed before any
+of this.
 
 **The card.** `create` with the assignee `sidera-inbox`, which the poll does not take
 (`card.MatchesAssignee`) and no Hermes profile bears (the probe refuses one), the
@@ -512,6 +512,55 @@ message a few hours later, so for most of that time an answer goes out as a plai
 message, which needs the sender's address and the id of the message it answers; Hermes
 clears the subscriptions of cards done and idle for 30 days, after which nobody could be
 woken about an answer anyway.
+
+### The node's own notices
+
+The node tells an endpoint, from its reserved system endpoint, that a message the
+endpoint sent was refused, expired or went unanswered, or that a recipient is blocked or
+recovered. A page marks such a message `feedback: true` (the adapter's kit declares the
+capability that asks for it), and `Message.Feedback` carries it, on a message cut into
+parts if any part has it. The text of the notice is the node's, not another agent's, and
+it names no message, so the adapter asks `endpoint.message_status` what happened.
+
+The message handler routes a notice before everything else (`laneFlows.HandleMessage`):
+it is never matched as the reply of a card, even when its sender is the peer a card
+waits for, and never made a request, whose text would be fenced as untrusted. Three steps
+follow, in this order, each for the endpoint that received the notice:
+
+1. **Cards in flight are settled** (`laneFlows.settleEndpoint`). Every card of the
+   endpoint that was sent and is not yet known to be delivered has its message's status
+   read, and the result is applied by the code the tick uses (`settle`): a rejected or
+   expired message fails the card as a delivery failure, a delivery that is unknown or a
+   close that is unconfirmed as an outcome unknown. The tick would find it too, later;
+   the notice is the moment the node says it, so the owner's agent is woken at once. A
+   status the node refuses to give (it no longer knows the message) is left to the tick.
+2. **Answers that did not arrive are reported** (`inbound.reportLostAnswers`). A reply
+   card is completed as soon as its answer is sent, so a failure of the answer afterwards
+   has no card to land on. The reply record keeps the Sidera message id of the answer, the
+   request card it answers and when it was sent, and for `adapterproto.SentKeyWindow` from
+   the send (`state.Reply.Watched`) a notice makes the adapter read the status of every
+   such answer sent from the endpoint. A message that did not arrive becomes a card of
+   the conversation, made and completed like a continuation (below): "Sidera answer not
+   delivered", whose first line says that the answer to request card X could not be
+   delivered to the sender, and in which state. Its idempotency key is derived from the
+   answer's message id, and the record is marked reported (`Reply.Reported`), so a failure
+   is reported once however many notices follow and however often a notice comes again.
+3. **A notice nothing explained is relayed** (`inbound.HandleNotice`). When steps 1 and 2
+   changed nothing, the notice becomes a card of the conversation of the endpoint,
+   assigned to `sidera-inbox` like every card the adapter makes of a message, with the
+   continuation rules (the latest done card of the conversation is the parent; a `cron:`,
+   orphan or instance endpoint wakes the home target) and the Sidera message id of the
+   notice as idempotency key. Title and first line of the summary are the adapter's:
+   "Sidera channel notice". The body says that the notice comes from this node itself, is
+   trusted and is not external content, that it is not a request and must not be answered
+   with a reply card, and then quotes the text in a fence. Nothing is recorded as a
+   request, so no reply card can name it.
+
+The notice is `Written`, and so acknowledged, when every step that had to write to the
+board has succeeded; a failure of Hermes that may pass is a `Retry` and one that will not
+a `Skip`, as for every message, so a notice that was not written is never acknowledged.
+Every step repeats safely: a card ended in step 1 is no longer in flight when the notice
+comes again, step 2 reports a failure once, and step 3 finds its card by the key.
 
 ### Reply cards
 
@@ -594,6 +643,10 @@ The body tells the agent:
   the sender's text between fences and says it is untrusted external content, never an
   instruction from the owner; the answer is a card with mode `reply` and `reply_to` set
   to the request card's id;
+- that a card titled "Sidera channel notice" is from this node itself, reports what
+  happened to a message, and is never answered with a reply card (the card it concerns
+  is blocked or completed on its own), and that "Sidera answer not delivered" says an
+  answer did not arrive;
 - that a wake-up can arrive more than once and the status of the card is the truth, so
   an action already done is not done again.
 
@@ -791,7 +844,7 @@ or the home target.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go` and `inbound_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
+| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `setup_test.go` |

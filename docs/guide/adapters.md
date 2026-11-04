@@ -373,6 +373,16 @@ a card of mode `reply` that names the request card; the adapter sends the answer
 sender. An answer sent more than about a day after the request goes as a plain message
 that begins "Reply to your message <id>:".
 
+**When a message or an answer does not arrive.** Your node tells the Hermes endpoint when a
+message it sent was refused, expired or went unanswered. If that is a task a card sent, the
+card is blocked at once with the reason, and the agent is woken, without waiting for the
+adapter's next look. If it is an answer to a request, the card that sent it was completed
+when the answer left, so the adapter makes a card in the conversation, "Sidera answer not
+delivered", saying which request and to whom, once per answer; the agent decides whether to
+answer again. A notice that neither explains is passed on as a card titled "Sidera channel
+notice". It comes from your own node, so it is not external content, and the agent is told
+not to answer it.
+
 **What the adapter keeps.** The state of every card, endpoint and remote session it
 handles is in `adapter-state/hermes/` of the node's data directory. A card or request
 that the adapter lost track of is found again after a restart. A remote session that was

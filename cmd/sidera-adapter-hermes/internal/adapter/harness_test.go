@@ -111,6 +111,9 @@ type options struct {
 	// ready is the fake Hermes' answer to listing the ready cards.
 	ready string
 	now   func() time.Time
+	// tick, if set, replaces the interval of the timer loop; a long one leaves the
+	// cards to the flows an event starts.
+	tick time.Duration
 	// settings are added to the instance configuration, over the defaults of the
 	// tests.
 	settings map[string]any
@@ -243,6 +246,9 @@ func start(t *testing.T, o options) *harness {
 	}
 	app := New(slog.New(slog.DiscardHandler), flows)
 	app.tm = fastTiming
+	if o.tick > 0 {
+		app.tm.tick = o.tick
+	}
 	if o.now != nil {
 		app.now = o.now
 	}

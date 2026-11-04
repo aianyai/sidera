@@ -98,7 +98,7 @@ func (in *inbound) answer(ctx context.Context, id, text string, orig state.Reque
 		mid, err := in.env.Send(ctx, out)
 		switch {
 		case err == nil:
-			if err := in.update(id, func(r *state.Reply) { r.Sent(string(mid)) }); err != nil {
+			if err := in.update(id, func(r *state.Reply) { r.Sent(orig.CardID, string(mid), in.env.Now()) }); err != nil {
 				in.env.Log.Error("recording a sent answer", "card", id, "error", err)
 				return
 			}

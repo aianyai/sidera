@@ -21,6 +21,9 @@ type Message struct {
 	// PossiblyDuplicate is set when any part was handed out before and not
 	// acknowledged.
 	PossiblyDuplicate bool
+	// Feedback marks the node's own notice about what happened to a message this
+	// endpoint sent. It is neither a reply nor a request: the text is the node's.
+	Feedback bool
 }
 
 // ToInstance reports whether the message is addressed to Hermes itself.

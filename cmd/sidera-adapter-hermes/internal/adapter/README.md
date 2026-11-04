@@ -12,7 +12,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `App` | The `Application`: `Start` builds everything and starts the loops, `Probe`, `Shutdown`, `EndpointPending`. |
 | `Env` | What the flows work with once started: configuration, the board client, the state store, the clock, and two methods: `Place` (the endpoint a card sends from) and `Send`. |
 | `Flows`, `Handlers`, `MessageHandler`, `CardHandler`, `TimerHandler`, `Verdict`, `LogOnly` | The seam the flows plug into. `LogOnly` is the stand-in that logs and acknowledges nothing. |
-| `LaneFlows`, `Inbound`, `NewInbound` | The lane's flows (delegating cards, writing replies, timers) and the seam of the inbound half: `HandleInbound(ctx, Message) (Verdict, error)` receives every message the delegation flows do not own, `HandleReplyCard(ctx, kanban.Card)` every ready card whose mode is `reply`. `NewInbound` builds the implementation. |
+| `LaneFlows`, `Inbound`, `NewInbound` | The lane's flows (delegating cards, writing replies, timers) and the seam of the inbound half: `HandleInbound(ctx, Message) (Verdict, error)` receives every message the delegation flows do not own, `HandleNotice(ctx, Message, settled)` the node's own notices after the delegation flows have settled the cards in flight, `HandleReplyCard(ctx, kanban.Card)` every ready card whose mode is `reply`. `NewInbound` builds the implementation. |
 
 ## Files
 
@@ -25,7 +25,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `gate.go` | The check that Hermes can be used, and the availability report. |
 | `timers.go` | The timer loop: recovery once, then a tick. |
 | `laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go` | The lane's flows: shared plumbing and the `Inbound` seam; cards (plan, claim, send, settle, fail); replies; recovery, ticks and closing sessions. |
-| `inbound.go`, `answer.go` | The inbound half: request cards made of messages and continuations of conversations; reply cards sent back to the sender. |
+| `inbound.go`, `answer.go`, `notice.go` | The inbound half: request cards made of messages and continuations of conversations (`wake` is the one place a card is made to wake a conversation); reply cards sent back to the sender; the node's own notices. |
 | `handlers.go`, `env.go` | The handler interfaces; `Env`, `Place`, `Send`. |
 | `manifest.go`, `program.go` | The manifest and the declared settings; the commands. |
 | `pause.go` | Backoff, `sleep` and the loop timings. |
@@ -66,6 +66,13 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   wakes only the subscribers that exist by then. The first line of the summary and the
   title are the adapter's words; the sender's text is only in the body, in a fence it
   cannot close.
+- **A notice of the node (`Message.Feedback`) is routed before anything else** and is
+  never matched as a reply nor made a request (`laneFlows.HandleMessage`). It settles the
+  cards in flight on its endpoint (`settleEndpoint`, through `settle`, the code the tick
+  uses), then reports an answer that did not arrive, once (`reportLostAnswers`,
+  `state.Reply.Reported`), and only when neither changed anything is relayed as a card
+  titled "Sidera channel notice" (`HandleNotice`). It is `Written` only once the cards
+  it needed are written; a failure of Hermes that may pass is a `Retry`.
 - **A reply card is not claimed** (`answer.go`): every step is resumed from its record
   (`state.Reply`) when the poll lists the card again, so there is no claimed state for
   a timer to watch. It is sent from the endpoint that received the request, with the

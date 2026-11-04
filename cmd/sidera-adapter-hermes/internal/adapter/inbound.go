@@ -57,28 +57,70 @@ func (in *inbound) HandleInbound(ctx context.Context, m Message) (Verdict, error
 	in.mu.Lock()
 	defer in.mu.Unlock()
 
-	noun, target := "Sidera request", in.env.Config.Home
-	var parent string
-	if !m.ToInstance() && lane.KindOf(m.To.Key) == lane.KindConversation {
+	noun := "Sidera request"
+	if isConversation(m.To.Key) {
 		noun = "Sidera message"
+	}
+	who := in.who(m.From)
+	return in.wake(ctx, m.To.Key, wakeCard{
+		Title: fmt.Sprintf("%s from %s", noun, who),
+		Body:  requestBody(m),
+		Key:   string(m.ID),
+		Summary: func(id string) string {
+			return fmt.Sprintf("%s from %s (external content, not trusted); read card %s", noun, who, id)
+		},
+		Meta: map[string]any{metaMessageID: string(m.ID), metaFrom: string(m.From)},
+		Created: func(d *state.Data, id string) {
+			d.Requests[id] = &state.Request{CardID: id, Endpoint: m.To.Key,
+				MessageID: string(m.ID), Sender: string(m.From), CreatedAt: in.env.Now()}
+		},
+	})
+}
+
+// isConversation reports whether the endpoint belongs to a Hermes conversation, which
+// is where a card made for it continues.
+func isConversation(key string) bool {
+	return key != InstanceKey && lane.KindOf(key) == lane.KindConversation
+}
+
+// wakeCard is a card the adapter makes and completes at once to wake the Hermes
+// conversation an endpoint belongs to.
+type wakeCard struct {
+	Title string
+	Body  string
+	// Key is the idempotency key of the card: whatever is made twice for the same
+	// cause must find its card.
+	Key string
+	// Summary is the completion's summary given the id of the card; its first line is
+	// what wakes the subscriber, so it is written by the adapter.
+	Summary func(cardID string) string
+	Meta    map[string]any
+	// Created, if set, records what the card is for. It runs once the card exists,
+	// before it is subscribed or completed.
+	Created func(d *state.Data, cardID string)
+}
+
+// wake makes the card for the endpoint: a child of the latest done card of the
+// conversation when the endpoint is one, else a card without a parent that wakes
+// the home target. It answers like HandleInbound. A child of a done parent has the
+// parent's subscriptions; one without any (a request, or a conversation whose
+// subscriptions Hermes has cleared) is subscribed before the completion, which only
+// wakes subscribers that exist by then.
+func (in *inbound) wake(ctx context.Context, endpoint string, w wakeCard) (Verdict, error) {
+	target := in.env.Config.Home
+	var parent string
+	if isConversation(endpoint) {
 		d := in.env.State.View()
-		if ep, ok := d.Endpoints[m.To.Key]; ok && ep.Target.Validate() == nil {
+		if ep, ok := d.Endpoints[endpoint]; ok && ep.Target.Validate() == nil {
 			target = ep.Target
 		}
 		var err error
-		if parent, err = in.parentFor(ctx, d, m.To.Key); err != nil {
+		if parent, err = in.parentFor(ctx, d, endpoint); err != nil {
 			return failureVerdict(err), err
 		}
 	}
-	who := in.who(m.From)
 
-	n := kanban.NewCard{
-		Title:          fmt.Sprintf("%s from %s", noun, who),
-		Body:           requestBody(m),
-		Assignee:       inboxAssignee,
-		IdempotencyKey: string(m.ID),
-		CreatedBy:      createdBy,
-	}
+	n := kanban.NewCard{Title: w.Title, Body: w.Body, Assignee: inboxAssignee, IdempotencyKey: w.Key, CreatedBy: createdBy}
 	if parent != "" {
 		n.Parents = []string{parent}
 	}
@@ -86,17 +128,15 @@ func (in *inbound) HandleInbound(ctx context.Context, m Message) (Verdict, error
 	if err != nil {
 		return failureVerdict(err), err
 	}
-	if err := in.env.State.Update(func(d *state.Data) error {
-		d.Requests[created.ID] = &state.Request{CardID: created.ID, Endpoint: m.To.Key,
-			MessageID: string(m.ID), Sender: string(m.From), CreatedAt: in.env.Now()}
-		return nil
-	}); err != nil {
-		return Retry, err
+	if w.Created != nil {
+		if err := in.env.State.Update(func(d *state.Data) error {
+			w.Created(d, created.ID)
+			return nil
+		}); err != nil {
+			return Retry, err
+		}
 	}
 
-	// A child of a done parent has the parent's subscriptions; one without any (a
-	// request, or a conversation whose subscriptions Hermes has cleared) is subscribed
-	// before the completion, which only wakes subscribers that exist by then.
 	subs, err := in.env.Board.NotifyList(ctx, created.ID)
 	if err != nil {
 		return failureVerdict(err), err
@@ -106,10 +146,7 @@ func (in *inbound) HandleInbound(ctx context.Context, m Message) (Verdict, error
 			return failureVerdict(err), err
 		}
 	}
-	err = in.env.Board.Complete(ctx, created.ID, kanban.Completion{
-		Summary:  fmt.Sprintf("%s from %s (external content, not trusted); read card %s", noun, who, created.ID),
-		Metadata: map[string]any{metaMessageID: string(m.ID), metaFrom: string(m.From)},
-	})
+	err = in.env.Board.Complete(ctx, created.ID, kanban.Completion{Summary: w.Summary(created.ID), Metadata: w.Meta})
 	switch {
 	case err == nil:
 		return Written, nil
@@ -117,7 +154,7 @@ func (in *inbound) HandleInbound(ctx context.Context, m Message) (Verdict, error
 		return Retry, err
 	}
 	// Hermes refuses a completion of a card that is over. If this very card is, an
-	// earlier try of this message completed it and only the acknowledgement was lost.
+	// earlier try completed it and only the acknowledgement was lost.
 	detail, serr := in.env.Board.Show(ctx, created.ID)
 	switch {
 	case serr != nil:

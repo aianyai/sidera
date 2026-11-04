@@ -16,7 +16,9 @@ implement them: they delegate cards, write replies back and close remote session
 What other nodes start (a message to the instance endpoint or to a conversation, a
 reply card) is the `adapter.Inbound` seam, implemented by `adapter.NewInbound`: a
 message becomes a card assigned to `sidera-inbox`, completed at once to wake the
-conversation it belongs to, and a reply card is sent back to the sender of the request.
+conversation it belongs to, a reply card is sent back to the sender of the request, and
+the node's own notices about a message that did not arrive end the card that sent it or
+become a card of their own.
 
 ## Layout
 

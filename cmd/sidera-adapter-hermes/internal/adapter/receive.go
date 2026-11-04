@@ -188,7 +188,7 @@ func (r *receiver) process(ctx context.Context, ep Endpoint, lease adapterproto.
 // the parts that acknowledge it. A message is handled only when every part is in
 // hand: a task cut short would be carried out as if it were complete.
 func (r *receiver) assemble(ctx context.Context, ep Endpoint, lease adapterproto.LeaseRef, first adapterproto.PageMessage) (Message, []heldPart, error) {
-	msg := Message{ID: first.ID, From: first.From, To: ep, PossiblyDuplicate: first.PossiblyDuplicate}
+	msg := Message{ID: first.ID, From: first.From, To: ep, PossiblyDuplicate: first.PossiblyDuplicate, Feedback: first.Feedback}
 	if first.Part == nil {
 		msg.Body = first.Body
 		return msg, []heldPart{{lease, adapterproto.PartRef{MessageID: first.ID, Part: 1}}}, nil
@@ -201,6 +201,7 @@ func (r *receiver) assemble(ctx context.Context, ep Endpoint, lease adapterproto
 	for cur, curLease := first, lease; ; {
 		body.WriteString(cur.Body)
 		msg.PossiblyDuplicate = msg.PossiblyDuplicate || cur.PossiblyDuplicate
+		msg.Feedback = msg.Feedback || cur.Feedback
 		parts = append(parts, heldPart{curLease, adapterproto.PartRef{MessageID: first.ID, Part: cur.Part.Index}})
 		next := cur.Part.Next
 		if next == nil {
