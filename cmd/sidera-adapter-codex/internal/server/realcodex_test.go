@@ -25,6 +25,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 )
 
 func requireRealCodex(t *testing.T) string {
@@ -57,24 +58,27 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if !srv.Started() {
-		t.Fatal("the server was not started by this process")
-	}
 	stopped := false
 	defer func() {
 		if !stopped {
-			_ = srv.Stop()
+			_ = srv.Terminate(context.Background())
 		}
 	}()
 	// The server runs in a directory of its own, recorded in the state file; it is
 	// under the user's cache directory, so the test removes it.
 	var recorded struct {
-		WorkDir string `json:"work_dir"`
+		PID      int    `json:"pid"`
+		StartKey string `json:"start_key"`
+		WorkDir  string `json:"work_dir"`
 	}
 	if raw, err := os.ReadFile(filepath.Join(dir, "app-server.json")); err != nil || json.Unmarshal(raw, &recorded) != nil || recorded.WorkDir == "" {
 		t.Fatalf("the state file records no working directory: %v", err)
 	}
 	defer os.RemoveAll(recorded.WorkDir)
+	id := process.Identity{PID: recorded.PID, StartKey: recorded.StartKey}
+	if running, err := process.Running(id); err != nil || !running {
+		t.Fatalf("the state file does not identify the running server: %+v, %v, %v", id, running, err)
+	}
 
 	type itemEvent struct {
 		ThreadID string `json:"threadId"`
@@ -210,12 +214,12 @@ func TestThreadEnvironmentAndServerCleanup(t *testing.T) {
 	}
 
 	_ = client.Close()
-	if err := srv.Stop(); err != nil {
+	if err := srv.Terminate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	stopped = true
-	if !srv.GroupGone() {
-		t.Error("the server's process group is still there after Stop")
+	if running, err := process.Running(id); err != nil || running {
+		t.Errorf("the server is still running after Terminate: %v, %v", running, err)
 	}
 	pctx, pcancel := context.WithTimeout(ctx, 2*time.Second)
 	defer pcancel()

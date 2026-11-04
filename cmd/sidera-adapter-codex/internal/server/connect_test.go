@@ -12,6 +12,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver/appservertest"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 )
 
 // On Windows a recorded server that is running but does not answer a probe is
@@ -21,6 +22,7 @@ import (
 // as ErrStartFailed.
 func TestConnectWindowsRecordedServer(t *testing.T) {
 	const pid, startedNS = 4242, 1_000_000
+	const startKey = "key-1"
 
 	tests := []struct {
 		name string
@@ -29,6 +31,11 @@ func TestConnectWindowsRecordedServer(t *testing.T) {
 		failProbes int
 		running    bool
 		started    int64 // start time of the process now holding pid
+		// recordKey is the start key in the state file; empty for a file an earlier
+		// adapter wrote, which has the start time alone.
+		recordKey string
+		// runningKey is the start key of the process now holding pid.
+		runningKey string
 		wantStart  bool
 		wantErr    string // substring of the error, empty for success
 	}{
@@ -36,13 +43,17 @@ func TestConnectWindowsRecordedServer(t *testing.T) {
 		{name: "never answers", failProbes: -1, running: true, started: startedNS, wantErr: "pid 4242"},
 		{name: "process is gone", failProbes: -1, running: false, wantStart: true},
 		{name: "pid belongs to another process", failProbes: -1, running: true, started: startedNS + 1, wantStart: true},
+		{name: "recorded key: answers on a later probe", failProbes: 2, running: true, recordKey: startKey, runningKey: startKey},
+		{name: "recorded key: never answers", failProbes: -1, running: true, recordKey: startKey, runningKey: startKey, wantErr: "pid 4242"},
+		{name: "recorded key: pid belongs to another process", failProbes: -1, running: true, recordKey: startKey, runningKey: "key-2", wantStart: true},
+		{name: "recorded key: process is gone", failProbes: -1, recordKey: startKey, wantStart: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := appservertest.NewTCP(t, "old-token")
 			defer fake.Close()
 			dir := t.TempDir()
-			raw, _ := json.Marshal(state{PID: pid, Address: fake.Endpoint.Address, StartedNS: startedNS})
+			raw, _ := json.Marshal(state{PID: pid, Address: fake.Endpoint.Address, StartedNS: startedNS, StartKey: tc.recordKey})
 			tokenPath := filepath.Join(dir, tokenFileName)
 			if err := os.WriteFile(filepath.Join(dir, stateFileName), raw, 0o600); err != nil {
 				t.Fatal(err)
@@ -55,7 +66,12 @@ func TestConnectWindowsRecordedServer(t *testing.T) {
 			srv.goos = "windows"
 			srv.userCacheDir = func() (string, error) { return dir, nil }
 			srv.retryWaits = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
-			srv.processStart = func(p int) (int64, bool) { return tc.started, p == pid && tc.running }
+			srv.lookup = func(p int) (process.Process, bool, error) {
+				return process.Process{Identity: process.Identity{PID: p, StartKey: tc.runningKey}, StartTime: time.Unix(0, tc.started)}, p == pid && tc.running, nil
+			}
+			srv.running = func(id process.Identity) (bool, error) {
+				return id.PID == pid && tc.running && id.StartKey == tc.runningKey, nil
+			}
 			probes := 0
 			srv.probe = func(ctx context.Context, ep appserver.Endpoint) error {
 				probes++

@@ -151,7 +151,7 @@ stream_max_retries = 0
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer func() { _ = srv.Stop() }()
+	defer func() { _ = srv.Terminate(context.Background()) }()
 	var recorded struct {
 		WorkDir string `json:"work_dir"`
 	}

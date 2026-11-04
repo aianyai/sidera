@@ -24,7 +24,7 @@ version is not ours to fix.
 | Platform | Listens on | Reached by |
 | -------- | ---------- | ---------- |
 | Unix | `--listen unix://<state_dir>/app-server.sock` | WebSocket over the Unix socket. Codex makes the socket `0600` in a `0700` directory, symlinks it at the path given, and takes a lock per path, so a second server for the same path cannot run. |
-| Windows | `--listen ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <state_dir>/ws-token` | WebSocket over loopback with `Authorization: Bearer <token>`. The port is found by binding port 0 and releasing it; the port, the pid and the process's start time are in `app-server.json`, the token (`0600`, random, 32 bytes) in `ws-token`. |
+| Windows | `--listen ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <state_dir>/ws-token` | WebSocket over loopback with `Authorization: Bearer <token>`. The port is found by binding port 0 and releasing it; the port, the pid, the process's start key and container are in `app-server.json`, the token (`0600`, random, 32 bytes) in `ws-token`. |
 
 `<state_dir>` is `instance.state_dir` of `initialize`. On Unix the socket path must
 fit the socket address limit; the adapter refuses a longer one with a message that
@@ -43,8 +43,8 @@ lock keeps a second server from running beside the first, and a second server
 would overwrite `ws-token` and take the address, leaving the first with threads
 and no way in. So when the probe of the recorded address fails, the adapter
 checks `app-server.json` before it starts anything: if its pid is a running
-process whose start time is the one recorded (a pid alone could be anyone's now;
-a file without a start time is checked for a running process only), a server
+process whose start key is the one recorded (a pid alone could be anyone's now; a
+file that records no start at all is checked for a running process only), a server
 exists. It is probed again after 250 ms, 500 ms, 1 s and 2 s, each probe bounded
 at 2 seconds; the first answer is used. When none comes, the attempt fails with an
 error that names the pid and the address, no server is started, and the
@@ -56,16 +56,35 @@ socket path already makes a second server impossible, and a failed probe goes
 straight to a start, which ends with the error above when an earlier server holds
 the socket.
 
-**A process that cannot be queried is taken as not running.** The check above asks the
-process table (`process.Lookup` of `sdk/go/adapterkit/process`) for the recorded pid and
-reads its start time as nanoseconds since the epoch; a pid that names no process and a
-process table that does not answer (access denied included) both mean "not running", and
-the adapter then starts a server. This differs on purpose from the Claude adapter, which
-treats a table that cannot be read as an error: a wrong "not running" there leaves two
-writers on one session, silently and beyond repair, while here it starts a second App
-Server, which shows (two processes, a log, a waiting reconnect loop) and ends with the
-owner stopping one. The state file's start time is written for every start, on Unix too,
-but only Windows reads it back.
+**The state file identifies the process.** `app-server.json` records the pid, the SDK's
+start key of the process (`process.Identity`, the same pair that names a Claude turn
+process) and the container `process.Start` returned, besides the address, the working
+directory and `started_ns`. It is written for every start, on every platform, by
+replacing the file whole, and every platform reads it. Whether the recorded process is
+the server is asked of the process table by pid and key (`process.Running`).
+
+**A file an earlier adapter wrote has a start time and no key.** `started_ns` is the
+wall-clock start, which the SDK says never to use as identity: on Linux it moves when
+the clock is set after boot. A record without a key is therefore taken for the process
+that holds the pid only when its `started_ns` equals the process's start time exactly,
+and the key is then written into the file (when the adapter finds the server running
+and when it ends it). On macOS and Windows both are the same kernel value, so an
+earlier server is always recognised; on Linux it is unless the clock was set after boot.
+Any other record, one whose start time differs or that has none, is not proven to name
+the process: the adapter does not end the process (`ErrNotProven`) and the server is
+restarted by hand.
+
+**Two questions, answered in opposite directions when the process table does not
+answer.** The process table (`process.Lookup`, `process.Running` of
+`sdk/go/adapterkit/process`) can fail to answer, access denied included. Whether to
+start a server takes that for "not running", and the adapter then starts one. This
+differs on purpose from the Claude adapter, which treats a table that cannot be read
+as an error: a wrong "not running" there leaves two writers on one session, silently
+and beyond repair, while here it starts a second App Server, which shows (two
+processes, a log, a waiting reconnect loop) and ends with the owner stopping one.
+Whether to end a server takes it for "not to be touched": a wrong guess there ends
+someone else's process, silently and beyond repair, so `Server.Terminate` returns the
+error and ends nothing.
 
 **Detached start.** The Codex program is resolved to an absolute path first (a name through `PATH`, a relative
 path against the adapter's directory), because `process.Start` requires an absolute path and runs
@@ -80,7 +99,7 @@ logged at info level.
 
 - **Unix.** The child gets a session of its own (`setsid`), so the signals aimed at the
   adapter's process group do not reach it and its pid is the id of its process group,
-  which `Server.Stop` signals.
+  which `Server.Terminate` signals.
 - **Linux, systemd user scope.** The child is also moved out of the adapter's control
   group, into a scope named `sidera-codex-<16 hex digits>.scope`, so that stopping the
   unit the daemon runs in does not take it along. The pid and the process group are the
@@ -131,7 +150,7 @@ roots. Every thread, turn and command the adapter asks for names the preset's `c
 The state file records the working directory (`work_dir`). A server found running whose
 record has none was started in `<state_dir>` by an earlier adapter; `adapter.probe` then
 reports the `app-server` dependency as `wrong_version` with a detail that says to restart
-it, since the adapter does not end a server it did not start. Restarting it does not take
+it, since the adapter does not restart a server it did not start. Restarting it does not take
 back an ACE the Windows sandbox already granted on `<state_dir>`.
 
 **Environment.** The server is started with the adapter's environment (composed by
@@ -144,12 +163,17 @@ and `CLAUDE_CODE_*`. On Windows names have no case, so a variable is left out wh
 case it is spelled in (`Codex_Thread_Id`). The owner's Codex configuration (`CODEX_HOME`, `config.toml`)
 is left alone and loads as usual.
 
-**Ending it.** Only a server this process started and still holds is ever ended
-(`Server.Stop`): the process group gets `SIGTERM`, then `SIGKILL` after three
-seconds. A server another process started is never touched, because a pid in a file
-could be anyone's by now: the check above errs toward waiting, while a wrong guess
-here would end someone else's process. The adapter's own shutdown does not stop the
-server. On Windows only the process itself
+**Ending it.** `Server.Terminate` ends the server the state file names, whichever
+adapter started it, and only when the file and the process table show that the process
+is the one that was started (above): `process.Terminate` gives the process group
+`SIGTERM`, then `SIGKILL` after three seconds, and returns once the server is gone. A
+process table that does not answer, and a record that is not proven (`ErrNotProven`),
+leave the server running and are errors, each logged with the pid. Nothing is done when
+there is no record or the recorded process has ended. A server that did not become
+reachable within the start timeout is ended the same way, but by the identity the start
+returned, not by the state file, which may not have been written (the process that was
+just started is killed directly in the one case that its key could not be read). The
+adapter's own shutdown does not stop the server. On Windows only the process itself
 is ended, not what it started.
 
 **Versions.** `adapter.probe` reports the version of the `codex` program
@@ -855,9 +879,11 @@ about ten seconds to the background.
 - **A busy session is refused, not queued or steered.** One writer per thread keeps the
   order of prompts and the books of turns the adapter's own; the daemon retries a
   refusal when the turn ends.
-- **Only the server this process started is ended.** The alternative needs a check of
-  the identity of a process from a pid and a start time; even with that, a wrong kill
-  is worse than a leftover server, which is found and reused anyway.
+- **Only a server shown to be ours is ended, and "cannot ask" means "do not end".**
+  The process is named by pid and start key, which the state file records for every
+  start, not by the process that happens to hold the pid. A wrong kill ends someone
+  else's process; a leftover server is found and reused anyway, so every doubt (a
+  table that does not answer, an old record that does not match) leaves it running.
 - **A hand-written client and subset of types.** The schema is large with many `oneOf`s,
   and a generated copy would carry all of it and its instability. The guard test pins
   what is used. The community Go SDKs found target an older Codex, start the server as
@@ -874,7 +900,7 @@ about ten seconds to the background.
 | Client: dial over Unix socket or TCP, frames, read loop, queue | `cmd/sidera-adapter-codex/internal/appserver/client.go` |
 | The subset of types and methods; `IsThreadGone`; `ServerVersion` | `internal/appserver/types.go` |
 | A fake App Server for tests | `internal/appserver/appservertest/` |
-| Start, connect, working directory, detach, environment, stop | `internal/server/` (`server.go`, `env.go`, `detach_*.go`, `version.go`) |
+| Start, connect, working directory, detach, environment, identity and termination | `internal/server/` (`server.go`, `env.go`, `version.go`; tests `terminate_test.go`, `connect_test.go`) |
 | Preset and instance configuration, thread configuration and permission profile, sandbox policy | `internal/codexcfg/` |
 | Starting and resuming threads, and checking the profile took | `internal/adapter/thread.go` |
 | Creation decisions and the checkpoint | `internal/create/` |

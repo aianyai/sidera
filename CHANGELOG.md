@@ -23,6 +23,12 @@ protocol has a version of its own.
   `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,
   and the Go SDK gives the context of an application's `Start` and `Probe` a deadline 2 seconds
   short of it, so an adapter can tell how long it has. The limit itself is unchanged.
+- **Codex adapter: the App Server is identified by the process's start key.** The adapter
+  records the start key of the App Server it starts in `app-server.json`, on every platform,
+  and checks it instead of the wall-clock start time, which moves when the clock is set. A
+  record an earlier version wrote is recognised when its start time equals the process's
+  exactly, and the key is then added; otherwise the adapter treats the process as one it
+  cannot prove is its own and leaves it alone.
 - **Closing an attached session now needs `--allow-attached`.** `sidera endpoint close`
   used to close the endpoint of a controller session a person is using exactly as it closes
   any other, so a cleanup that closed endpoints by address could end it by mistake. The

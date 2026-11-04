@@ -42,7 +42,7 @@ func cheapestModel(t *testing.T, program string) string {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer srv.Stop()
+	defer func() { _ = srv.Terminate(context.Background()) }()
 	c, err := appserver.Dial(ctx, ep, appserver.Handlers{})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestRealCodexInterruptEndsTheRunningCommand(t *testing.T) {
 	var srv *server.Server
 	t.Cleanup(func() {
 		if srv != nil {
-			_ = srv.Stop()
+			_ = srv.Terminate(context.Background())
 		}
 	})
 	h := newHarnessWith(t, nil, func(o *adapter.Options) {

@@ -1,6 +1,6 @@
 // Package server runs the App Server the adapter talks to: it finds one that is
-// already up or starts one that outlives the adapter, and ends only a server this
-// process started.
+// already up or starts one that outlives the adapter, and ends only a server it can
+// show, by the pid and start key in the state file, to be the one it started.
 //
 // The server is Codex's `app-server` run privately, not the daemon Codex manages
 // for its own clients: that one is shared with the owner's other Codex programs,
@@ -27,6 +27,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // File names inside the state directory.
@@ -48,8 +49,9 @@ const maxSocketPath = 100
 // Timing of a start and of the end of a server.
 const (
 	defaultStartTimeout = 15 * time.Second
-	termWait            = 3 * time.Second
-	killWait            = 2 * time.Second
+	// terminateGrace is how long a server asked to end may take before it is
+	// killed.
+	terminateGrace = 3 * time.Second
 	// probeTimeout bounds one probe of a server that is known to be running.
 	probeTimeout = 2 * time.Second
 )
@@ -63,6 +65,12 @@ var defaultRetryWaits = []time.Duration{250 * time.Millisecond, 500 * time.Milli
 // ErrStartFailed is wrapped by errors from a start that did not end in a
 // reachable server.
 var ErrStartFailed = errors.New("server: the App Server did not start")
+
+// ErrNotProven is wrapped by the error of a Terminate that left a server running
+// because the state file cannot show that the process it names is the one that was
+// started: an earlier adapter wrote the file with a start time that does not match
+// the process, or none. Such a server is restarted by hand.
+var ErrNotProven = errors.New("server: the state file does not prove which process is the App Server")
 
 // Config says how to reach or start the server.
 type Config struct {
@@ -87,8 +95,7 @@ type Server struct {
 	cfg Config
 	log *slog.Logger
 
-	mu    sync.Mutex
-	owned *ownedProcess // the server this process started, if any
+	mu sync.Mutex
 	// exposure says why the server Connect last returned may let a sandboxed
 	// command reach the state directory; empty when it cannot.
 	exposure string
@@ -97,31 +104,11 @@ type Server struct {
 	// a test can stand in for them.
 	goos         string
 	probe        func(context.Context, appserver.Endpoint) error
-	processStart func(pid int) (startedNS int64, running bool)
+	running      func(process.Identity) (bool, error)
+	lookup       func(pid int) (process.Process, bool, error)
+	terminate    func(context.Context, process.Identity, time.Duration) error
 	userCacheDir func() (string, error)
 	retryWaits   []time.Duration
-}
-
-// ownedProcess is the server this process started.
-type ownedProcess struct {
-	started process.Started
-	exited  chan struct{} // closed once the server has ended and been reaped
-	// exitErr is how it ended (nil for exit status 0); read only after exited is
-	// closed.
-	exitErr error
-}
-
-// processStart reports whether the process with the pid is running and when it
-// started, in nanoseconds since the Unix epoch. A pid that names no process, or one
-// the platform cannot be asked about, is not running as far as the adapter can
-// tell: a wrong "not running" starts a second server, which shows and can be ended,
-// where the same mistake about a session's writer would corrupt the session.
-func processStart(pid int) (int64, bool) {
-	p, found, err := process.Lookup(pid)
-	if err != nil || !found {
-		return 0, false
-	}
-	return p.StartTime.UnixNano(), true
 }
 
 // New returns a Server for the configuration.
@@ -141,38 +128,19 @@ func New(cfg Config) *Server {
 		log:          log,
 		goos:         runtime.GOOS,
 		probe:        appserver.Probe,
-		processStart: processStart,
+		running:      process.Running,
+		lookup:       process.Lookup,
+		terminate:    process.Terminate,
 		userCacheDir: os.UserCacheDir,
 		retryWaits:   defaultRetryWaits,
 	}
 }
 
-// Started reports whether this process started the running server and still
-// holds it, which is the only server Stop ends.
-func (s *Server) Started() bool {
-	o := s.ownedProcess()
-	if o == nil {
-		return false
-	}
-	select {
-	case <-o.exited:
-		return false
-	default:
-		return true
-	}
-}
-
-func (s *Server) ownedProcess() *ownedProcess {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.owned
-}
-
 // Exposure says why the server Connect last returned may let a sandboxed command
 // reach the adapter's files, or is empty. Only a server an earlier adapter left
 // running can: it was started in the state directory, before the server had a
-// working directory of its own (see workDir). The adapter does not end a server
-// it did not start, so this is for someone to restart it.
+// working directory of its own (see workDir). A server whose start the adapter
+// cannot show is not ended by it, so this is for someone to restart it.
 func (s *Server) Exposure() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,6 +152,9 @@ func (s *Server) Exposure() string {
 // the state file; a server whose record has none was started in the state
 // directory.
 func (s *Server) noteFound() {
+	if rec, err := s.recorded(); err == nil {
+		s.migrate(rec)
+	}
 	exposure := ""
 	if st, err := s.loadState(); err != nil || st.WorkDir == "" {
 		exposure = "it was started by an earlier adapter in the state directory, where a sandboxed command can be given write access to the adapter's files: restart it"
@@ -245,16 +216,97 @@ func (s *Server) awaitRecorded(ctx context.Context, ep appserver.Endpoint, st st
 
 // recordedServer reads the state file and reports the server it names and
 // whether that process is running and is the one that was started: a pid alone
-// could be anyone's by now, so the process's start time recorded with it must
-// match. A state file without a start time can only be checked for a running
-// process.
+// could be anyone's by now, so the start recorded with it must match. A state file
+// that records no start at all can only be checked for a running process. A
+// process table that does not answer counts as not running, for the reason given
+// at Terminate's opposite: starting a second server is visible and recoverable.
 func (s *Server) recordedServer() (state, bool) {
+	rec, err := s.recorded()
+	if err != nil {
+		return rec.state, false
+	}
+	return rec.state, rec.verdict == recordedOurs ||
+		(rec.verdict == recordedUnproven && rec.state.StartKey == "" && rec.state.StartedNS == 0)
+}
+
+// verdict is what the state file and the process table together say about the
+// recorded server.
+type verdict int
+
+const (
+	// recordedGone: there is no record, or the process it names is not running, or
+	// the pid is held by another process.
+	recordedGone verdict = iota
+	// recordedOurs: the record names the process that runs.
+	recordedOurs
+	// recordedUnproven: a process runs under the recorded pid but the record, which
+	// an earlier adapter wrote with a start time and no start key, does not show it
+	// is the one started.
+	recordedUnproven
+)
+
+// record is the state file read against the process table.
+type record struct {
+	state   state
+	verdict verdict
+	// id names the process when the verdict is recordedOurs.
+	id process.Identity
+	// legacy is set when the record had no start key and the process was proven by
+	// its start time alone, so the key is still to be written (see migrate).
+	legacy bool
+}
+
+// recorded judges the state file against the process table. An error means the
+// table did not answer, and never that the server is gone.
+//
+// A record with a start key is judged by the key. An older record has only the
+// start time, which the SDK says never to use as identity (on Linux it moves with
+// the clock): it names the same process only when it equals the start time the
+// table reports exactly. On macOS and Windows both come from the same value of the
+// kernel, so it always does; on Linux it does unless the clock was set after boot.
+// When it does not, the record is unproven rather than guessed at: the process may
+// be the server or another one that holds the pid.
+func (s *Server) recorded() (record, error) {
 	st, err := s.loadState()
 	if err != nil || st.PID <= 0 {
-		return st, false
+		return record{state: st}, nil
 	}
-	started, running := s.processStart(st.PID)
-	return st, running && (st.StartedNS == 0 || st.StartedNS == started)
+	if st.StartKey != "" {
+		id := process.Identity{PID: st.PID, StartKey: st.StartKey}
+		running, err := s.running(id)
+		switch {
+		case err != nil:
+			return record{state: st}, err
+		case running:
+			return record{state: st, verdict: recordedOurs, id: id}, nil
+		}
+		return record{state: st}, nil
+	}
+	p, found, err := s.lookup(st.PID)
+	switch {
+	case err != nil:
+		return record{state: st}, err
+	case !found:
+		return record{state: st}, nil
+	case st.StartedNS != 0 && st.StartedNS == p.StartTime.UnixNano():
+		return record{state: st, verdict: recordedOurs, id: p.Identity, legacy: true}, nil
+	}
+	return record{state: st, verdict: recordedUnproven}, nil
+}
+
+// migrate writes the start key of a record that was proven by its start time, so
+// that the record is judged by the key from now on. It replaces the file whole, so
+// a crash leaves the old record or the new.
+func (s *Server) migrate(rec record) {
+	if !rec.legacy {
+		return
+	}
+	rec.state.StartKey = rec.id.StartKey
+	if err := s.storeState(rec.state); err != nil {
+		s.log.Warn("cannot add the start key to the state file", "error", err)
+		return
+	}
+	s.log.Info("recognised the App Server an earlier adapter started", "pid", rec.id.PID, "start_key", rec.id.StartKey)
 }
 
 // existing is the endpoint a server left running would be at.
@@ -278,10 +330,16 @@ func (s *Server) unixEndpoint() (appserver.Endpoint, error) {
 type state struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
+	// StartKey is the SDK's start key of the process; with the pid it identifies the
+	// process. Empty when it could not be read, and in a file an earlier adapter
+	// wrote.
+	StartKey string `json:"start_key,omitempty"`
+	// Container is where the process was put so that it outlives the adapter.
+	Container adapterproto.Container `json:"container,omitzero"`
 	// StartedNS is when the process started, in nanoseconds since the Unix epoch;
-	// zero when it could not be read. With the pid it identifies the process. Only
-	// Windows reads it back: on Unix the lock per socket path already keeps a second
-	// server from running, and the start time there is derived from the boot time.
+	// zero when it could not be read. It is written for the log and for the earlier
+	// adapter that reads it, and is used for nothing but to recognise a file that has
+	// no StartKey (see recorded).
 	StartedNS int64 `json:"started_ns,omitempty"`
 	// WorkDir is the working directory the server was started in. A server an
 	// earlier adapter started has none recorded: it ran in the state directory.
@@ -353,17 +411,18 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 		if !errors.Is(err, process.ErrStartedUnidentified) {
 			return ep, fmt.Errorf("%w: %v", ErrStartFailed, err)
 		}
-		// The server runs; only its start time could not be read, so the state file
+		// The server runs; only its identity could not be read, so the state file
 		// records none and a check of the recorded server tests the pid alone.
 		s.log.Warn("started the App Server but could not identify it", "error", err)
 	}
-	owned := &ownedProcess{started: started, exited: make(chan struct{})}
+	exited := make(chan struct{}) // closed once the server has ended and been reaped
+	var exitErr error             // how it ended; read only after exited is closed
 	go func() {
-		owned.exitErr = <-started.Done
-		close(owned.exited)
+		exitErr = <-started.Done
+		close(exited)
 	}()
 	s.mu.Lock()
-	s.owned, s.exposure = owned, ""
+	s.exposure = ""
 	s.mu.Unlock()
 	s.log.Info("started the App Server", "pid", started.PID, "listen", ep.Network, "dir", workDir)
 	if !started.Detachment.OutlivesDaemon {
@@ -380,13 +439,13 @@ func (s *Server) start(ctx context.Context) (appserver.Endpoint, error) {
 	defer tick.Stop()
 	for {
 		select {
-		case <-owned.exited:
+		case <-exited:
 			return ep, fmt.Errorf("%w: it exited (%s) before it was reachable; an earlier App Server may hold the socket, see %s",
-				ErrStartFailed, exitStatus(owned.exitErr), logName)
+				ErrStartFailed, exitStatus(exitErr), logName)
 		case <-ctx.Done():
 			return ep, ctx.Err()
 		case <-deadline.C:
-			_ = s.Stop()
+			s.endUnreachable(started)
 			return ep, fmt.Errorf("%w: not reachable after %v", ErrStartFailed, s.cfg.StartTimeout)
 		case <-tick.C:
 			pctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -466,10 +525,30 @@ func (s *Server) writeState(started process.Started, ep appserver.Endpoint, work
 	if !started.StartTime.IsZero() {
 		startedNS = started.StartTime.UnixNano()
 	}
-	raw, _ := json.Marshal(state{PID: started.PID, Address: ep.Address, StartedNS: startedNS, WorkDir: workDir})
-	if err := os.WriteFile(filepath.Join(s.cfg.StateDir, stateFileName), raw, 0o600); err != nil {
+	if err := s.storeState(state{
+		PID: started.PID, Address: ep.Address, StartKey: started.StartKey, Container: started.Container,
+		StartedNS: startedNS, WorkDir: workDir,
+	}); err != nil {
 		s.log.Warn("cannot write the state file", "error", err)
 	}
+}
+
+// storeState replaces the state file whole.
+func (s *Server) storeState(st state) error {
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(s.cfg.StateDir, stateFileName)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // newTCPEndpoint picks a free loopback port and makes the token the listener will
@@ -498,49 +577,55 @@ func (s *Server) newTCPEndpoint() (appserver.Endpoint, error) {
 	return appserver.Endpoint{Network: "tcp", Address: addr, Token: token}, nil
 }
 
-// Stop ends the server this process started: the whole process group, politely,
-// then by force. A server another process started is never touched: a pid in a
-// file could be anyone's now, and a wrong guess here would end someone else's
-// process. It
-// returns once the server's process group is gone.
-func (s *Server) Stop() error {
-	o := s.ownedProcess()
-	if o == nil {
+// Terminate ends the server the state file names, if the file and the process
+// table show that the process is the one that was started, whichever adapter
+// started it: the process group gets SIGTERM and, after a few seconds, SIGKILL (on
+// Windows the process is ended and what it started is not reached). It returns once
+// the server is gone. Nothing is done, and nil returned, when there is no record or
+// the recorded process has ended.
+//
+// Where Connect takes a process table that does not answer for "not running", so as
+// to start a server rather than wait for one that may not be there, Terminate takes
+// it for "not to be touched": a wrong guess here ends someone else's process. So a
+// table that does not answer is the error, and so is a record that cannot be shown
+// to name the process (ErrNotProven), and in both the server is left running.
+func (s *Server) Terminate(ctx context.Context) error {
+	rec, err := s.recorded()
+	if err != nil {
+		s.log.Warn("the App Server was left running: the process table did not answer", "pid", rec.state.PID, "error", err)
+		return fmt.Errorf("server: look up the App Server (pid %d): %w", rec.state.PID, err)
+	}
+	switch rec.verdict {
+	case recordedGone:
 		return nil
+	case recordedUnproven:
+		s.log.Warn("the App Server was left running: the state file does not show that the process is the one started", "pid", rec.state.PID)
+		return fmt.Errorf("%w (pid %d); restart it by hand", ErrNotProven, rec.state.PID)
 	}
-	select {
-	case <-o.exited:
-		return nil
-	default:
-	}
-	pid := o.started.PID
-	_ = signalGroup(o.started, false)
-	select {
-	case <-o.exited:
-	case <-time.After(termWait):
-		_ = signalGroup(o.started, true)
-		select {
-		case <-o.exited:
-		case <-time.After(killWait):
-			return fmt.Errorf("the App Server (pid %d) did not end", pid)
-		}
-	}
-	// The leader is reaped; members of its group may still be dying.
-	for i := 0; i < 20 && !groupGone(pid); i++ {
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !groupGone(pid) {
-		_ = signalGroup(o.started, true)
+	s.migrate(rec)
+	return s.end(ctx, rec.id)
+}
+
+// end ends the server id names, politely first and then by force, and returns once
+// it is gone; one that has ended already is not an error.
+func (s *Server) end(ctx context.Context, id process.Identity) error {
+	s.log.Info("ending the App Server", "pid", id.PID, "start_key", id.StartKey)
+	if err := s.terminate(ctx, id, terminateGrace); err != nil && !errors.Is(err, process.ErrNotRunning) {
+		return fmt.Errorf("server: end the App Server (pid %d): %w", id.PID, err)
 	}
 	return nil
 }
 
-// GroupGone reports whether the process group of the server that was started is
-// empty; it is true when none was started.
-func (s *Server) GroupGone() bool {
-	o := s.ownedProcess()
-	if o == nil {
-		return true
+// endUnreachable ends a server this call started that never answered. It is ended
+// by the identity the start returned, not by the state file: the file may not have
+// been written, and then it names no server or an earlier, gone one. When the
+// identity could not be read, the process the start returned is killed.
+func (s *Server) endUnreachable(started process.Started) {
+	if started.StartKey == "" {
+		_ = started.Kill()
+		return
 	}
-	return groupGone(o.started.PID)
+	if err := s.end(context.Background(), started.Identity); err != nil {
+		s.log.Warn("cannot end the App Server that did not answer", "error", err)
+	}
 }

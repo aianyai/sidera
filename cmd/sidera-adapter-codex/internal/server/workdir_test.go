@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,16 @@ import (
 // The stand-in is this test binary: TestMain sees the variable and acts as it.
 const cwdFileEnv = "SIDERA_TEST_FAKE_CODEX_CWD_FILE"
 
+// hangFileEnv makes the stand-in write its PID to the named file and stay, never
+// answering.
+const hangFileEnv = "SIDERA_TEST_FAKE_CODEX_HANG_FILE"
+
 func TestMain(m *testing.M) {
+	if path := os.Getenv(hangFileEnv); path != "" {
+		_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600)
+		time.Sleep(time.Minute)
+		os.Exit(1)
+	}
 	if path := os.Getenv(cwdFileEnv); path != "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -86,6 +96,9 @@ func TestStartRunsTheServerInADirectoryOfItsOwn(t *testing.T) {
 	}
 	if st.WorkDir != cwd {
 		t.Errorf("state file records %q, the server ran in %q", st.WorkDir, cwd)
+	}
+	if st.PID <= 0 || st.StartKey == "" || st.Container.Validate() != nil {
+		t.Errorf("state file records pid %d, start key %q and container %+v: the process must be identifiable and its container valid", st.PID, st.StartKey, st.Container)
 	}
 	if entries, err := os.ReadDir(cwd); err != nil || len(entries) != 0 {
 		t.Errorf("the server's directory holds %v (%v), want nothing", entries, err)
