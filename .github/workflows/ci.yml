@@ -335,10 +335,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The job ends in seconds, before the test jobs, so its saved cache entry would
+      # hold almost none of what they build and keep them from saving theirs.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
+          cache: false
       - name: go build
         run: go build ./...
       - name: go test
@@ -348,44 +350,21 @@ jobs:
 
   # Every binary and package must build for every platform Sidera ships for,
   # statically (CGO_ENABLED=0), whichever runner builds it.
-  cross-compile:
-    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {goos: darwin, goarch: arm64}
-          - {goos: darwin, goarch: amd64}
-          - {goos: linux, goarch: amd64}
-          - {goos: linux, goarch: arm64}
-          - {goos: windows, goarch: amd64}
-          - {goos: windows, goarch: arm64}
-    env:
-      CGO_ENABLED: "0"
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The matrix jobs would race to save one identical cache entry.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: go build
-        run: go build ./... ./sdk/go/...
-
+  #
   # scripts/release.sh runs for real only when a tag is pushed, so a change that
   # breaks it (a program that no longer builds as a package, a module whose licence
-  # the notices refuse) would otherwise surface at the first release. This builds the
-  # archives into a directory outside the checkout and publishes nothing. The version
-  # is a placeholder that no tag will carry; the script only needs one that looks
-  # like a version, and a changelog section is not read here.
-  release-dry-run:
-    name: release archives
+  # the notices refuse) would otherwise surface at the first release. The script
+  # builds the archives into a directory outside the checkout and publishes nothing.
+  # The version is a placeholder that no tag will carry; the script only needs one
+  # that looks like a version, and a changelog section is not read here.
+  #
+  # Both build the same packages for the same six platforms, so they are one job:
+  # the script builds with -trimpath, and so does the loop, which makes the
+  # script's builds come from the build cache the loop filled. The job keeps no
+  # cache of its own between runs (cache: false), since it would save an entry
+  # that the test jobs on Linux should save.
+  build:
+    name: build and release archives
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -395,7 +374,17 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache-dependency-path: "**/go.sum"
+          cache: false
+      - name: go build for every platform
+        run: |
+          for platform in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            echo "::group::$platform"
+            CGO_ENABLED=0 GOOS=${platform%/*} GOARCH=${platform#*/} go build -trimpath ./... ./sdk/go/... || {
+              echo "::error::go build failed for $platform"
+              exit 1
+            }
+            echo "::endgroup::"
+          done
       - name: scripts/release.sh
         run: scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"
       - name: checksums.txt verifies and names the six archives
