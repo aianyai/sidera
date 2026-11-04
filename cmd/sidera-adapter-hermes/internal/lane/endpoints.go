@@ -23,19 +23,75 @@ type Placement struct {
 	Reason string
 }
 
-// retirable lists the conversation endpoints that can be retired, least recently
-// active first: no unfinished card sends from one and no open remote session was
-// created by one, since a session can be closed only from its creator.
-func retirable(endpoints []state.Endpoint, sessions []state.Session, cards []state.Card) []state.Endpoint {
+// InUse is what keeps an endpoint from being retired, besides the endpoint being
+// the orphan's: it is used again by something the adapter still has to do.
+type InUse struct {
+	// Sessions are the open remote sessions: a session can be closed only from the
+	// endpoint that created it.
+	Sessions []state.Session
+	// Cards are the cards; an unfinished one sends from its endpoint and awaits a
+	// reply there.
+	Cards []state.Card
+	// Requests are the messages other nodes sent that became cards. A request not
+	// answered yet is answered from the endpoint that received it, by a reply card
+	// that may come in a later turn of the conversation.
+	Requests []state.Request
+	// Replies are the answers sent. One whose delivery the node may still report
+	// (state.Reply.Watched) is told about by a notice to the endpoint it was sent
+	// from.
+	Replies []state.Reply
+	// Now is the time Watched is judged at.
+	Now time.Time
+}
+
+// UseOf is what the records hold in use at the time.
+func UseOf(d *state.Data, now time.Time) InUse {
+	u := InUse{Sessions: d.SessionList(), Cards: d.CardList(), Now: now}
+	for _, r := range d.Requests {
+		u.Requests = append(u.Requests, *r)
+	}
+	for _, r := range d.Replies {
+		u.Replies = append(u.Replies, *r)
+	}
+	return u
+}
+
+// busy lists the keys of the endpoints something still depends on.
+func (u InUse) busy() map[string]bool {
 	busy := map[string]bool{}
-	for _, c := range cards {
+	for _, c := range u.Cards {
 		if c.Unfinished() {
 			busy[c.Endpoint] = true
 		}
 	}
-	for _, s := range sessions {
+	for _, s := range u.Sessions {
 		busy[s.Endpoint] = true
 	}
+	requestEndpoint := map[string]string{}
+	for _, r := range u.Requests {
+		requestEndpoint[r.CardID] = r.Endpoint
+	}
+	answered := map[string]bool{}
+	for _, r := range u.Replies {
+		if r.RequestCard != "" {
+			answered[r.RequestCard] = true
+		}
+		if r.Watched(u.Now) {
+			busy[requestEndpoint[r.RequestCard]] = true
+		}
+	}
+	for _, r := range u.Requests {
+		if !answered[r.CardID] {
+			busy[r.Endpoint] = true
+		}
+	}
+	return busy
+}
+
+// retirable lists the conversation endpoints that can be retired, least recently
+// active first: nothing in use keeps one (InUse).
+func retirable(endpoints []state.Endpoint, use InUse) []state.Endpoint {
+	busy := use.busy()
 	var out []state.Endpoint
 	for _, e := range endpoints {
 		if e.Key != OrphanKey && !busy[e.Key] {
@@ -51,7 +107,7 @@ func retirable(endpoints []state.Endpoint, sessions []state.Session, cards []sta
 // that is registered, and the orphan, are used as they are. A new key takes a free
 // slot; when none is free, the conversation endpoint idle longest that can be
 // retired makes room; when none can, the card is sent from the orphan endpoint.
-func PlaceEndpoint(key string, endpoints []state.Endpoint, sessions []state.Session, cards []state.Card, max int) Placement {
+func PlaceEndpoint(key string, endpoints []state.Endpoint, use InUse, max int) Placement {
 	if key == OrphanKey || slices.ContainsFunc(endpoints, func(e state.Endpoint) bool { return e.Key == key }) {
 		return Placement{Key: key}
 	}
@@ -64,7 +120,7 @@ func PlaceEndpoint(key string, endpoints []state.Endpoint, sessions []state.Sess
 	if conversations < max-reservedEndpoints {
 		return Placement{Key: key}
 	}
-	if r := retirable(endpoints, sessions, cards); len(r) > 0 {
+	if r := retirable(endpoints, use); len(r) > 0 {
 		return Placement{Key: key, Retire: r[0].Key}
 	}
 	return Placement{
@@ -76,10 +132,10 @@ func PlaceEndpoint(key string, endpoints []state.Endpoint, sessions []state.Sess
 // IdleEndpoints returns the keys of the endpoints to retire for lack of use: idle
 // longer than idle and retirable. Retiring is cheap: the same key opens the same
 // address again.
-func IdleEndpoints(endpoints []state.Endpoint, sessions []state.Session, cards []state.Card, idle time.Duration, now time.Time) []string {
+func IdleEndpoints(endpoints []state.Endpoint, use InUse, idle time.Duration) []string {
 	var out []string
-	for _, e := range retirable(endpoints, sessions, cards) {
-		if now.Sub(e.LastActivity) > idle {
+	for _, e := range retirable(endpoints, use) {
+		if use.Now.Sub(e.LastActivity) > idle {
 			out = append(out, e.Key)
 		}
 	}

@@ -6,7 +6,7 @@ does I/O. The caller records the transition with `state.Store.Update`, then acts
 | Entry point | Decides |
 | ----------- | ------- |
 | `EndpointKey`, `KindOf` | The conversation endpoint of a card's source; the kind of an endpoint from its key. |
-| `PlaceEndpoint`, `IdleEndpoints` | Which endpoint a card sends from under the cap; which to retire for idleness. |
+| `PlaceEndpoint`, `IdleEndpoints`, `InUse` | Which endpoint a card sends from under the cap; which to retire for idleness; what keeps an endpoint from being retired (unfinished cards, open sessions, unanswered requests, watched answers). |
 | `MatchReply` | Which card a received message answers (waiting, or blocked for no reply or a transient failure, or finished by an earlier hand-out of this very message), or to read pending creations first. |
 | `ShouldQueue`, `NextQueued` | Whether a send waits behind another card on the same endpoint and peer; who goes next. |
 | `IdempotencyKey`, `OnReady`, `OnReplyCard`, `AttemptExpired` | The key of an attempt; what to do with a known card, or the record of a reply card, that is ready again; the one rule for whether an attempt may still be sent again. |

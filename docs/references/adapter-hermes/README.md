@@ -125,10 +125,15 @@ never released, and a key per card would make the node's configuration grow with
 bound.
 
 An endpoint is retired when it has been idle for `endpoint_idle`, or to make room
-(below), and only when no unfinished card sends from it and no open remote session
-was created by it, since a session can be closed only from its creator. The same key
-opens the same address again, so retiring loses nothing but messages sent in the
-meantime. `orphan` is never retired.
+(below), and only when nothing depends on it (`lane.InUse`): no unfinished card sends
+from it; no open remote session was created by it, since a session can be closed only
+from its creator; no request that arrived on it is unanswered, since the answer is
+sent from the endpoint that received the request and may come in a later turn; and no
+answer sent from it is still watched (`state.Reply.Watched`), since the node's notice
+about a failed delivery of the answer comes to the endpoint it was sent from. A request
+is answered once a reply record names it, and is forgotten after `RequestRetention`
+whether answered or not. The same key opens the same address again, so retiring loses
+nothing but messages sent in the meantime. `orphan` is never retired.
 
 **Capacity** (`lane.PlaceEndpoint`). The adapter holds at most `max_endpoints`; two
 slots are kept for the instance endpoint and the orphan. A card whose key is
@@ -215,8 +220,7 @@ its next use. The recorded endpoints are declared hidden again after start, sinc
 process may have ended between registering and declaring.
 
 **Idle retirement.** Every ten minutes `lane.IdleEndpoints` names the conversation
-endpoints unused for `endpoint_idle` with no unfinished card and no open remote
-session; each is recorded as removed and closed with `endpoint.unregister`. The time
+endpoints unused for `endpoint_idle` that nothing depends on (above); each is recorded as removed and closed with `endpoint.unregister`. The time
 of use is the last card placed on the endpoint or message read from it.
 
 ### Receiving

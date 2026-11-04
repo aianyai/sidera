@@ -404,20 +404,30 @@ func TestPlaceEndpoint(t *testing.T) {
 		endpoints []state.Endpoint
 		sessions  []state.Session
 		cards     []state.Card
+		requests  []state.Request
+		replies   []state.Reply
 		want      Placement
 	}{
-		{"a registered key is used as it is", "a", full, nil, nil, Placement{Key: "a"}},
-		{"the orphan is always available", OrphanKey, full, nil, nil, Placement{Key: OrphanKey}},
-		{"room left", "new", full[:2], nil, nil, Placement{Key: "new"}},
-		{"the orphan does not take a conversation's slot", "new", []state.Endpoint{ep("a", 0), ep("b", 0), ep(OrphanKey, 0)}, nil, nil, Placement{Key: "new"}},
-		{"full: the endpoint idle longest is retired", "new", full, nil, nil, Placement{Key: "new", Retire: "b"}},
-		{"full: one with an unfinished card is kept", "new", full, nil, []state.Card{busy("b")}, Placement{Key: "new", Retire: "c"}},
-		{"full: a finished card does not keep it", "new", full, nil, []state.Card{{Endpoint: "b", Phase: state.PhaseFinished}}, Placement{Key: "new", Retire: "b"}},
-		{"full: one that created an open session is kept", "new", full, []state.Session{{Address: "s", Endpoint: "b"}}, nil, Placement{Key: "new", Retire: "c"}},
-		{"full and nothing can go: send from the orphan", "new", full, nil, []state.Card{busy("a"), busy("b"), busy("c")}, Placement{Key: OrphanKey}},
+		{"a registered key is used as it is", "a", full, nil, nil, nil, nil, Placement{Key: "a"}},
+		{"the orphan is always available", OrphanKey, full, nil, nil, nil, nil, Placement{Key: OrphanKey}},
+		{"room left", "new", full[:2], nil, nil, nil, nil, Placement{Key: "new"}},
+		{"the orphan does not take a conversation's slot", "new", []state.Endpoint{ep("a", 0), ep("b", 0), ep(OrphanKey, 0)}, nil, nil, nil, nil, Placement{Key: "new"}},
+		{"full: the endpoint idle longest is retired", "new", full, nil, nil, nil, nil, Placement{Key: "new", Retire: "b"}},
+		{"full: one with an unfinished card is kept", "new", full, nil, []state.Card{busy("b")}, nil, nil, Placement{Key: "new", Retire: "c"}},
+		{"full: a finished card does not keep it", "new", full, nil, []state.Card{{Endpoint: "b", Phase: state.PhaseFinished}}, nil, nil, Placement{Key: "new", Retire: "b"}},
+		{"full: one that created an open session is kept", "new", full, []state.Session{{Address: "s", Endpoint: "b"}}, nil, nil, nil, Placement{Key: "new", Retire: "c"}},
+		{"full: one that received a request nobody answered yet is kept", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, nil, Placement{Key: "new", Retire: "c"}},
+		{"full: an answered request does not keep it", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r"}}, Placement{Key: "new", Retire: "b"}},
+		{"full: an answer the node may still report on keeps the endpoint it was sent from", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", MessageID: "m", SentAt: ago(time.Minute)}}, Placement{Key: "new", Retire: "c"}},
+		{"full: an answer past the window does not", "new", full, nil, nil,
+			[]state.Request{{CardID: "r", Endpoint: "b"}}, []state.Reply{{CardID: "a1", RequestCard: "r", MessageID: "m", SentAt: ago(adapterproto.SentKeyWindow + time.Minute)}}, Placement{Key: "new", Retire: "b"}},
+		{"full and nothing can go: send from the orphan", "new", full, nil, []state.Card{busy("a"), busy("b"), busy("c")}, nil, nil, Placement{Key: OrphanKey}},
 	}
 	for _, tc := range cases {
-		got := PlaceEndpoint(tc.key, tc.endpoints, tc.sessions, tc.cards, 5)
+		got := PlaceEndpoint(tc.key, tc.endpoints, InUse{Sessions: tc.sessions, Cards: tc.cards, Requests: tc.requests, Replies: tc.replies, Now: t0}, 5)
 		reason := got.Reason
 		got.Reason = ""
 		if got != tc.want {
@@ -440,7 +450,7 @@ func TestIdleEndpoints(t *testing.T) {
 	}
 	cards := []state.Card{{Endpoint: "old-busy", Phase: state.PhaseBlocked}}
 	sessions := []state.Session{{Address: "s", Endpoint: "old-sessions"}}
-	got := IdleEndpoints(eps, sessions, cards, idle, t0)
+	got := IdleEndpoints(eps, InUse{Sessions: sessions, Cards: cards, Now: t0}, idle)
 	if len(got) != 1 || got[0] != "old" {
 		t.Errorf("got %v", got)
 	}

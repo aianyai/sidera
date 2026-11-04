@@ -194,7 +194,7 @@ func (e *endpoints) Place(ctx context.Context, src lane.Source, target config.Ta
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	d := e.store.View()
-	p := lane.PlaceEndpoint(lane.EndpointKey(src), d.EndpointList(), d.SessionList(), d.CardList(), e.max)
+	p := lane.PlaceEndpoint(lane.EndpointKey(src), d.EndpointList(), lane.UseOf(&d, e.now()), e.max)
 	if p.Retire != "" {
 		if err := e.retire(ctx, p.Retire); err != nil {
 			return Placement{}, err
@@ -283,7 +283,7 @@ func (e *endpoints) retireIdle(ctx context.Context, idle time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	d := e.store.View()
-	keys := lane.IdleEndpoints(d.EndpointList(), d.SessionList(), d.CardList(), idle, e.now())
+	keys := lane.IdleEndpoints(d.EndpointList(), lane.UseOf(&d, e.now()), idle)
 	slices.Sort(keys)
 	for _, key := range keys {
 		if err := e.retire(ctx, key); err != nil {
