@@ -20,8 +20,7 @@ protocol has a version of its own.
   ending; the instance stays enabled) or `retire` (the instance is disabled or removed). The
   daemon sends it only to an adapter that declares the new capability `shutdown_intent`, so an
   adapter that decodes `shutdown` strictly is not affected. The Go SDK declares the capability
-  itself, and `adapterkit.Application.Shutdown` now takes the intent and returns an error. The
-  protocol stays at version 1.
+  itself. The protocol stays at version 1.
 - **Disabling an instance releases what its adapter left running.** The daemon now tells an
   adapter why it ends: `restart` when it restarts, `stop` when it ends, `retire` when the
   instance is disabled. When an instance is disabled while its adapter is not running (it
@@ -38,6 +37,11 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Go SDK: `adapterkit.Application.Shutdown` takes the shutdown parameters and returns an
+  error.** The method is now `Shutdown(ctx context.Context, p adapterproto.ShutdownParams) error`
+  (it was `Shutdown(ctx context.Context)`), so that an adapter can see why it ends and report a
+  failure to release what it started. A third-party adapter has to update its implementation
+  when it upgrades the SDK; embedding `adapterkit.Base` keeps the default that does nothing.
 - **Stopping the daemon ends the Codex App Server when no Codex session is running a turn.**
   `sidera daemon stop` used to leave the server running always. The Codex adapter now ends it
   when every session it manages is idle, and keeps it when one runs a turn, as it does when
