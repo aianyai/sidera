@@ -28,7 +28,8 @@ protocol has a version of its own.
   is waiting to be started again after a failure), the daemon starts the adapter once only
   so that it can release what it started. The Codex adapter now ends its App Server then,
   whatever it is doing, and deletes the directory it made for it under your user cache
-  directory.
+  directory. The Claude Code adapter interrupts the turns it is running, so that no turn
+  keeps writing into the state directory that `sidera adapter remove` deletes.
 - **Removing an instance deletes its state directory.** `sidera adapter remove` used to leave
   `~/.sidera/adapter-state/<instance>/` for you to delete. The daemon now waits for the
   adapter to have ended, then deletes the directory with the instance. On Windows the removal

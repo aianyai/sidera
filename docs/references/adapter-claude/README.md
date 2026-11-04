@@ -276,6 +276,29 @@ already signalled and an interrupt after a close that could not signal does sign
 never killed: a turn that ignores the interrupt stays `requested`. A turn that was running when the
 adapter restarted is the recorded turn all the same.
 
+### When the adapter ends
+
+A turn process is detached so that a turn survives the adapter and the daemon, and the
+intent of `shutdown` decides whether that is still wanted:
+
+- `restart` and `stop` leave every turn process running; the turn is found again by its
+  recorded identity when the adapter starts, and a turn that ends meanwhile ends without
+  anyone watching it, as a turn does when the adapter is down.
+- `retire` (the instance is disabled or removed) interrupts the running turn of each
+  session the adapter holds, the way an interrupt request does (same marking of the turn,
+  same signal, by the recorded PID and start key, and only while the process table shows
+  that process still to be the one recorded), and waits up to `InterruptWait` for them to
+  end. Nothing follows to take them over, and the turn files they write are in the state
+  directory the daemon deletes when the instance is removed. A process that cannot be
+  signalled, or does not end within the wait, is the error `shutdown` is answered with, naming
+  the session; the adapter ends all the same and never kills a turn.
+
+Only the recorded turn process is known by identity. When the instance is retired while the
+adapter is not running, the daemon starts the adapter only to initialize and retire, and the
+adapter holds no session then, so it signals nothing: the turn processes of an earlier adapter
+end by themselves when their turn is over.
+Attached sessions are the person's and are never signalled.
+
 ### Attached sessions
 
 A session a person opened in a terminal can ask to be attached (the management method
@@ -447,7 +470,8 @@ runtime's `ack_markers` in the manifest and the tool results read from the recor
 writer that is not the adapter's (the runtime's session registry, which `create.Observations`
 accepts and the adapter leaves empty, so a session the user resumed by hand is not noticed, nor is
 one the listing denies the adapter),
-and sandbox settings. The turn files in the state directory are not cleaned up.
+and sandbox settings. The turn files in the state directory are not cleaned up while the
+instance exists; they go with the state directory when the instance is removed.
 
 ### The record directory
 

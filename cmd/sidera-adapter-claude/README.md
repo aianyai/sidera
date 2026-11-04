@@ -43,7 +43,7 @@ library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys
 executable so that the identity answered in `initialize` is read from it; its version is
 the placeholder `@version@`, replaced by the release version when the manifest is read. The
 executable is started by the daemon and ends when the daemon closes its input; the
-turn processes it started are detached and run on.
+turn processes it started are detached and run on, unless the instance is retired, when it interrupts the running ones by identity.
 `pack.go` is the `package` subcommand: it writes the package for one platform the
 manifest lists from a binary built for it.
 

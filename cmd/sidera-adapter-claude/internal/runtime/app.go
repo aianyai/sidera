@@ -13,17 +13,22 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/create"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // Options are what the adapter is built from. Zero fields take the operating
@@ -184,10 +189,66 @@ func claudeDir(environ []string) string {
 	return filepath.Join(home, ".claude")
 }
 
-// Shutdown stops the monitors. The turn processes are detached and run on,
-// whatever the intent.
-func (a *App) Shutdown(context.Context, adapterproto.ShutdownParams) error {
+// Shutdown stops the monitors. A turn process is detached and runs on through a
+// restart or a stop, so that a turn survives the daemon or the adapter being
+// replaced; when the instance is retired (disabled or removed) nothing follows to
+// take it over, and the turns this adapter knows are interrupted first. The error
+// names what could not be interrupted, and the adapter ends all the same.
+func (a *App) Shutdown(ctx context.Context, p adapterproto.ShutdownParams) error {
+	var err error
+	if p.Effective() == adapterproto.ShutdownRetire {
+		err = a.interruptRunningTurns(ctx)
+	}
 	a.stop()
+	return err
+}
+
+// interruptRunningTurns interrupts, as Ctrl-C does, the running turn of every session
+// the adapter holds, and waits up to InterruptWait for the processes to end. A process
+// is signalled only while it is the one recorded: the same pid with another start key
+// is another program. Only the recorded turn process is known by identity; a turn
+// process the adapter has not seen is not looked for. Attached sessions are the
+// person's and are never touched.
+func (a *App) interruptRunningTurns(ctx context.Context) error {
+	a.mu.Lock()
+	sessions := slices.Collect(maps.Values(a.sessions))
+	a.mu.Unlock()
+
+	var signalled []turn.Process
+	var failures []string
+	for _, s := range sessions {
+		s.mu.Lock()
+		t := s.turn
+		running := t != nil && !t.Done()
+		var p turn.Process
+		if running {
+			p = t.Process
+		}
+		s.mu.Unlock()
+		if !running {
+			continue
+		}
+		alive, err := a.alive(p)
+		if err == nil && alive {
+			if err = a.interruptProcess(ctx, s, p); err == nil {
+				signalled = append(signalled, p)
+			}
+		}
+		if err != nil && !errors.Is(err, proc.ErrNotRunning) {
+			a.log.Warn("a turn cannot be interrupted at retire", "endpoint", s.endpoint, "error", err)
+			failures = append(failures, fmt.Sprintf("session %s: %v", s.endpoint, err))
+		}
+	}
+	gone, err := a.waitEnded(ctx, signalled, a.o.InterruptWait)
+	switch {
+	case err != nil:
+		failures = append(failures, "the processes cannot be looked at: "+err.Error())
+	case !gone:
+		failures = append(failures, "a turn process did not end after the interrupt")
+	}
+	if len(failures) > 0 {
+		return peer.NewError(peer.CodeInternalError, "turns were left running: "+strings.Join(failures, "; "))
+	}
 	return nil
 }
 
