@@ -228,12 +228,16 @@ func (a *App) interruptRunningTurns(ctx context.Context) error {
 		if !running {
 			continue
 		}
+		// An interrupt or a close of the session may be on its way to the same
+		// process; interruptProcess is called only by the holder of the lock.
+		s.interruptMu.Lock()
 		alive, err := a.alive(p)
 		if err == nil && alive {
 			if err = a.interruptProcess(ctx, s, p); err == nil {
 				signalled = append(signalled, p)
 			}
 		}
+		s.interruptMu.Unlock()
 		if err != nil && !errors.Is(err, proc.ErrNotRunning) {
 			a.log.Warn("a turn cannot be interrupted at retire", "endpoint", s.endpoint, "error", err)
 			failures = append(failures, fmt.Sprintf("session %s: %v", s.endpoint, err))

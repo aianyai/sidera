@@ -71,3 +71,30 @@ func TestShutdownOfARetiredInstanceSignalsNothingWhenNoTurnRuns(t *testing.T) {
 		t.Fatalf("signals %v", got)
 	}
 }
+
+// The interrupts and the close of a session are served one at a time, and so is the
+// interrupt a retire sends: while one of them holds the session, the retire signals
+// nothing, and once it lets go, signals the turn once.
+func TestShutdownRetireWaitsForTheInterruptLockOfTheSession(t *testing.T) {
+	w, app := runningTurn(t)
+	w.onInterrupt = func(w *world, p *fakeProc) { w.exit(p, resultError) }
+	s := app.session("session-1")
+	s.interruptMu.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.Shutdown(ctxT(t), adapterproto.ShutdownParams{Intent: adapterproto.ShutdownRetire})
+	}()
+	time.Sleep(4 * shortWait) // a retire that does not wait has signalled by now
+	if got := w.signalled(); len(got) != 0 {
+		s.interruptMu.Unlock()
+		t.Fatalf("the retire signalled %v while the session's interrupt lock was held", got)
+	}
+	s.interruptMu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if got := w.signalled(); len(got) != 1 {
+		t.Fatalf("signals %v, want 1", got)
+	}
+}
