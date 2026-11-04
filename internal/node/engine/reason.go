@@ -317,6 +317,13 @@ type Refusal struct {
 	// RetryAfter says how long until the refused request may be made again; set for
 	// ReasonPairingPaused only.
 	RetryAfter time.Duration
+	// FromTarget says the refusal is what another node answered to a call this node
+	// made for the caller (a directory read of a remote node), with the reason that
+	// node named, and not a state of this node. The same reason word means a
+	// different thing in the two cases (a node that is starting, a node whose clock
+	// is set back), and only the front end that words the answer for an adapter reads
+	// this field; the Agent interface answers both alike.
+	FromTarget bool
 	// Err is the cause, when there is one beyond the reason (a storage error).
 	Err error
 }

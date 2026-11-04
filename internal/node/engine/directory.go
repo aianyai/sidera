@@ -161,11 +161,15 @@ func (c *cmdDirectoryResult) run(e *Engine, _ time.Time) {
 }
 
 // directoryFailure is what a caller of Directory is told of an error of the
-// transport call: a refusal keeps its reason, whether the target's engine
-// returned it in this process or a remote target named it, and every other
-// failure of the call (no answer, an answer that says it failed, a reason this
-// engine does not know) is that the directory is unavailable. The caller is
-// never handed the transport's own errors.
+// transport call: a refusal keeps its reason, and every other failure of the call
+// (no answer, an answer that says it failed, a reason this engine does not know)
+// is that the directory is unavailable. The caller is never handed the transport's
+// own errors.
+//
+// A refusal this process's own engine returned, as the target of a read of this
+// node, is a state of this node and passes as it is. A reason a remote target
+// named is that node's answer, and is marked FromTarget so that a caller can tell
+// it from the same reason word of this node.
 func directoryFailure(err error) error {
 	if err == nil {
 		return nil
@@ -174,7 +178,9 @@ func directoryFailure(err error) error {
 		return err
 	}
 	if reason, ok := callReasonOf(err); ok {
-		return refuse(reason)
+		ref := refuse(reason)
+		ref.FromTarget = true
+		return ref
 	}
 	return refuse(ReasonDirectoryUnavailable)
 }

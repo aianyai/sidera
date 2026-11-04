@@ -865,17 +865,22 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
   says the request was misused. `outcome` is `ok` with the page, `unavailable` when the
   target gave no answer within the time allowed or could not be reached (a later read may
   succeed; the reason the node sends is `directory_unavailable`, which does not tell a
-  timeout from an unreachable node) or `refused` when the target answered that it would not,
-  and `reason` is the name the target gave its refusal, passed on unchanged (`shutting_down`,
-  say). The `reason` of both is an open word: a reader that does not know one takes the
-  outcome alone. A page that is not `ok` has no entries and no cursor. The daemon refusing
-  to read at all because of its own state (starting, or its clock set back) is not a result
-  but the existing `1012` `node_busy`, as for every other `endpoint.*` request. A cursor the
-  node does not accept is `-32602` with `data.reason` `cursor_invalid`: the adapter started
-  or continued a listing wrongly, and starts it again. A cursor that another node refused
-  is not reported so, because a refusal that comes over the network carries its reason and
-  no detail: it is a `refused` result with reason `invalid_argument`, and the adapter starts the
-  listing again as well.
+  timeout from an unreachable node) or `refused` when the target node answered that it would not,
+  and `reason` is the name that node gave its refusal, passed on unchanged (`shutting_down`,
+  `recovering`, `clock_rollback` or `invalid_argument` for a cursor it did not accept, say).
+  The `reason` of both is an open word: a reader that does not know one takes the outcome
+  alone. A page that is not `ok` has no entries and no cursor.
+- **The target's refusals and this daemon's own states are told apart.** Only what the node
+  asked answered is a `refused` result, so the same word means what the node asked did. This
+  daemon refusing to read at all because of its own state is an error, as for every other
+  `endpoint.*` request: starting, its clock set back or back pressure is the existing `1012`
+  `node_busy`, and stopping is `-32002`. A cursor this daemon does not accept (the node
+  asked is this one) is `-32602` with `data.reason`
+  `cursor_invalid`: the adapter started or continued a listing wrongly, and starts it again.
+  A cursor that a remote node did not accept is a `refused` result with reason
+  `invalid_argument`, because a refusal that comes over the network carries its reason and no
+  detail; the adapter starts the listing again as well. When the node asked is this one there
+  is no other node to answer, so every refusal is this daemon's own.
 - `endpoint.peers` lists this node first (`self` true, `trust` `self`), then every node it
   trusts directly (`trust` `direct`), in the order of their names. `connected` is whether a
   connection to the node is up now; it is read without waiting and says nothing about

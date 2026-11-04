@@ -143,14 +143,14 @@ func (a adapterEngine) EndpointDirectory(ctx context.Context, instance string, p
 	return res, nil
 }
 
-// directoryOutcome is what a directory read that got no page is answered with.
-// The engine reports a refusal of the node asked and a refusal of this node in the
-// same words, so the two are told apart by the reason: a directory that could not
-// be reached in time is unavailable, and the reasons a node asked can name besides
-// the states of this node (starting, its clock set back, back pressure, which
-// keep the table's mapping for every request) are a refusal. A cursor the engine
-// refused with its own detail is misuse by the adapter; one the node asked refused
-// arrives without the detail, which no remote refusal carries, and is a refusal.
+// directoryOutcome is what a directory read that got no page is answered with. A
+// directory that could not be reached in time is unavailable. What the node asked
+// answered (the engine marks it FromTarget) is a refusal, with the reason it
+// named, whatever the reason is: it says what that node would not do, and a state
+// of it (starting, its clock set back) is not a state of this node. Every other
+// refusal is this node's own, and the table words it as it does for every request:
+// a cursor this node refused is misuse by the adapter, this node starting is
+// node_busy, and this node stopping is shutting down.
 func directoryOutcome(err error) (adapterproto.DirectoryResult, error) {
 	var ref *engine.Refusal
 	if !errors.As(err, &ref) {
@@ -162,7 +162,7 @@ func directoryOutcome(err error) (adapterproto.DirectoryResult, error) {
 			Outcome: adapterproto.DirectoryUnavailable, Reason: adapterproto.DirectoryReasonUnavailable,
 			Endpoints: []adapterproto.DirectoryEntry{},
 		}, nil
-	case ref.Reason == engine.ReasonInvalidArgument && ref.Detail == 0, ref.Reason == engine.ReasonShuttingDown:
+	case ref.FromTarget:
 		return adapterproto.DirectoryResult{
 			Outcome: adapterproto.DirectoryRefused, Reason: adapterproto.DirectoryReason(ref.Reason.String()),
 			Endpoints: []adapterproto.DirectoryEntry{},

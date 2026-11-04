@@ -63,12 +63,14 @@ not import it: the words of the wire never enter the engine.
   the table, and a test holds the details the engine can send to that list. A
   directory read that got no page is a result and not an error
   (`directoryOutcome`): `ReasonDirectoryUnavailable` is `unavailable` with the reason
-  `directory_unavailable`; a bare `invalid_argument` (a cursor another node refused:
-  a remote refusal carries no detail) and `shutting_down` are `refused` with the
-  reason word unchanged. The engine names a refusal of the node asked and one of this
-  node alike, so these two are told apart from this node's own states only by the
-  reason; the starting, clock-set-back and back-pressure refusals, and an unknown
-  endpoint, keep the table's mapping (`1012`, `1001`).
+  `directory_unavailable`; a refusal the engine marks `FromTarget` (what a remote node
+  answered) is `refused` with its reason word unchanged, whatever the word is, a cursor
+  it refused included (a remote refusal carries no detail). The same words are this
+  node's own states when the mark is absent, and the table maps them as for every
+  request: this node starting, its clock set back or under back pressure is `1012`, it
+  stopping is `-32002`, a cursor it refused is `-32602` with `cursor_invalid`, an unknown
+  endpoint is `1001`. The Agent interface does not read the mark (`fromRefusal`), so its
+  answers do not tell the two apart.
 - **Refusals with no effect are `node_busy` on the adapter side.** The six that mean
   "not now, nothing was recorded" (node queue full, storage full, storage unavailable,
   clock rollback, loop busy, recovering) are `1012` with data `{"reason":"<name>"}`, the

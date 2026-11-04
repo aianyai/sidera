@@ -186,8 +186,9 @@ A refusal with a detail the protocol lists as a reason of invalid params is `-32
 with `data.reason` set to it (`cursor_invalid`, `empty_patch`, `too_many_senders`,
 `duplicate_sender`). A directory read that got no page is not an error:
 `endpoint.directory` answers `unavailable` (reason `directory_unavailable`) for a target
-that could not be reached in time, and `refused` with the reason word unchanged for a bare
-`invalid_argument` and for `shutting_down`; the other refusals keep the rows above.
+that could not be reached in time, and `refused` with the reason word unchanged for every
+refusal the engine marks as the answer of a remote target; the refusals of this node keep
+the rows above.
 
 The production `apiwire.AdapterEngine` also implements `EndpointCalls`, so
 `endpoint.send`, `endpoint.recv`, `endpoint.ack` and `endpoint.message_status`

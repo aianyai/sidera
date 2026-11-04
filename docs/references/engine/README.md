@@ -179,6 +179,13 @@ its reason, whether its engine returned it in this process or a remote target na
 (`callReasonOf` maps the name back); every other failure of the call, a target that says
 only that it failed and a name this engine does not know included, is
 `ReasonDirectoryUnavailable`, so the caller is never handed the transport's own errors.
+The same reason word means two things in the answer: a state of this node (it is
+starting, its clock is set back, it is stopping) and what a remote target answered. The
+`Refusal` says which with `FromTarget`, set for a reason a remote target named and not
+for a refusal of this process's own engine, which is the target when the node asked is
+this one. Only the adapter front end (`apiwire`) reads it, to answer a refusal of the
+target as a result of the read and a state of this node as an error; the Agent
+interface answers both by the reason alone.
 
 The single worker is a known limit: a slow target holds every outbound call behind
 it. A directory timeout cancels its own work, never another call ahead of it.

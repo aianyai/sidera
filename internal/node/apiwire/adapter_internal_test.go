@@ -328,8 +328,9 @@ func TestAnInvalidArgumentWithAListedDetailSaysItInTheData(t *testing.T) {
 
 // A directory read that got no page is a result for the adapter, not an error:
 // unavailable for a directory that could not be reached, refused with the word
-// of the refusal for what a node asked says no to, and the table's error for the
-// states of this node.
+// of the refusal for whatever the node asked says no to (its own starting, its
+// clock and its cursor included), and the table's error for the refusals of this
+// node, which are the same words with another meaning.
 func TestADirectoryReadThatGotNoPageIsAResult(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -339,9 +340,14 @@ func TestADirectoryReadThatGotNoPageIsAResult(t *testing.T) {
 		code    int
 	}{
 		{"a directory that could not be reached", &engine.Refusal{Reason: engine.ReasonDirectoryUnavailable}, adapterproto.DirectoryUnavailable, "directory_unavailable", 0},
-		{"a refusal of another node without a detail", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "cursor"}, adapterproto.DirectoryRefused, "invalid_argument", 0},
-		{"a node that is stopping", &engine.Refusal{Reason: engine.ReasonShuttingDown}, adapterproto.DirectoryRefused, "shutting_down", 0},
+		{"a cursor another node refused", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "cursor", FromTarget: true}, adapterproto.DirectoryRefused, "invalid_argument", 0},
+		{"another node that is stopping", &engine.Refusal{Reason: engine.ReasonShuttingDown, FromTarget: true}, adapterproto.DirectoryRefused, "shutting_down", 0},
+		{"another node starting", &engine.Refusal{Reason: engine.ReasonRecovering, FromTarget: true}, adapterproto.DirectoryRefused, "recovering", 0},
+		{"another node's clock set back", &engine.Refusal{Reason: engine.ReasonClockRollback, FromTarget: true}, adapterproto.DirectoryRefused, "clock_rollback", 0},
+		{"another node under back pressure", &engine.Refusal{Reason: engine.ReasonNodeQueueFull, FromTarget: true}, adapterproto.DirectoryRefused, "node_queue_full", 0},
+		{"a directory another node named unavailable", &engine.Refusal{Reason: engine.ReasonDirectoryUnavailable, FromTarget: true}, adapterproto.DirectoryUnavailable, "directory_unavailable", 0},
 		{"a cursor this node refused", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "cursor", Detail: engine.DetailCursorInvalid}, "", "", -32602},
+		{"this node stopping", &engine.Refusal{Reason: engine.ReasonShuttingDown}, "", "", -32002},
 		{"this node starting", &engine.Refusal{Reason: engine.ReasonRecovering}, "", "", 1012},
 		{"this node's clock set back", &engine.Refusal{Reason: engine.ReasonClockRollback}, "", "", 1012},
 		{"an endpoint that is not the connection's", &engine.Refusal{Reason: engine.ReasonEndpointUnknown}, "", "", 1001},

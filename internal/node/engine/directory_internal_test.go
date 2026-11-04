@@ -33,22 +33,27 @@ func TestAbandonedDirectoryTaskDiscardsALateAnswer(t *testing.T) {
 // the directory is unavailable.
 func TestDirectoryFailureIsAReason(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		err  error
-		want Reason
+		name       string
+		err        error
+		want       Reason
+		fromTarget bool
 	}{
-		{"a refusal of this process", refuse(ReasonRecovering), ReasonRecovering},
-		{"a refusal a remote target named", transport.Refused{Reason: "clock_rollback"}, ReasonClockRollback},
-		{"a refusal a remote target named, wrapped", fmt.Errorf("asking: %w", transport.Refused{Reason: "recovering"}), ReasonRecovering},
-		{"a refusal whose name is not known", transport.Refused{Reason: "from_a_newer_node"}, ReasonDirectoryUnavailable},
-		{"a target that could not be reached", fmt.Errorf("%w: down", transport.ErrUnreachable), ReasonDirectoryUnavailable},
-		{"a target that did not answer", transport.ErrTimeout, ReasonDirectoryUnavailable},
-		{"a target that says it failed", errors.New("network: the target could not handle the call"), ReasonDirectoryUnavailable},
+		{"a refusal of this process", refuse(ReasonRecovering), ReasonRecovering, false},
+		{"a refusal a remote target named", transport.Refused{Reason: "clock_rollback"}, ReasonClockRollback, true},
+		{"a refusal a remote target named, wrapped", fmt.Errorf("asking: %w", transport.Refused{Reason: "recovering"}), ReasonRecovering, true},
+		{"a refusal whose name is not known", transport.Refused{Reason: "from_a_newer_node"}, ReasonDirectoryUnavailable, false},
+		{"a target that could not be reached", fmt.Errorf("%w: down", transport.ErrUnreachable), ReasonDirectoryUnavailable, false},
+		{"a target that did not answer", transport.ErrTimeout, ReasonDirectoryUnavailable, false},
+		{"a target that says it failed", errors.New("network: the target could not handle the call"), ReasonDirectoryUnavailable, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := ReasonOf(directoryFailure(c.err))
+			err := directoryFailure(c.err)
+			got, ok := ReasonOf(err)
 			if !ok || got != c.want {
 				t.Fatalf("reason = %v (found %v), want %v", got, ok, c.want)
+			}
+			if ref := err.(*Refusal); ref.FromTarget != c.fromTarget {
+				t.Fatalf("FromTarget = %v, want %v", ref.FromTarget, c.fromTarget)
 			}
 		})
 	}
