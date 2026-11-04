@@ -152,7 +152,8 @@ Creating a session takes about 10 to 30 seconds until the first turn ends for a
 short task. Sessions do not close by themselves.
 `sidera control <session-address> session.close` closes a session you created;
 the owner can close any with `sidera endpoint close <session-address>` on the node
-that hosts it.
+that hosts it. A session that a person attached (their own Claude Code or Codex
+session, see the controller below) is closed only with `--allow-attached`.
 
 ## The controller: a session you started yourself
 

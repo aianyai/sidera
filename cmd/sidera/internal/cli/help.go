@@ -24,7 +24,7 @@ var helpEntries = map[string]helpEntry{
 	"adapter disable":            {"adapter disable <instance> [--expected-version <n>]", "Disable an instance and close its endpoints.", "sidera adapter disable work"},
 	"adapter remove":             {"adapter remove <instance> [--expected-version <n>]", "Remove a disabled instance and its settings. It is refused while the instance is enabled or has open session endpoints.", "sidera adapter remove work"},
 	"endpoint list":              {"endpoint list [--instance <name>]", "List this node's endpoints, including closed endpoints.", "sidera endpoint list --instance work --json"},
-	"endpoint close":             {"endpoint close <address>", "Close an endpoint.", "sidera endpoint close <address>"},
+	"endpoint close":             {"endpoint close <address> [--allow-attached]", "Close an endpoint. A session a person opened and is using (origin attached) is closed only with --allow-attached.", "sidera endpoint close <address>"},
 	"endpoint set":               {"endpoint set <address> <field>=<json> ... [--expected-version <n>]", "Change endpoint settings using the instances collection version.", "sidera endpoint set <address> max_queue_s=1800 backlog_limit=200"},
 	"node show":                  {"node show", "Show node settings and their version.", "sidera node show --json"},
 	"node set":                   {"node set <field>=<json> ... [--expected-version <n>]", "Change node settings; non-JSON assignment values are strings.", "sidera node set node_queue_limit=20000 reply_permission=false"},

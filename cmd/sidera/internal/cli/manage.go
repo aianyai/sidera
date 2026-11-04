@@ -366,6 +366,9 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		addPresent(f, plan.params, "instance", "instance", o.instance)
 	case "endpoints.close":
 		plan.params["endpoint"] = p[0]
+		if o.allowAttached {
+			plan.params["allow_attached"] = true
+		}
 	case "endpoints.set":
 		patch, err := assignments(p[1:])
 		if err != nil {
@@ -442,7 +445,7 @@ func assignments(args []string) (map[string]any, error) {
 type managementFlags struct {
 	file, instance, node, output string
 	expectVersion                string
-	all, yes                     bool
+	all, yes, allowAttached      bool
 	version                      uint64
 	wait                         time.Duration
 }
@@ -460,6 +463,8 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&o.file, "config", "", "instance JSON file, or - for stdin")
 	case "endpoint list":
 		f.StringVar(&o.instance, "instance", "", "filter by instance")
+	case "endpoint close":
+		f.BoolVar(&o.allowAttached, "allow-attached", false, "close a session a person opened and is using")
 	case "identity export-revocation":
 		f.StringVar(&o.output, "out", "", "write the verified raw record to a new private file")
 	case "trust request":

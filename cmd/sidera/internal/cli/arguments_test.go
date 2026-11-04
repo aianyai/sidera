@@ -95,6 +95,35 @@ func TestNetworkCommandsHaveThreeWordsAndPlanTheirMethods(t *testing.T) {
 	}
 }
 
+// Only the flag turns the opt-in on: without it the request carries no allow_attached,
+// so the daemon refuses an attached session.
+func TestEndpointCloseSendsTheOptInOnlyWithItsFlag(t *testing.T) {
+	const address = "node1abc/ep1"
+	for _, tc := range []struct {
+		args   []string
+		params map[string]any
+	}{
+		{[]string{"endpoint", "close", address}, map[string]any{"endpoint": address}},
+		{[]string{"endpoint", "close", address, "--allow-attached"}, map[string]any{"endpoint": address, "allow_attached": true}},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			c := command{Config: Config{Getenv: func(string) string { return "" }}}
+			c.arguments = arguments(tc.args)
+			rest, err := c.globals(tc.args, c.arguments.flags)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := c.managementPlan(rest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.method != "endpoints.close" || !reflect.DeepEqual(plan.params, tc.params) {
+				t.Errorf("plan %+v, want endpoints.close with %v", plan, tc.params)
+			}
+		})
+	}
+}
+
 func orEmpty(m map[string]any) map[string]any {
 	if m == nil {
 		return map[string]any{}

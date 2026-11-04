@@ -823,7 +823,8 @@ them there without your owner's yes (see "Ask your owner before").
 12. **Close only what you created.** `control <session-address> session.close` closes
     a session you started when it is done. From outside a session, run
     `sidera endpoint close <session-address>` on the node that hosts it. Ask your
-    owner before closing any other.
+    owner before closing any other. A session a person attached needs
+    `--allow-attached`; do not use the flag on your own.
 13. **Do not wait forever.** If a node does not answer after several `recv` rounds,
     check `status <message-id>` for the delivery state and `peers` for `connected`,
     and tell your owner what you found.

@@ -8,6 +8,16 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **Closing an attached session now needs `--allow-attached`.** `sidera endpoint close`
+  used to close the endpoint of a controller session a person is using exactly as it closes
+  any other, so a cleanup that closed endpoints by address could end it by mistake. The
+  daemon now refuses (`refused/attached_close_not_allowed`) unless the request sets
+  `allow_attached`, which the command does with `--allow-attached`. Endpoints a node created,
+  direct endpoints and endpoints that are closed already close as before. `sidera endpoint
+  list` shows which endpoints are attached in its `ORIGIN` column.
+
 ## [0.12.2] - 2026-11-04
 
 A patch release with one fix, for Windows. State written by 0.12.1 needs no migration: no

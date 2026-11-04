@@ -52,7 +52,7 @@ arguments, purpose and one example.
 | `adapter enable <id> [--instance <name>] [--config <file>] [--expected-version <n>]` / `adapter disable <instance> [--expected-version <n>]` | Enable or disable an instance. A config file of `-` reads stdin; `enable` takes one only for an instance that does not exist yet. |
 | `adapter remove <instance> [--expected-version <n>]` | Remove a disabled instance and its settings. Refused while the instance is enabled and while session endpoints made through it are open (the message says how many). The adapter's state directory and the instance's endpoint ids stay. |
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
-| `endpoint list [--instance <name>]` / `endpoint close <addr>` | Read endpoints, including closed ones, or close an endpoint. |
+| `endpoint list [--instance <name>]` / `endpoint close <addr> [--allow-attached]` | Read endpoints, including closed ones (`origin` says `created` or `attached` for a session), or close an endpoint. An attached session, which a person is using, is closed only with `--allow-attached`; without it the command fails with `refused/attached_close_not_allowed`. |
 | `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings. |
 | `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. |
 | `network show` | Show where the node listens, the contact line, the addresses kept for other nodes and which of them are connected. |
