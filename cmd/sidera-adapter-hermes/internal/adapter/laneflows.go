@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
@@ -94,6 +95,8 @@ type laneFlows struct {
 	// queued are the cards already commented as queued; a restart may comment once
 	// more, which is harmless.
 	queued map[string]bool
+	// blockedCheckedAt is when the blocked cards were last read (reconcileBlocked).
+	blockedCheckedAt time.Time
 }
 
 // Texts the flows write into cards. They are short, and none holds remote text.

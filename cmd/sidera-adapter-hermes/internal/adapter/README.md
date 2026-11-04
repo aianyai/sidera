@@ -86,6 +86,9 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   a timer to watch. It is sent from the endpoint that received the request, with the
   idempotency key of its persisted attempt; only a refusal with the reason
   `message_unknown` turns the reply into a plain message, once.
+- **A blocked card is read every few minutes** (`reconcileBlocked`): Hermes may complete or
+  archive it without the adapter being told, and the card would hold its remote session
+  and endpoint until a restart.
 - The timings are fields (`timing`) so tests run in milliseconds; they are not settings.
 - Tests drive the real `App` over pipes against a stub daemon (`harness_test.go`) and
   use `kanban/kanbantest` as `hermes`.

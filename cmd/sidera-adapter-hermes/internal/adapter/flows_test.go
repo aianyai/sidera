@@ -375,6 +375,31 @@ func TestFailuresToCompleteAReply(t *testing.T) {
 	})
 }
 
+// A blocked card that its creator completes instead of unblocking, as the Skill
+// allows, is ended in the record within minutes, and the remote session it held is
+// then closed in its turn: nothing else would tell the adapter.
+func TestBlockedCardCompletedByHermesFreesItsSession(t *testing.T) {
+	clk := newClock()
+	d := &daemon{directAccess: true}
+	h := start(t, options{d: d, lane: true, flows: LaneFlows(nil), now: clk.now})
+	addCard(t, h, "t_1", sessionCard)
+	until(t, "the session to be recorded", func() bool { return len(h.app.env.State.View().Sessions) == 1 })
+
+	clk.advance(2 * time.Hour) // the configured wait is an hour
+	until(t, "the card to be blocked", func() bool { return boardCard(h, "t_1").Status == "blocked" })
+	kanbantest.Update(t, h.hermes, func(b *kanbantest.Board) { b.Cards["t_1"].Status = "done" })
+	clk.advance(blockedCheckInterval + time.Minute)
+	until(t, "the card to be finished in the record", func() bool { return cardState(h, "t_1").Phase == state.PhaseFinished })
+
+	clk.advance(2 * time.Hour) // the close window of an orphan card's session is an hour
+	until(t, "the session to be closed", func() bool { return len(h.app.env.State.View().Sessions) == 0 })
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if last := d.sends[len(d.sends)-1]; last.Control == nil || last.Control.Signal != adapterproto.SignalSessionClose {
+		t.Errorf("last send %+v, want session.close", last)
+	}
+}
+
 // A new session: the signal carries the preset and the task, the control reply names
 // the session, its replies complete the card, and the session is closed from the
 // endpoint that created it once it has been idle for the close window.

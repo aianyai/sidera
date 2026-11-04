@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/lane"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
@@ -37,11 +38,21 @@ func (f *laneFlows) Recover(ctx context.Context) error {
 	return nil
 }
 
+// blockedCheckInterval is how often the cards the adapter has blocked are read to
+// see whether Hermes finished one meanwhile. A blocked card waits for a person or an
+// agent, who may complete or archive it instead of unblocking it (the Skill says so);
+// nothing else would tell the adapter, which would hold the card's remote session and
+// endpoint for as long as it runs. The reading costs one command per blocked card, the
+// news is not urgent (a session is kept for hours anyway) and a few minutes is far
+// below the time it takes to matter.
+const blockedCheckInterval = 5 * time.Minute
+
 // Tick does what the clock makes due: sends and settles, waits that ran out,
-// remote sessions to close, records to forget.
+// blocked cards that Hermes finished, remote sessions to close, records to forget.
 func (f *laneFlows) Tick(ctx context.Context) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.reconcileBlocked(ctx)
 	d := f.env.State.View()
 	for _, c := range d.CardList() {
 		switch c.Phase {
@@ -59,6 +70,31 @@ func (f *laneFlows) Tick(ctx context.Context) {
 		return nil
 	}); err != nil {
 		f.env.Log.Error("forgetting finished cards", "error", err)
+	}
+}
+
+// reconcileBlocked reads the blocked cards every blockedCheckInterval and ends in the
+// record those Hermes has completed or archived, which frees their remote sessions
+// and endpoints. A failure of Hermes that may pass is left to the next round; a card
+// that is ready again is the poll's.
+func (f *laneFlows) reconcileBlocked(ctx context.Context) {
+	now := f.env.Now()
+	if now.Sub(f.blockedCheckedAt) < blockedCheckInterval {
+		return
+	}
+	f.blockedCheckedAt = now
+	d := f.env.State.View()
+	for _, c := range d.CardList() {
+		if c.Phase != state.PhaseBlocked || ctx.Err() != nil {
+			continue
+		}
+		detail, err := f.env.Board.Show(ctx, c.ID)
+		switch {
+		case err == nil && terminal(detail.Card.Status), err != nil && isPermanent(err):
+			f.finishLocal(ctx, c.ID)
+		case err != nil:
+			f.env.Log.Warn("reading a blocked card", "card", c.ID, "error", err)
+		}
 	}
 }
 

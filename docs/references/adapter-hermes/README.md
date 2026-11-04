@@ -442,7 +442,13 @@ Cards listed ready again go through the poll. `Tick` runs every ten seconds whil
 is usable, under the same pause rule as the other loops: it moves every card on
 (`advance`: send what is due, resend an interrupted attempt or declare its outcome
 unknown, read what became of a message, block a card whose wait ran out), closes
-remote sessions and forgets finished records after `session_retention`.
+remote sessions and forgets finished records after `session_retention`. Every five
+minutes it also reads the cards it has blocked (`reconcileBlocked`) and ends in the
+record those Hermes has completed or archived meanwhile: a person or an agent may
+complete a blocked card instead of unblocking it, and nothing else tells the adapter,
+which would hold the card's remote session and its endpoint for as long as it runs. The
+interval is a command per blocked card and the news is not urgent, since a session is
+kept for an hour at least.
 
 *No reply.* A card whose wait has reached `no_reply_timeout` is blocked as
 `needs_input`; unblocked it waits again with the timer reset and nothing is resent; the
