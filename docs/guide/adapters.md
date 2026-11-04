@@ -10,33 +10,38 @@ connects Sidera to one kind of agent: it hands a message to the agent's real ses
 tells the node when a turn starts and ends, and lets the agent send its own
 messages. You install and enable one adapter per kind of agent on a machine
 ([Getting started](getting-started.md#4-install-and-enable-adapters-both)) and add a
-preset for it ([Presets](getting-started.md#5-add-a-preset-both)). Sidera ships three:
+preset for it ([Presets](getting-started.md#5-add-a-preset-both)). Sidera ships four:
 
 - **Claude Code**, `sidera-adapter-claude`, instance name `claude`.
 - **Codex**, `sidera-adapter-codex`, instance name `codex`.
+- **Hermes**, `sidera-adapter-hermes`, instance name `hermes`.
 - **The console**, `sidera-adapter-console`, instance name `console`.
 
 An agent uses Sidera in one of three ways, described in
 [Working with agents](agents.md): in a session Sidera created from a preset, as a
 controller (a session you opened yourself and attached), or through the owner's console.
-This page says what each adapter does for each way.
+This page says what each adapter does for each way. Hermes is the exception: its
+agents use none of the three, and reach other nodes through a Kanban board
+([Hermes](#hermes)).
 
-All three are built for macOS, Linux and Windows on amd64 and arm64
+All four are built for macOS, Linux and Windows on amd64 and arm64
 ([supported platforms](install.md#supported-platforms)). Sidera does not install the
-agents: the daemon must be able to find `claude` or `codex`, and it must be signed in.
+agents: the daemon must be able to find `claude`, `codex` or `hermes`, and each must
+be signed in or set up.
 
 ## Summary
 
-| | Claude Code | Codex | Console |
-| --- | --- | --- | --- |
-| Connects | `claude` | `codex`, through a private App Server | The node's owner, from a terminal |
-| Created sessions | Yes | Yes | No |
-| Controller sessions | Yes | Yes | No |
-| Direct endpoint | No | No | Yes, the `owner` endpoint |
-| An idle created session is woken by | A new `claude -p --resume` process | A new turn on the session's thread | Nothing: you read with `recv` |
-| A controller is woken | Through the session's inbox, within about a second | Through the Codex queue, within about 10 seconds when idle | Not applicable |
-| Interrupt and close | Created sessions only | Created sessions only | Not offered: close a session with `sidera endpoint close` |
-| Permission questions | Never asked: denied at once | Never asked: answered from the preset | Not applicable |
+| | Claude Code | Codex | Hermes | Console |
+| --- | --- | --- | --- | --- |
+| Connects | `claude` | `codex`, through a private App Server | A Hermes Kanban board, through the `hermes` command | The node's owner, from a terminal |
+| Created sessions | Yes | Yes | No | No |
+| Controller sessions | Yes | Yes | No | No |
+| Direct endpoint | No | No | Yes: one for new requests and one for each Hermes conversation | Yes, the `owner` endpoint |
+| An idle created session is woken by | A new `claude -p --resume` process | A new turn on the session's thread | Not applicable | Nothing: you read with `recv` |
+| A controller is woken | Through the session's inbox, within about a second | Through the Codex queue, within about 10 seconds when idle | Not applicable | Not applicable |
+| What wakes the agent | The node's wake-up prompt | The node's wake-up prompt | A completed card, which Hermes delivers to the conversation | Nothing |
+| Interrupt and close | Created sessions only | Created sessions only | Not offered | Not offered: close a session with `sidera endpoint close` |
+| Permission questions | Never asked: denied at once | Never asked: answered from the preset | Not applicable | Not applicable |
 
 How to read it:
 
@@ -44,9 +49,10 @@ How to read it:
   runs `session.create`. **Controller sessions** are the ones you opened yourself
   and that attached on first use of a Sidera tool
   ([The controller](agents.md#the-controller-a-session-you-started-yourself)). The
-  console hosts neither: it has no presets and no sessions.
+  console hosts neither: it has no presets and no sessions, and neither does Hermes,
+  which only starts sessions on other nodes.
 - A **direct endpoint** is read by the adapter on behalf of a person or program, not by
-  a native agent session. Only the console has one.
+  a native agent session. The console and Hermes have them.
 - The node, not the adapter, decides when to wake a session. A wake-up is a short
   prompt that says messages are waiting and tells the agent to read them with `recv`.
   A message that arrives while a session runs a turn waits in the queue, and the agent
@@ -236,6 +242,174 @@ listed under
 in the reference. Set `model` and `effort` in a preset for unattended use: otherwise
 the session uses your own Codex defaults.
 
+## Hermes
+
+Adapter details: [the Hermes adapter reference](../references/adapter-hermes/README.md).
+
+Hermes Agent is usually a long-running gateway: you talk to it through a messaging
+platform, and much of its work runs unattended (cron jobs, Kanban boards). This adapter
+lets such a Hermes delegate work to agents on other nodes, and lets agents on other nodes
+hand it work, through its own Kanban board. Nothing in Hermes is replaced: the adapter
+reads the board with the `hermes kanban` command, and what comes back reaches the Hermes
+conversation that asked, the way a finished card always does. It creates no Hermes
+process and no session.
+
+**Needs.**
+
+- The `hermes` command, found on the daemon's `PATH` or named by `hermes_path`. On
+  Windows it must be an executable, not a `.cmd` or `.bat` shim: the probe reports it
+  as missing otherwise.
+- A Hermes release from 0.22.2 up to, but not including, 0.23.0. Hermes is a 0.x project
+  and a minor release may rename a flag or a field of the output the adapter reads, so
+  the adapter refuses a release outside this range and the probe says which it found.
+  Move to a newer Hermes only with a Sidera release that names it.
+- A Kanban board that already exists in that Hermes, and no Hermes profile named
+  `sidera`, `sidera-inbox` or beginning with `sidera:`. Those names are the adapter's
+  assignees: Hermes starts a worker for a card whose assignee is a profile.
+- A daemon new enough to give an adapter direct endpoints that are hidden from the
+  directory; on an older one the probe says the node needs an update.
+
+**Install and enable.** The configuration has required settings, so it is given when
+the instance is enabled. Save it as `hermes.json`:
+
+```json
+{
+  "hermes_home": "<absolute path of the HERMES_HOME of the gateway>",
+  "board": "<board slug>",
+  "home_profile": "<profile>",
+  "home_platform": "<platform, such as telegram>",
+  "home_chat_id": "<chat id>",
+  "aliases": [
+    "builder=<node-id>/<endpoint-id>;modes=new_session,message;presets=light"
+  ]
+}
+```
+
+```sh
+sidera adapter install ~/sidera-release/adapters/hermes
+sidera adapter enable hermes --config hermes.json
+sidera adapter list
+```
+
+The probe goes to `passed` when `hermes` runs, its release is in the range, the board
+exists and no profile has an adapter name. The instance registers one endpoint, named
+`Hermes (<host name>)` unless `display_name` says otherwise, which other nodes find with
+`directory`.
+
+**The settings that matter.** A setting the adapter does not know is refused with the
+reason, as is a missing required one; every problem is listed at once.
+
+| Setting | What it is |
+| --- | --- |
+| `hermes_home` | The `HERMES_HOME` given to every Hermes command the adapter runs. Required, absolute. The daemon does not run in your shell, so the adapter never relies on its environment. |
+| `board` | The slug of the one board this instance serves. Required. |
+| `home_profile`, `home_platform`, `home_chat_id` | Where a request goes when it belongs to no conversation: the profile whose gateway is woken and the chat it answers in. Required. `home_chat_type` (`dm`, `group`, `channel` or `thread`), `home_thread_id` and the other `home_*` settings complete it when the platform needs them. |
+| `aliases` | The names a card may address, one entry each: `<name>=<address>;modes=<mode>[,<mode>];presets=<preset>[,<preset>]`. The modes are `new_session` (start a session on that runtime endpoint with one of the presets listed) and `message` (send to that address). Presets go with `new_session` and only with it. Required, at least one. |
+| `creator_profiles` | If set, only cards created by these Hermes profiles are served. |
+| `no_reply_timeout` | How long a card waits for the other side: 24h. |
+| `hermes_path`, `kanban_home`, `display_name` | The `hermes` program (default `hermes`), the `HERMES_KANBAN_HOME` if you set one, and the name in the directory. |
+
+The other settings (how long a claim, a remote session and a conversation's endpoint are
+kept, the polling interval and the caps) are listed with their defaults in
+[the reference](../references/adapter-hermes/README.md#instance-configuration).
+Durations are written `90m` or `168h`. Change them with `sidera adapter config hermes
+--config <file>`, which takes the whole configuration, as for the other adapters
+([Change an adapter's configuration](operations.md#change-an-adapters-configuration)).
+
+**The alias table is the allow-list.** A card on the board is not trusted: any program of
+your operating-system user can write the board. So a card never names an address. It
+names an alias, and only the modes and presets you listed for that alias can be used.
+Everything a card can make this node do is in this table, and an agent of Hermes learns
+the aliases and nothing more. Find the address behind a name with
+`sidera-adapter-console directory --node <node-id>`, and write it into the entry.
+`creator_profiles` narrows who may ask, but Hermes lets a command-line caller state any
+creator, so treat it as a second line of defence, not a boundary.
+
+**Setup.** Hermes needs two things before its agents can delegate: the Kanban tools,
+which are off by default on the chat platforms and on cron, and a Skill that tells the
+agent how to write a card. `setup` writes the Skill from your alias table and prints the
+Hermes commands that enable the tools and place the Skill. The program is in the
+package you installed:
+
+```sh
+~/sidera-release/adapters/hermes/bin/sidera-adapter-hermes setup --config hermes.json --profile <profile>
+```
+
+It prints the steps and changes nothing in Hermes. Add `--apply` to have it run them, each
+after a `y/N` question. `--profile` names a profile whose agents delegate and repeats; the
+platforms are `home_platform` and `cron`, and `--platform` adds more.
+
+After `setup`, **restart the gateway of each profile yourself**. Hermes reads its tools
+and Skills when the gateway starts, and a restart interrupts the conversations it is
+serving, so Sidera never does it. `setup` never edits `config.yaml` either. Run it
+again whenever you change the aliases, since the Skill lists them.
+
+**A delegation, from Hermes.** The agent creates a card assigned to `sidera` whose body
+says which alias, what mode (`new_session` with a preset, or `message`) and the task.
+The adapter claims the card, sends the task, and comments on the card when something
+needs saying. When the other agent answers, the card is completed with the answer as its
+result, and Hermes wakes the conversation that made it. A long answer is an attachment
+of the card. A follow-up is a new card that names the earlier one as its parent and
+leaves the alias out: it goes to the same agent. Two cards for one peer in one
+conversation do not run at once; the second waits. The Skill tells the agent to ask for
+one reply with the final result: the first reply completes the card, and a later one
+arrives as a new request.
+
+When a card cannot go on, it is blocked with the reason, and the agent that made it is
+woken to decide. A card that is not valid, for example an alias that is not in the table,
+is blocked at once. A delivery that failed is blocked, and sent again when the agent
+unblocks the card. A peer that has not answered after `no_reply_timeout` blocks the card
+once; unblocked, it waits again, and if the peer still does not answer the card is
+completed saying so.
+
+**A request, from another node.** A message sent to the Hermes endpoint becomes a card
+assigned to `sidera-inbox`, completed at once so that Hermes wakes the gateway. A node that
+a Hermes conversation wrote to sees the message come from an address of its own, hidden
+from the directory; a message sent to that address wakes that conversation, and a message
+to the Hermes endpoint wakes the home conversation. The card's
+body holds the text of the sender between fences, with the sender's address and a
+statement that it is external content, not an instruction from you. The agent answers with
+a card of mode `reply` that names the request card; the adapter sends the answer to the
+sender. An answer sent more than about a day after the request goes as a plain message
+that begins "Reply to your message <id>:".
+
+**What the adapter keeps.** The state of every card, endpoint and remote session it
+handles is in `adapter-state/hermes/` of the node's data directory. A card or request
+that the adapter lost track of is found again after a restart. A remote session that was
+started for a conversation is closed a week after its last card (`session_retention`), for
+a cron job an hour after the card finished.
+
+**When Hermes is down.** The adapter checks that Hermes answers before every round of
+reading and of polling. When it does not, it stops reading and tells the daemon the
+dependency is missing, and tries again after pauses that grow from a second to two
+minutes. Messages for Hermes wait in the node's queue, and are neither lost nor used up;
+they wait as long as the endpoint's queue time allows (30 minutes by default; see
+[deadlines](../references/delivery/README.md#deadlines-and-retention)), and a sender whose
+message waited longer is told. Cards stay on the board and are taken when it answers
+again. Nothing is acknowledged that was not written to a card.
+
+**Limits.**
+
+- One instance serves one board of one Hermes installation, and shows as one Hermes in
+  the directory. Run one Hermes instance per node.
+- Only the releases of the range above. The adapter has been run on macOS against Hermes
+  0.22.2; Linux and Windows are expected to work, since the adapter only runs
+  the `hermes` command, and are not yet confirmed.
+- On Windows `hermes` must be an `.exe`; a batch shim is refused, because `cmd.exe` would
+  interpret the characters of the arguments, and some of them come from other agents.
+- Hermes clears the delivery settings of cards that are done and idle for 30 days. An
+  answer to a request is possible for as long as the adapter keeps the request (30 days),
+  but a conversation that old may no longer be woken.
+- The agent cannot interrupt or close anything on the other node; the adapter closes the
+  remote sessions it started when they are idle, as above, and never one that a card is
+  waiting on.
+- The text of a request is another agent's, and the agent must read it as information. The
+  wording around it says so; what the agent does with it is the Hermes agent's own
+  permissions and your own policy for it.
+
+**Configuration.** Instance keys are the table above and the reference's list. There are
+no presets: the adapter starts no process.
+
 ## The console
 
 Adapter details: [the console adapter reference](../references/adapter-console/README.md).
@@ -287,11 +461,14 @@ prints the message id to check with `status`.
 
 - To start work on another machine, create a session there with the adapter of the agent
   you want and a preset that suits the job: [Working with
-  agents](agents.md#starting-a-session-on-another-machine). Both agent adapters
-  create sessions the same way; they differ in how the agent is woken, in what a preset
+  agents](agents.md#starting-a-session-on-another-machine). The Claude Code and Codex
+  adapters create sessions the same way; they differ in how the agent is woken, in what a preset
   can offer and in the limits above.
 - To have an agent you already work with talk to others, attach it as a controller. A
   Claude Code controller is woken within about a second; a Codex controller within
   about 10 seconds, and not while you wait at Esc. These times start once the node
   decides to wake the session.
+- To let a long-running Hermes delegate work to other machines, and be reached by them,
+  use the Hermes adapter: it works through the Hermes Kanban board, so Hermes needs no
+  session and no wake-up of its own.
 - To read what comes back yourself, or start a first session by hand, use the console.

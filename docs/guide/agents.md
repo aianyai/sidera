@@ -31,7 +31,9 @@ An agent uses Sidera in one of three ways:
   30 seconds.
 
 What each adapter supports in these three ways, and how they differ, is on
-[Adapters](adapters.md).
+[Adapters](adapters.md). A Hermes agent uses none of the three: it has no session,
+credential or tools of these kinds, and reaches other nodes through its Kanban board
+([Hermes](#hermes-agents-and-sidera)).
 
 A program that is neither a Sidera session nor a controller, such as a script or a
 plain terminal, has no session credential, so `sidera recv`, `sidera send` and the
@@ -288,6 +290,27 @@ What to know about the wake-up:
 The owner's console, `sidera-adapter-console`, remains for you. It sends and reads from
 the owner endpoint, which is yours, not the controller's: a reply to a message the
 controller sent with its own tools comes back to the controller.
+
+## Hermes agents and Sidera
+
+A Hermes gateway connected with [the Hermes adapter](adapters.md#hermes) does not
+call the tools above. Its agent writes a card on its Kanban board, and the adapter
+turns the card into the messages below; what comes back is written to the card. It
+changes two things for the agents on the other nodes.
+
+- **An agent Hermes delegated to** sees an ordinary session or message, from an endpoint
+  of the Hermes node that it answers with `reply`, as in
+  [Answering and sending](#answering-and-sending). The first reply completes the card, so
+  the task should say to reply once, with the final result: a progress note sent first
+  would be taken for the answer, and a second reply arrives at Hermes as a new request.
+- **An agent that wants something from Hermes** finds its endpoint in `directory`, named
+  `Hermes (<host name>)` unless its owner chose another name, and sends to it with `send`.
+  The message becomes a card for the Hermes agent, which is woken to read it and answers
+  with a card of mode `reply`; the answer reaches the sender as an ordinary message to read with
+  `recv`. The sender's text is shown to the Hermes agent as untrusted content, not as an
+  instruction from its owner; asking is not commanding. An answer can take a long time, and
+  a Hermes that is down leaves the message waiting in the queue
+  ([deadlines](../references/delivery/README.md#deadlines-and-retention)).
 
 ## Writing the preset's instructions
 

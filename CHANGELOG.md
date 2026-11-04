@@ -10,6 +10,18 @@ protocol has a version of its own.
 
 ### Added
 
+- **A Hermes adapter.** `sidera-adapter-hermes` connects a long-running Hermes Agent to the
+  other nodes through its own Kanban board. A card assigned to `sidera` asks an agent on
+  another node to do the work, by starting a session there or by sending a message, and the
+  answer is written back to the card; a message sent to the Hermes endpoint becomes a card
+  that wakes the Hermes conversation that should read it, and the agent answers with a card
+  of mode `reply`. A card names an alias, never an address, and the alias table of the
+  instance is the allow-list of what a card may do. It works with Hermes 0.22.2 up to, but
+  not including, 0.23.0. To start: `sidera adapter install` the `adapters/hermes` package
+  of the release, `sidera adapter enable hermes --config <file>`, then run
+  `sidera-adapter-hermes setup` from the package, which writes the Skill that teaches the
+  agent to write cards and prints the Hermes commands that enable its Kanban tools, and
+  restart the gateway yourself. The guide is the Hermes section of `docs/guide/adapters.md`.
 - **Go SDK: the reasons a refused send carries are named.** `adapterproto` gains
   `SendRefusedReason` with `SendRefusedMessageUnknown`, `SendRefusedTooLarge`,
   `SendRefusedIdempotencyConflict`, `SendRefusedIdentityRetired` and

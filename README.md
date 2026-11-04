@@ -34,6 +34,9 @@ Sidera 0.13.0 is the current release; 0.8.0 was the first public release.
 - Pairing: two nodes trust each other after both owners confirm.
 - Claude Code on macOS, Linux and Windows.
 - Codex on macOS, Linux and Windows.
+- Hermes Agent: a long-running Hermes delegates to agents on other machines, and is
+  reached by them, through its own Kanban board. Run so far on macOS; Linux and
+  Windows are not yet confirmed.
 - Interrupting a running turn, on Claude Code and Codex.
 - Creating a session on another machine and exchanging messages with it.
 - The console bridge: the owner starts sessions and reads replies from a terminal.
@@ -184,7 +187,7 @@ start the work from a terminal on any of the machines and read the answers there
 - **Made for your own machines, on every platform.** Mac, Windows and Linux on
   one desk or one office network. Useful whenever what you build has to be tested
   and run on all three.
-- **Any agent, as it already is.** Adapters for Claude Code and Codex come
+- **Any agent, as it already is.** Adapters for Claude Code, Codex and Hermes come
   with Sidera, and other agents join the same way. Sessions keep their own
   login, project instructions, skills and settings, and their credentials
   never leave the machine.
@@ -234,6 +237,8 @@ to, what to say and how to react. It is not:
   - [`sidera-adapter-codex`](cmd/sidera-adapter-codex/README.md): the Codex adapter.
   - [`sidera-adapter-console`](cmd/sidera-adapter-console/README.md): the console
     bridge, the owner's endpoint and client.
+  - [`sidera-adapter-hermes`](cmd/sidera-adapter-hermes/README.md): the Hermes adapter,
+    a Hermes Kanban board as a lane to other nodes.
   - `sidera-fake-adapter` and `sidera-fake-runtime`: stand-ins used by tests.
 - `internal/`: the foundation packages, see its [README](internal/README.md).
 - `protocol/`: the language-neutral definition of the adapter protocol and the
