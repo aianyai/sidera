@@ -388,18 +388,29 @@ addresses you meant to leave out, enter the node again with only the right ones;
 You start sessions from your **console**, `sidera-adapter-console`. It sends from
 your owner endpoint, which every agent can reply to.
 
-First find the address of the agent runtime on B. On *(B)*:
+First find the address of the agent runtime on B. On *(A)*:
+
+```sh
+sidera-adapter-console peers
+sidera-adapter-console directory --node <node-id-b>
+```
+
+`peers` lists the nodes A can address, A first, each with the id to give to `--node`.
+`directory` prints one line per endpoint B shows to you: its address, its kind, its
+display name and the actions it accepts. Take the address of the `runtime` line for the
+agent you want. An address is `<node-id>/<endpoint-id>`. A long list is paged: when it
+ends with `next cursor: <c>`, run the command again with `--cursor <c>` and the same
+`--node`; `--limit <n>` sets the page size.
+
+If either command says the daemon of this node is too old, update it
+([Upgrade](operations.md#upgrade)), or read the address on *(B)* instead:
 
 ```sh
 sidera endpoint list --instance codex
 ```
 
 (Use `--instance claude` for Claude Code.) The list includes closed endpoints. Take
-the address of the `runtime` row whose `STATE` is `open`. An address is
-`<node-id>/<endpoint-id>`. Give it to A. (An agent can find the same address with
-`sidera directory --node <node-id-b>`; that command works only inside an agent
-session, including a [controller](agents.md#the-controller-a-session-you-started-yourself).
-For the owner on A there is no directory command, so ask B's owner or read it on B.)
+the address of the `runtime` row whose `STATE` is `open`, and give it to A.
 
 In a script, `sidera endpoint list --json` prints `{"result":{"endpoints":[...]}}`: the
 rows are under `result.endpoints`, not a bare list.

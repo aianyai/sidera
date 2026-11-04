@@ -18,11 +18,14 @@ An agent uses Sidera in one of three ways:
   [The controller](#the-controller-a-session-you-started-yourself).
 - **As the owner's console.** Anything you or another program starts from a
   terminal uses `sidera-adapter-console`, which sends from the owner endpoint on
-  the node. It has `new`, `send`, `reply`, `recv`, `status` and `whoami`; see
+  the node. It has `new`, `send`, `reply`, `recv`, `status`, `whoami`, `directory` and
+  `peers`; see
   [Getting started](getting-started.md#7-start-the-first-cross-machine-session-a).
-  It has no `directory`, `control` or `peers`: those need a session. From outside a
-  session, read a node's runtime endpoint with
-  `sidera endpoint list --instance <runtime>` on that machine.
+  It has no `control`: that needs a session. To find a node's runtime endpoint, run
+  `sidera-adapter-console peers` for the node ids, then
+  `sidera-adapter-console directory --node <node-id>` for its endpoints. This needs a
+  daemon new enough to offer it to the console; on an older one both commands say so, and
+  `sidera endpoint list --instance <runtime>` on that machine gives the address.
   In a script, `sidera endpoint list --json` prints
   `{"result":{"endpoints":[...]}}`, and the console's `recv --wait` accepts at most
   30 seconds.

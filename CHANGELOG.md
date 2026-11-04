@@ -8,6 +8,27 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **Direct endpoints can read the directory and the peer list and set their own declaration.**
+  The adapter protocol gains `endpoint.directory`, `endpoint.peers` and `endpoint.declare`
+  for a direct endpoint, behind the daemon capability `direct_endpoint_access` that
+  `initialize` declares, so an adapter learns at the start whether the daemon serves them. The
+  protocol stays at version 1. The Go SDK `Conn` gains `DaemonCapabilities`, `Directory`,
+  `Peers` and `Declare`. The console gains `directory` and `peers`, so you can find the
+  address of a runtime on another node, and page through a long list, without logging in
+  to that machine; on a daemon that does not declare the capability they say that it is too
+  old.
+
+### Changed
+
+- **`declare` names why a list of senders is refused.** Over HTTP, the command line and MCP,
+  the Agent interface now answers a `declare` whose `accept_from` is too long with the code
+  `too_many_senders`, and one that lists an address twice with `duplicate_sender`, where it
+  answered `malformed_request` for both. The category stays `invalid_argument`, so the HTTP
+  status (400) and the exit code of the command line are unchanged; an entry that is not an
+  address is still `malformed_request`.
+
 ## [0.13.0] - 2026-11-04
 
 Nodes now keep the connections they need and close the ones they do not, an instance's

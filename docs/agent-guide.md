@@ -660,12 +660,13 @@ warning about the unconfirmed backup on every call.
 ## 10. Verify end to end
 
 1. Get the address of the other machine's agent runtime. The console on this
-   machine cannot list another node's endpoints (`sidera directory` can, but only
-   inside a session or a controller, see Part 2), so read it on the other machine: run
+   machine lists them with `sidera-adapter-console peers` (the node ids) and
+   `sidera-adapter-console directory --node <node-id>`: take the `runtime` line whose
+   display name is the agent you want; its address is `<node-id>/<endpoint-id>`. If the
+   command says the daemon is too old, read it on the other machine instead: run
    `sidera endpoint list --instance codex` (or `claude`) there as its owner. It lists
-   endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`;
-   its address is `<node-id>/<endpoint-id>`. Get that address from the other
-   machine's owner or agent.
+   endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`.
+   Get that address from the other machine's owner or agent.
    In a script, `sidera endpoint list --json` prints
    `{"result":{"endpoints":[...]}}`: the rows are under `result.endpoints`.
 
@@ -754,10 +755,12 @@ If you are not inside a session at all (a plain terminal), you have no credentia
 `unauthenticated/token_missing`. Inside a Claude Code or Codex session the same
 commands first attach that session as a controller, even without the `sidera` MCP
 server (see rule 15). Use the owner's console instead:
-`sidera-adapter-console new | send | reply | recv | status | whoami`. The console has
-no `directory`, `control` or `peers`: those need a session. From outside a session,
-find a node's runtime endpoint by running `sidera endpoint list --instance codex` (or
-`claude`) on that machine and taking the `runtime` row whose `STATE` is `open`.
+`sidera-adapter-console new | send | reply | recv | status | whoami | directory | peers`.
+The console has no `control`: that needs a session. To find a node's runtime endpoint,
+run `sidera-adapter-console peers`, then `sidera-adapter-console directory --node
+<node-id>`, and take the `runtime` line of the agent you want. If the command says the
+daemon of the node is too old, run `sidera endpoint list --instance codex` (or `claude`)
+on that machine and take the `runtime` row whose `STATE` is `open`.
 
 Inside a session, the owner commands (`preset`, `adapter`, `trust`, `network`,
 `endpoint close`, `daemon stop`, `daemon restart`, `identity`) may work, depending on the preset,

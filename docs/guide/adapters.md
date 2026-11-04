@@ -261,9 +261,14 @@ then answers the sender of its first message.
 [Starting a session on another machine](agents.md#starting-a-session-on-another-machine))
 and prints the session's address; `send`, `reply`, `recv` and `status` follow
 ([Getting started](getting-started.md#7-start-the-first-cross-machine-session-a)).
-It has no `directory`, `control` or `peers`, so it cannot interrupt or close a session it
-started: close one with `sidera endpoint close <session-address>` on the node that hosts
-it. The console reaches the daemon over a
+`peers` lists the nodes you can address, and `directory [--node <id>]` lists the endpoints
+a node shows to the owner endpoint, which is how you find the address of a runtime before
+`new`; a page that has more ends with `next cursor: <c>`, to give back with `--cursor`.
+Both need a daemon that offers them to a direct endpoint; on an older one they say that
+the daemon is too old and exit with code 1. The console has no `control`, so it cannot
+interrupt or close a session it started: close one with
+`sidera endpoint close <session-address>` on the node that hosts it. The console reaches
+the daemon over a
 channel on this machine that only the owner can use, so run it as the user the node
 runs as. If `new` gets no control reply within its `--timeout` it exits with code 3 and
 prints the message id to check with `status`.
