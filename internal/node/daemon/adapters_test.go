@@ -307,6 +307,43 @@ func TestAnInstanceThatCannotBeStartedIsJudgedOfflineAndTheStartGoesOn(t *testin
 	}
 }
 
+// The adapters are told why the daemon ends: a restart is a restart, and any other
+// end (a stop, a signal) is a stop, since the daemon does not say when it comes
+// back.
+func TestTheDaemonTellsTheAdaptersWhyItEnds(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		end    func(*daemon.Daemon)
+		want   string
+		ending daemon.Ending
+	}{
+		{"a stop", func(d *daemon.Daemon) { d.RequestStop("test") }, `{"intent":"stop"}`, daemon.EndStopped},
+		{"a restart", func(d *daemon.Daemon) { d.RequestRestart("test") }, `{"intent":"restart"}`, daemon.EndRestart},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			c, clk := initialized(t)
+			installChat(t, openHome(t, c), installedChat())
+			a := newAdapters(t, clk, installedChat(), nil)
+			c.AdapterHost = a.host
+			d, err := daemon.Start(context.Background(), c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := a.launches(t, 1)[0]
+			a.probed(t, d)
+			tc.end(d)
+			if err := d.Wait(); err != nil || d.Ending() != tc.ending {
+				t.Fatalf("the daemon ended with %v, %v", err, d.Ending())
+			}
+			got := first.Params(adapterproto.MethodShutdown)
+			if len(got) != 1 || string(got[0]) != tc.want {
+				t.Errorf("the adapter was sent shutdown %s, want [%s]", got, tc.want)
+			}
+		})
+	}
+}
+
 // The adapters are stopped at step 3 of the shutdown, after the interfaces and
 // before the engine ends: the adapter is asked to shut down, and the hook that
 // stops what the host does not run comes after the host.

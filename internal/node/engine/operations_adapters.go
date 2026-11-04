@@ -324,7 +324,7 @@ func (e *Engine) restartInstance(now time.Time, instance string) {
 	if err := e.gone(now, instance, adapterhost.GoneConnectionEnded); err != nil {
 		e.log.Warn("an instance could not be marked offline for its restart", "instance", instance, "error", err.Error())
 	}
-	e.d.Adapters.Stop(instance)
+	e.d.Adapters.Stop(instance, adapterproto.ShutdownRestart)
 	e.d.Adapters.EnsureRunning(instance)
 }
 
@@ -445,7 +445,7 @@ func (e *Engine) openSessions(instance string) int {
 }
 
 // instanceDisabled is what follows the commit of a disabling, driven by the state
-// that was committed: the host stops the instance, the engine marks it offline and
+// that was committed: the host stops the instance as retired, the engine marks it offline and
 // forgets what it learned of the adapter that ran (its admission, its probe and its
 // tokens, so that the next adapter that runs is admitted and probed anew), and the
 // closing of its endpoints is queued. The admission goes first among them: a
@@ -458,7 +458,9 @@ func (e *Engine) instanceDisabled(now time.Time, instance string) {
 		st.tokens, st.probed, st.probe, st.probedAt, st.declared = nil, false, adapterproto.ProbeResult{}, time.Time{}, false
 	}
 	if e.d.Adapters != nil {
-		e.d.Adapters.Stop(instance)
+		// The instance is retired: the adapter releases what it started that
+		// outlives it.
+		e.d.Adapters.Stop(instance, adapterproto.ShutdownRetire)
 	}
 	e.later(&cmdInstanceDrain{instance: instance})
 }

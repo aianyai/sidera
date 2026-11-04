@@ -553,7 +553,7 @@ func stop(p *process) error {
 	p.eng.BeginShutdown()
 	var hostErr error
 	if p.host != nil {
-		if hostErr = p.host.Shutdown(ctx); hostErr != nil {
+		if hostErr = p.host.Shutdown(ctx, adapterproto.ShutdownStop); hostErr != nil {
 			hostErr = fmt.Errorf("stopping the adapter host: %w", hostErr)
 		}
 	}

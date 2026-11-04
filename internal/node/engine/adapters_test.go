@@ -43,7 +43,7 @@ type hostDouble struct {
 	stopping map[string]bool
 	asked    atomic.Int64
 	// calls are the starts and stops the engine asked for, in order, as
-	// "run:<instance>" and "stop:<instance>".
+	// "run:<instance>" and "stop:<instance>:<intent>".
 	calls []string
 	// attachAnswer and attachErr are what Attach answers; without them the instance is
 	// not connected. attaches and detaches are what the engine sent, in order.
@@ -88,7 +88,9 @@ func (h *hostDouble) Counts(instance string) adapterhost.ConnCounts {
 }
 
 func (h *hostDouble) EnsureRunning(instance string) { h.record("run:" + instance) }
-func (h *hostDouble) Stop(instance string)          { h.record("stop:" + instance) }
+func (h *hostDouble) Stop(instance string, intent adapterproto.ShutdownIntent) {
+	h.record("stop:" + instance + ":" + string(intent))
+}
 
 func (h *hostDouble) Stopping(instance string) bool {
 	h.mu.Lock()

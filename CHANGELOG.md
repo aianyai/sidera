@@ -21,8 +21,12 @@ protocol has a version of its own.
   daemon sends it only to an adapter that declares the new capability `shutdown_intent`, so an
   adapter that decodes `shutdown` strictly is not affected. The Go SDK declares the capability
   itself, and `adapterkit.Application.Shutdown` now takes the intent and returns an error. The
-  protocol stays at version 1. This change only carries the intent; the adapters of this
-  release still treat every intent as `restart`.
+  protocol stays at version 1.
+- **Disabling an instance releases what its adapter left running.** The daemon now tells an
+  adapter why it ends: `restart` when it restarts, `stop` when it ends, `retire` when the
+  instance is disabled. When an instance is disabled while its adapter is not running (it
+  is waiting to be started again after a failure), the daemon starts the adapter once only
+  so that it can release what it started.
 
 ### Changed
 

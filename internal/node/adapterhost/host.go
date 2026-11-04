@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/aianyai/sidera/internal/node/clock"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Config configures New.
@@ -210,24 +211,35 @@ func (h *Host) EnsureRunning(instance string) {
 }
 
 // Stop ends the supervision of an instance gracefully: the adapter is sent
-// shutdown, given Params.ShutdownWait to end and killed if it does not. It is
-// idempotent, returns at once and reports nothing to the engine: the caller that
-// disables an instance marks it offline itself. From the moment it returns, calls
-// to the instance return ErrNotConnected and the adapter's requests are answered
-// as the host shutting down.
-func (h *Host) Stop(instance string) {
+// shutdown with the intent, given Params.ShutdownWait to end and killed if it does
+// not. The intent says why (adapterproto.ShutdownIntent); an adapter that did not
+// declare shutdown_intent is sent the request without it.
+//
+// When the intent is ShutdownRetire and no adapter was in service to be told (the
+// instance was backing off or still being taken on), the host runs a release
+// round: it starts the adapter once, only for initialize and shutdown, so that it
+// can release what it started. The instance is stopping until that round has
+// ended.
+//
+// Stop is idempotent, returns at once and reports nothing to the engine: the
+// caller that disables an instance marks it offline itself. The intent of the
+// first call for an instance stands. From the moment it returns, calls to the
+// instance return ErrNotConnected and the adapter's requests are answered as the
+// host shutting down.
+func (h *Host) Stop(instance string, intent adapterproto.ShutdownIntent) {
 	h.mu.Lock()
 	s := h.sups[instance]
 	h.mu.Unlock()
 	if s != nil {
-		s.requestStop()
+		s.requestStop(intent)
 	}
 }
 
 // Stopping reports whether a process of the instance is still being ended: Stop
 // was called for it and its supervision has not finished, which is until the
 // adapter has ended, or has been killed after Params.ShutdownWait and been given
-// that long again. Stop returns at once, so this is what tells a caller that must
+// that long again, and, for an instance retired with no adapter in service, until
+// the release round has ended. Stop returns at once, so this is what tells a caller that must
 // not touch what the adapter runs from (the files of its version) that the process
 // may still hold them. It is false for an instance that is running, that is
 // waiting to be started again, and that is not supervised.
@@ -254,15 +266,15 @@ func (h *Host) Counts(instance string) ConnCounts {
 }
 
 // Shutdown ends the host gracefully: every adapter in service is sent shutdown
-// (limited by Params.HandshakeTimeout), its stream is closed, and it is given
+// with the intent (limited by Params.HandshakeTimeout), its stream is closed, and it is given
 // Params.ShutdownWait to end before it is killed; the supervisors stop and
 // Shutdown returns when every goroutine of the host has ended. The host reports
 // nothing to the engine. When ctx ends first, the rest is ended as Abort ends it
 // and Shutdown returns the error of ctx without waiting. It is idempotent; after
 // it, calls return ErrNotConnected and Start fails.
-func (h *Host) Shutdown(ctx context.Context) error {
+func (h *Host) Shutdown(ctx context.Context, intent adapterproto.ShutdownIntent) error {
 	for _, s := range h.beginEnd() {
-		s.requestStop()
+		s.requestStop(intent)
 	}
 	select {
 	case <-h.drained:

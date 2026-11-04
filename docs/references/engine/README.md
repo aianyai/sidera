@@ -500,6 +500,12 @@ has not been online since the engine started is offline since an unknown time. T
 host reports nothing when it stops an instance (`Host.Stop`, `Shutdown`, `Abort`), so
 the disabling of an instance marks it offline itself, as the report of a lost
 connection does, and `AdapterGone` is taken only for an instance that is enabled.
+The engine tells the host why it stops an instance, and the host the adapter: `restart`
+when the adapter of an enabled instance is replaced (`restartInstance`: a changed
+configuration, preset or package), `retire` when the instance is disabled
+(`instanceDisabled`). An adapter that was not in service when the instance was retired
+is started once by the host to release what it left running; the instance counts as
+stopping (`Adapters.Stopping`) until then.
 `AdapterSignals` is `adapterreg.Signals` over the last availability snapshot and
 that observation. The snapshot, the busy turns and the requests the runtime saw
 refused are memory: they are rebuilt by the adapter after a restart, and a
@@ -2097,7 +2103,7 @@ reproducible).
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
 | A replacement is installed while the process of a disabled instance is still ending, which is not started, and the files it may hold are left | `operations_adapters.go` (`instanceStopping`), `config` (`PlanInstall`) | `TestReplacingThePackageWhileTheProcessOfADisabledInstanceIsStillEndingHoldsItsFiles` |
-| Disabling stops the instance, marks it offline, closes its endpoints | `operations_adapters.go` (`instanceDisabled`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints` |
+| Disabling stops the instance as retired, marks it offline, closes its endpoints; a restart is a restart | `operations_adapters.go` (`instanceDisabled`, `restartInstance`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints`, `TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns` |
 | A request of the adapter after the disabling is refused, and enabling again completes | `operations_adapters.go` (`instanceDisabled`) | `TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes` |
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |
 | Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |

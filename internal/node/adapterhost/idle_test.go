@@ -73,7 +73,7 @@ func TestAProcessThatDidNotEndAfterShutdownAndCannotBeKilledIsNotWaitedForAgain(
 	}
 	r.start()
 	r.ready("chat", 1)
-	r.host.Stop("chat")
+	r.host.Stop("chat", adapterproto.ShutdownRestart)
 	eventually(t, "the adapter to receive shutdown", func() bool { return a.count(adapterproto.MethodShutdown) == 1 })
 	<-pp.serveDone
 	eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })

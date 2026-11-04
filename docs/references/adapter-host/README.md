@@ -278,6 +278,16 @@ zero. The counts are those of the latest connection until a new one replaces the
 
 ### Shutdown and abort
 
+`Stop(instance, intent)` and `Shutdown(ctx, intent)` say why the adapter ends, and the
+`shutdown` request carries it (`restart`, `stop` or `retire`, see the adapter protocol),
+but only to an adapter that declared `shutdown_intent`: any other is sent the request with
+no members, as it always was. The first intent given for an instance stands. The engine
+passes `restart` when it replaces the adapter of an enabled instance (a changed
+configuration, preset or package) and `retire` when the instance is disabled; the daemon
+passes `restart` when it ends for a restart and `stop` for any other end. An error the
+adapter answers `shutdown` with is logged as a warning and nothing more: the adapter is
+ended either way.
+
 `Shutdown` sends `shutdown` to each connection in service (limited by
 `HandshakeTimeout`), closes the stream, waits for the process at most `ShutdownWait`
 and kills it if it stays; it stops the supervisors and waits for every goroutine of
@@ -301,6 +311,17 @@ instance stopped again before the new adapter launched is still stopping until t
 previous process has ended, and a further restart waits for the supervisor before it, so
 for the whole chain. An instance that was restarted and not stopped again is wanted
 running, so it is not stopping.
+**The release round.** An instance that is retired while no adapter is in service (it is
+backing off after a failure, still being taken on, or waiting for the process before it)
+has nobody to tell to release what an earlier adapter started and left running. For the
+intent `retire` the supervisor therefore launches the adapter once after the rest has
+ended, asks it only to `initialize` (which gives it the state directory and takes the
+instance lock, so it waits for the process before it) and sends `shutdown` with `retire`;
+`adapter.start` is never sent, the engine is told nothing and no request of the adapter
+is let through. A round that cannot start the adapter, or that the adapter answers with
+an error, is logged and not repeated. The instance is stopping until the round has
+ended. A `stop` or `restart` starts no round, nor does a `retire` whose adapter was in
+service and was sent the intent.
 `Stop` reports nothing to the engine either, so the engine goes on showing the
 instance as online until it is told otherwise: the caller that disables an instance
 marks it offline itself, with `AdapterGone`, which the engine takes only for an
@@ -468,6 +489,9 @@ check on every test):
 | `EnsureRunning` and `Stop` | `TestEnsureRunningAndStopOfAnInstance` |
 | `Stopping` is true from `Stop` until the process has ended, also for an instance stopped before its adapter launched, which waits for the previous process | `TestAnInstanceIsStoppingUntilItsProcessHasEnded`, `TestAnInstanceStoppedBeforeItLaunchedIsStoppingUntilThePreviousProcessHasEnded` |
 | `Shutdown` and `Abort` | `TestShutdownSendsShutdownWaitsThenKills`, `TestAbortKillsAtOnceAndSendsNoShutdown` |
+| The intent goes only to an adapter that declared it, and the first one stands | `TestShutdownCarriesTheIntentOnlyToAnAdapterThatDeclaredIt`, `TestTheFirstIntentOfAStopStands` |
+| An error answered to `shutdown` is logged | `TestAnErrorOfShutdownIsLoggedAndTheAdapterEnds` |
+| The release round | `TestRetiringAnInstanceWithNoAdapterInServiceRunsAReleaseRound`, `TestAReleaseRoundThatFailsIsLoggedAndNotRepeated`, `TestAReleaseRoundWaitsForTheAdapterBeforeIt` |
 | The log of the adapter | `TestTheStderrOfTheAdapterGoesToItsLog` |
 | The lock path and the instance the launcher is given | `TestLockPath`, `TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold` |
 | The exec launcher over a helper process (the test binary started again) | `TestExecLauncherRunsTheProgramOfTheManifestOverStandardStreams` |

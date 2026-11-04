@@ -32,7 +32,11 @@ type conn struct {
 	exited chan struct{}
 
 	admission atomic.Pointer[adapterreg.Admission] // nil until admitted
-	closing   atomic.Bool                          // shutdown began: requests get -32002
+	// initialized holds what the adapter declared in an initialize the host
+	// accepted; nil until then. Only an adapter that answered initialize is sent
+	// shutdown, and what it declared decides whether the request carries the intent.
+	initialized atomic.Pointer[adapterproto.Capabilities]
+	closing     atomic.Bool // shutdown began: requests get -32002
 
 	// ctx is the connection's own context, for what the forwarder asks of the
 	// engine; it ends when the connection is torn down without being drained.

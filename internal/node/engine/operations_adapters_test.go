@@ -715,7 +715,7 @@ func TestReplacingThePackageOfAnAdapterThatRunsRestartsTheInstance(t *testing.T)
 			if !did.Replaced || did.AlreadyCurrent || did.Version != c.version {
 				t.Errorf("the installation did %+v, want %s to replace the package", did, c.version)
 			}
-			if got := host.asks()[asked:]; !reflect.DeepEqual(got, []string{"stop:relay", "run:relay"}) {
+			if got := host.asks()[asked:]; !reflect.DeepEqual(got, []string{"stop:relay:restart", "run:relay"}) {
 				t.Errorf("the host was asked for %v, want the instance stopped and started again", got)
 			}
 			if v, err := e.Adapter(ctx, "relay"); err != nil || v.Online {
@@ -973,7 +973,7 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 	if want := `{"instance":"chat","enabled":false,"version":` + itoa(uint64(version)+1) + `}`; string(res.Result) != want {
 		t.Errorf("the result is %s, want %s", res.Result, want)
 	}
-	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:chat"}) {
+	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:chat:retire"}) {
 		t.Errorf("the host was asked for %v, want it to stop chat", got)
 	}
 	settle(t, e)
@@ -1026,7 +1026,7 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 	if v.Online || !v.OfflineSince.Equal(disabledAt) {
 		t.Errorf("after enabling again the instance is online=%v, offline since %v; want offline since the disabling, %v", v.Online, v.OfflineSince, disabledAt)
 	}
-	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:chat", "run:chat"}) {
+	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:chat:retire", "run:chat"}) {
 		t.Errorf("the host was asked for %v", got)
 	}
 }
@@ -1238,7 +1238,7 @@ func TestAChangeOfThePresetsRestartsTheRuntimeInstancesThatRun(t *testing.T) {
 			if _, err := e.Execute(ctx, tc.command(r.cfg.Presets().Version)); err != nil {
 				t.Fatal(err)
 			}
-			if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent", "run:agent"}) {
+			if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent:restart", "run:agent"}) {
 				t.Errorf("the host was asked for %v, want agent stopped and started again, and nothing else", got)
 			}
 			if v, err := e.Adapter(ctx, "agent"); err != nil || v.Online {
@@ -1291,7 +1291,7 @@ func TestReplacingTheConfigurationOfAnInstanceRestartsItOnlyWhenItRuns(t *testin
 	if _, err := e.Execute(ctx, configureCommand(71, "agent", r.cfg.Instances().Version, "agent", `{"program":"new"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent", "run:agent"}) {
+	if got := host.asks(); !reflect.DeepEqual(got, []string{"stop:agent:restart", "run:agent"}) {
 		t.Errorf("the host was asked for %v, want agent stopped and started again, and nothing else", got)
 	}
 	if v, err := e.Adapter(ctx, "agent"); err != nil || v.Online {

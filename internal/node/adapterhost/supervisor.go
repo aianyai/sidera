@@ -54,10 +54,15 @@ type supervisor struct {
 	draining bool // a connection is being ended: a stop request no longer interrupts
 	wg       sync.WaitGroup
 
+	// retired says that the adapter was sent shutdown with the intent retire, so
+	// that nothing is left to release. Used by the supervisor's goroutine only.
+	retired bool
+
 	mu       sync.Mutex
-	stopping bool  // guarded by mu
-	cur      *conn // the latest connection, in service or not
-	service  *conn // the connection in service, nil otherwise
+	stopping bool                        // guarded by mu
+	intent   adapterproto.ShutdownIntent // why it is stopping; set with stopping, guarded by mu
+	cur      *conn                       // the latest connection, in service or not
+	service  *conn                       // the connection in service, nil otherwise
 }
 
 func newSupervisor(h *Host, id string, prev <-chan struct{}, startWait bool) *supervisor {
@@ -78,10 +83,16 @@ func newSupervisor(h *Host, id string, prev <-chan struct{}, startWait bool) *su
 	return s
 }
 
-// requestStop asks the supervisor to end the instance gracefully. It is the only
-// method other goroutines call besides the counts and the lookups below.
-func (s *supervisor) requestStop() {
+// requestStop asks the supervisor to end the instance gracefully, for the reason
+// intent names. It is the only method other goroutines call besides the counts and
+// the lookups below. The first request's intent stands: a later one, such as the
+// end of the host over an instance that is already being retired, does not change
+// what the adapter is told.
+func (s *supervisor) requestStop(intent adapterproto.ShutdownIntent) {
 	s.mu.Lock()
+	if !s.stopping {
+		s.intent = intent
+	}
 	s.stopping = true
 	s.service = nil
 	if s.cur != nil {
@@ -95,6 +106,14 @@ func (s *supervisor) isStopping() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stopping
+}
+
+// stopIntent is the intent the instance is being stopped for; empty before a stop
+// was requested.
+func (s *supervisor) stopIntent() adapterproto.ShutdownIntent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.intent
 }
 
 func (s *supervisor) stopRequested() bool {
@@ -150,6 +169,8 @@ func (s *supervisor) finish() {
 		close(helpers)
 	}()
 	s.wait(waits{over: helpers})
+	// The wait for the supervisor before this one comes first: its process holds
+	// the instance lock, which the release round needs.
 	if s.prev != nil {
 		// A supervisor stopped before it launched has not waited for the process of
 		// the supervisor before it, which may still be ending, and has not finished
@@ -159,6 +180,9 @@ func (s *supervisor) finish() {
 		// so the wait is bounded by its ShutdownWait and kill. It is idle: the
 		// process waited for is not this supervisor's work.
 		s.park(waits{over: s.prev, final: true}, true)
+	}
+	if s.stopIntent() == adapterproto.ShutdownRetire && !s.retired && s.h.ctx.Err() == nil {
+		s.retireRound()
 	}
 	close(s.done)
 	s.h.forget(s)

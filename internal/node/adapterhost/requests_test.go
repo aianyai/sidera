@@ -347,7 +347,7 @@ func TestCallsToTheAdapterAreForwardedValidatedAndRefusedWhenItIsNotInService(t 
 		r.advance(time.Second)
 		r.waitLaunches(2)
 		r.ready("chat", 2)
-		if err := r.host.Shutdown(timeoutCtx(t)); err != nil {
+		if err := r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := r.host.Close(timeoutCtx(t), "chat", adapterproto.CloseParams{Endpoint: "s-1"}); !errors.Is(err, adapterhost.ErrNotConnected) {

@@ -318,8 +318,8 @@ func TestEnsureRunningAndStopOfAnInstance(t *testing.T) {
 			t.Fatalf("%d launches after two EnsureRunning, want 1", n)
 		}
 
-		r.host.Stop("chat")
-		r.host.Stop("chat")
+		r.host.Stop("chat", adapterproto.ShutdownRestart)
+		r.host.Stop("chat", adapterproto.ShutdownRestart)
 		r.waitDisconnected("chat")
 		eventually(t, "the supervision to end", func() bool { return zeroCounts(r.host.Counts("chat")) })
 		eventually(t, "Stop to send shutdown", func() bool { return slices.Contains(r.tl.written(), adapterproto.MethodShutdown) })
@@ -354,7 +354,7 @@ func TestEnsureRunningAndStopOfAnInstance(t *testing.T) {
 		r.waitConnected("chat")
 		r.settle()
 
-		r.host.Stop("chat")
+		r.host.Stop("chat", adapterproto.ShutdownRestart)
 		r.host.EnsureRunning("chat")
 		// The old adapter is stubborn: it ends only when killed, after ShutdownWait.
 		<-first.serveDone
@@ -392,7 +392,7 @@ func TestAnInstanceIsStoppingUntilItsProcessHasEnded(t *testing.T) {
 		t.Fatal("an instance that is running is stopping")
 	}
 
-	r.host.Stop("chat")
+	r.host.Stop("chat", adapterproto.ShutdownRestart)
 	if !r.host.Stopping("chat") {
 		t.Fatal("an instance Stop was called for is not stopping when Stop returns")
 	}
@@ -429,9 +429,9 @@ func TestAnInstanceStoppedBeforeItLaunchedIsStoppingUntilThePreviousProcessHasEn
 	r.waitConnected("chat")
 	r.settle()
 
-	r.host.Stop("chat")
+	r.host.Stop("chat", adapterproto.ShutdownRestart)
 	r.host.EnsureRunning("chat")
-	r.host.Stop("chat")
+	r.host.Stop("chat", adapterproto.ShutdownRestart)
 	// The first adapter is stubborn: it ends only when killed, after ShutdownWait.
 	<-first.serveDone
 	eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
@@ -467,7 +467,7 @@ func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {
 		r.waitConnected("chat")
 		r.waitConnected("mail")
 		r.settle()
-		if err := r.host.Shutdown(timeoutCtx(t)); err != nil {
+		if err := r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop); err != nil {
 			t.Fatalf("Shutdown: %v", err)
 		}
 		written := r.tl.written()
@@ -494,7 +494,7 @@ func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {
 		if err := r.host.Start(timeoutCtx(t), r.env(false)); err == nil {
 			t.Fatal("Start after Shutdown succeeded")
 		}
-		if err := r.host.Shutdown(timeoutCtx(t)); err != nil {
+		if err := r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop); err != nil {
 			t.Fatalf("a second Shutdown: %v", err)
 		}
 	})
@@ -511,7 +511,7 @@ func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {
 		r.waitConnected("chat")
 		r.settle()
 		done := make(chan error, 1)
-		go func() { done <- r.host.Shutdown(timeoutCtx(t)) }()
+		go func() { done <- r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop) }()
 		eventually(t, "the adapter to receive shutdown", func() bool { return a.count(adapterproto.MethodShutdown) == 1 })
 		<-pp.serveDone
 		eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
@@ -554,7 +554,7 @@ func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {
 		r.settle()
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
-		go func() { done <- r.host.Shutdown(ctx) }()
+		go func() { done <- r.host.Shutdown(ctx, adapterproto.ShutdownStop) }()
 		<-pp.serveDone
 		eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
 		cancel()
@@ -605,7 +605,7 @@ func TestAbortKillsAtOnceAndSendsNoShutdown(t *testing.T) {
 			t.Fatal("Start after Abort succeeded")
 		}
 		r.host.Abort() // idempotent
-		if err := r.host.Shutdown(timeoutCtx(t)); err != nil {
+		if err := r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop); err != nil {
 			t.Fatalf("Shutdown after Abort: %v", err)
 		}
 	})

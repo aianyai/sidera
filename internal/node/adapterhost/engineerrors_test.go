@@ -67,7 +67,7 @@ func TestRequestsAfterShutdownBeganAreAnsweredAsShuttingDown(t *testing.T) {
 	}
 	r.start()
 	r.ready("chat", 1)
-	r.host.Stop("chat")
+	r.host.Stop("chat", adapterproto.ShutdownRestart)
 	var res json.RawMessage
 	err := a.call(adapterproto.MethodEndpointRegister, adapterproto.RegisterParams{Key: "k", DisplayName: "d"}, &res)
 	var pe *peer.Error

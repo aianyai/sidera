@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // What an adapter writes on its standard error goes to adapter-<instance>.log, one
@@ -27,7 +28,7 @@ func TestTheStderrOfTheAdapterGoesToItsLog(t *testing.T) {
 				t.Fatalf("Write(%q) = %d, %v", chunk, n, err)
 			}
 		}
-		if err := r.host.Shutdown(timeoutCtx(t)); err != nil {
+		if err := r.host.Shutdown(timeoutCtx(t), adapterproto.ShutdownStop); err != nil {
 			t.Fatal(err)
 		}
 		want := "starting up\npartial line\nsecond\nthird\nno newline at the end\n"

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The longest the interfaces, the adapters and the engine have to stop in, on the
@@ -41,9 +43,16 @@ func (d *Daemon) shutdown(fatal bool) {
 	if fatal {
 		grace = FatalGrace
 	}
+	// The adapters are told why they end: a restart brings a new process at once,
+	// while any other end (a stop, a signal, a fatal failure) does not say when the
+	// node comes back.
+	intent := adapterproto.ShutdownStop
 	select {
 	case <-d.stopCh:
 		d.log.Info("shutdown requested", "reason", d.stopReason, "restart", d.stopEnding == EndRestart)
+		if d.stopEnding == EndRestart {
+			intent = adapterproto.ShutdownRestart
+		}
 	default:
 	}
 	step := func(n int, name string, fn func(context.Context)) {
@@ -94,7 +103,7 @@ func (d *Daemon) shutdown(fatal bool) {
 			return
 		}
 		if h := d.cfg.AdapterHost; h != nil {
-			warn("the adapter host did not stop in time", h.Shutdown(ctx))
+			warn("the adapter host did not stop in time", h.Shutdown(ctx, intent))
 		}
 		if d.cfg.Attach.StopAdapters != nil {
 			warn("the adapters", d.cfg.Attach.StopAdapters(ctx))

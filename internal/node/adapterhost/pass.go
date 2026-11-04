@@ -116,11 +116,26 @@ func launchFault(err error) error {
 // adapter.start. On success the connection is in service. On failure the process
 // has been ended.
 func (s *supervisor) connect() (*conn, error) {
-	h := s.h
 	inst, err := s.instance()
 	if err != nil {
 		return nil, err
 	}
+	c, err := s.launch(inst)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.handshake(c, inst); err != nil {
+		s.finishConn(c, modeOf(err))
+		return nil, err
+	}
+	return c, nil
+}
+
+// launch makes the state directory, starts the adapter process and its protocol
+// peer. The adapter's requests are answered as before admission until the caller
+// admits it. On failure the process has been ended.
+func (s *supervisor) launch(inst Instance) (*conn, error) {
+	h := s.h
 	if err := makeStateDir(h.env.Home, s.id); err != nil {
 		return nil, err
 	}
@@ -140,11 +155,30 @@ func (s *supervisor) connect() (*conn, error) {
 	}
 	c.register()
 	c.p.Start()
-	if err := s.handshake(c, inst); err != nil {
-		s.finishConn(c, modeOf(err))
-		return nil, err
-	}
 	return c, nil
+}
+
+// initialize is step 3 of taking an adapter on: initialize, and the checks of its
+// answer that need nothing of the engine.
+func (s *supervisor) initialize(c *conn, inst Instance) (adapterproto.InitializeResult, error) {
+	sent := adapterproto.InitializeParams{
+		Protocol:     adapterproto.SupportedRange(),
+		Daemon:       adapterproto.DaemonInfo{Version: s.h.version},
+		Instance:     adapterproto.InstanceInfo{ID: s.id, LockPath: inst.LockPath, StateDir: inst.StateDir},
+		Capabilities: adapterproto.DaemonCapabilities{},
+	}
+	var init adapterproto.InitializeResult
+	if err := s.rpc(c, adapterproto.MethodInitialize, sent, &init, s.h.params.HandshakeTimeout); err != nil {
+		var pe *peer.Error
+		if errors.As(err, &pe) && pe.Code == adapterproto.CodeInstanceLocked {
+			s.log.Warn("another process holds the instance lock; nobody is admitted", "lock_path", inst.LockPath)
+		}
+		return init, fmt.Errorf("initialize: %w", err)
+	}
+	if err := adapterreg.CheckHandshake(sent.Protocol, init, inst.Adapter.Manifest); err != nil {
+		return init, err
+	}
+	return init, nil
 }
 
 // handshake is steps 3 to 5 of taking an adapter on.
@@ -152,25 +186,11 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	h := s.h
 	eng := h.env.Engine
 	limit := h.params.HandshakeTimeout
-	sent := adapterproto.InitializeParams{
-		Protocol:     adapterproto.SupportedRange(),
-		Daemon:       adapterproto.DaemonInfo{Version: h.version},
-		Instance:     adapterproto.InstanceInfo{ID: s.id, LockPath: inst.LockPath, StateDir: inst.StateDir},
-		Capabilities: adapterproto.DaemonCapabilities{},
-	}
-	var init adapterproto.InitializeResult
-	if err := s.rpc(c, adapterproto.MethodInitialize, sent, &init, limit); err != nil {
-		var pe *peer.Error
-		if errors.As(err, &pe) && pe.Code == adapterproto.CodeInstanceLocked {
-			s.log.Warn("another process holds the instance lock; nobody is admitted", "lock_path", inst.LockPath)
-		}
-		return fmt.Errorf("initialize: %w", err)
-	}
-	m := inst.Adapter.Manifest
-	if err := adapterreg.CheckHandshake(sent.Protocol, init, m); err != nil {
+	init, err := s.initialize(c, inst)
+	if err != nil {
 		return err
 	}
-	adm, err := adapterreg.Admit(init.Capabilities, m)
+	adm, err := adapterreg.Admit(init.Capabilities, inst.Adapter.Manifest)
 	if err != nil {
 		return err
 	}
@@ -182,8 +202,10 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	if err != nil {
 		return fmt.Errorf("the engine could not take the adapter on: %w", err)
 	}
-	// Only now are the adapter's requests let through. What it says is held until
-	// the engine has applied the result of adapter.start.
+	// Only now are the adapter's requests let through, and it is sent shutdown when
+	// it ends. What it says is held until the engine has applied the result of
+	// adapter.start.
+	c.initialized.Store(&init.Capabilities)
 	c.admit(adm)
 	var started adapterproto.StartResult
 	if err := s.rpc(c, adapterproto.MethodAdapterStart, start, &started, limit); err != nil {
@@ -201,6 +223,38 @@ func (s *supervisor) handshake(c *conn, inst Instance) error {
 	s.mu.Unlock()
 	s.release()
 	return nil
+}
+
+// retireRound releases what the adapter of a retired instance started, when the
+// instance was retired while no adapter was in service (it was backing off after
+// a failure, still being taken on, or waiting for the process before it to end):
+// there was nobody to send shutdown to. The host starts the adapter once, asks it
+// to initialize, which gives it the instance's state directory, and sends it
+// shutdown with the intent retire; adapter.start is never sent, so the adapter
+// takes up none of the sessions. A round that fails is logged and not tried
+// again: the cost is a process left running, which the log names.
+func (s *supervisor) retireRound() {
+	s.draining = true
+	inst, err := s.instance()
+	var c *conn
+	if err == nil {
+		c, err = s.launch(inst)
+	}
+	if err == nil {
+		var init adapterproto.InitializeResult
+		if init, err = s.initialize(c, inst); err != nil {
+			s.finishConn(c, modeOf(err))
+		} else {
+			c.initialized.Store(&init.Capabilities)
+		}
+	}
+	if err != nil {
+		if !isEnd(err) {
+			s.log.Warn("the adapter of a retired instance could not be asked to release what it started", "err", err)
+		}
+		return
+	}
+	s.finishConn(c, modeShutdown)
 }
 
 // probe is step 6. A probe the adapter fails is logged and nothing more: whether
@@ -438,13 +492,24 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 		s.closeConn(c)
 	case modeShutdown:
 		s.draining = true
-		if c.admission.Load() != nil {
+		if caps := c.initialized.Load(); caps != nil {
+			intent := s.stopIntent()
+			// An adapter that did not declare the intent gets the request it always
+			// got, which it takes as a restart.
+			params := adapterproto.ShutdownParams{}
+			if caps.ShutdownIntent {
+				params.Intent = intent
+			}
 			var none adapterproto.Empty
-			err := s.rpc(c, adapterproto.MethodShutdown, adapterproto.Empty{}, &none, s.h.params.HandshakeTimeout)
+			err := s.rpc(c, adapterproto.MethodShutdown, params, &none, s.h.params.HandshakeTimeout)
 			if errors.Is(err, errAborted) {
 				_ = c.proc.Kill()
 				s.closeConn(c)
 				return
+			}
+			s.retired = s.retired || intent == adapterproto.ShutdownRetire
+			if err != nil {
+				s.log.Warn("the adapter did not take shutdown", "intent", string(intent), "err", err)
 			}
 		}
 		s.closeConn(c)

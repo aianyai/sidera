@@ -89,7 +89,8 @@ func AdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptio
 	return fakeadapter.ManifestOptions{
 		ID: instance, Version: "1.0.0",
 		Direct: true, MaxDirectEndpoints: maxDirect,
-		Program: adapterProgram,
+		ShutdownIntent: true,
+		Program:        adapterProgram,
 	}
 }
 
@@ -339,6 +340,7 @@ type AdapterLaunch struct {
 
 	mu      sync.Mutex
 	methods []string
+	params  map[string][]json.RawMessage // by method, in order
 }
 
 // Controller turns the knobs of this process.
@@ -351,6 +353,14 @@ func (l *AdapterLaunch) Methods() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]string(nil), l.methods...)
+}
+
+// Params are the parameters of the requests and notifications of the method that
+// the daemon wrote to this process, in order, as they were written.
+func (l *AdapterLaunch) Params(method string) []json.RawMessage {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.params[method])
 }
 
 // Survive makes this process one the host cannot end: from now on neither Kill nor
@@ -411,13 +421,18 @@ func (l *AdapterLaunch) watch() {
 
 func (l *AdapterLaunch) wrote(line []byte) {
 	var m struct {
-		Method string `json:"method"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
 	}
 	if json.Unmarshal(line, &m) != nil || m.Method == "" {
 		return
 	}
 	l.mu.Lock()
 	l.methods = append(l.methods, m.Method)
+	if l.params == nil {
+		l.params = map[string][]json.RawMessage{}
+	}
+	l.params[m.Method] = append(l.params[m.Method], slices.Clone(m.Params))
 	l.mu.Unlock()
 }
 
@@ -556,9 +571,9 @@ func (a *abandonableAdapters) EnsureRunning(instance string) {
 	}
 }
 
-func (a *abandonableAdapters) Stop(instance string) {
+func (a *abandonableAdapters) Stop(instance string, intent adapterproto.ShutdownIntent) {
 	if !a.abandoned.Load() {
-		a.inner.Stop(instance)
+		a.inner.Stop(instance, intent)
 	}
 }
 

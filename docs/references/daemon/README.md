@@ -109,7 +109,10 @@ places and nowhere else:
   that cannot be started at all does (a bad `Env`, a host that was started or ended
   before). The `Adapters` hook runs after it, in the same step.
 - **Shutdown step 3** shuts the host down with the step's context, which carries the
-  grace: each adapter in service is sent `shutdown`, its stream is closed, and a
+  grace: each adapter in service is sent `shutdown` with the intent `restart` when the
+  daemon ends for a restart (`RequestRestart`) and `stop` for any other end (a stop, a
+  signal, a fatal failure), since the daemon does not say when it comes back, its stream
+  is closed, and a
   process that stays is killed. A failure (the grace passed) is logged as a warning,
   as every step's is, and the hook `StopAdapters` runs after it. The step runs after
   the engine began to refuse (step 1) and before the engine ends (step 4): the
@@ -137,7 +140,7 @@ of a start that failed; a step with nothing to stop is logged and does nothing.
 | ---- | ---- | ------------ |
 | 1 | refuse | The engine refuses what comes from outside (`unavailable/shutting_down`). |
 | 2 | interfaces | Both management and Agent HTTP servers stop taking connections and wait for active requests within the grace; remaining connections close on expiry. In parallel with them the network stops listening, closes its connections and waits for its goroutines. Their serving goroutines are joined, then hook `StopInterfaces` stops other interfaces. |
-| 3 | adapters | The adapter host shuts the adapters down (`Config.AdapterHost`, when set), within the grace; then hook `StopAdapters`. Native sessions are separate processes and are not affected. |
+| 3 | adapters | The adapter host shuts the adapters down (`Config.AdapterHost`, when set) with the intent `restart` or `stop`, within the grace; then hook `StopAdapters`. Native sessions are separate processes and are not affected. With the intent `stop` the Codex adapter may end its App Server when no session is known to be running a turn; running turns are never affected. |
 | 4 | engine | The loop ends after its command, and every goroutine of the engine is waited for. |
 | 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. If the engine has not ended within the grace, it may still be writing: the lock and the log are kept until the process exits, the line says so, and `Wait` returns `ErrEngineNotStopped`. |
 
@@ -773,7 +776,7 @@ reach the socket can obtain the credential of an endpoint of this node.
 - Tests of the adapter host's wiring (`adapters_test.go`):
   `TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem`,
   `TestAnInstanceThatCannotBeStartedIsJudgedOfflineAndTheStartGoesOn`,
-  `TestShutdownStopsTheAdaptersAtStepThree`, `TestAFatalFailureStillStopsTheAdapters`,
+  `TestShutdownStopsTheAdaptersAtStepThree`, `TestTheDaemonTellsTheAdaptersWhyItEnds`, `TestAFatalFailureStillStopsTheAdapters`,
   `TestANodeWithoutAnAdapterHostStartsNoAdapter`: fake adapters in the test process,
   started by the one launcher the engine-layer fixture also uses (`harness`).
 - Tests of the network's place in the start and the shutdown (`network_test.go`):
