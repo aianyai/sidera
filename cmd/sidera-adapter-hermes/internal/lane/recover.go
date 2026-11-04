@@ -6,6 +6,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/state"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // IdempotencyKey is the key of one attempt to send a card. It is built from the
@@ -131,10 +132,15 @@ type Action struct {
 //   - not blocked and not sent: send. A card that never began an attempt gets the
 //     next number. One that did sends with the same number, so the channel
 //     recognizes it as the same message, unless the attempt began longer ago than
-//     the channel remembers its keys: then it is not repeated, because a repeat
-//     might create a second remote session, and the outcome is unknown;
+//     adapterproto.SentKeyWindow: then it is not repeated, because a repeat might
+//     create a second remote session, and the outcome is unknown;
 //   - sent: it already is; go on waiting, timer as it was.
-func OnReady(c *state.Card, now time.Time, window time.Duration) Action {
+//
+// The window is the SDK's, not a setting: a copied value would drift silently
+// when the protocol timing changes. It holds only while the adapter's sends name
+// no accept_before_s, so the node's default deadline applies; a send that names
+// one must not rely on it, and the window has to be re-derived from that deadline.
+func OnReady(c *state.Card, now time.Time) Action {
 	switch {
 	case c == nil:
 		return Action{Kind: ActionNew}
@@ -146,7 +152,7 @@ func OnReady(c *state.Card, now time.Time, window time.Duration) Action {
 		return Action{Kind: ActionKeepWaiting, ResetTimer: true}
 	case c.Phase == state.PhaseBlocked, c.Phase == state.PhaseNew:
 		return Action{Kind: ActionSend, Attempt: c.Attempt + 1}
-	case c.Phase == state.PhaseAttempting && now.Sub(c.AttemptAt) > window:
+	case c.Phase == state.PhaseAttempting && now.Sub(c.AttemptAt) > adapterproto.SentKeyWindow:
 		return Action{Kind: ActionOutcomeUnknown}
 	case c.Phase == state.PhaseAttempting:
 		return Action{Kind: ActionSend, Attempt: c.Attempt}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Phase is where a card is in its delegation.
@@ -176,15 +177,18 @@ func (d *Data) Seen(messageID string, now time.Time) bool {
 	return ok && now.Before(until)
 }
 
-// MarkProcessed records the message as processed until the given time and drops
-// the records that have expired.
-func (d *Data) MarkProcessed(messageID string, now, until time.Time) {
+// MarkProcessed records the message as processed and drops the records that have
+// expired. The record is kept for adapterproto.ReceivedRedeliveryWindow from now,
+// the time the message was first received: until then the node may hand the
+// message out again, and after it nothing can. The window is the SDK's, not a
+// setting, so it follows the protocol timing when that changes.
+func (d *Data) MarkProcessed(messageID string, now time.Time) {
 	for id, u := range d.Processed {
 		if !now.Before(u) {
 			delete(d.Processed, id)
 		}
 	}
-	d.Processed[messageID] = until
+	d.Processed[messageID] = now.Add(adapterproto.ReceivedRedeliveryWindow)
 }
 
 // Prune drops the records of cards that finished more than keep ago, except those

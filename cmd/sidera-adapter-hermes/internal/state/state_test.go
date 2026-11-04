@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 var t0 = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
@@ -23,7 +25,7 @@ func TestUpdateIsWrittenBeforeItReturnsAndSurvivesReopening(t *testing.T) {
 		c := &Card{ID: "t_1", Endpoint: "e", Mode: "message", ClaimedAt: t0}
 		c.BeginAttempt(1, t0)
 		d.Cards[c.ID] = c
-		d.MarkProcessed("m1", t0, t0.Add(time.Hour))
+		d.MarkProcessed("m1", t0)
 		return nil
 	})
 	if err != nil {
@@ -46,7 +48,7 @@ func TestUpdateIsWrittenBeforeItReturnsAndSurvivesReopening(t *testing.T) {
 	if c := d.Cards["t_1"]; c == nil || c.Attempt != 1 || !c.AttemptAt.Equal(t0) || c.Phase != PhaseAttempting {
 		t.Errorf("reopened card: %+v", c)
 	}
-	if !d.Seen("m1", t0.Add(59*time.Minute)) || d.Seen("m1", t0.Add(time.Hour)) || d.Seen("other", t0) {
+	if !d.Seen("m1", t0.Add(adapterproto.ReceivedRedeliveryWindow-time.Minute)) || d.Seen("m1", t0.Add(adapterproto.ReceivedRedeliveryWindow)) || d.Seen("other", t0) {
 		t.Error("the table of processed messages is wrong after reopening")
 	}
 	if runtime.GOOS != "windows" {
@@ -78,8 +80,8 @@ func TestOpenRefusesAFileItCannotRead(t *testing.T) {
 
 func TestMarkProcessedDropsExpiredRecords(t *testing.T) {
 	d := newData()
-	d.MarkProcessed("old", t0, t0.Add(time.Hour))
-	d.MarkProcessed("new", t0.Add(2*time.Hour), t0.Add(3*time.Hour))
+	d.MarkProcessed("old", t0)
+	d.MarkProcessed("new", t0.Add(adapterproto.ReceivedRedeliveryWindow))
 	if _, ok := d.Processed["old"]; ok {
 		t.Error("expired record kept")
 	}

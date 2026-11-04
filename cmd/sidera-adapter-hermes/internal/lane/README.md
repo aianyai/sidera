@@ -23,4 +23,6 @@ the second block of one kind. A card that awaits a reply (`state.Card.AwaitsRepl
 is matched to the reply even when blocked, and is completed from the blocked state
 as it stands, with no unblock or new claim before; a blocked card does not hold its
 peer for `ShouldQueue` and `NextQueued`. Cards are passed in claim order (`Data.CardList`).
+`OnReady` takes its idempotency window from the SDK (`adapterproto.SentKeyWindow`); it
+holds only while the adapter's sends name no `accept_before_s`.
 A rule here that changes what is sent, or how often, updates the reference.

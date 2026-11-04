@@ -21,31 +21,29 @@ import (
 
 // The keys of the instance configuration.
 const (
-	KeyHermesPath        = "hermes_path"
-	KeyHermesHome        = "hermes_home"
-	KeyKanbanHome        = "kanban_home"
-	KeyBoard             = "board"
-	KeyHomeProfile       = "home_profile"
-	KeyHomePlatform      = "home_platform"
-	KeyHomeChatID        = "home_chat_id"
-	KeyHomeChatType      = "home_chat_type"
-	KeyHomeThreadID      = "home_thread_id"
-	KeyHomeUserID        = "home_user_id"
-	KeyHomeUserIDAlt     = "home_user_id_alt"
-	KeyHomeParentChatID  = "home_parent_chat_id"
-	KeyHomeGuildID       = "home_guild_id"
-	KeyAliases           = "aliases"
-	KeyCreatorProfiles   = "creator_profiles"
-	KeyNoReplyTimeout    = "no_reply_timeout"
-	KeyClaimTTL          = "claim_ttl"
-	KeySessionRetention  = "session_retention"
-	KeyCloseWindow       = "close_window"
-	KeyEndpointIdle      = "endpoint_idle"
-	KeyPollInterval      = "poll_interval"
-	KeyIdempotencyWindow = "idempotency_window"
-	KeyDedupRetention    = "dedup_retention"
-	KeyMaxEndpoints      = "max_endpoints"
-	KeyMaxOpenSessions   = "max_open_sessions"
+	KeyHermesPath       = "hermes_path"
+	KeyHermesHome       = "hermes_home"
+	KeyKanbanHome       = "kanban_home"
+	KeyBoard            = "board"
+	KeyHomeProfile      = "home_profile"
+	KeyHomePlatform     = "home_platform"
+	KeyHomeChatID       = "home_chat_id"
+	KeyHomeChatType     = "home_chat_type"
+	KeyHomeThreadID     = "home_thread_id"
+	KeyHomeUserID       = "home_user_id"
+	KeyHomeUserIDAlt    = "home_user_id_alt"
+	KeyHomeParentChatID = "home_parent_chat_id"
+	KeyHomeGuildID      = "home_guild_id"
+	KeyAliases          = "aliases"
+	KeyCreatorProfiles  = "creator_profiles"
+	KeyNoReplyTimeout   = "no_reply_timeout"
+	KeyClaimTTL         = "claim_ttl"
+	KeySessionRetention = "session_retention"
+	KeyCloseWindow      = "close_window"
+	KeyEndpointIdle     = "endpoint_idle"
+	KeyPollInterval     = "poll_interval"
+	KeyMaxEndpoints     = "max_endpoints"
+	KeyMaxOpenSessions  = "max_open_sessions"
 )
 
 // The defaults.
@@ -74,18 +72,6 @@ const (
 	// starts a Hermes process, which costs a fraction of a second, and a new card
 	// waiting ten seconds is invisible next to the hours a delegation takes.
 	DefaultPollInterval = 10 * time.Second
-	// DefaultIdempotencyWindow is how long after an attempt began the same
-	// idempotency key still reaches the same message. The sender's node keeps a
-	// key until the message's report_by: its delivery deadline (10 minutes by
-	// default) plus 2 hours of queue, 1 hour of redelivery and the clock
-	// tolerance, 3 hours 12 minutes. The attempt began before its send, so 3 hours
-	// stays inside the keeping with some margin. The SDK does not export the
-	// figure, hence a setting.
-	DefaultIdempotencyWindow = 3 * time.Hour
-	// DefaultDedupRetention is how long the id of a processed inbound message is
-	// remembered. The channel redelivers a message for 15 minutes at most
-	// (lease chain), so this is far beyond it.
-	DefaultDedupRetention = 6 * time.Hour
 
 	DefaultMaxEndpoints    = 64
 	DefaultMaxOpenSessions = 32
@@ -154,14 +140,12 @@ type Config struct {
 	// CreatorProfiles, when not empty, are the profiles whose cards are served.
 	CreatorProfiles []string
 
-	NoReplyTimeout    time.Duration
-	ClaimTTL          time.Duration
-	SessionRetention  time.Duration
-	CloseWindow       time.Duration
-	EndpointIdle      time.Duration
-	PollInterval      time.Duration
-	IdempotencyWindow time.Duration
-	DedupRetention    time.Duration
+	NoReplyTimeout   time.Duration
+	ClaimTTL         time.Duration
+	SessionRetention time.Duration
+	CloseWindow      time.Duration
+	EndpointIdle     time.Duration
+	PollInterval     time.Duration
 	// MaxEndpoints bounds the endpoints the adapter holds, the instance endpoint
 	// and the orphan endpoint included.
 	MaxEndpoints int
@@ -175,21 +159,19 @@ type Config struct {
 func Decode(values adapterproto.ConfigValues) (Config, error) {
 	r := reader{values: values, used: map[string]bool{}}
 	c := Config{
-		HermesPath:        r.str(KeyHermesPath, DefaultHermesPath),
-		HermesHome:        r.str(KeyHermesHome, ""),
-		KanbanHome:        r.str(KeyKanbanHome, ""),
-		Board:             r.str(KeyBoard, ""),
-		CreatorProfiles:   r.list(KeyCreatorProfiles),
-		NoReplyTimeout:    r.duration(KeyNoReplyTimeout, DefaultNoReplyTimeout, time.Minute),
-		ClaimTTL:          r.duration(KeyClaimTTL, DefaultClaimTTL, time.Hour),
-		SessionRetention:  r.duration(KeySessionRetention, DefaultSessionRetention, time.Minute),
-		CloseWindow:       r.duration(KeyCloseWindow, DefaultCloseWindow, time.Minute),
-		EndpointIdle:      r.duration(KeyEndpointIdle, DefaultEndpointIdle, time.Hour),
-		PollInterval:      r.duration(KeyPollInterval, DefaultPollInterval, minPollInterval),
-		IdempotencyWindow: r.duration(KeyIdempotencyWindow, DefaultIdempotencyWindow, time.Minute),
-		DedupRetention:    r.duration(KeyDedupRetention, DefaultDedupRetention, time.Minute),
-		MaxEndpoints:      r.integer(KeyMaxEndpoints, DefaultMaxEndpoints, MinMaxEndpoints, MaxMaxEndpoints),
-		MaxOpenSessions:   r.integer(KeyMaxOpenSessions, DefaultMaxOpenSessions, 1, 1000),
+		HermesPath:       r.str(KeyHermesPath, DefaultHermesPath),
+		HermesHome:       r.str(KeyHermesHome, ""),
+		KanbanHome:       r.str(KeyKanbanHome, ""),
+		Board:            r.str(KeyBoard, ""),
+		CreatorProfiles:  r.list(KeyCreatorProfiles),
+		NoReplyTimeout:   r.duration(KeyNoReplyTimeout, DefaultNoReplyTimeout, time.Minute),
+		ClaimTTL:         r.duration(KeyClaimTTL, DefaultClaimTTL, time.Hour),
+		SessionRetention: r.duration(KeySessionRetention, DefaultSessionRetention, time.Minute),
+		CloseWindow:      r.duration(KeyCloseWindow, DefaultCloseWindow, time.Minute),
+		EndpointIdle:     r.duration(KeyEndpointIdle, DefaultEndpointIdle, time.Hour),
+		PollInterval:     r.duration(KeyPollInterval, DefaultPollInterval, minPollInterval),
+		MaxEndpoints:     r.integer(KeyMaxEndpoints, DefaultMaxEndpoints, MinMaxEndpoints, MaxMaxEndpoints),
+		MaxOpenSessions:  r.integer(KeyMaxOpenSessions, DefaultMaxOpenSessions, 1, 1000),
 		Home: Target{
 			Profile:      r.str(KeyHomeProfile, ""),
 			Platform:     r.str(KeyHomePlatform, ""),

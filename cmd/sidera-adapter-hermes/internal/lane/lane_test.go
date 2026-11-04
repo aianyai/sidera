@@ -167,7 +167,7 @@ func TestQueue(t *testing.T) {
 }
 
 func TestOnReady(t *testing.T) {
-	window := 3 * time.Hour
+	window := adapterproto.SentKeyWindow
 	mk := func(phase state.Phase, mut func(*state.Card)) *state.Card {
 		c := &state.Card{ID: "t", Phase: phase, Attempt: 2, AttemptAt: ago(time.Hour)}
 		if mut != nil {
@@ -192,7 +192,7 @@ func TestOnReady(t *testing.T) {
 		{"already sent", mk(state.PhaseSent, nil), Action{Kind: ActionKeepWaiting}},
 	}
 	for _, tc := range cases {
-		if got := OnReady(tc.card, t0, window); got != tc.want {
+		if got := OnReady(tc.card, t0); got != tc.want {
 			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
 		}
 	}

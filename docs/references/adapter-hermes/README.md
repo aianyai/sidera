@@ -40,12 +40,16 @@ at once.
 | `close_window` | How long a cron or orphan card's remote session is kept after the card finished | 1h |
 | `endpoint_idle` | How long a conversation endpoint may go unused before it is retired | 720h |
 | `poll_interval` | The pause between looks at the board | 10s |
-| `idempotency_window` | How long after an attempt began it can be sent again as the same message | 3h |
-| `dedup_retention` | How long the id of a processed inbound message is remembered | 6h |
 | `max_endpoints` | Endpoints held, the instance endpoint and the orphan endpoint included (4 to 256) | 64 |
 | `max_open_sessions` | Remote sessions kept open | 32 |
 
 Durations are Go durations (`90m`, `168h`).
+
+Two timings are not settings: how long an attempt can be sent again as the same
+message, and how long the id of a processed inbound message is remembered. They follow
+from the delivery timing of the protocol, which the SDK exports
+(`adapterproto.SentKeyWindow`, `adapterproto.ReceivedRedeliveryWindow`), so a copy
+kept here would drift silently when that timing changes.
 
 An alias entry is `<name>=<address>;modes=<mode>[,<mode>];presets=<preset>[,<preset>]`.
 The modes are `new_session` and `message`. Presets are required with `new_session`
@@ -203,12 +207,20 @@ has no peer and never waits. The oldest queued card goes when the peer is free.
 **The idempotency window.** An attempt's idempotency key is the card id and the
 persisted attempt number (`IdempotencyKey`), written before the send, so a resend
 after a crash is the same message to the channel and a deliberate retry is a new
-one. The sender's node keeps a key only until the message's `report_by`, a little over
-3 hours with the default deadline. A key that is forgotten no longer recognizes the
-resend, which would create a second remote session. So on recovery an attempt that
-began longer ago than `idempotency_window` is not sent again: its outcome is unknown.
-The SDK does not export the retention, so the window is a setting (default 3h, inside
-the 3h12m of the default deadline).
+one. The sender's node keeps a key only until the message's `report_by`. A key that is
+forgotten no longer recognizes the resend, which would create a second remote session.
+So on recovery an attempt that began longer ago than `adapterproto.SentKeyWindow` is
+not sent again: its outcome is unknown. The window is the SDK's, since a value copied
+here would drift silently when the protocol timing changes.
+
+The window counts the node's default delivery deadline. It therefore holds only while
+the adapter's sends name no `accept_before_s`; a send that names one has a different
+key lifetime, and the window would have to be derived from it.
+
+**The redelivery window.** The id of a processed inbound message is remembered from
+its first receipt for `adapterproto.ReceivedRedeliveryWindow` (`MarkProcessed`), the
+longest time the node may still hand the message out again. After it nothing can
+redeliver the message, and the record is dropped.
 
 **A card that comes back** (`OnReady`). A card the adapter already has is listed as
 ready again because its creator unblocked it, or because its claim lapsed or was
