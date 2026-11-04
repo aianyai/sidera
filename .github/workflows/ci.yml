@@ -20,6 +20,11 @@ on:
         type: choice
         options: [full, smoke]
         default: full
+      # Whether the bench job runs; see the bench job.
+      benchmarks:
+        description: Run the single-sample benchmarks
+        type: boolean
+        default: false
 
 # Nothing here writes to the repository, so the token only ever reads it.
 permissions:
@@ -111,10 +116,15 @@ jobs:
         run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
 
   # One untagged, non-race sample records each platform's real filesystem
-  # costs. These are measurements, not performance thresholds. They run on every
-  # platform on every run, in a job of their own so that they do not add their
-  # time to the tests'.
+  # costs. These are measurements, not performance thresholds, and nothing reads
+  # them automatically. Their one consumer is the cold-start threshold in the
+  # storage reference, which a person checks when the store's scan or the
+  # platform changes, as with the crash walk. On every push they cost four jobs,
+  # one of them on macOS, and on Windows x64 a job of about 900 s that was as long
+  # as any test job. So they run on manual dispatch only, when the benchmarks
+  # input asks for them: before a release or after a change to the store's scan.
   bench:
+    if: github.event_name == 'workflow_dispatch' && inputs.benchmarks
     name: benchmarks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40

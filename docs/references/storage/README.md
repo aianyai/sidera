@@ -1470,9 +1470,13 @@ M4, `BenchmarkColdStartScan`, 2/3 target records and 1/3 source records):
 
 The threshold at which segment files become a task of their own is a cold start of
 200,000 files above 30 s on macOS or above 60 s on the CI of Windows. The numbers
-above were measured on the development machine; no CI job runs
-`BenchmarkColdStartScan`, so the Windows and Linux numbers and a cold page cache
-are not exercised by CI.
+above were measured on the development machine. The `bench` job of the CI runs
+`BenchmarkColdStartScan` on a manual dispatch that asks for it, on Linux, macOS,
+Windows and Windows arm64; a cold page cache is not exercised by CI. The scan of
+200,000 files measured there (single samples, 2026-11-04) took 21 s and 26 s on
+Linux x64, 32 s and 43 s on Windows x64, 37 s and 37 s on Windows arm64 and 127 s
+and 160 s on macOS: the hosted macOS runners are far slower than the development
+machine the table was measured on.
 
 **The rules of recovery.** Each rule has a predicate, a pure function of a scan,
 and the store offers the write that carries it out. The predicates the store owns:

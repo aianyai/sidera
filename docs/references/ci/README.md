@@ -13,7 +13,8 @@ dispatch, except that a push or pull request whose changed files are all Markdow
 (`**.md`) starts no run: no job builds, tests or packages a Markdown file, so the
 verdict of the commit before it still holds. A job that comes to read a Markdown
 file has to remove that filter first. The `crashwalk` job runs on manual dispatch
-only; every other job runs on all three triggers. Every step fails its job on any
+only, and the `bench` job on a manual dispatch that asks for it; every other job
+runs on all three triggers. Every step fails its job on any
 failure; there is no
 `continue-on-error`; the only tests left out of a job are the power-loss tests on
 macOS and Windows and the crash walk of the built binary, which has jobs of its
@@ -24,7 +25,7 @@ test, the crash walks of `internal/node/store` included.
 | --- | ------- | ----- |
 | `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `race` | Linux, macOS, Windows | `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`; no Windows arm64, where Go has no race detector |
-| `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64 | the three single-sample benchmark commands below |
+| `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64; manual dispatch with `benchmarks` set only | the three single-sample benchmark commands below |
 | `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
@@ -37,15 +38,16 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | --- | --------- | ----------------- | ------------------ |
 | `test` | 4 | 40 | 30m per test step |
 | `race` | 3 | 40 | 30m |
-| `bench` | 4 | 40 | benchmarks 10m, 10m, 30m |
+| `bench` | 4 when a dispatch asks for the benchmarks | 40 | benchmarks 10m, 10m, 30m |
 | `test-tags` | 4 | 40 | 30m per step |
 | `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
 | `linux-checks` | 1 | 30 | go default for the `sdk/go` tests, none for the rest |
 
-A push to `main` or a pull request starts 20 jobs, five of them on macOS (`test`,
-`race`, `test-tags`, `acceptance` and `bench`); a manual dispatch adds the nine
-`crashwalk` jobs, 29 in all, seven of them on macOS. GitHub runs at most 20 jobs of
+A push to `main` or a pull request starts 16 jobs, four of them on macOS (`test`,
+`race`, `test-tags` and `acceptance`); a manual dispatch adds the nine `crashwalk`
+jobs, 25 in all, six of them on macOS, and one that sets `benchmarks` adds the four
+`bench` jobs, 29 in all, seven of them on macOS. GitHub runs at most 20 jobs of
 the account at once, and macOS jobs more tightly than the others: at most five macOS
 jobs at once across all workflows, so on a dispatch the two macOS crash-walk jobs
 wait for the shorter macOS jobs to finish. A push stays within the limit on its own; a run that starts while
@@ -110,9 +112,11 @@ tags do not change this child selection. The crash-walk job needs only
 
 ### Single-sample benchmarks
 
-The `bench` job runs these three benchmark commands once on every platform, on
-every run, without build tags or the race detector. `-run '^$'` omits ordinary tests and
-`-benchtime=1x -count=1` takes one iteration of every named sub-benchmark:
+The `bench` job runs these three benchmark commands once on every platform, without
+build tags or the race detector. It runs on manual dispatch only, when the
+`benchmarks` input is set, and never on a push or pull request. `-run '^$'` omits
+ordinary tests and `-benchtime=1x -count=1` takes one iteration of every named
+sub-benchmark:
 
 | Benchmark | Package | Command timeout |
 | --- | --- | --- |
@@ -121,7 +125,20 @@ every run, without build tags or the race detector. `-run '^$'` omits ordinary t
 | `BenchmarkColdStartScan` | `internal/node/store` | 30m |
 
 These are platform cost records with no performance threshold or statistical
-regression claim. Transaction results use `ns/write-window` for the interval
+regression claim, and nothing reads them automatically. Their one consumer is the
+cold-start threshold in the storage reference, which a person checks when the
+store's scan or the platform changes, so they run when asked, as the crash walk
+does: before a release or after a change to the store's scan. Run on every push they
+cost four jobs, one of them on macOS, and on Windows x64 a job of about 900 s, as
+long as any test job. To ask for them:
+
+```sh
+gh workflow run ci.yml --ref <branch> -f benchmarks=true
+```
+
+A dispatch that leaves the input out runs no benchmarks.
+
+Transaction results use `ns/write-window` for the interval
 from the first actual write observation to the logical commit observation,
 alongside `commits/op`. Work before the first write and after logical commit
 falls outside the window, including preparation before `Begin` and the remaining
@@ -515,8 +532,8 @@ to the workflow.
   `go test` and 44 s for `go vet`); setting up a job takes 2 to 22 s and a job waits
   about 2 s for a runner, so another runner costs almost nothing. Split into
   `test`, `race` and `bench`, the steps run on separate machines and a run takes
-  about as long as its longest single step. The benchmarks still run on every
-  platform on every run; they only no longer queue behind the tests. The
+  about as long as its longest single step. The benchmarks have since been
+  made a dispatch option (see "Single-sample benchmarks"). The
   `-race` run of `test-tags` stays in that job: it takes only the packages the
   tags change, so it is short.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
