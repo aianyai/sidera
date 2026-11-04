@@ -3,6 +3,7 @@ package network
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -302,4 +303,19 @@ func TestServerKeepsAStreamUntilTheClientClosesIt(t *testing.T) {
 		a, b, _, _ := open(t, 300*time.Millisecond)
 		eventually(t, "the server to release the connection", func() bool { return busy(b, a) == 0 })
 	})
+}
+
+// TestRequestThatCannotBeSentDoesNotDial makes a call whose request is over its
+// protocol's limit to a node that is not connected: it fails as a request, and
+// no connection is made for it.
+func TestRequestThatCannotBeSentDoesNotDial(t *testing.T) {
+	a, b := pair(t, false, true, true, nil)
+	limit, _ := nodeproto.LimitOf(nodeproto.ProtocolDirectory)
+	_, err := a.net.call(ctx5(t), b.id, nodeproto.ProtocolDirectory, make([]byte, limit.Request+1))
+	if err == nil || errors.Is(err, transport.ErrUnreachable) || errors.Is(err, transport.ErrTimeout) {
+		t.Fatalf("err = %v, want the failure of a request that is over its limit", err)
+	}
+	if a.connCount() != 0 || b.connCount() != 0 {
+		t.Errorf("connections after the call: a %d, b %d, want none", a.connCount(), b.connCount())
+	}
 }

@@ -148,11 +148,15 @@ func (n *Network) askDialBack(ctx context.Context, node ident.NodeID) (dialBackR
 	if e == nil {
 		return dialBackReply{}, fmt.Errorf("%w: no member connection to it", transport.ErrUnreachable)
 	}
-	req, err := nodeproto.DialBackRequest{}.Encode()
+	body, err := nodeproto.DialBackRequest{}.Encode()
 	if err != nil {
 		return dialBackReply{}, fmt.Errorf("network: dial-back request: %w", err)
 	}
-	raw, err := n.callOn(ctx, e, node, nodeproto.ProtocolDialBack, req)
+	req, err := newMemberRequest(nodeproto.ProtocolDialBack, body)
+	if err != nil {
+		return dialBackReply{}, err
+	}
+	raw, err := n.callOn(ctx, e, node, req)
 	var unsupported msmux.ErrNotSupported[protocol.ID]
 	if errors.As(err, &unsupported) {
 		return dialBackReply{Outcome: dialBackCannotAsk}, nil

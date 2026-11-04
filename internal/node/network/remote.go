@@ -141,25 +141,43 @@ func outcomeError(o nodeproto.Outcome, reason string) error {
 //     the stream broke: ErrTimeout;
 //   - the caller's own context ended: its error, as it is.
 func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, req []byte) ([]byte, error) {
+	r, err := newMemberRequest(proto, req)
+	if err != nil {
+		return nil, err
+	}
 	e, err := n.connect(ctx, target)
 	if err != nil {
 		return nil, err
 	}
-	return n.callOn(ctx, e, target, proto, req)
+	return n.callOn(ctx, e, target, r)
+}
+
+// memberRequest is a request in the forms a call needs, made before the call
+// looks for a connection: a request that cannot be sent must not dial.
+type memberRequest struct {
+	proto  string
+	plain  []byte // the message, for a 1.0.0 stream
+	framed []byte // the message as a frame, for a 2.0.0 stream
+	limit  nodeproto.Limit
+}
+
+// newMemberRequest checks the protocol and the size of the request.
+func newMemberRequest(proto string, req []byte) (memberRequest, error) {
+	limit, ok := nodeproto.LimitOf(proto)
+	if !ok {
+		return memberRequest{}, fmt.Errorf("network: %s is not a node protocol", proto)
+	}
+	framed, err := nodeproto.AppendFrame(nil, req, limit.Request)
+	if err != nil {
+		return memberRequest{}, fmt.Errorf("network: request: %w", err)
+	}
+	return memberRequest{proto: proto, plain: req, framed: framed, limit: limit}, nil
 }
 
 // callOn is call on a connection already chosen: the one this side judged a
 // member's connection to the target. A call that needs a connection that is up
 // already, and does not dial one, is made with it.
-func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID, proto string, req []byte) ([]byte, error) {
-	limit, ok := nodeproto.LimitOf(proto)
-	if !ok {
-		return nil, fmt.Errorf("network: %s is not a node protocol", proto)
-	}
-	framed, err := nodeproto.AppendFrame(nil, req, limit.Request)
-	if err != nil {
-		return nil, fmt.Errorf("network: request: %w", err)
-	}
+func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID, r memberRequest) ([]byte, error) {
 	if !n.acquire(e) {
 		return nil, fmt.Errorf("%w: the connection ended", transport.ErrUnreachable)
 	}
@@ -167,7 +185,7 @@ func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID,
 
 	cctx, cancel := context.WithTimeout(ctx, n.cfg.CallTimeout)
 	defer cancel()
-	s, err := n.openStream(cctx, e, nodeproto.Offer(proto)...)
+	s, err := n.openStream(cctx, e, nodeproto.Offer(r.proto)...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -195,15 +213,15 @@ func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID,
 	// peer's reset code; a write or half-close error does not always.
 	var answer []byte
 	if nodeproto.IsLegacy(string(s.Protocol())) {
-		if _, err := s.Write(req); err == nil {
+		if _, err := s.Write(r.plain); err == nil {
 			s.CloseWrite()
 		}
-		answer, err = nodeproto.ReadMessage(s, limit.Answer)
+		answer, err = nodeproto.ReadMessage(s, r.limit.Answer)
 	} else {
 		// Not half-closed: the server keeps the stream, and with it its
 		// connection, until it sees the close that follows the answer.
-		_, _ = s.Write(framed)
-		answer, err = nodeproto.ReadFrame(bufio.NewReader(s), limit.Answer)
+		_, _ = s.Write(r.framed)
+		answer, err = nodeproto.ReadFrame(bufio.NewReader(s), r.limit.Answer)
 	}
 	if err != nil {
 		return nil, failed(err)
