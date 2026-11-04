@@ -40,6 +40,8 @@ Sidera 0.11.0 is the current release; 0.8.0 was the first public release.
 - A Claude Code or Codex session you opened yourself becomes a controller with an
   endpoint of its own, and is woken when a reply arrives.
 - Dynamic adapter install, replace, configuration and removal, while Sidera runs.
+- `sidera update` upgrades an installation from a release archive in place, and
+  `sidera daemon restart` restarts the daemon.
 
 **Planned**
 
@@ -74,10 +76,10 @@ Sidera 0.11.0 is the current release; 0.8.0 was the first public release.
   - Messages to several recipients.
 - Running Sidera
   - Installing the daemon as a background service that starts at boot.
-  - Upgrades in place, diagnostics and metrics.
+  - Diagnostics and metrics.
   - Detecting a node restored from an old backup or running twice, and stopping it
     from acting until the owner confirms.
-  - Signed release archives, a Homebrew tap and `go install`.
+  - A Homebrew tap and `go install`.
 
 ## Quick start
 

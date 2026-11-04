@@ -57,7 +57,7 @@ arguments, purpose and one example.
 | `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. |
 | `network show` | Show where the node listens, the contact line, the addresses kept for other nodes and which of them are connected. |
 | `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
-| `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted. |
+| `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted (`daemon restart`). |
 | `trust expect <node>` / `trust forget <node>` | Enter or delete the expectation for a node: the owner means to pair with it, which stands for a confirmation made in advance. |
 | `trust reject <pairing_id>` | End a request for a pairing that is stuck or unwanted: reject one this node holds, or withdraw one it started. The identifier is in `trust list`. |
 | `trust request <node> [<multiaddr> ...] [--wait <duration>]` | Ask a node for a pairing, dialing the multiaddrs for this request only; prints the verification code and waits for the pairing to complete (default `--wait 10s`, `0` does not wait). |

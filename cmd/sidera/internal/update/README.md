@@ -61,5 +61,5 @@ this is the map.
   before every download and removed when the run ends; the lock file beside it stays.
 - Tests: `harness_test.go` serves signed releases from a local TLS server, with a
   throwaway key and small archives, and `update_test.go` runs the whole run against a
-  temporary program directory and a fake node. The real binary on the three systems is
-  the acceptance's.
+  temporary program directory and a fake node. The real update path is checked on real
+  machines before a release.

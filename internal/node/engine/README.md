@@ -195,7 +195,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **A retired identity signs nothing, from the commit on.** `RetireIdentityOp` keeps the
   statement the keys verified at load as a verified revocation under `config/`, and
   `canSign` then refuses with `ReasonIdentityRetired`, before the daemon is down. The
-  operation asks for the stop (`StoredResult.Stop`), also on a resend. The same
+  operation asks for the stop (`StoredResult.Ending`), also on a resend. The same
   judgement (`SignRefusalOf`: the identity first, then the clock) is read by the
   capacity check, which then refuses new work with `ReasonIdentityRetired` so that
   nothing is acknowledged that no start will ever send, and handed to the periodic
@@ -633,7 +633,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - Give `Deps.Rand` a reader the engine alone uses; it is read in the loop.
 - Call `Execute` only for a request that `admin.Authorize` allowed and
   `admin.ValidateRequest` passed, with the key made by `admin.KeyFor` for the
-  actor that was allowed, and run what `StoredResult.Stop` asks for after the
+  actor that was allowed, and run what `StoredResult.Ending` asks for after the
   answer was written.
 - Make the transport with the engine as its handler, after `Open`, and give it to the
   engine with `SetTransport` before `Start`; give `Deps.Keys` the keys of this node, loaded

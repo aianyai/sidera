@@ -236,6 +236,10 @@ four methods `update` calls must read the same across versions:
 | `adapters.list` | `adapters[].id` and `adapters[].version` |
 | `adapters.install` | param `source` (an absolute path); result `adapter.id`, `adapter.version`, `replaced`, `already_current` |
 
+`daemon.restart` exists from 0.12.0. A daemon older than that answers `method_unknown`;
+`update` then does not restart it and tells the user to stop it with `sidera daemon stop`
+and start it the way it was started, the words of `daemon restart` in the same case.
+
 A later version may add members; it does not rename, remove or change the meaning of these.
 The command decodes the answers loosely (a member it does not know is ignored), so adding one
 breaks nothing. A change that cannot keep this is a change to the update procedure, made

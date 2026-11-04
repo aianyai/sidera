@@ -96,7 +96,8 @@ not import it: the words of the wire never enter the engine.
   exposes only the daemon's existing declarations, avoiding an import of the
   composition root. The shared mapping covers those errors and IPC path-length
   and missing-lock failures; the [daemon reference](../../../docs/references/daemon/README.md#errors-and-command-output)
-  lists their stable codes. Except for the extracted IPC path-length and peer-check
+  lists their stable codes (`daemonerr.ErrRestartUnavailable` is `refused/restart_unavailable`, which the daemon
+  reference words with what to do). Except for the extracted IPC path-length and peer-check
   messages, wire explanations are fixed: wrappers and causes stay off the wire.
   A `FatalError` is `unavailable/daemon_storage_fatal`, after an existing wire
   error but before an engine refusal it wraps. It means restart the daemon for

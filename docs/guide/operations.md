@@ -136,7 +136,7 @@ It refuses, changing nothing and saying what to do, when:
   worked around: download nothing by hand to "get past" it;
 - another `sidera update` is running.
 
-The download goes through the proxy named by `HTTPS_PROXY`/`NO_PROXY` and is kept in
+The download goes through the proxy named by `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, and is kept in
 `sidera-update/<version>` in the user cache directory, removed when the run ends (the lock
 file `sidera-update/update.lock` stays, for the next run). Nothing else
 contacts GitHub or any release server: the daemon never does. The rules, with their reasons, are in
@@ -232,8 +232,10 @@ release before 0.12.0 are upgraded with these steps.
    1 and 3 unnecessary: replace the programs as in step 2 (renaming a running program
    works on every system), then run
    `sidera daemon restart --expect-version <the new version>` (see
-   [Restart the daemon](#restart-the-daemon)). Do this only when the daemon's program
-   is the one you replaced; the version check refuses the restart otherwise.
+   [Restart the daemon](#restart-the-daemon)). This works only when the running daemon
+   is 0.12.0 or later: a 0.11.0 daemon has no `daemon restart` and is stopped and started
+   as in steps 1 and 3. Do this only when the daemon's program is the one you replaced;
+   the version check refuses the restart otherwise.
 
 4. Install the new release's package of each adapter:
 
@@ -272,7 +274,7 @@ release before 0.12.0 are upgraded with these steps.
    `sidera network show` lists the peers with `connected true`.
 
 To upgrade Codex or Claude Code themselves, upgrade them as usual. On Windows,
-restart the daemon once so that it finds the new Codex release.
+restart the daemon once (`sidera daemon restart`) so that it finds the new Codex release.
 
 ### The Codex App Server after an upgrade
 
