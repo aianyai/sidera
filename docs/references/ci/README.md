@@ -17,14 +17,16 @@ only; every other job runs on all three triggers. Every step fails its job on an
 failure; there is no
 `continue-on-error`; the only tests left out of a job are the power-loss tests on
 macOS and Windows and the crash walk of the built binary, which has jobs of its
-own (see below), and the suite runs without `-short`. The untagged `-race` step runs every
+own (see below), and the suite runs without `-short`. The `race` job runs every
 test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
-| `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...` (not on Windows arm64, where Go has no race detector), then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
-| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then the two `go test` runs of `test` again with `-tags crashtest,testclock`, on those packages only (the `-race` one not on Windows arm64) |
+| `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
+| `race` | Linux, macOS, Windows | `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`; no Windows arm64, where Go has no race detector |
+| `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64 | the three single-sample benchmark commands below |
+| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
@@ -37,7 +39,9 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | Job | Instances | `timeout-minutes` | `go test -timeout` |
 | --- | --------- | ----------------- | ------------------ |
 | `format` | 1 | 10 | none |
-| `test` | 4 | 40 | 30m per test step; benchmarks 10m, 10m, 30m |
+| `test` | 4 | 40 | 30m per test step |
+| `race` | 3 | 40 | 30m |
+| `bench` | 4 | 40 | benchmarks 10m, 10m, 30m |
 | `test-tags` | 4 | 40 | 30m per step |
 | `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
@@ -45,10 +49,12 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | `cross-compile` | 6 | 15 | none |
 | `release-dry-run` | 1 | 20 | none |
 
-A push to `main` or a pull request starts 21 jobs, three of them on macOS; a
-manual dispatch adds the nine `crashwalk` jobs, 30 in all, five of them on macOS.
-GitHub limits how many jobs of a plan run at once, macOS jobs more tightly than
-the others, so some of them may wait for a runner.
+A push to `main` or a pull request starts 28 jobs, five of them on macOS (`test`,
+`race`, `test-tags`, `acceptance` and `bench`); a manual dispatch adds the nine
+`crashwalk` jobs, 37 in all, seven of them on macOS. GitHub limits how many jobs of a
+plan run at once, macOS jobs more tightly than the others: a free plan runs at most
+five macOS jobs at once across all workflows, so on a dispatch the two macOS crash-walk
+jobs wait for the shorter macOS jobs to finish. Other jobs may wait for a runner too.
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
@@ -84,7 +90,7 @@ same 13 on every platform, among them `internal/node/daemon`,
 `internal/node/manageapi` and `cmd/sidera/internal/cli`, the packages that carry
 files behind the tags; the others reach the tags only through a dependency.
 `internal/node/store` is not among them: its tests do not depend on either tag,
-so its crash walks run in `test`, and they run under `-race` there.
+so its crash walks run in `test` and, under `-race`, in `race`.
 `scripts/tagged-test-packages.sh <tags>` makes the choice, using only
 `go list`. It lists every package and test variant with and without the tags,
 with the files that make up each (`GoFiles`, `CgoFiles`, `TestGoFiles`,
@@ -108,8 +114,8 @@ tags do not change this child selection. The crash-walk job needs only
 
 ### Single-sample benchmarks
 
-Each platform's existing `test` job runs these three benchmark commands once,
-without build tags or the race detector. `-run '^$'` omits ordinary tests and
+The `bench` job runs these three benchmark commands once on every platform, on
+every run, without build tags or the race detector. `-run '^$'` omits ordinary tests and
 `-benchtime=1x -count=1` takes one iteration of every named sub-benchmark:
 
 | Benchmark | Package | Command timeout |
@@ -127,9 +133,8 @@ return path of `Commit`; this is not the complete transaction duration.
 The cold scan uses the real filesystem with a warm page cache and includes
 opening the filesystem and constructing the table, writer and store for each
 scan; it does not measure a cold page cache or complete daemon startup.
-The existing 40-minute job limit remains unchanged; command timeouts do not
-establish that the combined job fits that limit. Hosted timings must establish
-the remaining margin.
+The job's 40-minute limit is not established by the command timeouts, which sum to
+more; hosted timings must establish the remaining margin.
 
 ### The crash walk of the binary
 
@@ -430,8 +435,8 @@ to the workflow.
   import of a root-module package would go unnoticed, so the module is built,
   tested and tidied with the workspace switched off.
 - **`CGO_ENABLED=0` in `cross-compile`**: released binaries are static, so a
-  dependency that needs cgo must fail here and not at release time. The `test`
-  job's `-race` is the one place cgo is on: the race detector needs it and a C
+  dependency that needs cgo must fail here and not at release time. The `race`
+  and `test-tags` jobs' `-race` steps are the one place cgo is on: the race detector needs it and a C
   compiler, which the Linux, macOS and Windows x64 hosted runner images carry.
 - **The crash walks take what the reliability floor needs**: the walks of
   `internal/node/store` and `internal/node/engine` replay every crash point of
@@ -499,13 +504,24 @@ to the workflow.
   unquoted expansion in the script; with `GOFLAGS` the flag would also reach the
   `go build` that the test binary runs.
 - **The walk of the binary does not use the race detector**: race detection
-  belongs where it finds races at the lowest layer, and the `-race` steps of
-  `test` and `test-tags` and the Linux `acceptance` job drive the same concurrent
+  belongs where it finds races at the lowest layer, and the `race` job, the
+  `-race` step of `test-tags` and the Linux `acceptance` job drive the same concurrent
   code. The walk checks crash consistency; rerunning thousands of real-process
   crashes under the race detector only repeats that check at about four times the
   cost per crash point.
-- **Race and plain runs are separate steps**: the race detector changes timing
+- **Race and plain runs are separate jobs**: the race detector changes timing
   and memory use; a failure in one mode must be visible without the other.
+- **The long steps are jobs of their own**: `go vet`, `go test`, `go test -race`
+  and the benchmarks used to be steps of one job, run one after another, and the
+  job took about 31 minutes on Windows. The time was in the test steps (on Windows
+  about 950 s for `-race`, 550 to 700 s for the benchmarks, about 210 s for
+  `go test` and 44 s for `go vet`); setting up a job takes 2 to 22 s and a job waits
+  about 2 s for a runner, so another runner costs almost nothing. Split into
+  `test`, `race` and `bench`, the steps run on separate machines and a run takes
+  about as long as its longest single step. The benchmarks still run on every
+  platform on every run; they only no longer queue behind the tests. The
+  `-race` run of `test-tags` stays in that job: it takes only the packages the
+  tags change, so it is short.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
   so `test` alone would never vet or run them. A separate job, not an extra
   step, keeps each failure attributable to the build it came from and lets
@@ -525,7 +541,7 @@ to the workflow.
 - **Power-loss tests run on Linux only**: tests that replay a crash against an
   in-memory file system model the same thing on every platform, so repeating
   them elsewhere only costs time. Their names all start with
-  `TestPowerLossClone`; `test` and `test-tags` skip that prefix with
+  `TestPowerLossClone`; `test`, `race` and `test-tags` skip that prefix with
   `-skip '^TestPowerLossClone'` on macOS and Windows and skip nothing on Linux.
   The fast fault-injection tests of the same file system are not named this
   way and run everywhere. Any new power-loss test must keep the prefix, or it
@@ -689,7 +705,7 @@ that leaves `inputs.crashwalk` out takes `full`. The foreground-process acceptan
 package exists and its focused tests run locally. A complete binary catalog walk
 and its hosted timings must be verified separately; focused tests do not establish the full-walk budget.
 
-The Windows arm64 jobs (`test`, `test-tags` and `acceptance` on `windows-11-arm`) have
+The Windows arm64 jobs (`test`, `bench`, `test-tags` and `acceptance` on `windows-11-arm`) have
 not run yet either: the packages build and vet for windows/arm64 on a development
 machine, and nothing has run the tests on that platform until CI does.
 
