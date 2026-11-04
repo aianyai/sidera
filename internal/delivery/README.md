@@ -141,9 +141,12 @@ expired_unconfirmed and delivery_unknown, and the close of a delivery that was n
 All values are constants in `timing.go`: `accept_before` default 10 min and cap
 1 h, unreachable hint 2 min, endpoint queue time default 30 min and cap 2 h,
 lease 5 min with a total life of at most 15 min and at most 3 redeliveries,
-safety margin 5 min. The clock tolerance (2 min) is not defined here: it is
+safety margin 5 min. The values an adapter also reasons about (the accept_before
+default and cap, the queue cap, the lease life cap, the redeliveries, `ReportByOffset`)
+are named there from `sdk/go/adapterproto/timing.go`, where they are defined, and are
+not to be redefined here. The clock tolerance (2 min) is not defined here either: it is
 `timing.ClockTolerance` from [`internal/timing`](../timing/README.md), shared
-with the trust and admin packages.
+with the trust and admin packages, which names it from the same SDK file.
 
 `report_by = accept_before + 2 h + 4 x 15 min + 2 min`: the queue cap, the
 redelivery period (4 leases, each at most 15 min, which is the only thing it

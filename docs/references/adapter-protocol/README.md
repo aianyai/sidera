@@ -403,6 +403,15 @@ message names it, and ends all the same: the daemon logs the error and does not 
 and the adapter kit declares the capability itself and hands `Application.Shutdown` an
 intent that is never empty.
 
+**Delivery timing.** An adapter that keeps its own records reasons about two windows:
+how long the idempotency key of a message it sent is still held by the node, so that after
+a restart it never resends with a key the node has forgotten, and how long a message it
+received may be handed out to it again, so that it prunes its table of processed message ids
+only when the message cannot return. The SDK exports both, `adapterproto.SentKeyWindow` and
+`adapterproto.ReceivedRedeliveryWindow`, with the constants they follow from; what each
+means and from which moment it is counted is in their comments, and the deadlines they
+follow from are in [delivery](../delivery/README.md#deadlines-and-retention).
+
 **The close of a session.** `session.close` releases the native session, and the
 daemon may ask again at any time: after the endpoint was closed in the channel, after the
 adapter restarted, and again when an earlier answer was lost. It is idempotent, and a native
@@ -1097,7 +1106,9 @@ is authoritative.
   `codes.go` (the application codes and the rules of the error object),
   `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
   `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
-  `validate.go`.
+  `validate.go`, `timing.go` (the delivery timing constants and the two windows an adapter
+  keeps its records for; they are the node's own values, which `internal/delivery` and
+  `internal/timing` name from here).
 - `sdk/go/adapterkit`: the serve loop of an adapter (`serve.go`: the states and the lock
   order, `conn.go`: what the adapter sends, `application.go`: what it implements, `lock_*.go`:
   the instance lock). Tests: `TestOnlyInitializePingAndCancelAreServedBeforeInitialize`,

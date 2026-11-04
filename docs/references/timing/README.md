@@ -49,4 +49,6 @@ up on, is a protocol fork that no retry resolves.
 | A certificate is issued valid from this long before its issue time, because validity is compared without tolerance and a higher serial replaces the old certificate at once | `internal/record` (`IssueNetworkKeyCertificate`, `IssueDeviceCertificate`) |
 | A reading of the wall clock may be this far behind the persisted high water mark before the node treats the clock as set back; the boundary is inclusive | `internal/node/clock` (`CheckWall`, `HighWater.Observe`; table `TestCheckWallJudgmentTable`) |
 
-The value itself: `internal/timing/timing.go`. Test: `TestClockTolerance`.
+The value is defined in `sdk/go/adapterproto/timing.go`, because an adapter that keeps its
+own records needs it too and may import only the SDK; `internal/timing/timing.go` names it
+from there. Test: `TestClockTolerance`.

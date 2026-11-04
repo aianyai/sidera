@@ -6,17 +6,21 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/timing"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Decided timing values. They are protocol constants, not node settings: the
 // sender computes ReportBy from the caps below and every target must reach the
-// same value from the same envelope.
+// same value from the same envelope. The values an adapter also reasons about
+// are defined in package adapterproto, the one module an adapter may import,
+// and named here so the node's code keeps one vocabulary; the rest are the
+// node's own.
 const (
 	// DefaultAcceptBefore is the delivery deadline a sender uses when the
 	// caller names none.
-	DefaultAcceptBefore = 10 * time.Minute
+	DefaultAcceptBefore = adapterproto.DefaultAcceptBefore
 	// MaxAcceptBefore is how far in the future a delivery deadline may lie.
-	MaxAcceptBefore = time.Hour
+	MaxAcceptBefore = adapterproto.MaxAcceptBefore
 
 	// UnreachableHintAfter is how long contact with the target must have been
 	// failing before the sender hears about it.
@@ -26,17 +30,17 @@ const (
 	// queued unless its owner chooses otherwise.
 	DefaultEndpointMaxQueue = 30 * time.Minute
 	// MaxQueueCap is the protocol cap on any endpoint's longest queue time.
-	MaxQueueCap = 2 * time.Hour
+	MaxQueueCap = adapterproto.MaxQueueCap
 
 	// LeaseDuration is the initial life of a lease handed out by recv.
 	LeaseDuration = 5 * time.Minute
 	// LeaseRenewalCap caps the total life of one lease, measured from the
 	// moment it was issued, however often it is renewed.
-	LeaseRenewalCap = 15 * time.Minute
+	LeaseRenewalCap = adapterproto.LeaseRenewalCap
 	// MaxRedeliveries is how many times a message whose lease expired
 	// unacknowledged is handed out again before its outcome is declared
 	// unknown.
-	MaxRedeliveries = 3
+	MaxRedeliveries = adapterproto.MaxRedeliveries
 
 	// ReportBySafetyMargin is how long before ReportBy the target must already
 	// have settled every delivery, so the sender can still pull the result.
@@ -45,16 +49,16 @@ const (
 
 // MaxLeases is how many leases one message can receive: the first hand-out and
 // its redeliveries.
-const MaxLeases = 1 + MaxRedeliveries
+const MaxLeases = adapterproto.MaxLeases
 
 // MaxRedeliveryPeriod is the longest time a message can spend under leases. It
 // follows only from the lease life cap and the lease count: every one of the
 // MaxLeases leases may live for LeaseRenewalCap.
-const MaxRedeliveryPeriod = MaxLeases * LeaseRenewalCap
+const MaxRedeliveryPeriod = adapterproto.MaxRedeliveryPeriod
 
 // ReportByOffset is the distance from accept_before to report_by: the longest
 // queue time, then the longest time under leases, then the clock tolerance.
-const ReportByOffset = MaxQueueCap + MaxRedeliveryPeriod + timing.ClockTolerance
+const ReportByOffset = adapterproto.ReportByOffset
 
 // ReportBy returns the time until which the sender keeps pulling the state of a
 // delivery whose delivery deadline is acceptBefore. After it every delivery

@@ -14,6 +14,9 @@ for the reasoning.
 
 ## Invariants
 
+- The value is defined in `sdk/go/adapterproto/timing.go`, because an adapter that
+  keeps its own records needs it too and may import only the SDK; this package names
+  it from there and must never give it a value of its own.
 - The value is a protocol constant, not a node setting: a node that chose its
   own tolerance would disagree with its peers about voucher freshness, delivery
   deadlines and offline-directive signing times.

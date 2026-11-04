@@ -35,6 +35,12 @@ protocol has a version of its own.
   address of a runtime on another node, and page through a long list, without logging in
   to that machine; on a daemon that does not declare the capability they say that it is too
   old.
+- **Go SDK: the delivery timing an adapter reasons about.** `adapterproto` now exports
+  `DefaultAcceptBefore`, `MaxAcceptBefore`, `ClockTolerance` and `ReportByOffset` with the
+  constants they follow from, and two durations for an adapter that keeps its own records:
+  `SentKeyWindow`, how long the idempotency key of a send is certainly still held, and
+  `ReceivedRedeliveryWindow`, how long a received message may be handed out again. An adapter
+  no longer copies these numbers from the node. No value changes.
 
 ### Changed
 

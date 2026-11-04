@@ -89,6 +89,15 @@ the sender's idempotency keys as long as the dedup records. Reply permission
 reads some of these facts for longer; see
 [what each side keeps](../envelope/README.md#what-each-side-keeps).
 
+The timing values an adapter also reasons about are defined in
+`sdk/go/adapterproto/timing.go`, the one module an adapter may import, and this package
+names them from there: `DefaultAcceptBefore`, `MaxAcceptBefore`, `ReportByOffset` and the
+values it is derived from (`MaxQueueCap`, `LeaseRenewalCap`, `MaxRedeliveries`,
+`MaxLeases`, `MaxRedeliveryPeriod`), and `timing.ClockTolerance`. The SDK adds the two windows
+an adapter that keeps its own records needs, each measured from a moment the adapter
+observes: `SentKeyWindow`, how long the idempotency key of a send is certainly still held,
+and `ReceivedRedeliveryWindow`, how long a received message may be handed out again.
+
 A target keeps its record of a delivery until `RecordRetainUntil(report_by)`,
 `report_by` plus the clock tolerance. A source pulls until `report_by` on its own
 clock and reads a missing record as a loss at the target (below), so a target
@@ -820,6 +829,10 @@ permission still reads it.
 
 ## Where
 
+- `sdk/go/adapterproto/timing.go`: the definition of the timing values above, the
+  windows `SentKeyWindow` and `ReceivedRedeliveryWindow`; `internal/delivery/timing.go`
+  and `internal/timing/timing.go` take their values from it. Tests: `TestReportByDerivation`,
+  `TestDecidedValues`, `TestClockTolerance`.
 - `internal/delivery/state.go`: states, sub-state, reject reasons, causes,
   the transition table. Tests: `TestCanTransition`, `TestStateClasses`,
   `TestRejectReasonNames`.
