@@ -17,14 +17,14 @@ only; every other job runs on all three triggers. Every step fails its job on an
 failure; there is no
 `continue-on-error`; the only tests left out of a job are the power-loss tests on
 macOS and Windows and the crash walk of the built binary, which has jobs of its
-own (see below), and the suite runs without `-short`. The `-race` steps run every
+own (see below), and the suite runs without `-short`. The untagged `-race` step runs every
 test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...` (not on Windows arm64, where Go has no race detector), then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
-| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` (the `-race` one not on Windows arm64) |
+| `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then the two `go test` runs of `test` again with `-tags crashtest,testclock`, on those packages only (the `-race` one not on Windows arm64) |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
@@ -75,6 +75,29 @@ pipe and helper-reexecution tests remain available without `acceptance`.
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
 binaries and have their own jobs, limits and timeouts. `go vet` in `test-tags`
 adds it so the files are at least type-checked on every platform.
+
+The tagged `go test` steps run only the packages whose test binary the tags
+change: `go test` on any other package builds the same test from the same files
+and dependencies, so a second run would only repeat the verdict of the `test`
+job. With `crashtest,testclock` those are 13 of the 96 packages with tests, the
+same 13 on every platform, among them `internal/node/daemon`,
+`internal/node/manageapi` and `cmd/sidera/internal/cli`, the packages that carry
+files behind the tags; the others reach the tags only through a dependency.
+`internal/node/store` is not among them: its tests do not depend on either tag,
+so its crash walks run in `test`, and they run under `-race` there.
+`scripts/tagged-test-packages.sh <tags>` makes the choice, using only
+`go list`. It lists every package and test variant with and without the tags,
+with the files that make up each (`GoFiles`, `CgoFiles`, `TestGoFiles`,
+`XTestGoFiles`, `EmbedFiles`); a variant whose line differs, or that exists with
+one set of tags only, is changed. A package is printed when the generated test
+main package that `go list -test` reports for it has a changed package among its
+dependencies. The test mains themselves are left out of the comparison, because the
+file generated for them is no source of difference. The list is not kept in the
+workflow, so a package that comes to depend on a tag is picked up without editing
+it. The script fails, and so does the job, when `go list` fails or when the list
+is empty: a tagged job that selects nothing would pass having tested nothing.
+`go vet` keeps running over every package, since it is cheap and type-checks each
+tagged file.
 
 The regular `acceptance` job enables all three outer test tags, so
 `TestTaggedProcessPrerequisites` executes alongside the other binary tests.
@@ -142,7 +165,7 @@ machine is fast unless it asks for `full`.
 
 The package-local walks of `internal/node/store`, `internal/node/engine`,
 `internal/node/config`, `internal/node/keys` and `internal/node/daemon` retain
-complete transaction coverage and run in `test` and `test-tags`. Binary walk
+complete transaction coverage and run in `test`. Binary walk
 selection belongs to the outer catalog test; the package and its process fixture
 are present. A missing formal walk remains an error caught by the name guard,
 not a reason to skip the job.
@@ -459,8 +482,9 @@ to the workflow.
 - **The walk of the binary runs on demand, not on every push**: the full walk
   reruns about 2,000 real-process crashes on each of three operating systems.
   Per-operation crash recovery is already checked on every push by the crash
-  tests of the store, the engine and the daemon (the `crashtest` tag, in
-  `test-tags`), so what the walk of the binary adds is the end-to-end scenario of
+  tests of the store, the engine and the daemon (in `test`; the `crashtest` tag
+  adds the daemon's binary-level crash points, in `test-tags`), so what the walk
+  of the binary adds is the end-to-end scenario of
   the built program. That is run when it is wanted, such as before a release or
   after a change to recovery code, with a manual dispatch of the workflow.
 - **The inner binary is built with `-race` on Linux only, in `acceptance`**: the
@@ -486,6 +510,14 @@ to the workflow.
   so `test` alone would never vet or run them. A separate job, not an extra
   step, keeps each failure attributable to the build it came from and lets
   both builds run in parallel.
+- **Why the tagged job takes only some packages**: a test binary built from the
+  same files and dependencies is the same program, so running it again with a tag
+  it does not read repeats the verdict of the untagged job. Of the 96 packages with
+  tests, 13 build a different binary with `crashtest,testclock`. The other 83 include
+  `internal/node/store`, whose crash walks are the longest tests of the suite. The
+  selection is read from `go list` and not written in the workflow, so that a
+  package which gains a file behind the tag is tested with it from that commit on,
+  and a list nobody remembers to edit cannot go stale.
 - **Explicit `-timeout`**: `go test` aborts a package after 10 minutes by
   default, which a slow runner under `-race` can exceed. Every `go test` step
   names `30m`, inside the job's 40 minute limit, so a hang ends with the test
@@ -611,8 +643,13 @@ times vary by roughly 20% between runs, and by more in single cells: macOS `-rac
 without tags took 990 s and then 1140 s with no change to that path, and the
 ubuntu plain tagged run took 497 s and then 329 s. The margin is therefore read
 from the slowest job, not from a mean. Almost all of the time is the crash walks.
-Re-measure after a change to the store's tests with
-`GOMAXPROCS=4 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./internal/node/store`.
+The "with tags" columns date from when the tagged job also ran the store; the store's
+tests do not depend on the tags, so it no longer runs there, and the figures of the
+untagged columns are the ones that still apply. Re-measure after a change to the store's
+tests with
+`GOMAXPROCS=4 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./internal/node/store`
+(the tags do not change the store's test binary, so the command also measures the
+untagged job).
 
 On a developer machine (4 processors, 2026-10-25) that command took 1116 s with the
 two kinds of crash and the nested walk, and 139 s once the race run also skipped the
@@ -666,6 +703,7 @@ machine, and nothing has run the tests on that platform until CI does.
   `scripts/release-notes.sh` (prints the changelog section of a version),
   `scripts/third-party-notices.sh` (writes `THIRD_PARTY_NOTICES`) and
   `CHANGELOG.md`.
+- Tagged package selection: `scripts/tagged-test-packages.sh`.
 - Line endings: `.gitattributes`.
 
 ## Run the same checks locally
@@ -685,8 +723,9 @@ go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -time
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...
-go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
-go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
+# (these two run the packages the tags change, the way CI does)
+go test -count=1 -timeout 30m -tags crashtest,testclock $(scripts/tagged-test-packages.sh crashtest,testclock)
+go test -race -count=1 -timeout 30m -tags crashtest,testclock $(scripts/tagged-test-packages.sh crashtest,testclock)
 
 # the jobs of the binary; CLI/MCP tests and the foreground-process fixture
 go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
