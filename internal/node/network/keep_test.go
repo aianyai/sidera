@@ -152,6 +152,10 @@ func TestKeptConnectionComesBackAfterARestart(t *testing.T) {
 		{"the node it keeps the connection to restarts", func(a, b *peerNode) {
 			listen := b.listenAddr()
 			b.net.Close()
+			// The node ends its connections to the one that closed, as it does when
+			// it sees them lost: see below for why the test does not wait for it to
+			// see them. What follows is the dials after a loss.
+			a.closeConns()
 			// Down for a few attempts of the backoff.
 			settle(a.clk, 10*time.Second, 10)
 			b.restart(listen, a, false)
@@ -174,8 +178,9 @@ func TestKeptConnectionComesBackAfterARestart(t *testing.T) {
 			// happened) never to process it, which leaves the other end of that
 			// connection open. The product tolerates such a half-open connection
 			// (the next call fails on it and clears it, and the yamux keepalive
-			// clears it within about 30 seconds), but this test waits for the
-			// restarted side's connection to come back.
+			// clears it within about 30 seconds), but the test cannot wait for
+			// that on a fake clock, so where the other side restarts it ends the
+			// connections of the node that stays itself.
 			advancing(t, a.clk, "the connection to come up and both questions to be answered", time.Second, func() bool {
 				return a.connectedTo(b) && b.connectedTo(a) && a.reachOf(b) == reachUnreachable && b.reachOf(a) != reachUnknown
 			})
