@@ -89,16 +89,26 @@ jobs:
 
   # The race detector needs cgo and a C compiler, which the Linux, macOS and
   # Windows x64 hosted images ship, and Go does not support it on windows/arm64,
-  # so there is no job for that platform. The race run is the longest step of a
-  # run on Windows.
+  # so there is no job for that platform.
+  #
+  # The race run of a platform spreads about 2,700 package-seconds over four
+  # processors, so it is bound by processors and not by one package: on Windows
+  # x64 the step took 940 to 980 s while its slowest package took about 500 s.
+  # Two machines halve it. The tree under internal/node and every other package
+  # hold about half of that time each, and a split by directory keeps what each
+  # part holds obvious and needs no list to maintain. The packages are listed by
+  # one go list and divided in the select step, so that the two parts are
+  # complements of each other by construction and a new package lands in one of
+  # them without editing this file.
   race:
-    name: race (${{ matrix.os }})
+    name: race (${{ matrix.os }}, ${{ matrix.part }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        part: [node, rest]
     defaults:
       run:
         shell: bash
@@ -112,8 +122,34 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
+      # The node part is internal/node and every package under it; the rest part
+      # is every other package of ./... and ./sdk/go/....
+      - name: packages of this part
+        id: packages
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          node=$(GOWORK=off go list -m)/internal/node
+          all=$(go list ./... ./sdk/go/...)
+          if [ "$PART" = node ]; then
+            packages=$(echo "$all" | awk -v node="$node" '$0 == node || index($0, node "/") == 1')
+          else
+            packages=$(echo "$all" | awk -v node="$node" '!($0 == node || index($0, node "/") == 1)')
+          fi
+          if [ -z "$packages" ]; then
+            echo "::error::no package selected for the $PART part"
+            exit 1
+          fi
+          echo "$packages"
+          echo "packages=$(echo "$packages" | tr '\n' ' ')" >>"$GITHUB_OUTPUT"
+      # $PACKAGES, the packages the previous step printed, is a list of words on
+      # purpose.
       - name: go test -race
-        run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
+        env:
+          PACKAGES: ${{ steps.packages.outputs.packages }}
+        run: |
+          # shellcheck disable=SC2086
+          go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" $PACKAGES
 
   # One untagged, non-race sample records each platform's real filesystem
   # costs. These are measurements, not performance thresholds, and nothing reads

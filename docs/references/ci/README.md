@@ -18,13 +18,13 @@ runs on all three triggers. Every step fails its job on any
 failure; there is no
 `continue-on-error`; the only tests left out of a job are the power-loss tests on
 macOS and Windows and the crash walk of the built binary, which has jobs of its
-own (see below), and the suite runs without `-short`. The `race` job runs every
-test, the crash walks of `internal/node/store` included.
+own (see below), and the suite runs without `-short`. The two parts of the `race`
+job together run every test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
-| `race` | Linux, macOS, Windows | `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`; no Windows arm64, where Go has no race detector |
+| `race` (shown as `race (<os>, <part>)`) | Linux, macOS, Windows, each in two parts, `node` and `rest` | first a step that lists the packages of the part from one `go list ./... ./sdk/go/...` and prints them (`node` is `internal/node` and every package under it, `rest` is every other package), then `go test -race -count=1 -timeout 30m [-skip …]` on that list; no Windows arm64, where Go has no race detector |
 | `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64; manual dispatch with `benchmarks` set only | the three single-sample benchmark commands below |
 | `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
@@ -37,17 +37,17 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | Job | Instances | `timeout-minutes` | `go test -timeout` |
 | --- | --------- | ----------------- | ------------------ |
 | `test` | 4 | 40 | 30m per test step |
-| `race` | 3 | 40 | 30m |
+| `race` | 6: Linux, macOS and Windows x64, two parts each | 40 | 30m |
 | `bench` | 4 when a dispatch asks for the benchmarks | 40 | benchmarks 10m, 10m, 30m |
 | `test-tags` | 4 | 40 | 30m per step |
 | `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
 | `linux-checks` | 1 | 30 | go default for the `sdk/go` tests, none for the rest |
 
-A push to `main` or a pull request starts 16 jobs, four of them on macOS (`test`,
-`race`, `test-tags` and `acceptance`); a manual dispatch adds the nine `crashwalk`
-jobs, 25 in all, six of them on macOS, and one that sets `benchmarks` adds the four
-`bench` jobs, 29 in all, seven of them on macOS. GitHub runs at most 20 jobs of
+A push to `main` or a pull request starts 19 jobs, five of them on macOS (`test`,
+the two `race` parts, `test-tags` and `acceptance`); a manual dispatch adds the nine
+`crashwalk` jobs, 28 in all, seven of them on macOS, and one that sets `benchmarks`
+adds the four `bench` jobs, 32 in all, eight of them on macOS. GitHub runs at most 20 jobs of
 the account at once, and macOS jobs more tightly than the others: at most five macOS
 jobs at once across all workflows, so on a dispatch the two macOS crash-walk jobs
 wait for the shorter macOS jobs to finish. A push stays within the limit on its own; a run that starts while
@@ -535,7 +535,23 @@ to the workflow.
   about as long as its longest single step. The benchmarks have since been
   made a dispatch option (see "Single-sample benchmarks"). The
   `-race` run of `test-tags` stays in that job: it takes only the packages the
-  tags change, so it is short.
+  tags change, so it is short. The race job was later split in two (see the next
+  entry).
+- **The race run of a platform is two jobs**: it spreads about 2,700
+  package-seconds over the four processors of a runner (on Windows x64 the step
+  took 940 to 980 s while its slowest package, `internal/node/engine`, took about
+  500 s), so it is bound by processors and not by one package, and two machines
+  halve it. The tree under `internal/node` and the other packages hold about half
+  of that time each (on macOS `engine` 362 s, `store` 203 s, `daemon` 144 s,
+  `adapterhost` 133 s and `keys` 106 s on one side; `protocol` 220 s, `delivery`
+  147 s, `handoff` 88 s, `reply` 74 s and `authz` 69 s on the other). The split is by
+  directory, so what each part holds is obvious and no list has to be kept. The
+  `node` part is the package `internal/node` and every package whose import path
+  starts with `internal/node/`; the `rest` part is every other package. Both are
+  taken from one `go list ./... ./sdk/go/...` by a step of the job, so they are
+  complements by construction: a new package is in exactly one part, and none can
+  fall between them. The step fails on an empty part, since `go test` with no
+  package would pass having tested nothing. The cost is three more runners per run.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
   so `test` alone would never vet or run them. A separate job, not an extra
   step, keeps each failure attributable to the build it came from and lets
@@ -771,10 +787,13 @@ Two dispatched runs of the present layout (2026-11-04, crash walk `smoke`) took
 jobs waited up to 500 s. Their longest jobs were `race` on Windows x64 (976 s and
 1017 s) and `bench` on Windows x64 (882 s and 966 s) and on Windows arm64 (726 s
 and 782 s). `test-tags` with its race run took 180 to 560 s, against 900 to
-1150 s when it tested every package. A run now lasts about as long as the longer
-of the two Windows x64 jobs: the race run spreads about 2 700 package-seconds over
-four processors, and the benchmarks are one cold-start scan of 200,000 files.
-Each could be split further only by adding jobs beyond the 20 that run at once.
+1150 s when it tested every package. That layout had one `race` job per
+platform and the benchmarks ran on every push, so a run lasted about as long as the
+longer of the two Windows x64 jobs: the race run spreads about 2 700
+package-seconds over four processors, and the benchmarks are one cold-start scan of
+200,000 files. The race run was then split in two jobs per platform and the
+benchmarks were made a dispatch option, so these figures describe the layout before
+that split.
 
 The foreground-process acceptance package exists and its focused tests run
 locally. A complete binary catalog walk and its hosted timings must be verified
