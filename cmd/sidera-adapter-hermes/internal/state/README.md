@@ -21,4 +21,9 @@ requests made of inbound messages, the answers to them, processed inbound messag
   answer, the request card it answers, when it was sent and whether its failure was
   reported. `Reply.Watched` says whether a notice still looks at it (within
   `adapterproto.SentKeyWindow` of the send); the window is the SDK's, not a setting.
+- A card keeps where it came from (`Origin`, written once before the claim, because the
+  board later holds a subscription the adapter made) and the id of the reply being
+  written to it (`ReplyID`, written before the completion, so that a redelivered reply is
+  recognised). An endpoint keeps when a card of it last ended for a failed delivery and
+  when a notice about it was last handled (`FailedAt`, `NoticedAt`).
 - This package decides nothing else; `lane` does.
