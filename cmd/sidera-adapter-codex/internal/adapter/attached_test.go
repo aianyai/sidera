@@ -54,7 +54,7 @@ func newFakeOwner(t *testing.T, codex *fakeCodex) *fakeOwner {
 		o.mu.Lock()
 		o.experimental = p.Capabilities.ExperimentalAPI
 		o.mu.Unlock()
-		return map[string]any{"userAgent": "sidera-adapter-codex/0.166.0 (test)", "codexHome": "/h"}, nil
+		return map[string]any{"userAgent": "sidera-adapter-codex/" + codex.servingVersion() + " (test)", "codexHome": "/h"}, nil
 	})
 	codex.srv.Handle("thread/read", func(raw json.RawMessage) (any, *appserver.RPCError) {
 		p := decode[struct{ ThreadID string }](raw)

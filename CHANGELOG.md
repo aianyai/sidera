@@ -23,6 +23,15 @@ protocol has a version of its own.
   `adapter.probe` is now `adapterproto.HandshakeLimit`, written into the protocol reference,
   and the Go SDK gives the context of an application's `Start` and `Probe` a deadline 2 seconds
   short of it, so an adapter can tell how long it has. The limit itself is unchanged.
+- **Codex adapter: the App Server is replaced after a Codex upgrade.** The App Server the
+  adapter runs outlives the adapter and the daemon, so after you upgraded Codex it went on
+  serving the old version until someone ended it. The adapter now compares the installed
+  Codex with the server's version when it starts, every ten minutes and when a turn ends,
+  and replaces the server as soon as no session is running a turn; a turn is never cut
+  short for the upgrade. A prompt that arrives while the server is being replaced is
+  refused as the runtime being unavailable, which the daemon retries. A server the adapter
+  cannot show to be its own is left running with a warning in the adapter's log, and you
+  restart it yourself.
 - **Codex adapter: the App Server is identified by the process's start key.** The adapter
   records the start key of the App Server it starts in `app-server.json`, on every platform,
   and checks it instead of the wall-clock start time, which moves when the clock is set. A

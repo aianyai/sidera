@@ -28,6 +28,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	codexPath, sideraPath, version := a.codexPath, a.sideraPath, a.codexVer
 	missing := append(missingPrograms(nil), a.missing...)
 	serverVer := a.serverVer
+	replacing := a.upgrade.pending
 	srv := a.srv
 	a.mu.Unlock()
 	if !started {
@@ -76,7 +77,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	res.Dependencies = append(res.Dependencies,
 		codexDependency(codexProblem, version),
 		programDependency("sidera", missing, ""),
-		serverDependency(c != nil, serverVer, version, srv.Exposure()),
+		serverDependency(c != nil, serverVer, version, srv.Exposure(), replacing),
 	)
 
 	a.mu.Lock()
@@ -114,15 +115,18 @@ func codexDependency(problem, version string) adapterproto.Dependency {
 // serverDependency judges the App Server. A server left running by an earlier
 // adapter may not be the one this adapter would start: it may serve the version
 // that was installed then, or run where a sandboxed command can be given the
-// adapter's files (exposure). The adapter does not end a server it did not start,
-// so either is reported for someone to restart it.
-func serverDependency(reachable bool, serverVer, installed, exposure string) adapterproto.Dependency {
+// adapter's files (exposure). A server of another version is replaced by the
+// adapter when no session is running (replacing); one it cannot show to be its own,
+// or that runs in the state directory, is reported for someone to restart.
+func serverDependency(reachable bool, serverVer, installed, exposure string, replacing bool) adapterproto.Dependency {
 	d := adapterproto.Dependency{Name: "app-server", State: adapterproto.DependencyOK, Detail: serverVer}
 	switch {
 	case !reachable:
 		d.State, d.Detail = adapterproto.DependencyMissing, "the App Server cannot be reached"
 	case exposure != "":
 		d.State, d.Detail = adapterproto.DependencyWrongVersion, cut(exposure, adapterproto.MaxDetailLen)
+	case serverVer != "" && installed != "" && serverVer != installed && replacing:
+		d.State, d.Detail = adapterproto.DependencyWrongVersion, fmt.Sprintf("serving %s, installed %s: it will be replaced when no session is running", serverVer, installed)
 	case serverVer != "" && installed != "" && serverVer != installed:
 		d.State, d.Detail = adapterproto.DependencyWrongVersion, fmt.Sprintf("serving %s, installed %s: restart it", serverVer, installed)
 	}
@@ -180,10 +184,16 @@ func (a *App) toolProbe(ctx context.Context, c *appserver.Client, sideraPath, co
 		// Only a preset without a sandbox offers this front end, so the policy is
 		// dangerFullAccess: command/exec cannot carry the permission profile of a
 		// sandboxed thread, and without a policy it would run under the owner's own.
+		leave, ok := a.enterServerOp()
+		if !ok {
+			out.Outcome, out.Detail, out.Method = adapterproto.ProbeFailed, "the App Server is being replaced", ""
+			return out
+		}
 		r, err := c.CommandExec(ctx, appserver.CommandExecParams{
 			Command: []string{sideraPath, "probe"}, CWD: preset.CWD, Env: env,
 			SandboxPolicy: preset.SandboxPolicy(), TimeoutMs: 20000,
 		})
+		leave()
 		switch {
 		case err != nil:
 			out.Outcome, out.Detail = adapterproto.ProbeFailed, "the command could not be run: "+shorten(err.Error())

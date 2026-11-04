@@ -63,6 +63,8 @@ type fakeCodex struct {
 	// unprotected makes thread/start and thread/resume answer with no active
 	// permission profile, whatever the request asked for.
 	unprotected bool
+	// serving is the version the server reports; empty means 0.164.0.
+	serving string
 }
 
 // dataDir is the data directory of the sessions the tests create: a real
@@ -130,9 +132,21 @@ func decode[T any](raw json.RawMessage) T {
 	return v
 }
 
+// servingVersion is the version the server reports in its initialize answer, which
+// the harness's Codex program matches unless a test says otherwise: a server of another
+// version is replaced once it is idle, which would end a connection the test uses.
+func (f *fakeCodex) servingVersion() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.serving == "" {
+		return "0.164.0"
+	}
+	return f.serving
+}
+
 func (f *fakeCodex) install() {
 	f.srv.Handle("initialize", func(json.RawMessage) (any, *appserver.RPCError) {
-		return map[string]any{"userAgent": "sidera-adapter-codex/0.164.0 (test)", "codexHome": "/h"}, nil
+		return map[string]any{"userAgent": "sidera-adapter-codex/" + f.servingVersion() + " (test)", "codexHome": "/h"}, nil
 	})
 	f.srv.Handle("account/read", func(json.RawMessage) (any, *appserver.RPCError) {
 		f.mu.Lock()
@@ -333,6 +347,11 @@ type fakeManager struct {
 	exposure string
 	// gate, when set, holds Connect until it is closed.
 	gate chan struct{}
+
+	mu         sync.Mutex
+	terminated int
+	// terminate is what Terminate does besides counting; nil does nothing.
+	terminate func() error
 }
 
 func (m *fakeManager) Connect(ctx context.Context) (appserver.Endpoint, error) {
@@ -346,6 +365,23 @@ func (m *fakeManager) Connect(ctx context.Context) (appserver.Endpoint, error) {
 	return m.ep, m.err
 }
 func (m *fakeManager) Exposure() string { return m.exposure }
+
+func (m *fakeManager) Terminate(context.Context) error {
+	m.mu.Lock()
+	m.terminated++
+	f := m.terminate
+	m.mu.Unlock()
+	if f == nil {
+		return nil
+	}
+	return f()
+}
+
+func (m *fakeManager) terminations() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.terminated
+}
 
 // harness is the daemon's end of a served adapter, with a fake App Server behind
 // the adapter.

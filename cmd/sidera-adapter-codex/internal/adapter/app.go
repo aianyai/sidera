@@ -36,6 +36,9 @@ type ServerManager interface {
 	// Exposure says why the server Connect last returned may let a sandboxed
 	// command reach the adapter's files, or is empty.
 	Exposure() string
+	// Terminate ends the server, when it can be shown to be one this adapter
+	// started; see server.Server.Terminate.
+	Terminate(ctx context.Context) error
 }
 
 // Options holds what a test replaces. The zero value is the real thing.
@@ -68,6 +71,9 @@ type Options struct {
 	// StartWait is the longest adapter.start waits for the sessions to be loaded; zero
 	// means until a second before the deadline of its context.
 	StartWait time.Duration
+	// UpgradeCheckEvery is how often the version of the Codex program is compared
+	// with the one the App Server runs.
+	UpgradeCheckEvery time.Duration
 	// ReconnectMin and ReconnectMax bound the wait between attempts to reach the
 	// App Server again.
 	ReconnectMin, ReconnectMax time.Duration
@@ -110,6 +116,9 @@ func (o *Options) defaults() {
 	if o.TurnStaleAfter == 0 {
 		o.TurnStaleAfter = 2 * time.Hour
 	}
+	if o.UpgradeCheckEvery == 0 {
+		o.UpgradeCheckEvery = 10 * time.Minute
+	}
 	if o.ReconnectMin == 0 {
 		o.ReconnectMin = time.Second
 	}
@@ -134,6 +143,14 @@ type App struct {
 
 	// connMu serializes dialling, so that two callers never open two connections.
 	connMu sync.Mutex
+	// replaceGate is held, shared, by every operation that needs the App Server to
+	// stay as it is for as long as it lasts (see enterServerOp), and exclusively by
+	// the replacement of the server.
+	replaceGate sync.RWMutex
+	// checkMu lets one comparison of the server's version run at a time.
+	checkMu sync.Mutex
+	// versionWatch starts the periodic comparison once.
+	versionWatch sync.Once
 	// attachMu serializes the attaching of sessions, so that a repeated attachment
 	// never starts two readings of one thread.
 	attachMu sync.Mutex
@@ -155,6 +172,7 @@ type App struct {
 	client     *appserver.Client // nil while there is no connection
 	serverVer  string
 	signedIn   bool
+	upgrade    upgradeState
 	reconnect  bool // a reconnect loop is running
 	// endRestore ends the loading of the sessions of the latest adapter.start.
 	endRestore  context.CancelFunc

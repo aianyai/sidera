@@ -117,6 +117,10 @@ feed:
 	wg.Wait()
 	if r.wasAnswered() {
 		a.publishAvailability(false)
+		// The check made after the answer found the sessions not yet loaded, which count
+		// as busy; now their state is known, and a replacement that was waiting for it
+		// need not wait for the next periodic check.
+		a.checkServer(ctx)
 	}
 }
 

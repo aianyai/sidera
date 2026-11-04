@@ -68,6 +68,11 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	if !ok {
 		return refused(adapterproto.RefusalNativeUnavailable), nil
 	}
+	leave, ok := a.enterServerOp()
+	if !ok {
+		return refused(adapterproto.RefusalNativeUnavailable), nil
+	}
+	defer leave()
 	c := a.liveClient()
 	if c == nil {
 		if cc, err := a.ensureClient(ctx); err == nil {

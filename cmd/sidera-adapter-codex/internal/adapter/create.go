@@ -74,6 +74,15 @@ func (a *App) CreateSession(ctx context.Context, p adapterproto.SessionCreatePar
 	if rec.began.IsZero() {
 		rec.began = time.Now()
 	}
+	// A creation keeps the App Server from being replaced for as long as it runs.
+	leave, ok := a.enterServerOp()
+	if !ok {
+		if rec.state.ThreadID != "" {
+			return a.lostConnection(rec), nil
+		}
+		return failed(adapterproto.CreateFailNativeUnavailable, "the App Server is being replaced"), nil
+	}
+	defer leave()
 	res, err := a.runCreate(ctx, rec, p)
 	if err != nil {
 		return res, err

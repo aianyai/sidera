@@ -7,7 +7,6 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
-	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/server"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -95,9 +94,8 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	a.runtimeEP, a.instance = p.RuntimeEndpoint, inst
 	a.codexPath, a.sideraPath, a.codexVer, a.missing = codexPath, sideraPath, version, missing
 	a.presets, a.sessions, a.byThread = presets, sessions, byThread
-	a.srv = a.opts.NewServer(server.Config{
-		Program: codexPath, StateDir: a.inst.StateDir, Environ: a.opts.Environ, Logger: a.log,
-	})
+	a.srv = a.newServer()
+	a.upgrade = upgradeState{}
 	a.mu.Unlock()
 
 	// The sessions are loaded in the background and answered when the time adapter.start
@@ -118,5 +116,9 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	}
 	states := rest.answer()
 	a.publishAvailability(true)
+	a.versionWatch.Do(func() { go a.watchCodexVersion() })
+	// The sessions the answer waited for are loaded, so the server's idleness is known;
+	// the ones it did not wait for are checked when their loading ends (see restore.run).
+	go a.checkServer(a.bgCtx)
 	return adapterproto.StartResult{Sessions: states}, nil
 }

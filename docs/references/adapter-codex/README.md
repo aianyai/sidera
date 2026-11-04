@@ -180,12 +180,50 @@ is ended, not what it started.
 (`codex --version`). The server's own version is in the user agent it answers
 `initialize` with. When the two differ (Codex was upgraded under a running server)
 the probe reports the `app-server` dependency as `wrong_version`, as it does for a server
-that runs in the state directory (see "Working directory"); the adapter does
-not restart a server it did not start. Neither the manifest nor the adapter names a
+that runs in the state directory (see "Working directory"); what the detail says is
+under "After Codex is upgraded". Neither the manifest nor the adapter names a
 version it was tested with, and nothing judges one: Codex releases several times a
 day, so a list could not stay true. Whether `prompt.reconcile` may conclude that a
 prompt is absent rests on what the adapter can verify of the record (below), not on
 the version.
+
+**After Codex is upgraded.** The server is replaced when it runs another version than
+the Codex now installed and no session is running. A session's turn is the session's
+work and is never cut short for an upgrade, so the replacement waits for it.
+
+- **When it is looked at.** At the end of `adapter.start`, every ten minutes, and each
+  time a turn ends while a replacement waits. Sessions that `adapter.start` did not wait
+  for are not known to be idle at its end and count as busy, so the look is made again
+  when their loading ends. Each look resolves `codex` again (`PATH` or the configured
+  path) and runs `codex --version`, because an upgrade may move the program; a program
+  that cannot be found or run, or a server that is not connected, ends the look.
+- **When the server counts as idle.** Strictly: every session the server holds for the
+  adapter must have its thread loaded in the current connection and idle, with no turn
+  reported running, no turn start being answered and no creation under way. A thread
+  the adapter has not seen in this connection, or in a state it does not know, counts as
+  busy. Sessions of a thread a person runs (attached sessions) are not counted: their
+  turns run in the person's own Codex, not in this server. A session whose thread is
+  gone is not counted either.
+- **The replacement gate.** Every operation that needs the server to stay as long as it
+  lasts holds the gate shared: a turn start (a delivered prompt), a session creation,
+  a prompt queued for an attached session, and the command the command-line probe runs
+  through the server. The replacement takes it exclusively without waiting, checks that
+  every session is idle, and ends the server through `Server.Terminate`, then closes the
+  connection. An operation that finds the gate taken answers as it does when there is
+  no connection: a prompt is refused as `native_unavailable` (which the daemon
+  retries), a creation fails as `native_unavailable` or, when it already has a thread,
+  asks to be asked about again, a tool probe fails. The gate is released once the server
+  is gone; the reconnect loop then starts the server afresh from the Codex now
+  installed and resumes every session in it, the path a server that died takes. The
+  threads are in Codex's own store and survive the server.
+- **What is not retried.** A server that cannot be shown to be one the adapter started
+  (`ErrNotProven`, above) is logged and left; the probe then keeps saying to restart it
+  by hand. The same pair of versions is not tried again after a replacement or after
+  that refusal, so a Codex whose `--version` is never the version its server reports
+  does not end the server at every look. Any other failure to end the server is logged
+  and tried again at the next look.
+- **The probe.** While a replacement is waiting, the `app-server` dependency is
+  `wrong_version` with the detail `it will be replaced when no session is running`.
 
 ### The connection
 
@@ -879,6 +917,13 @@ about ten seconds to the background.
 - **A busy session is refused, not queued or steered.** One writer per thread keeps the
   order of prompts and the books of turns the adapter's own; the daemon retries a
   refusal when the turn ends.
+- **The server is replaced when idle, not when Codex is upgraded.** Codex's own managed
+  daemon replaces itself on a schedule and says it may interrupt running work; here the
+  turn is the session's paid, long work and the one server per instance cannot be run
+  beside a second of another version, so the replacement waits for idleness and treats
+  anything it does not know as busy. Rejected: ending the server at the next start of
+  the adapter (it would cut turns), and starting a second server beside the first (the
+  state directory holds one socket and one lock, and the threads would have to move).
 - **Only a server shown to be ours is ended, and "cannot ask" means "do not end".**
   The process is named by pid and start key, which the state file records for every
   start, not by the process that happens to hold the pid. A wrong kill ends someone
@@ -908,13 +953,17 @@ about ten seconds to the background.
 | Answers to the server's requests | `internal/serverreq/` |
 | Identity, capabilities, manifest, package | `internal/declare/` |
 | The adapter's methods, events, reconnect | `internal/adapter/` |
+| The replacement of the server after an upgrade: the gate, the version check, the idleness test | `internal/adapter/replace.go` |
 | Attached sessions: attachment, the watch of a person's thread, queued prompts | `internal/adapter/attached.go` |
 | The executable and the `package` subcommand | `cmd/sidera-adapter-codex/main.go` |
 
 Tests: `TestCallsAndNotificationsOverBothTransports`, `TestServerRequestsAreAnsweredFromTheHandler`,
 `TestPendingCallsFailWhenTheConnectionDrops`, `TestLargeMessagesAreRead` (the client against
 the fake server); `TestEnviron` (the environment of the server); `TestStartRunsTheServerInADirectoryOfItsOwn`,
-`TestConnectReportsAServerThatRunsInTheStateDirectory` (where the server runs); `TestParsePreset`,
+`TestConnectReportsAServerThatRunsInTheStateDirectory` (where the server runs); `TestTerminateEndsOnlyWhatTheRecordProves` (which records may end a process);
+`TestServerIsReplacedWhenIdleAfterAnUpgrade`, `TestServerThatIsNotProvenOursIsLeftForSomeoneToRestart`,
+`TestFailureToEndTheServerIsRetried`, `TestPromptDuringTheReplacementIsRefusedAsUnavailable`, `TestBusyReason`
+(the replacement after an upgrade); `TestParsePreset`,
 `TestSandboxIsAProfileNotALegacyMode`, `TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
 `TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`

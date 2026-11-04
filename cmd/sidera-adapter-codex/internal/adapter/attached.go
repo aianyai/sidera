@@ -431,6 +431,11 @@ func (s *session) attemptIn(clientIDs []string) string {
 // nobody has the thread loaded, the prompt stays queued, and nothing is reported
 // until it is taken.
 func (a *App) deliverAttached(ctx context.Context, s *session, p adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	leave, ok := a.enterServerOp()
+	if !ok {
+		return refused(adapterproto.RefusalNativeUnavailable), nil
+	}
+	defer leave()
 	c := a.liveClient()
 	if c == nil {
 		if cc, err := a.ensureClient(ctx); err == nil {

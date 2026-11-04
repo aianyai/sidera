@@ -150,6 +150,7 @@ func (a *App) finishTurn(s *session, turnID, status string) {
 	a.mu.Unlock()
 	s.signal()
 	a.reportEnded(s, turnID, status)
+	a.turnEnded()
 	if over != nil {
 		a.mu.Lock()
 		rec.endErr = endErr

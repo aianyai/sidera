@@ -275,6 +275,10 @@ release before 0.12.0 are upgraded with these steps.
 
 To upgrade Codex or Claude Code themselves, upgrade them as usual. On Windows,
 restart the daemon once (`sidera daemon restart`) so that it finds the new Codex release.
+The Codex adapter replaces its App Server by itself after a Codex upgrade, as soon as no
+Codex session it manages is running a turn (it looks every ten minutes and when a turn
+ends). A server it cannot show to be one it started is left running, with a warning in
+`logs/adapter-codex.log`, and you restart it yourself.
 
 ### The Codex App Server after an upgrade
 
