@@ -329,7 +329,7 @@ creator, so treat it as a second line of defence, not a boundary.
 
 **Setup.** Hermes needs two things before its agents can delegate: the Kanban tools,
 which are off by default on the chat platforms and on cron, and a Skill that tells the
-agent how to write a card. `setup` writes the Skill from your alias table and prints the
+agent how to write a card. `setup` writes the Skill from your alias table and board and prints the
 Hermes commands that enable the tools and place the Skill. The program is in the
 package you installed:
 
@@ -344,7 +344,10 @@ platforms are `home_platform` and `cron`, and `--platform` adds more.
 After `setup`, **restart the gateway of each profile yourself**. Hermes reads its tools
 and Skills when the gateway starts, and a restart interrupts the conversations it is
 serving, so Sidera never does it. `setup` never edits `config.yaml` either. Run it
-again whenever you change the aliases, since the Skill lists them.
+again whenever you change the aliases or the board, since the Skill lists them. The Skill
+names the board, and tells the agent to pass it on every Kanban tool call it makes for a
+Sidera card: without it Hermes puts the card on the board it has selected, where the
+adapter does not look.
 
 **A delegation, from Hermes.** The agent creates a card assigned to `sidera` whose body
 says which alias, what mode (`new_session` with a preset, or `message`) and the task.

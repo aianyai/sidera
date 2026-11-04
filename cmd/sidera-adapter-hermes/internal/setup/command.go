@@ -133,7 +133,7 @@ func run(o options, env Env) error {
 		return fmt.Errorf("%s does not exist: enable the instance first ('sidera adapter enable hermes --instance %s --config <file>'), or check --home and --instance", dir, o.instance)
 	}
 
-	skill, err := Skill(cfg.Aliases)
+	skill, err := Skill(cfg.Board, cfg.Aliases)
 	if err != nil {
 		return err
 	}
@@ -262,7 +262,8 @@ func orDefault(given multi, fallback string) []string {
 }
 
 func printPlan(w io.Writer, cfg config.Config, skillFile string, steps []Step) {
-	fmt.Fprintf(w, "Wrote the Skill for %d alias(es): %s\n\n", len(cfg.Aliases), skillFile)
+	fmt.Fprintf(w, "Wrote the Skill for %d alias(es): %s\n", len(cfg.Aliases), skillFile)
+	fmt.Fprintf(w, "The Skill names the board %q, so the agent and the adapter use the same one.\n\n", cfg.Board)
 	fmt.Fprintln(w, "Steps (Hermes commands; HERMES_HOME is "+cfg.HermesHome+envKanban(cfg)+"):")
 	for i, s := range steps {
 		fmt.Fprintf(w, "  %d. %s\n     %s\n", i+1, s.Why, s.Command(cfg.HermesPath))

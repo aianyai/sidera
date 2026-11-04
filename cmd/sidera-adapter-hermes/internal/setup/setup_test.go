@@ -64,7 +64,7 @@ func TestPlan(t *testing.T) {
 	}
 }
 
-func TestSkillListsEveryAliasWithItsModesAndPresets(t *testing.T) {
+func TestSkillListsEveryAliasWithItsModesPresetsAndTheBoard(t *testing.T) {
 	aliases, err := config.ParseAliases([]string{
 		"Node-B/Codex=nodeb/codex;modes=new_session,message;presets=work,review",
 		"ops=nodec/ops;modes=message",
@@ -72,7 +72,7 @@ func TestSkillListsEveryAliasWithItsModesAndPresets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skill, err := Skill(aliases)
+	skill, err := Skill("e2e-board", aliases)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +81,8 @@ func TestSkillListsEveryAliasWithItsModesAndPresets(t *testing.T) {
 		"- `node-b/codex`: `new_session`, `message`; presets: `work`, `review`\n",
 		"- `ops`: `message`\n",
 		"name: sidera\n",
+		"`board: \"e2e-board\"`",
+		"- `board`: `e2e-board`.\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("skill lacks %q:\n%s", want, text)

@@ -684,7 +684,7 @@ platforms it delegates from (they are off by default, and on cron as well as the
 platforms), and the knowledge of how to write a card. The second is a Skill, a prompt
 Hermes loads when the agent has a use for it.
 
-**The Skill** (`setup.Skill`) is generated from the alias table, once per `setup` run,
+**The Skill** (`setup.Skill`) is generated from the board and the alias table, once per `setup` run,
 and written to `skill/SKILL.md` in the instance's state directory, owner-only (directory
 `0700`, file `0600`; a `skill` directory an earlier run left wider is narrowed): the
 daemon starts an adapter only when its whole state directory is private to its owner, so a
@@ -693,6 +693,12 @@ wider entry would stop the instance at its next start. Its front matter is
 in the list the agent chooses from, so the part that says when to use it comes first).
 The body tells the agent:
 
+- which board the cards are on: the adapter serves one board, and every Hermes kanban
+  tool takes an optional `board` that, left out, means the board Hermes has selected, so
+  the Skill names the configured board and tells the agent to pass it on every kanban
+  call it makes for a Sidera card (`kanban_create`, `kanban_show`, `kanban_list`,
+  `kanban_attachments`, `kanban_comment`, `kanban_unblock`, `kanban_complete`); a card
+  created without it lands where the adapter never looks;
 - who it can reach: every alias with its modes and presets, never an address, since a
   card names an alias and an address in a prompt only invites its use;
 - how to delegate: `kanban_create` with the assignee `sidera` (or `sidera:<alias>`),
@@ -770,7 +776,9 @@ conversations the gateway is serving, which is the owner's call; the output says
 owner must restart the gateway of each profile for the tools and the Skill to take effect.
 To find the address behind an alias, the output points to `sidera-adapter-console
 directory --node <id>`; no directory client is built here. When the alias table changes
-the owner runs `setup` again, since the Skill lists the aliases.
+the owner runs `setup` again, since the Skill lists the aliases. The output also says that
+the Skill names the board, so that the agent and the adapter use the same one; a change of
+`board` needs `setup` again too.
 
 ### Decisions
 

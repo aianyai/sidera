@@ -31,10 +31,12 @@ type skillAlias struct {
 	Presets string
 }
 
-// Skill renders the SKILL.md for an alias table. The aliases are listed by name with
-// their modes and presets and never with their addresses: a card names an alias, and
-// an address in a prompt would only invite the agent to use it.
-func Skill(aliases config.Aliases) ([]byte, error) {
+// Skill renders the SKILL.md for an alias table and the board the adapter serves. The
+// aliases are listed by name with their modes and presets and never with their
+// addresses: a card names an alias, and an address in a prompt would only invite the
+// agent to use it. The board is named because the kanban tools act on the board Hermes
+// has selected unless a call names one, and the adapter reads only its own.
+func Skill(board string, aliases config.Aliases) ([]byte, error) {
 	var list []skillAlias
 	for _, name := range slices.Sorted(maps.Keys(aliases)) {
 		a := aliases[name]
@@ -46,7 +48,10 @@ func Skill(aliases config.Aliases) ([]byte, error) {
 	}
 	var out bytes.Buffer
 	out.WriteString("---\nname: " + SkillName + "\ndescription: " + skillDescription + "\n---\n\n")
-	if err := skillTemplate.Execute(&out, struct{ Aliases []skillAlias }{list}); err != nil {
+	if err := skillTemplate.Execute(&out, struct {
+		Board   string
+		Aliases []skillAlias
+	}{board, list}); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

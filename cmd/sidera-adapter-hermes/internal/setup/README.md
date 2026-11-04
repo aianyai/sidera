@@ -23,6 +23,8 @@ why `--apply` does only what it does are in
   `skills` directory is Hermes's, with ordinary modes.
 - **Nothing is restarted.** The output tells the owner to restart the gateways.
 - **The Skill never contains an address.** A card names an alias.
+- **The Skill names the adapter's board.** Hermes's kanban tools act on the board Hermes
+  has selected unless a call passes `board`, so the agent is told to pass it.
 - **A Hermes command gets the environment of the adapter's own** (`kanban.ChildEnv`): the
   owner's shell may point at another home or pin a profile, and `setup` changes the
   installation the configuration names.
