@@ -8,6 +8,30 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-04
+
+A patch release of fixes. State written by 0.12.0 needs no migration: no stored format
+changed (the list of page identifiers that a delivery keeps is only shorter, and a longer
+one written by 0.12.0 is read as before and shortened the next time the delivery is handed
+out). The adapter protocol stays at version 1 without a change, and the Go SDK does not
+change. An installation of 0.12.0 updates with `sidera update`.
+
+### Fixed
+
+- **Claude Code adapter: a prompt is no longer started a second time.** When the process of a
+  turn wrote the prompt it was given and ended just as the adapter was checking whether the
+  prompt had been delivered, the adapter found neither the prompt nor the process and started
+  the prompt again. It now looks at the processes before it reads the session's record, so a
+  process it sees as gone has already written everything the record holds.
+- **A message that is read again and again no longer makes its delivery record grow.** Every
+  `recv` that handed a message out added a page identifier to the message's record, so an agent
+  that read without acknowledging made the record, and the time to check it, grow for as long
+  as the message lived. The record now keeps the latest 16. An acknowledgement that names an
+  older page is refused as an unknown page and the message comes again.
+- **A lease is never shortened by a renewal.** When the clock of the machine had stepped back,
+  renewing a lease could set its expiry earlier than it already was; a renewal now never moves
+  the expiry earlier.
+
 ## [0.12.0] - 2026-11-03
 
 Sidera can now update itself and restart its own daemon: `sidera update` brings an
@@ -447,7 +471,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/aianyai/sidera/releases/tag/v0.12.1
 [0.12.0]: https://github.com/aianyai/sidera/releases/tag/v0.12.0
 [0.11.0]: https://github.com/aianyai/sidera/releases/tag/v0.11.0
 [0.10.0]: https://github.com/aianyai/sidera/releases/tag/v0.10.0
