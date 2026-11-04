@@ -811,6 +811,14 @@ package-seconds over four processors, and the benchmarks are one cold-start scan
 benchmarks were made a dispatch option, so these figures describe the layout before
 that split.
 
+A dispatched run of the present layout (2026-11-04, crash walk `smoke`, no
+benchmarks) took 656 s. Its longest jobs were `test-tags` on Linux (652 s: about
+130 s plain and 460 s under `-race`) and on macOS (552 s), and the `node` part of
+`race` on Windows x64 (593 s), Linux (567 s) and macOS (540 s); the `rest` parts
+took 327 to 444 s. `vet` took 411 s for twelve vets on one runner, and `acceptance`
+on Linux 507 s. The dispatch starts 29 jobs, more than the 20 that run at once, so
+a few of them waited 90 to 190 s for a runner; a push starts 20.
+
 The foreground-process acceptance package exists and its focused tests run
 locally. A complete binary catalog walk and its hosted timings must be verified
 separately; focused tests do not establish the full-walk budget.
