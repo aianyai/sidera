@@ -40,27 +40,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main') }}
 
 jobs:
-  format:
-    name: gofmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: gofmt -l must list nothing
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-
   # The checks that decide whether the code is right, on every platform a node
   # runs on. The steps that take long run as jobs of their own (race, bench), so
   # that they run side by side on separate machines and a run takes about as
@@ -324,34 +303,19 @@ jobs:
       - name: go test crash walk
         run: go test -count=1 -v -timeout "$TEST_TIMEOUT" -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
 
+  # The checks that need one runner each and no matrix, in one job: formatting,
+  # sdk/go on its own, and the cross-compile with the release archives. GitHub
+  # runs at most 20 jobs of the account at once, five of them on macOS. A push
+  # started 22 jobs when these were three, so even a run alone had two jobs
+  # waiting for a runner, and a run that overlapped another queued its jobs for
+  # minutes. The three take about four minutes together, less than any of the
+  # test jobs, so one job costs the run no time and brings a push to 20 jobs.
+  # Every step after the first runs even when an earlier one failed, so that a
+  # failure does not hide the verdict of the others.
+  #
   # sdk/go is published as its own module, so it must build, test and be tidy
-  # without go.work.
-  sdk-standalone:
-    name: sdk/go without go.work
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      GOWORK: "off"
-    defaults:
-      run:
-        working-directory: sdk/go
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The job ends in seconds, before the test jobs, so its saved cache entry would
-      # hold almost none of what they build and keep them from saving theirs.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: go build
-        run: go build ./...
-      - name: go test
-        run: go test ./...
-      - name: go mod tidy -diff
-        run: go mod tidy -diff
-
+  # without go.work; its steps switch the workspace off.
+  #
   # Every binary and package must build for every platform Sidera ships for,
   # statically (CGO_ENABLED=0), whichever runner builds it.
   #
@@ -362,15 +326,19 @@ jobs:
   # The version is a placeholder that no tag will carry; the script only needs one
   # that looks like a version, and a changelog section is not read here.
   #
-  # Both build the same packages for the same six platforms, so they are one job:
-  # the script builds with -trimpath, and so does the loop, which makes the
-  # script's builds come from the build cache the loop filled. The job keeps no
-  # cache of its own between runs (cache: false), since it would save an entry
-  # that the test jobs on Linux should save.
-  build:
-    name: build and release archives
+  # The loop and the script build the same packages for the same six platforms,
+  # so they are steps of one job: the script builds with -trimpath, and so does
+  # the loop, which makes the script's builds come from the build cache the loop
+  # filled.
+  #
+  # The job keeps no cache of its own between runs (cache: false). It ends in
+  # minutes, before the test jobs, so the entry it saved would hold almost none
+  # of what they build and keep them from saving theirs; its cross-compiles are
+  # not the test jobs' builds (other target, other flags) in any case.
+  linux-checks:
+    name: gofmt, sdk/go and release archives
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -379,7 +347,34 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: gofmt -l must list nothing
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: sdk/go go build
+        if: ${{ !cancelled() }}
+        working-directory: sdk/go
+        env:
+          GOWORK: "off"
+        run: go build ./...
+      - name: sdk/go go test
+        if: ${{ !cancelled() }}
+        working-directory: sdk/go
+        env:
+          GOWORK: "off"
+        run: go test ./...
+      - name: sdk/go go mod tidy -diff
+        if: ${{ !cancelled() }}
+        working-directory: sdk/go
+        env:
+          GOWORK: "off"
+        run: go mod tidy -diff
       - name: go build for every platform
+        if: ${{ !cancelled() }}
         run: |
           for platform in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             echo "::group::$platform"
@@ -390,8 +385,10 @@ jobs:
             echo "::endgroup::"
           done
       - name: scripts/release.sh
+        if: ${{ !cancelled() }}
         run: scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"
       - name: checksums.txt verifies and names the six archives
+        if: ${{ !cancelled() }}
         working-directory: ${{ runner.temp }}/dist
         run: |
           sha256sum -c checksums.txt

@@ -22,37 +22,35 @@ test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
-| `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows, Windows arm64 | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `race` | Linux, macOS, Windows | `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`; no Windows arm64, where Go has no race detector |
 | `bench` (shown as `benchmarks`) | Linux, macOS, Windows, Windows arm64 | the three single-sample benchmark commands below |
 | `test-tags` | Linux, macOS, Windows, Windows arm64 | tagged: `go vet -tags crashtest,testclock,acceptance,netacceptance ./... ./sdk/go/...` over everything, then `scripts/tagged-test-packages.sh crashtest,testclock`, which prints the packages whose test binary the tags change (the log lists them), then `go test` and `go test -race` (not on Windows arm64) with `-tags crashtest,testclock`, with the same flags as `test` and `race`, on those packages only |
 | `acceptance` | Linux, macOS, Windows, Windows arm64 | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows x64 (4); manual dispatch only | the crash walk of the built binary, without the race detector: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
-| `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
-| `build` (shown as `build and release archives`) | Linux | `go build -trimpath ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64, one after another, failing on the first with the platform named; then `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, which also checks that both install guides quote the release public key, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
+| `linux-checks` (shown as `gofmt, sdk/go and release archives`) | Linux | in this order, each step running even when an earlier one failed: `gofmt -l .` must print nothing; in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff`; `go build -trimpath ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64 and windows/arm64, one after another, failing on the first with the platform named; then `scripts/release.sh 0.0.0-dryrun "$RUNNER_TEMP/dist"`, which also checks that both install guides quote the release public key, then `sha256sum -c checksums.txt` in that directory and a check that it names six archives; nothing is published |
 
 Limits of every job, in minutes. `go test -timeout` is set a few minutes under
 the job's limit so that a hang ends with the goroutine dump of the test binary:
 
 | Job | Instances | `timeout-minutes` | `go test -timeout` |
 | --- | --------- | ----------------- | ------------------ |
-| `format` | 1 | 10 | none |
 | `test` | 4 | 40 | 30m per test step |
 | `race` | 3 | 40 | 30m |
 | `bench` | 4 | 40 | benchmarks 10m, 10m, 30m |
 | `test-tags` | 4 | 40 | 30m per step |
 | `acceptance` | 4 | 30 | 25m |
 | `crashwalk` | 9 on manual dispatch: Linux 3, macOS 2, Windows x64 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
-| `sdk-standalone` | 1 | 15 | go default |
-| `build` | 1 | 20 | none |
+| `linux-checks` | 1 | 30 | go default for the `sdk/go` tests, none for the rest |
 
-A push to `main` or a pull request starts 22 jobs, five of them on macOS (`test`,
+A push to `main` or a pull request starts 20 jobs, five of them on macOS (`test`,
 `race`, `test-tags`, `acceptance` and `bench`); a manual dispatch adds the nine
-`crashwalk` jobs, 31 in all, seven of them on macOS. GitHub limits how many jobs of a
-plan run at once, macOS jobs more tightly than the others: a free plan runs at most
-five macOS jobs at once across all workflows, so on a dispatch the two macOS crash-walk
-jobs wait for the shorter macOS jobs to finish. Other jobs may wait for a runner too.
+`crashwalk` jobs, 29 in all, seven of them on macOS. GitHub runs at most 20 jobs of
+the account at once, and macOS jobs more tightly than the others: at most five macOS
+jobs at once across all workflows, so on a dispatch the two macOS crash-walk jobs
+wait for the shorter macOS jobs to finish. A push stays within the limit on its own; a run that starts while
+another is in progress queues its jobs behind the other's. Which jobs are one job is
+chosen with this limit in mind (see `linux-checks` under "Why").
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
@@ -402,7 +400,7 @@ decide whether it may be bundled; the script never decides that. A module that
 only says it is under either of two licences (`go-base36` says Apache-2.0 or MIT and
 ships neither text) is listed as `Apache-2.0 OR MIT` with the file it ships.
 
-The `build` job of `ci.yml` runs the script a tag runs, so that a change which breaks
+The `linux-checks` job of `ci.yml` runs the script a tag runs, so that a change which breaks
 it, such as a program that no longer packages, a module whose licence the
 notices refuse or an install guide that no longer quotes the public key, fails on the
 commit that makes it and not at the first release. An edit of a guide alone starts no
@@ -429,11 +427,11 @@ to the workflow.
 
 ## Why
 
-- **`sdk-standalone`**: `sdk/go` is consumed as its own module by adapters
+- **`sdk/go` without `go.work`**: `sdk/go` is consumed as its own module by adapters
   outside this repository. With `go.work` in effect, a missing requirement or an
   import of a root-module package would go unnoticed, so the module is built,
-  tested and tidied with the workspace switched off.
-- **`CGO_ENABLED=0` in `build`**: released binaries are static, so a
+  tested and tidied with the workspace switched off, by the steps of `linux-checks`.
+- **`CGO_ENABLED=0` in the cross-compile of `linux-checks`**: released binaries are static, so a
   dependency that needs cgo must fail here and not at release time. The `race`
   and `test-tags` jobs' `-race` steps are the one place cgo is on: the race detector
   needs it and a C compiler, which the Linux, macOS and Windows x64 hosted runner images carry.
@@ -643,18 +641,42 @@ to the workflow.
   and build caches are keyed on every `go.sum` in the tree, per operating system
   and Go version, so every job on one OS shares one entry; the first job to finish
   saves it and the others skip saving. On Linux that used to be `sdk-standalone`,
-  which ends in seconds: its entry held 21 MB against about 90 MB on macOS and
+  which ended in seconds: its entry held 21 MB against about 90 MB on macOS and
   Windows, so the Linux test jobs restored a cache that held almost none of their
-  build. The jobs that finish early or build little of what the test jobs build
-  therefore set `cache: false`: `format`, `sdk-standalone` and `build`. `build`
-  also builds for six platforms, and its builds are not the test jobs' (other
-  target, other flags), so an entry saved from it would be of no use to them.
-- **One `build` job for the cross-compile and the release check**: they compile
+  build. The short job that would save an almost empty entry, now only
+  `linux-checks`, therefore sets `cache: false`. Its cross-compiles are not the test
+  jobs' builds either (other target, other flags), so an entry saved from it would
+  be of no use to them.
+- **No build cache of its own for each job**: each job could keep its own cache,
+  keyed by job and platform, and the jobs would start warm. It was measured and
+  rejected. On a development machine with 10 processors, compiling every test
+  binary with `-race` takes 40 s with an empty cache and 19 s with a full one (the
+  linking remains), and 22 s and 5 s without `-race`; each cache is about 650 MB. On
+  a runner with 4 processors the saving is about a minute of a race job that takes
+  15 minutes, while a cache per job and platform would take 4 to 5 GB of the
+  repository's 10 GB cache limit and costs 20 to 40 s to restore on Windows. So the jobs keep setup-go's one cache
+  per operating system, which whichever job finishes first saves.
+- **`linux-checks` is one job, not three**: formatting, `sdk/go` without `go.work`
+  and the cross-compile with the release archives used to be the jobs `format`,
+  `sdk-standalone` and `build`. GitHub runs at most 20 jobs of the account at once,
+  five of them on macOS. A push started 22 jobs, so even a run alone had two jobs
+  waiting for a runner, and runs that overlapped (a push while another run was in
+  progress) queued jobs for 4 to 8 minutes in a measured run; these three queued
+  240 to 320 s each while another run was in progress. The three take about 4
+  minutes on one runner (gofmt 6 s, `sdk/go` 26 s, build and release 230 s), less
+  than any of the test jobs, so one job costs the run no time and brings a push to
+  20 jobs (a dispatch to 29). Every step after the first check carries
+  `if: ${{ !cancelled() }}`, so that a failure in one check does not skip the
+  others and hide their verdicts: a formatting failure still shows whether the
+  build passes. The timeout is 30 minutes: the old jobs' limits (10, 15 and 20)
+  were sized for steps that now run one after another, and the steps need about 4
+  minutes together, so the limit only has to end a hang.
+- **One loop for the cross-compile and the release check**: they compile
   the same packages for the same six platforms. As two jobs, the release check
   compiled them again after the cross-compile jobs had done so, about 35 s of
   `go build` per platform in six jobs, and the release script took about 185 s
   on the runner. The release script builds with `-trimpath`, so the loop in
-  `build` does too: the packages then compile once and the script's builds come
+  `linux-checks` does too: the packages then compile once and the script's builds come
   from the build cache. Measured on a development machine with an empty cache:
   the loop took 42 s and the script after it 19 s, against 58 s for the script
   alone, and a second run of the script on a warm cache took 19 s. The
