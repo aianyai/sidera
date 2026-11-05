@@ -52,7 +52,8 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   the last answer.
 - **One full verification at a time** (`gate.verify`): the loops ask together and a check
   that finds one in progress takes its result, so the notifier and the toolsets are read once and an older
-  reading never replaces a newer one.
+  reading never replaces a newer one: the check that runs records its result before it ends
+  the flight.
 - **Availability reports reach the daemon in the order of the changes**: the gate holds
   its lock from the decision to the end of the report.
 - **A send never names a delivery deadline** (`Env.Send`, `Outgoing`). The idempotency

@@ -40,6 +40,10 @@ const (
 	// `tools list --platform=<platform>`, whichever profile and platform are asked. The
 	// recording is a platform whose list names kanban and skills, both enabled.
 	ToolsFile = "tools.txt"
+	// BlockFile, in the control directory, holds every command until it is removed.
+	// CallsFile collects the arguments of the commands that were run, one line each.
+	BlockFile = "block"
+	CallsFile = "calls.log"
 )
 
 // ToolsFileOf is the file that answers `tools list --platform=<platform>` for one
@@ -128,6 +132,17 @@ func recorded(args []string, control string) int {
 		if _, err := os.Stat(filepath.Join(control, DownFile)); err == nil {
 			fmt.Fprintln(os.Stderr, "sqlite3.OperationalError: database is locked")
 			return 1
+		}
+	}
+	if control != "" {
+		if f, err := os.OpenFile(filepath.Join(control, CallsFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintln(f, strings.Join(args, " "))
+			f.Close()
+		}
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(filepath.Join(control, BlockFile)); err != nil {
+				break
+			}
 		}
 	}
 	cmd := strings.Join(args, " ")

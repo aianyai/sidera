@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,9 +15,10 @@ import (
 )
 
 // The gate tells the daemon what the last verification found, and only when it changes.
-// Each step sets what the fake Hermes answers, optionally lets a verification interval
-// pass, checks the gate once and says what the daemon was told by that check: nothing,
-// that the condition is cleared, or a condition with the text in it.
+// Each step sets what the fake Hermes answers about the notifiers and the toolsets,
+// optionally lets a verification interval pass, checks the gate once and says what the
+// daemon was told by that check: nothing, that the conditions are cleared, or the
+// conditions with their text in it.
 func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 	const (
 		nothing = "nothing"
@@ -33,8 +33,12 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 		// later lets the verification interval pass before the check.
 		later   bool
 		wantErr bool
-		// told is nothing, cleared, or the text the new condition holds.
-		told string
+		// tools is the answer of `tools list`, replacing the recording in which both
+		// required toolsets are enabled.
+		tools string
+		// told is nothing, cleared, or the text the first of the conditions holds;
+		// also is the text of the second condition, when there are two.
+		told, also string
 	}
 	off := func(profiles ...string) map[string]string {
 		m := map[string]string{kanbantest.NotifierFile: "true\n"}
@@ -49,6 +53,11 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 	}
 	allOff := map[string]string{kanbantest.NotifierFile: "false\n"}
 	allOn := map[string]string{kanbantest.NotifierFile: "true\n"}
+	const (
+		noKanban  = "  ✗ disabled  kanban  x\n  ✓ enabled  skills  x\n"
+		noRows    = "✗ Unknown platform 'x'. Valid: feishu\n"
+		kanbanOff = "has not enabled the toolset(s) kanban"
+	)
 
 	steps := []step{
 		{name: "everything on at the first check", files: allOn, told: nothing},
@@ -65,6 +74,15 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 		{name: "Hermes not usable takes the place of it", files: allOff, down: true, wantErr: true, told: "hermes kanban is not usable"},
 		{name: "back, and the notifier condition returns", files: allOff, told: "disabled in the configuration of profiles default, feishu"},
 		{name: "on after the recovery", files: allOn, later: true, told: cleared},
+
+		{name: "toolsets: a toolset is missing at the next verification", files: allOn, tools: noKanban, later: true, told: kanbanOff},
+		{name: "toolsets: enabled again, not seen before a verification is due", files: allOn, told: nothing},
+		{name: "toolsets: cleared at the verification", files: allOn, later: true, told: cleared},
+		{name: "toolsets: missing again", files: allOn, tools: noKanban, later: true, told: kanbanOff},
+		{name: "toolsets: an unreadable answer keeps the last one", files: allOn, tools: noRows, later: true, told: nothing},
+		{name: "toolsets: the notifier off too, both told", files: allOff, tools: noKanban, later: true,
+			told: "disabled in the configuration of profiles default, feishu", also: kanbanOff},
+		{name: "toolsets: both cleared at once", files: allOn, later: true, told: cleared},
 	}
 
 	ctl := t.TempDir()
@@ -76,7 +94,8 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 	clock := time.Unix(1_700_000_000, 0)
 	var told []adapterproto.AvailabilityParams
 	g := &gate{
-		board: board, wakeProfiles: []string{"default", "feishu"}, log: slog.New(slog.DiscardHandler),
+		board: board, wakeProfiles: []string{"default", "feishu"}, homeProfile: "feishu", homePlatform: "feishu",
+		log: slog.New(slog.DiscardHandler),
 		now: func() time.Time { return clock }, verifyEvery: time.Hour,
 		report: func(_ context.Context, p adapterproto.AvailabilityParams) error {
 			told = append(told, p)
@@ -103,6 +122,11 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		if st.tools != "" {
+			if err := os.WriteFile(filepath.Join(ctl, kanbantest.ToolsFile), []byte(st.tools), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if st.later {
 			clock = clock.Add(2 * time.Hour)
 		}
@@ -121,10 +145,17 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 				t.Errorf("%s: told %+v, want the conditions cleared", st.name, got)
 			}
 		default:
-			if len(got) != 1 || len(got[0].Conditions) != 1 ||
-				got[0].Conditions[0].Condition != adapterproto.ConditionDependencyMissing ||
-				!strings.Contains(got[0].Conditions[0].Detail, st.told) {
-				t.Errorf("%s: told %+v, want one dependency_missing holding %q", st.name, got, st.told)
+			want := []string{st.told}
+			if st.also != "" {
+				want = append(want, st.also)
+			}
+			ok := len(got) == 1 && len(got[0].Conditions) == len(want)
+			for i := 0; ok && i < len(want); i++ {
+				c := got[0].Conditions[i]
+				ok = c.Condition == adapterproto.ConditionDependencyMissing && strings.Contains(c.Detail, want[i])
+			}
+			if !ok {
+				t.Errorf("%s: told %+v, want dependency_missing conditions holding %q", st.name, got, want)
 			}
 		}
 	}
@@ -170,24 +201,51 @@ func TestProbeSaysWhatItCouldNotReadAboutTheNotifier(t *testing.T) {
 	}
 }
 
-// A check that finds a verification in progress waits for it and takes its result, so
-// that the loops do not read the notifier together. The executable here does not exist:
-// a check that verified on its own would fail with another error.
-func TestVerificationInProgressIsShared(t *testing.T) {
-	board, err := kanban.New(kanban.Config{Executable: filepath.Join(t.TempDir(), "no-hermes"), Home: t.TempDir(), Board: "lane"})
+// Checks that arrive together share one verification: the loops do not read the
+// notifiers and the toolsets once each. The fake Hermes holds every command until the
+// test lets it go, so that both checks are in flight together.
+func TestConcurrentChecksShareOneVerification(t *testing.T) {
+	ctl := t.TempDir()
+	t.Setenv(kanbantest.ControlEnv, ctl)
+	board, err := kanban.New(kanban.Config{Executable: kanbantest.Executable(t, kanbantest.ModeBoard), Home: t.TempDir(), Board: "lane"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	g := &gate{
-		board: board, wakeProfiles: []string{"default"}, log: slog.New(slog.DiscardHandler),
-		now: time.Now, verifyEvery: time.Hour,
+		board: board, wakeProfiles: []string{"default"}, homeProfile: "feishu", homePlatform: "feishu",
+		log: slog.New(slog.DiscardHandler), now: time.Now, verifyEvery: time.Hour,
 		report: func(context.Context, adapterproto.AvailabilityParams) error { return nil },
 	}
-	want := errors.New("the answer of the verification in progress")
-	v := &verification{done: make(chan struct{}), err: want}
-	close(v.done)
-	g.verifying = v
-	if got := g.Check(context.Background()); got != want {
-		t.Errorf("got %v, want the result of the verification in progress", got)
+	calls := filepath.Join(ctl, kanbantest.CallsFile)
+	if err := os.WriteFile(filepath.Join(ctl, kanbantest.BlockFile), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	check := func() { errs <- g.Check(context.Background()) }
+	go check()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if _, err := os.Stat(calls); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first check never ran Hermes")
+		}
+	}
+	go check()
+	time.Sleep(100 * time.Millisecond) // the second check has arrived and waits
+	if err := os.Remove(filepath.Join(ctl, kanbantest.BlockFile)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Errorf("Check = %v", err)
+		}
+	}
+	log, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(log), "tools list"); n != 1 {
+		t.Errorf("the toolsets were read %d times, want once:\n%s", n, log)
 	}
 }

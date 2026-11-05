@@ -69,10 +69,8 @@ type gate struct {
 // verification is a full verification in progress, which every caller that arrives
 // meanwhile waits for.
 type verification struct {
-	done     chan struct{}
-	err      error
-	notifier notifierReading
-	toolsets toolsetsReading
+	done chan struct{}
+	err  error
 }
 
 // availability is what the daemon is told: that Hermes is unusable, or else which
@@ -92,52 +90,58 @@ type reading struct {
 // Check asks whether Hermes can be used, and reports a change. A failure caused by
 // the end of ctx is not Hermes' and is returned without being reported.
 func (g *gate) Check(ctx context.Context) error {
-	full := g.verificationDue()
-	var err error
-	var found reading
-	if full {
-		found, err = g.verify(ctx)
-	} else {
-		var ok bool
-		ok, err = g.board.BoardExists(ctx)
-		if err == nil && !ok {
-			err = errors.New("the board does not exist")
+	if g.verificationDue() {
+		err := g.verify(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
+		return err
+	}
+	ok, err := g.board.BoardExists(ctx)
+	if err == nil && !ok {
+		err = errors.New("the board does not exist")
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	g.set(ctx, err, full, found)
+	g.set(ctx, err, false, reading{})
 	return err
 }
 
 // verify runs the whole probe and, when Hermes is usable, reads the notifiers and the
-// toolsets. A call that arrives while another runs waits for it and returns its result.
-func (g *gate) verify(ctx context.Context) (reading, error) {
+// toolsets, and records what it found. A call that arrives while another runs waits for
+// it and returns its result. The one that runs records the result before it ends the
+// flight, so a verification that starts after it sees the result in place and a slower,
+// older one never replaces a newer one.
+func (g *gate) verify(ctx context.Context) error {
 	g.flightMu.Lock()
 	if v := g.verifying; v != nil {
 		g.flightMu.Unlock()
 		select {
 		case <-v.done:
-			return reading{v.notifier, v.toolsets}, v.err
+			return v.err
 		case <-ctx.Done():
-			return reading{}, ctx.Err()
+			return ctx.Err()
 		}
 	}
 	v := &verification{done: make(chan struct{})}
 	g.verifying = v
 	g.flightMu.Unlock()
 
+	var found reading
 	v.err = g.board.Probe(ctx)
 	if v.err == nil {
-		v.notifier = g.readNotifier(ctx)
-		v.toolsets = g.readToolsets(ctx)
+		found = reading{notifier: g.readNotifier(ctx), toolsets: g.readToolsets(ctx)}
+	}
+	// A failure caused by the end of ctx is not Hermes' and is not recorded.
+	if ctx.Err() == nil {
+		g.set(ctx, v.err, true, found)
 	}
 	g.flightMu.Lock()
 	g.verifying = nil
 	g.flightMu.Unlock()
 	close(v.done)
-	return reading{v.notifier, v.toolsets}, v.err
+	return v.err
 }
 
 // notifierReading is what a verification found about the notifiers; read is false
