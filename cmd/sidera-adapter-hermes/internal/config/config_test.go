@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,9 +23,10 @@ func values(t *testing.T, kv map[string]any) adapterproto.ConfigValues {
 	return v
 }
 
-func valid() map[string]any {
+func valid(t *testing.T) map[string]any {
+	t.Helper()
 	return map[string]any{
-		KeyHermesHome:   "/home/o/.hermes",
+		KeyHermesHome:   filepath.Join(t.TempDir(), ".hermes"),
 		KeyBoard:        "default",
 		KeyHomeProfile:  "default",
 		KeyHomePlatform: "feishu",
@@ -34,7 +36,7 @@ func valid() map[string]any {
 }
 
 func TestDecodeAppliesDefaultsAndLowercasesAliases(t *testing.T) {
-	c, err := Decode(values(t, valid()))
+	c, err := Decode(values(t, valid(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestDecodeRefuses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := valid()
+			m := valid(t)
 			tc.change(m)
 			_, err := Decode(values(t, m))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {

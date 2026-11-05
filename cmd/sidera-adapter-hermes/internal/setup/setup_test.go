@@ -14,7 +14,11 @@ import (
 )
 
 func TestPlan(t *testing.T) {
-	skillDir := func(profile string) string { return "/h/" + profile + "/skills/sidera" }
+	home := filepath.Join(t.TempDir(), "h")
+	skillDir := func(profile string) string { return filepath.Join(home, profile, "skills", "sidera") }
+	placed := func(profile string) string {
+		return "place /s/SKILL.md as " + filepath.Join(skillDir(profile), "SKILL.md")
+	}
 	cases := []struct {
 		name      string
 		profiles  []string
@@ -27,7 +31,7 @@ func TestPlan(t *testing.T) {
 			want: []string{
 				"hermes -p default tools enable kanban --platform cron",
 				"hermes -p default tools enable kanban --platform feishu",
-				"place /s/SKILL.md as /h/default/skills/sidera/SKILL.md",
+				placed("default"),
 			},
 		},
 		{
@@ -36,7 +40,7 @@ func TestPlan(t *testing.T) {
 			want: []string{
 				"hermes -p default tools enable kanban --platform cron",
 				"hermes -p default tools enable kanban --platform telegram",
-				"place /s/SKILL.md as /h/default/skills/sidera/SKILL.md",
+				placed("default"),
 			},
 		},
 		{
@@ -45,10 +49,10 @@ func TestPlan(t *testing.T) {
 			want: []string{
 				"hermes -p default tools enable kanban --platform cron",
 				"hermes -p default tools enable kanban --platform feishu",
-				"place /s/SKILL.md as /h/default/skills/sidera/SKILL.md",
+				placed("default"),
 				"hermes -p feishu tools enable kanban --platform cron",
 				"hermes -p feishu tools enable kanban --platform feishu",
-				"place /s/SKILL.md as /h/feishu/skills/sidera/SKILL.md",
+				placed("feishu"),
 			},
 		},
 	}
