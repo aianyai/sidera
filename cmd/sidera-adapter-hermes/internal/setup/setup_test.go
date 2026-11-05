@@ -17,7 +17,7 @@ func TestPlan(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "h")
 	skillDir := func(profile string) string { return filepath.Join(home, profile, "skills", "sidera") }
 	placed := func(profile string) string {
-		return "place /s/SKILL.md as " + filepath.Join(skillDir(profile), "SKILL.md")
+		return "place /s/SKILL.md as " + quote(filepath.Join(skillDir(profile), "SKILL.md"))
 	}
 	cases := []struct {
 		name      string

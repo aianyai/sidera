@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -103,9 +105,9 @@ func TestArgTooLongIsRefusedWithoutRunning(t *testing.T) {
 // On Windows a batch shim would hand every argument to cmd.exe, so the client
 // refuses to run one, whichever command it is asked for. The rule is applied for
 // another operating system here; the file is a real executable, so a run that was
-// not refused would show as another error.
+// not refused would show as another error. Each file is alone in its directory: a
+// lookup on Windows appends .exe, so a neighbour could stand in for the file named.
 func TestShimIsRefusedByEveryCommand(t *testing.T) {
-	dir := t.TempDir()
 	for _, tc := range []struct {
 		file    string
 		refused bool
@@ -115,27 +117,35 @@ func TestShimIsRefusedByEveryCommand(t *testing.T) {
 		{"hermes.exe", false},
 		{"hermes", false},
 	} {
-		path := filepath.Join(dir, tc.file)
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		c, err := New(Config{Executable: path, Home: "h", Board: "b"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		c.goos = "windows"
-		_, err = c.resolve("version")
-		var ke *Error
-		switch {
-		case tc.refused && (!errors.As(err, &ke) || ke.Class != Permanent || ke.ExitCode != -1):
-			t.Errorf("%s: err = %v, want a permanent refusal", tc.file, err)
-		case tc.refused:
-			if _, err := c.Version(context.Background()); !errors.As(err, &ke) || ke.Class != Permanent {
-				t.Errorf("%s: Version err = %v, want the refusal too", tc.file, err)
+		t.Run(tc.file, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tc.file)
+			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
 			}
-		case err != nil:
-			t.Errorf("%s: err = %v, want it let through", tc.file, err)
-		}
+			c, err := New(Config{Executable: path, Home: "h", Board: "b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.goos = "windows"
+			_, err = c.resolve("version")
+			var ke *Error
+			switch {
+			case tc.refused && (!errors.As(err, &ke) || ke.Class != Permanent || ke.ExitCode != -1):
+				t.Errorf("err = %v, want a permanent refusal", err)
+			case tc.refused:
+				if _, err := c.Version(context.Background()); !errors.As(err, &ke) || ke.Class != Permanent {
+					t.Errorf("Version err = %v, want the refusal too", err)
+				}
+			case tc.file == "hermes" && runtime.GOOS == "windows":
+				// Windows runs a file by its extension, so one without is not found as
+				// an executable, and no refusal of a shim is involved.
+				if !errors.Is(err, exec.ErrNotFound) {
+					t.Errorf("err = %v, want the file not to be found as an executable", err)
+				}
+			case err != nil:
+				t.Errorf("err = %v, want it let through", err)
+			}
+		})
 	}
 }
 
