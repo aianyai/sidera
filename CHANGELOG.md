@@ -8,7 +8,7 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
-## [0.14.0] - 2026-11-04
+## [0.14.0] - 2026-11-05
 
 Sidera now has a Hermes Agent adapter, `sidera-adapter-hermes`, which connects a long-running
 Hermes to the other nodes through its own Kanban board. The direct endpoint of an adapter can
