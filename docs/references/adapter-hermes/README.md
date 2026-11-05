@@ -262,6 +262,15 @@ they differ it covers both (Hermes 0.22.2):
    `setup` therefore prepares each profile it is given (`tools enable`, the Skill file), and
    in both modes the gateway that serves the profile has to be restarted afterwards.
 
+A wake for an `api_server` chat of a profile other than the host's default is delivered
+by a host gateway only when that chat already has a session in that profile's `state.db`:
+the chat of that platform is a raw session id and no route can anchor it, so the session
+store is Hermes' proof of ownership (`gateway/wake.py`, `session_owned_by_profile`, used
+by `_adapter_for_subscription` in `gateway/kanban_watchers_notifier.py`). Until the chat
+has one, the host skips the wake, keeps the event and delivers it later; a gateway per
+profile delivers without the condition. A home target of that platform in a non-default
+profile should therefore be a chat that has had a conversation.
+
 ### Endpoints in the program
 
 The instance endpoint, key `hermes`, is registered after start, with the name from
@@ -853,12 +862,13 @@ the Skill names the board, so that the agent and the adapter use the same one; a
 
 ### Platforms and operating notes
 
-**Verified.** The adapter has run the whole lane on macOS against Hermes 0.22.2 and on
-Linux against Hermes 0.22.7, on a cluster of three nodes: delegations to Codex and Claude
-Code on other nodes with `new_session` and with follow-ups, requests from other nodes,
-a delegation that the agent made itself, and a channel notice relayed as a card. Windows
-is not yet verified: no Hermes has run there, so whether it installs a `hermes.exe` or a
-batch shim (which the client refuses) is open.
+**Verified.** The adapter has run the whole lane on macOS against Hermes 0.22.2, on
+Linux against Hermes 0.22.7 and on Windows against Hermes 0.22.7, on a cluster of three
+nodes: delegations to Codex and Claude Code on other nodes with `new_session` and with
+follow-ups (in the same remote session too), requests from other nodes, and a delegation
+that the agent made itself; on macOS and Linux also a channel notice relayed as a card.
+On Windows the Hermes installer put `hermes.exe` under `%LOCALAPPDATA%\hermes\bin`, an
+executable the client accepts, and that directory on the user `PATH`.
 
 **A running host serves a new profile.** The host gateway serves every profile, so a profile
 created while it runs is served at once, with its own credentials and configuration, unless

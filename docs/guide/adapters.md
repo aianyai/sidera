@@ -286,18 +286,6 @@ process and no session.
   with the reason, and `setup` warns of the profiles it prepares. It checks the profile's
   own setting and the default profile's, since it cannot see which gateway runs, and it
   does not tell you that a gateway is not running.
-- A daemon new enough to give an adapter direct endpoints that are hidden from the
-  directory; on an older one the probe says the node needs an update.
-- A running Hermes gateway that serves each profile whose agents delegate, with its
-  Kanban notifier on, which is the default (`kanban.notify_in_gateway`). By default one
-  gateway serves every profile, and the notifier reads the setting of the profile that
-  started it, normally the default profile; a profile with its own gateway uses its own.
-  The agent is woken by that gateway when a card is completed. Without a running gateway,
-  or with `kanban.notify_in_gateway: false`, results are written to cards but no
-  conversation is woken. The adapter keeps working in the second case and says so:
-  `sidera adapter list` shows the instance's availability with the reason, and `setup`
-  warns of each profile it prepares. It reports a profile only when the setting is off
-  wherever it could be governed, and it does not tell you that a gateway is not running.
 
 **Install and enable.** The configuration has required settings, so it is given when
 the instance is enabled. Save it as `hermes.json`:
@@ -440,11 +428,15 @@ again. Nothing is acknowledged that was not written to a card.
 - One instance serves one board of one Hermes installation, and shows as one Hermes in
   the directory. Run one Hermes instance per node.
 - Only the releases of the range above. The adapter has been run on macOS against Hermes
-  0.22.2 and on Linux against Hermes 0.22.7. Windows is expected to work, since the
-  adapter only runs the `hermes` command, and is not yet confirmed.
+  0.22.2, on Linux against Hermes 0.22.7 and on Windows against Hermes 0.22.7 (installed
+  as `hermes.exe`).
 - Hermes serves every profile from one gateway by default, so a profile created while it
   runs is served at once. For a profile you make only for the adapter's tests, set
   `gateway.standalone: true` in it first, or the running gateway serves it.
+- When Hermes serves every profile from one gateway (its default), a wake for the home
+  chat of a profile other than the default is skipped while that chat is an `api_server`
+  chat with no conversation yet in that profile, and delivered once it has one. Choose as
+  the home target a chat that has had a conversation.
 - Disabling or removing the instance does not recall what it already sent. A new session
   that was still queued for a node that could not be reached is created there when the
   node is back (within the message's queue time), and nothing here is left to receive its

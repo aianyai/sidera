@@ -255,7 +255,6 @@ which is for the caller to read as "already done".
   `TestNotifierDisabled` (the notifier setting over the recorded outputs, and through a
   stand-in for hermes), `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
   `TestCheckProfiles`.
-- Verified platforms: the client has run on macOS against Hermes 0.22.2 and on Linux
-  against Hermes 0.22.7, both with the whole lane (see the Hermes adapter reference). Not
-  confirmed: Windows. The Windows rule is checked as a function of the path; whether
-  Hermes installs a `hermes.exe` or a shim there is for the first run on Windows to show.
+- Verified platforms: the client has run on macOS against Hermes 0.22.2, on Linux against
+  Hermes 0.22.7 and on Windows against Hermes 0.22.7 (installed as `hermes.exe`), all with
+  the whole lane (see the Hermes adapter reference).
