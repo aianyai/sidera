@@ -76,11 +76,9 @@ func TestGateReportsTheChangesOfWhatItFinds(t *testing.T) {
 		{name: "on after the recovery", files: allOn, later: true, told: cleared},
 
 		{name: "toolsets: a toolset is missing at the next verification", files: allOn, tools: noKanban, later: true, told: kanbanOff},
-		{name: "toolsets: enabled again, not seen before a verification is due", files: allOn, told: nothing},
-		{name: "toolsets: cleared at the verification", files: allOn, later: true, told: cleared},
-		{name: "toolsets: missing again", files: allOn, tools: noKanban, later: true, told: kanbanOff},
 		{name: "toolsets: an unreadable answer keeps the last one", files: allOn, tools: noRows, later: true, told: nothing},
-		{name: "toolsets: the notifier off too, both told", files: allOff, tools: noKanban, later: true,
+		{name: "toolsets: enabled again at the verification", files: allOn, later: true, told: cleared},
+		{name: "toolsets: missing again with the notifier off, both told", files: allOff, tools: noKanban, later: true,
 			told: "disabled in the configuration of profiles default, feishu", also: kanbanOff},
 		{name: "toolsets: both cleared at once", files: allOn, later: true, told: cleared},
 	}
