@@ -395,10 +395,14 @@ func TestRequestsAndAnswersAreHeldToTheProtocol(t *testing.T) {
 // daemon sends it to every adapter built on the kit, and does not change the
 // declaration it was given. An adapter without direct endpoints declares none.
 func TestTheKitDeclaresFeedbackForDirectEndpoints(t *testing.T) {
+	// The directory is made before the adapters are served, so that its removal runs
+	// after they end and release their locks: Windows does not remove a file that is
+	// still open.
+	dir := t.TempDir()
 	given := adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: 1}}
 	var init adapterproto.InitializeResult
 	s := serveOn(t, config(&stub{}, given))
-	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &init); err != nil {
+	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(dir, "direct.lock")), &init); err != nil {
 		t.Fatal(err)
 	}
 	if init.Capabilities.Direct == nil || !init.Capabilities.Direct.Feedback {
@@ -410,7 +414,7 @@ func TestTheKitDeclaresFeedbackForDirectEndpoints(t *testing.T) {
 
 	var runtimeOnly adapterproto.InitializeResult
 	s = serveOn(t, config(&stub{}, runtimeCaps()))
-	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(t.TempDir(), "lock")), &runtimeOnly); err != nil {
+	if err := s.call(adapterproto.MethodInitialize, initParams(filepath.Join(dir, "runtime.lock")), &runtimeOnly); err != nil {
 		t.Fatal(err)
 	}
 	if runtimeOnly.Capabilities.Direct != nil {
