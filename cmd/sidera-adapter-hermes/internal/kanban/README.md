@@ -12,7 +12,7 @@ without the adapter around it.
 
 | Name | Holds |
 | ---- | ----- |
-| `New(Config)` / `Client` | One board of one Hermes home. Methods: `List`, `Show`, `Create`, `Claim`, `Block`, `Comment`, `Complete`, `Attach`, `Attachments`, `NotifyList`, `NotifySubscribe`, `Version`, `Assignees`, `BoardExists`, `NotifierEnabled`, `NotifierDisabled`, `Probe` (one at a time; a caller meanwhile gets its result). `RemoveLeftoverAttachFiles` clears what an interrupted `Attach` left. |
+| `New(Config)` / `Client` | One board of one Hermes home. Methods: `List`, `Show`, `Create`, `Claim`, `Block`, `Comment`, `Complete`, `Attach`, `Attachments`, `NotifyList`, `NotifySubscribe`, `Version`, `Assignees`, `BoardExists`, `NotifierEnabled`, `NotifierDisabled`, `ToolsetsMissing`, `Probe` (one at a time; a caller meanwhile gets its result). `RemoveLeftoverAttachFiles` clears what an interrupted `Attach` left. |
 | `Error`, `Class`, `ErrTransient`, `ErrPermanent`, `ErrArgTooLong`, `ErrArgInvalid`, `ErrUnexpectedOutput` | The failure of every method (`client.go` runs, `error.go` classifies). |
 | `BlockKind` | The four block kinds Hermes accepts; the one home of that vocabulary. |
 | `SupportedFrom`, `SupportedBefore`, `ParseVersion`, `CheckVersion`, `CheckExecutable`, `CheckProfiles` | The probe rules; pure functions apart from `Probe`. |
@@ -58,7 +58,12 @@ run the commands in an isolated profile and board (never the owner's: create a
 profile with `hermes profile create <name> --no-alias --no-skills`, set
 `HERMES_HOME` to its directory and `HERMES_KANBAN_HOME` to a scratch directory),
 save each `--json` output, and replace home directories, host names and personal
-profile names with neutral values. Failure samples in `testdata/errors/` are
+profile names with neutral values. `testdata/tools-list/` holds `tools list --platform=<platform>` for each state of a
+platform's toolsets (a profile with no list, with a list that has neither `kanban` nor
+`skills`, one, the other, both, and `skills` named in `agent.disabled_toolsets`); the
+lists are made on the isolated profile with `config set platform_toolsets.<platform>
+'[...]'`, and the profile has `gateway.standalone` set at once so that a running host
+does not start serving it. Failure samples in `testdata/errors/` are
 `exit <code>` on the first line and Hermes' stderr after it; `recordedErrors` in
 `error_test.go` must list each with the class it gets. A sample that no longer
 decodes or classifies as before is a change to handle in the client, and a Hermes

@@ -1,0 +1,28 @@
+Built-in toolsets (feishu):
+  ✗ disabled  web  🔍 Web Search & Scraping
+  ✗ disabled  browser  🌐 Browser Automation
+  ✗ disabled  terminal  💻 Terminal & Processes
+  ✗ disabled  file  📁 File Operations
+  ✗ disabled  code_execution  ⚡ Code Execution
+  ✗ disabled  vision  👁️  Vision / Image Analysis
+  ✗ disabled  video  🎬 Video Analysis
+  ✓ enabled  image_gen  🎨 Image Generation
+  ✗ disabled  video_gen  🎬 Video Generation
+  ✗ disabled  x_search  🐦 X (Twitter) Search
+  ✗ disabled  tts  🔊 Text-to-Speech
+  ✗ disabled  stt  🎙️ Speech-to-Text
+  ✗ disabled  skills  📚 Skills
+  ✗ disabled  todo  📋 Task Planning
+  ✓ enabled  kanban  📌 Kanban
+  ✗ disabled  memory  💾 Memory
+  ✗ disabled  context_engine  🧩 Context Engine
+  ✗ disabled  session_search  🔎 Session Search
+  ✗ disabled  connections  🔌 Connections
+  ✗ disabled  clarify  ❓ Clarifying Questions
+  ✗ disabled  delegation  👥 Task Delegation
+  ✗ disabled  cronjob  ⏰ Cron Jobs
+  ✗ disabled  yuanbao  🤖 Yuanbao
+  ✗ disabled  computer_use  🖱️  Computer Use (macOS/Windows/Linux)
+
+Plugin toolsets (feishu):
+  ✗ disabled  a2a  🔌 A2A

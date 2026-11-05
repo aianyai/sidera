@@ -46,6 +46,7 @@ Verified against Hermes 0.22.2 (`hermes_cli/kanban_parser.py` and
 | `Assignees` | `assignees --json` | Profiles on disk (`on_disk`) and card assignees, with counts. |
 | `BoardExists` | `boards list --json` | Active boards; `--board` is ignored by `boards`. |
 | `NotifierEnabled` | `-p <profile> config get kanban.notify_in_gateway` (not a `kanban` subcommand, so without `--board`) | One line, the profile's resolved value: `true` or `false` for a boolean, `0`, `1` or `null` when the file holds that, and Hermes' default (`true`) when the profile sets nothing. An unknown key exits 1 with `Config key not set: <key>` on stderr. Stderr may also carry notices; only standard output is read. `NotifierDisabled` asks it for several profiles. |
+| `ToolsetsMissing` | `-p <profile> tools list --platform=<platform>` (not a `kanban` subcommand, so without `--board`) | Text, read-only: `Built-in toolsets (<platform>):` and `Plugin toolsets (<platform>):` followed by one row per toolset, `<mark> enabled\|disabled  <name>  <label>`, then `MCP servers:` when the profile has any. The rows are what the agent's own sessions resolve: the platform's saved list or, with none, its defaults (which leave `kanban` off and `skills` on), with `agent.disabled_toolsets` applied last. The client returns those of `kanban` and `skills` that are `disabled`. An unknown platform prints `Unknown platform '<x>'. Valid: ...` on standard output and exits 0, so a required toolset without a row is `ErrUnexpectedOutput`, not "missing". Without a TTY the output has no colour codes; the status mark is not read, only the word after it. |
 | `Version` | `--version` | First line `Hermes Agent v<major>.<minor>.<patch>[+build] (...)`. |
 
 `--status` accepts `archived blocked done ready review running scheduled todo
@@ -138,6 +139,17 @@ the list and reports the error. The value is parsed strictly: the gateway tests 
 count as off, `1` as on, and any other text is `ErrUnexpectedOutput` instead of a guess.
 The setting is read from the configuration; whether a gateway is running is not something
 `config get` can say.
+
+The toolsets an agent delegates with are not a check of `Probe` either. An agent whose platform
+has `kanban` off cannot create a card; one with `skills` off cannot load the Sidera Skill and
+creates a plain card on the current board, which the adapter never sees. Cards are still read and
+written, so the gate reads the home profile and platform with `ToolsetsMissing` in the same
+verification and reports a degraded lane, not an unusable one; `setup` reads every profile and
+platform it prepares the same way. No `hermes` command prints the state as JSON, and reading
+`config.yaml` would repeat the resolution Hermes does (a saved list, the platform's default
+composite, plugin toolsets, `agent.disabled_toolsets`), so the client asks `tools list`, whose
+rows come from that resolution itself (`hermes_cli/tools_config.py`, `_get_platform_tools`;
+`hermes_cli/tools_config_mcp.py`, `_print_tools_list`). The command changes nothing.
 
 The first check is not only the probe's: `run`, the single place hermes is started,
 resolves the executable and applies it before every command, so no command of the
@@ -245,6 +257,8 @@ which is for the caller to read as "already done".
 - Samples: `testdata/*.json` and `testdata/version.txt` are outputs of Hermes
   0.22.2 with the owner's paths and names replaced; `testdata/config-get/*.txt` are the outputs of
   `config get kanban.notify_in_gateway` for each value the profile can hold;
+  `testdata/tools-list/*.txt` are the outputs of `tools list --platform=<platform>` for each
+  state of a platform's toolsets;
   `testdata/errors/*.txt` are the exit code and stderr of the failures. `README.md` of the package says how to
   record them again.
 - Tests: `TestDecodeRecordedSamples` and `TestDecodeShapeChanges` (decoding),
@@ -255,7 +269,8 @@ which is for the caller to read as "already done".
   `TestTimeoutIsTransient`, `TestProbeAgainstRecordedOutputs`,
   `TestParseAndCheckVersion`, `TestParseRecordedNotifierSettings` and
   `TestNotifierDisabled` (the notifier setting over the recorded outputs, partial answers included, and through a
-  stand-in for hermes), `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
+  stand-in for hermes), `TestToolsetsMissingFromRecordedLists`, `TestToolsetsListWithoutTheRowsIsRefused` and
+  `TestToolsetsMissingThroughHermes` (the required toolsets over the recorded lists, the answers that are refused, and through the stand-in), `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
   `TestCheckProfiles`.
 - Verified platforms: the client has run on macOS against Hermes 0.22.2, on Linux against
   Hermes 0.22.7 and on Windows against Hermes 0.22.7 (installed as `hermes.exe`), all with

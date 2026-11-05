@@ -1,0 +1,1 @@
+✗ Unknown platform 'nosuch'. Valid: a2a, api_server, bluebubbles, buzz, cli, cron, dingtalk, discord, email, feishu, google_chat, irc, line, matrix, mattermost, ntfy, photon, qqbot, raft, signal, simplex, slack, sms, teams, telegram, webhook, wecom, wecom_callback, weixin, whatsapp, whatsapp_cloud, yuanbao

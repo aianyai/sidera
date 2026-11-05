@@ -36,6 +36,10 @@ const (
 	// `config get kanban.notify_in_gateway`, whichever profile is asked; a file named
 	// NotifierFile with "-<profile>" before the extension answers for that profile only.
 	NotifierFile = "notifier.txt"
+	// ToolsFile, in the control directory, replaces the recorded output of
+	// `tools list --platform=<platform>`, whichever profile and platform are asked. The
+	// recording is a platform whose list names kanban and skills, both enabled.
+	ToolsFile = "tools.txt"
 )
 
 // NotifierFileOf is the file that answers `config get kanban.notify_in_gateway` for one
@@ -127,6 +131,9 @@ func recorded(args []string, control string) int {
 	if len(args) > 2 && args[0] == "-p" {
 		cmd = strings.Join(args[2:], " ") // hermes -p <profile> <command>
 	}
+	if strings.HasPrefix(cmd, "tools list --platform=") {
+		cmd = "tools list" // the recording is the same for every platform
+	}
 	file := ""
 	switch cmd {
 	case "--version":
@@ -145,6 +152,14 @@ func recorded(args []string, control string) int {
 					os.Stdout.Write(b)
 					return 0
 				}
+			}
+		}
+	case "tools list":
+		file = filepath.Join("tools-list", "explicit-both.txt")
+		if control != "" {
+			if b, err := os.ReadFile(filepath.Join(control, ToolsFile)); err == nil {
+				os.Stdout.Write(b)
+				return 0
 			}
 		}
 	case "boards list --json":
