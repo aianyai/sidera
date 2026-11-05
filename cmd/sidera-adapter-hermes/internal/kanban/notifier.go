@@ -2,6 +2,7 @@ package kanban
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -38,29 +39,39 @@ const DefaultProfile = "default"
 // configuration has the notifier off. The notifier is a task of a gateway process and
 // reads the configuration of the profile the process was started from. By default one
 // gateway serves every profile and delivers all their notifications, started from the
-// default profile, so that profile's setting governs the others; a profile that runs
-// its own gateway (it sets gateway.standalone, or another gateway keeps the shared one
-// from taking it over) is governed by its own. The command line cannot say which of
-// the two arrangements runs, so both settings are read for every profile asked about
-// and either one being off is reported. The profiles come in the order given, the
-// default profile last when it was not among them. The first one that cannot be read
-// ends the call with its error.
+// default profile, so that profile's setting governs the others; a profile that runs its
+// own gateway (it sets gateway.standalone, or another gateway keeps the shared one from
+// taking it over) is governed by its own. The command line cannot say which of the two
+// arrangements runs, so both settings are read for every profile asked about and either
+// one being off is reported. The profiles come in the order given, the default profile
+// last when it was not among them.
+//
+// Every profile is read, and a profile that cannot be read does not hide what the others
+// show: the list holds the profiles known to be off, and the error, when not nil, joins
+// the failures, each naming its profile. A caller that gets both uses the list and
+// reports the error. A profile that is not in the list is on or unread; only a nil error
+// says it is on.
 func (c *Client) NotifierDisabled(ctx context.Context, profiles []string) ([]string, error) {
 	candidates := slices.Clone(profiles)
 	if !slices.Contains(candidates, DefaultProfile) {
 		candidates = append(candidates, DefaultProfile)
 	}
 	var off []string
+	var failed []error
 	for _, p := range candidates {
 		enabled, err := c.NotifierEnabled(ctx, p)
 		if err != nil {
-			return nil, fmt.Errorf("profile %s: %w", p, err)
+			failed = append(failed, fmt.Errorf("profile %s: %w", p, err))
+			if ctx.Err() != nil {
+				break
+			}
+			continue
 		}
 		if !enabled {
 			off = append(off, p)
 		}
 	}
-	return off, nil
+	return off, errors.Join(failed...)
 }
 
 // parseNotifierSetting reads what `config get` prints for the setting. Hermes prints

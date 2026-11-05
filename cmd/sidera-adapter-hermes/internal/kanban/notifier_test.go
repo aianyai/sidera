@@ -46,7 +46,8 @@ func TestParseRecordedNotifierSettings(t *testing.T) {
 // The client asks Hermes the way the recording was made, for the profile asked about
 // and for the default profile, which starts the gateway that serves every profile, and
 // tells which of them have the notifier off. An output it cannot read and a failing
-// Hermes are errors, not an answer.
+// Hermes are errors, not an answer; a profile that fails does not hide what the others
+// show.
 func TestNotifierDisabled(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -66,6 +67,10 @@ func TestNotifierDisabled(t *testing.T) {
 		{"the default asked about is read once", kanbantest.ModeBoard, []string{"default", "feishu"}, map[string]string{
 			kanbantest.NotifierFile: "null\n"}, []string{"default", "feishu"}, nil},
 		{"unreadable", kanbantest.ModeBoard, []string{"feishu"}, map[string]string{kanbantest.NotifierFile: "maybe\n"}, nil, ErrUnexpectedOutput},
+		{"one unreadable does not hide the default being off", kanbantest.ModeBoard, []string{"feishu"}, map[string]string{
+			kanbantest.NotifierFile: "false\n", kanbantest.NotifierFileOf("feishu"): "maybe\n"}, []string{"default"}, ErrUnexpectedOutput},
+		{"the default unreadable does not hide a profile being off", kanbantest.ModeBoard, []string{"feishu"}, map[string]string{
+			kanbantest.NotifierFile: "false\n", kanbantest.NotifierFileOf("default"): "maybe\n"}, []string{"feishu"}, ErrUnexpectedOutput},
 		{"hermes fails", kanbantest.ModeHang, []string{"feishu"}, nil, nil, ErrTransient},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,8 +95,8 @@ func TestNotifierDisabled(t *testing.T) {
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("disabled = %v, want %v", got, tc.want)
 			}
-			if err != nil && !strings.Contains(err.Error(), "profile feishu") {
-				t.Errorf("error %q does not say which profile", err)
+			if err != nil && !strings.Contains(err.Error(), "profile ") {
+				t.Errorf("error %q does not say which profile failed", err)
 			}
 		})
 	}

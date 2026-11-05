@@ -208,11 +208,15 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	notifier := adapterproto.Dependency{Name: "hermes-notifier", State: adapterproto.DependencyOK}
 	off, err := env.Board.NotifierDisabled(ctx, env.Config.WakeProfiles())
 	switch {
+	case len(off) > 0:
+		// A profile known to be off is said even when another could not be read.
+		notifier.State, notifier.Detail = adapterproto.DependencyMissing, notifierOffDetail(off)
+		if err != nil {
+			a.log.Warn("could not read whether the Kanban notifier is on in every profile", "error", err)
+		}
 	case err != nil:
 		notifier.State = adapterproto.DependencyMissing
 		notifier.Detail = detail(fmt.Sprintf("could not read whether the Kanban notifier is on: %v", err))
-	case len(off) > 0:
-		notifier.State, notifier.Detail = adapterproto.DependencyMissing, notifierOffDetail(off)
 	}
 	res.Dependencies = append(res.Dependencies, notifier)
 	return res, nil

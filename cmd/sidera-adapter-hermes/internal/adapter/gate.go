@@ -28,7 +28,10 @@ import (
 // the board.
 //
 // The same verification reads whether the gateways that wake the conversations run
-// the Kanban notifier. A notifier that is off does not make Hermes unusable: cards
+// the Kanban notifier. There is one verification at a time: the three loops ask the
+// gate together, and a caller that arrives while one runs waits for it and takes its
+// result, so that Hermes is not asked by several processes at once and a slow, older
+// answer never replaces a newer one. A notifier that is off does not make Hermes unusable: cards
 // are still read and written, so receiving goes on, but no conversation is woken by
 // what is written, and the daemon is told so in the same availability report.
 type gate struct {
@@ -49,6 +52,18 @@ type gate struct {
 	notifierOff string
 	// reported is the state the daemon was last told.
 	reported availability
+
+	// flightMu guards verifying, the verification in progress.
+	flightMu  sync.Mutex
+	verifying *verification
+}
+
+// verification is a full verification in progress, which every caller that arrives
+// meanwhile waits for.
+type verification struct {
+	done     chan struct{}
+	err      error
+	notifier notifierReading
 }
 
 // availability is what the daemon is told: that Hermes is unusable, or else which
@@ -65,10 +80,7 @@ func (g *gate) Check(ctx context.Context) error {
 	var err error
 	notifier := notifierReading{}
 	if full {
-		err = g.board.Probe(ctx)
-		if err == nil {
-			notifier = g.readNotifier(ctx)
-		}
+		notifier, err = g.verify(ctx)
 	} else {
 		var ok bool
 		ok, err = g.board.BoardExists(ctx)
@@ -83,6 +95,34 @@ func (g *gate) Check(ctx context.Context) error {
 	return err
 }
 
+// verify runs the whole probe and, when Hermes is usable, reads the notifiers. A call
+// that arrives while another runs waits for it and returns its result.
+func (g *gate) verify(ctx context.Context) (notifierReading, error) {
+	g.flightMu.Lock()
+	if v := g.verifying; v != nil {
+		g.flightMu.Unlock()
+		select {
+		case <-v.done:
+			return v.notifier, v.err
+		case <-ctx.Done():
+			return notifierReading{}, ctx.Err()
+		}
+	}
+	v := &verification{done: make(chan struct{})}
+	g.verifying = v
+	g.flightMu.Unlock()
+
+	v.err = g.board.Probe(ctx)
+	if v.err == nil {
+		v.notifier = g.readNotifier(ctx)
+	}
+	g.flightMu.Lock()
+	g.verifying = nil
+	g.flightMu.Unlock()
+	close(v.done)
+	return v.notifier, v.err
+}
+
 // notifierReading is what a verification found about the notifiers; read is false
 // when it did not look or could not tell.
 type notifierReading struct {
@@ -90,13 +130,19 @@ type notifierReading struct {
 	detail string // empty when every notifier is on
 }
 
+// readNotifier reads the notifier setting of the profiles. A profile that cannot be
+// read is logged and leaves the answer to the others: the profiles known to be off are
+// reported even then, and when none is known off the reading says nothing, so that the
+// last answer stands.
 func (g *gate) readNotifier(ctx context.Context) notifierReading {
 	off, err := g.board.NotifierDisabled(ctx, g.wakeProfiles)
 	if err != nil {
 		if ctx.Err() == nil {
 			g.log.Warn("could not read whether the Hermes gateway's Kanban notifier is on", "error", err)
 		}
-		return notifierReading{}
+		if len(off) == 0 {
+			return notifierReading{}
+		}
 	}
 	return notifierReading{read: true, detail: notifierOffDetail(off)}
 }

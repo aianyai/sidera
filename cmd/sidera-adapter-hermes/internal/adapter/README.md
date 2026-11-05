@@ -45,6 +45,9 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 - **A notifier that is off degrades the report and pauses nothing** (`gate`): cards are
   still read and written, and the daemon is told, with the same condition and a detail
   that names the setting, that nothing wakes a conversation.
+- **One full verification at a time** (`gate.verify`): the loops ask together and a check
+  that finds one in progress takes its result, so the notifier is read once and an older
+  reading never replaces a newer one.
 - **Availability reports reach the daemon in the order of the changes**: the gate holds
   its lock from the decision to the end of the report.
 - **A send never names a delivery deadline** (`Env.Send`, `Outgoing`). The idempotency

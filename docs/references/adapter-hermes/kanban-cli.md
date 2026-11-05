@@ -129,10 +129,12 @@ The notifier setting is not a check of `Probe`. A gateway whose Kanban notifier 
 so it is no reason to pause; but the notifier is what wakes the conversation when a card
 is completed, so with it off every reply and every inbound request lands on a card and no
 agent hears of it. The gate therefore reads it with `NotifierDisabled` in the same
-verification. The call reads the profile asked about and the default profile and returns
-those whose configuration has it off, because which of the two a gateway reads depends
-on an arrangement the command line cannot show; the adapter reference (Gateway modes)
-says why. The value is parsed strictly: the gateway tests it for truth, so `0` and `null`
+verification. The call reads the profile asked about and the default profile, because which of
+the two a gateway reads depends on an arrangement the command line cannot show (the adapter
+reference, Gateway modes, says why), and returns those whose configuration has it off. Every
+profile is read, and one that fails does not hide the others: the call returns the profiles
+known to be off together with the joined failures, each naming its profile, and a caller uses
+the list and reports the error. The value is parsed strictly: the gateway tests it for truth, so `0` and `null`
 count as off, `1` as on, and any other text is `ErrUnexpectedOutput` instead of a guess.
 The setting is read from the configuration; whether a gateway is running is not something
 `config get` can say.
@@ -252,7 +254,7 @@ which is for the caller to read as "already done".
   worker variable, through a stand-in for hermes), `TestArgTooLongIsRefusedWithoutRunning` (also the NUL rows),
   `TestTimeoutIsTransient`, `TestProbeAgainstRecordedOutputs`,
   `TestParseAndCheckVersion`, `TestParseRecordedNotifierSettings` and
-  `TestNotifierDisabled` (the notifier setting over the recorded outputs, and through a
+  `TestNotifierDisabled` (the notifier setting over the recorded outputs, partial answers included, and through a
   stand-in for hermes), `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
   `TestCheckProfiles`.
 - Verified platforms: the client has run on macOS against Hermes 0.22.2, on Linux against

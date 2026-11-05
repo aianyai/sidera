@@ -180,8 +180,8 @@ func profileSkillDir(ctx context.Context, cfg config.Config, profile string) (st
 
 // notifierOff names the profiles whose gateway does not run the Kanban notifier,
 // asking Hermes as the adapter does (the client is the one home of that question). A
-// profile that cannot be read is said so on w and left out: the owner's setup does not
-// depend on it.
+// profile that cannot be read is said so on w and left out, while the profiles that
+// could be read are still named: the owner's setup does not depend on the reading.
 func notifierOff(ctx context.Context, cfg config.Config, profiles []string, w io.Writer) []string {
 	board, err := kanban.New(kanban.Config{Executable: cfg.HermesPath, Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome, Board: cfg.Board})
 	if err != nil {
@@ -190,8 +190,7 @@ func notifierOff(ctx context.Context, cfg config.Config, profiles []string, w io
 	}
 	off, err := board.NotifierDisabled(ctx, profiles)
 	if err != nil {
-		fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read whether the Kanban notifier is on: %v\n", err)
-		return nil
+		fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read whether the Kanban notifier is on in every profile: %v\n", err)
 	}
 	return off
 }

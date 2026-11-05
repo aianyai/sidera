@@ -180,7 +180,8 @@ its version is in the supported range, `hermes kanban` runs, the board exists, a
 Hermes profile is named `sidera`, `sidera-inbox` or `sidera:*`. When that holds, a
 further dependency, `hermes-notifier`, says whether the Kanban notifier is on for the
 profiles that wake conversations (below, under availability): `missing` with the reason
-when it is off or cannot be read.
+when it is off in a profile or cannot be read in any (a profile known to be off is named even
+when another could not be read).
 
 **Shutdown.** The loops are stopped, whatever the intent. The adapter starts no process
 that outlives it (a Hermes command ends with its call, or is killed with its
@@ -201,7 +202,9 @@ the loop tries again after a pause that doubles from one second to two minutes. 
 success clears the condition. This adapter declares no runtime endpoint, so the owner reads
 the condition in the `availability` of its instance in `sidera adapter list`. Only the change is reported, and the reports reach the
 daemon in the order of the changes (the gate holds its lock until the daemon has been
-told). A Windows batch shim is not a check of the gate: the client refuses to run it
+told). There is one full verification at a time: the three loops ask together, and a check
+that arrives while one runs waits for it and takes its result, so the notifier is read by one
+set of Hermes processes and a slower, older reading never replaces a newer one. A Windows batch shim is not a check of the gate: the client refuses to run it
 (`kanban-cli`), and the gate reports that refusal like any other.
 
 **The notifier.** What wakes a Hermes conversation when a card is completed is the
@@ -220,7 +223,9 @@ replies are written to cards but nothing wakes the agent". It does not pause rec
 polling: the condition describes a degraded lane, not an unusable one. It is cleared when a
 later verification finds the notifier on everywhere that is read, and replaced by the "not
 usable" condition while Hermes itself fails (the notifier is read again when Hermes is
-back). A setting that cannot be read is logged and leaves the last answer. The check does
+back). A profile whose setting cannot be read is logged and does not hide the others: the
+profiles known to be off are reported even then, and when none is known off the last answer
+stands. The check does
 not see a gateway that is not running, a host started from a profile other than the
 default, or the profile of a card from a creator it was not told of (served when
 `creator_profiles` is empty; its profile is not known before the card exists).
@@ -853,7 +858,7 @@ kanban.notify_in_gateway true`); the command is advice and `--apply` does not ru
 the setting may be off on purpose. It reads the profiles it prepares and the default
 profile, as the gate does (Gateway modes), and names each one whose configuration has it
 off. A profile whose setting cannot be read is reported on
-standard error and the run goes on.
+standard error and left out, the others are still named, and the run goes on.
 To find the address behind an alias, the output points to `sidera-adapter-console
 directory --node <id>`; no directory client is built here. When the alias table changes
 the owner runs `setup` again, since the Skill lists the aliases. The output also says that
@@ -1049,7 +1054,7 @@ or the home target.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `manifest_test.go` |
+| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `gate_test.go` (what the gate tells the daemon over a series of checks, and the probe's notifier dependency), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `setup_test.go` |
