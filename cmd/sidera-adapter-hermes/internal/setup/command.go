@@ -108,6 +108,11 @@ func parse(args []string) (options, error) {
 	if err := fs.Parse(args); err != nil {
 		return o, err
 	}
+	for _, p := range o.profiles {
+		if err := config.ValidateProfileName(p); err != nil {
+			return o, fmt.Errorf("--profile: %w", err)
+		}
+	}
 	switch {
 	case fs.NArg() != 0:
 		return o, fmt.Errorf("unexpected argument %q", fs.Arg(0))

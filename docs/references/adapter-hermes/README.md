@@ -36,10 +36,10 @@ at once.
 | `kanban_home` | Optional `HERMES_KANBAN_HOME`; absolute | none |
 | `board` | The slug of the one board served (`[a-z0-9][a-z0-9_-]{0,63}`) | none |
 | `display_name` | What the instance endpoint is called in the directory | `Hermes (<host name>)` |
-| `home_profile`, `home_platform`, `home_chat_id` | Where a wake-up goes when a card has no conversation; required | none |
+| `home_profile`, `home_platform`, `home_chat_id` | Where a wake-up goes when a card has no conversation; required. A profile name follows Hermes's rule (`[a-z0-9][a-z0-9_-]{0,63}` after lowercasing), since it is the value of `-p` and a name beginning with a dash would be read as an option | none |
 | `home_chat_type`, `home_thread_id`, `home_user_id`, `home_user_id_alt`, `home_parent_chat_id`, `home_guild_id` | The other fields of that notify subscription | none |
 | `aliases` | The allow-list of names a card may address, one entry each (below); at least one | none |
-| `creator_profiles` | If not empty, only cards created by these profiles are served | any |
+| `creator_profiles` | If not empty, only cards created by these profiles are served; each name follows the profile rule above | any |
 | `no_reply_timeout` | How long a card waits for the peer before it is blocked once | 24h |
 | `claim_ttl` | How long a claim on a card lasts; longer than `no_reply_timeout` | 168h |
 | `session_retention` | How long a conversation's remote session is kept after its last card | 168h |
@@ -807,7 +807,8 @@ format, the modes or the inbound flow updates the text in the same commit.
 
 **`setup --config <file|-> [--home <dir>] [--instance <name>] [--profile <name>]...
 [--platform <name>]... [--apply]`** reads the instance configuration, writes the Skill and
-prints the steps. `--profile` is a Hermes profile whose agents delegate and `--platform`
+prints the steps. `--profile` is a Hermes profile whose agents delegate (its name follows the
+profile rule of `home_profile`) and `--platform`
 a platform they delegate from; both repeat, and default to `home_profile` and
 `home_platform`. `cron` is always added to the platforms. The steps, for each profile:
 

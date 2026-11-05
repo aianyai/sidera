@@ -64,6 +64,9 @@ func TestDecodeRefuses(t *testing.T) {
 		{"claim shorter than wait", func(m map[string]any) { m[KeyClaimTTL] = "1h" }, KeyClaimTTL},
 		{"endpoint cap too small", func(m map[string]any) { m[KeyMaxEndpoints] = 3 }, KeyMaxEndpoints},
 		{"wrong type", func(m map[string]any) { m[KeyBoard] = 5 }, KeyBoard},
+		{"home profile read as an option", func(m map[string]any) { m[KeyHomeProfile] = "--all" }, KeyHomeProfile},
+		{"creator profile read as an option", func(m map[string]any) { m[KeyCreatorProfiles] = []string{"ok", "-x"} }, KeyCreatorProfiles},
+		{"creator profile with a space", func(m map[string]any) { m[KeyCreatorProfiles] = []string{"a b"} }, KeyCreatorProfiles},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

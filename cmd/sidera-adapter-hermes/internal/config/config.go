@@ -88,6 +88,20 @@ const (
 
 var boardRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// profileRE is the grammar of a Hermes profile name (hermes_constants.PROFILE_ID_RE,
+// Hermes 0.22.2). Hermes lowercases the name given to -p before it applies the rule.
+var profileRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// ValidateProfileName refuses what Hermes would not take for a profile name. A name
+// reaches Hermes as the value of -p, where one that begins with a dash would be read as
+// an option, so the rule is applied before any command is built from it.
+func ValidateProfileName(name string) error {
+	if !profileRE.MatchString(strings.ToLower(name)) {
+		return fmt.Errorf("%q is not a Hermes profile name: lowercase letters, digits, - and _, starting with a letter or digit, up to 64 characters", name)
+	}
+	return nil
+}
+
 var chatTypes = []string{"dm", "group", "channel", "thread"}
 
 // ChatTypes lists the values of the chat type of a notify subscription.
@@ -225,8 +239,13 @@ func Decode(values adapterproto.ConfigValues) (Config, error) {
 	}
 	if err := c.Home.Validate(); err != nil {
 		r.problem("home_*: %v", err)
+	} else if err := ValidateProfileName(c.Home.Profile); err != nil {
+		r.problem("%s: %v", KeyHomeProfile, err)
 	}
 	for i, p := range c.CreatorProfiles {
+		if err := ValidateProfileName(p); err != nil {
+			r.problem("%s: %v", KeyCreatorProfiles, err)
+		}
 		c.CreatorProfiles[i] = strings.ToLower(p)
 	}
 	if c.ClaimTTL <= c.NoReplyTimeout {

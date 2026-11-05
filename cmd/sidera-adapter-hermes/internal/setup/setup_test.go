@@ -177,3 +177,19 @@ func TestPlanWarnsOfAProfileWithTheNotifierOff(t *testing.T) {
 		})
 	}
 }
+
+// A profile name becomes the value of -p, where Hermes would read one that begins with
+// a dash as an option.
+func TestParseRefusesAProfileNameHermesDoesNotTake(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		ok      bool
+	}{
+		{"work", true}, {"Work", true}, {"default", true}, {"-x", false}, {"--all", false}, {"a b", false}, {"", false},
+	} {
+		_, err := parse([]string{"--config", "c.json", "--profile=" + tc.profile})
+		if (err == nil) != tc.ok {
+			t.Errorf("--profile=%q: err = %v, want accepted: %v", tc.profile, err, tc.ok)
+		}
+	}
+}

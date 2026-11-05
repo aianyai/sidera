@@ -8,6 +8,9 @@ over (`Decode`), and the alias table (`ParseAliases`, `Aliases.Lookup`, and `Ali
 - The alias table is the allow-list of everything a card can make the node do. Names
   are lowercase. Adding a mode or a field to an alias changes what a card may do:
   update the reference.
+- A profile name is checked against Hermes's rule (`ValidateProfileName`) wherever the
+  owner gives one (`home_profile`, `creator_profiles`, and `setup --profile`): it is passed
+  as the value of `-p`, and one beginning with a dash would be read as an option.
 - `Target` is the set of fields of a Hermes notify subscription; the state package
   keeps it with each endpoint.
 - Settings must be declared in the package manifest with the same keys and defaults
