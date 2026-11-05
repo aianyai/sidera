@@ -1,0 +1,2 @@
+exit 1
+Config key not set: kanban.no_such_key

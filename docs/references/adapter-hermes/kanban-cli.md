@@ -45,6 +45,7 @@ Verified against Hermes 0.22.2 (`hermes_cli/kanban_parser.py` and
 | `NotifySubscribe` | `notify-subscribe <id> --platform= --chat-id= --notifier-profile= [--thread-id=] [--user-id=] [--user-id-alt=] [--chat-type=] [--parent-chat-id=] [--guild-id=] [--delivery-mode=]` | Text. `--parent-chat-id` and `--guild-id` are stored in `delivery_metadata`; other keys of it (a scope id) cannot be set from the command line. A new subscription starts caught up on the card's events. |
 | `Assignees` | `assignees --json` | Profiles on disk (`on_disk`) and card assignees, with counts. |
 | `BoardExists` | `boards list --json` | Active boards; `--board` is ignored by `boards`. |
+| `NotifierEnabled` | `-p <profile> config get kanban.notify_in_gateway` (not a `kanban` subcommand, so without `--board`) | One line, the profile's resolved value: `true` or `false` for a boolean, `0`, `1` or `null` when the file holds that, and Hermes' default (`true`) when the profile sets nothing. An unknown key exits 1 with `Config key not set: <key>` on stderr. Stderr may also carry notices; only standard output is read. `NotifierDisabled` asks it for several profiles. |
 | `Version` | `--version` | First line `Hermes Agent v<major>.<minor>.<patch>[+build] (...)`. |
 
 `--status` accepts `archived blocked done ready review running scheduled todo
@@ -122,6 +123,19 @@ the version found and the range.
    of Hermes tests each card's assignee with `profile_exists` on every tick and
    starts a worker for the card when such a profile exists. Names that only
    appear as assignees of cards, as the adapter's own do, are fine.
+
+The notifier setting is not a check of `Probe`. A gateway whose Kanban notifier is off
+(`kanban.notify_in_gateway: false`; default on) still lets cards be read and written,
+so it is no reason to pause; but the notifier is what wakes the conversation when a card
+is completed, so with it off every reply and every inbound request lands on a card and no
+agent hears of it. The gate therefore reads it with `NotifierDisabled` in the same
+verification. The call reads the profile asked about and the default profile and returns
+those whose configuration has it off, because which of the two a gateway reads depends
+on an arrangement the command line cannot show; the adapter reference (Gateway modes)
+says why. The value is parsed strictly: the gateway tests it for truth, so `0` and `null`
+count as off, `1` as on, and any other text is `ErrUnexpectedOutput` instead of a guess.
+The setting is read from the configuration; whether a gateway is running is not something
+`config get` can say.
 
 The first check is not only the probe's: `run`, the single place hermes is started,
 resolves the executable and applies it before every command, so no command of the
@@ -227,8 +241,9 @@ which is for the caller to read as "already done".
   kinds, delivery modes), `error.go` (`Error`, `Class` and `classify`),
   `probe.go` (versions and probe checks).
 - Samples: `testdata/*.json` and `testdata/version.txt` are outputs of Hermes
-  0.22.2 with the owner's paths and names replaced; `testdata/errors/*.txt` are the
-  exit code and stderr of the failures. `README.md` of the package says how to
+  0.22.2 with the owner's paths and names replaced; `testdata/config-get/*.txt` are the outputs of
+  `config get kanban.notify_in_gateway` for each value the profile can hold;
+  `testdata/errors/*.txt` are the exit code and stderr of the failures. `README.md` of the package says how to
   record them again.
 - Tests: `TestDecodeRecordedSamples` and `TestDecodeShapeChanges` (decoding),
   `TestClassifyRecordedErrors` (every recorded failure with its class; a new
@@ -236,7 +251,9 @@ which is for the caller to read as "already done".
   `TestCreateBodyThroughStdin` (a 256 KiB body, the explicit homes and the removed
   worker variable, through a stand-in for hermes), `TestArgTooLongIsRefusedWithoutRunning` (also the NUL rows),
   `TestTimeoutIsTransient`, `TestProbeAgainstRecordedOutputs`,
-  `TestParseAndCheckVersion`, `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
+  `TestParseAndCheckVersion`, `TestParseRecordedNotifierSettings` and
+  `TestNotifierDisabled` (the notifier setting over the recorded outputs, and through a
+  stand-in for hermes), `TestCheckExecutable`, `TestShimIsRefusedByEveryCommand`,
   `TestCheckProfiles`.
 - Not confirmed: the client has run on macOS against Hermes 0.22.2 only. The
   Windows rule is checked as a function of the path; whether Hermes installs a

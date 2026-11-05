@@ -21,6 +21,9 @@ why `--apply` does only what it does are in
 - **What is written in the state directory is owner-only.** The daemon refuses to start
   an adapter whose state directory holds an entry others can reach; the copy in a profile's
   `skills` directory is Hermes's, with ordinary modes.
+- **The notifier setting is read, never changed.** The plan warns of a profile that has
+  `kanban.notify_in_gateway` off and prints the command that turns it on; neither the plan
+  nor `--apply` runs it.
 - **Nothing is restarted.** The output tells the owner to restart the gateways.
 - **The Skill never contains an address.** A card names an alias.
 - **The Skill names the adapter's board.** Hermes's kanban tools act on the board Hermes

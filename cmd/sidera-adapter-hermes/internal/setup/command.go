@@ -153,7 +153,7 @@ func run(o options, env Env) error {
 		}
 	}
 	steps := Plan(profiles, platforms, skillFile, func(p string) string { return skillDirs[p] })
-	printPlan(env.Stdout, cfg, skillFile, steps)
+	printPlan(env.Stdout, cfg, skillFile, steps, notifierOff(ctx, cfg, profiles, env.Stderr))
 	if !o.apply {
 		return nil
 	}
@@ -176,6 +176,24 @@ func profileSkillDir(ctx context.Context, cfg config.Config, profile string) (st
 		return "", fmt.Errorf("hermes -p %s config path printed %q, want the path of config.yaml", profile, strings.TrimSpace(string(out)))
 	}
 	return filepath.Join(filepath.Dir(lines[len(lines)-1]), "skills", SkillName), nil
+}
+
+// notifierOff names the profiles whose gateway does not run the Kanban notifier,
+// asking Hermes as the adapter does (the client is the one home of that question). A
+// profile that cannot be read is said so on w and left out: the owner's setup does not
+// depend on it.
+func notifierOff(ctx context.Context, cfg config.Config, profiles []string, w io.Writer) []string {
+	board, err := kanban.New(kanban.Config{Executable: cfg.HermesPath, Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome, Board: cfg.Board})
+	if err != nil {
+		fmt.Fprintln(w, "sidera-adapter-hermes: setup: warning:", err)
+		return nil
+	}
+	off, err := board.NotifierDisabled(ctx, profiles)
+	if err != nil {
+		fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read whether the Kanban notifier is on: %v\n", err)
+		return nil
+	}
+	return off
 }
 
 // StateDir is where the daemon keeps an instance's private state: adapter-state/<instance>
@@ -261,16 +279,21 @@ func orDefault(given multi, fallback string) []string {
 	return []string{fallback}
 }
 
-func printPlan(w io.Writer, cfg config.Config, skillFile string, steps []Step) {
+func printPlan(w io.Writer, cfg config.Config, skillFile string, steps []Step, notifierOff []string) {
 	fmt.Fprintf(w, "Wrote the Skill for %d alias(es): %s\n", len(cfg.Aliases), skillFile)
 	fmt.Fprintf(w, "The Skill names the board %q, so the agent and the adapter use the same one.\n\n", cfg.Board)
 	fmt.Fprintln(w, "Steps (Hermes commands; HERMES_HOME is "+cfg.HermesHome+envKanban(cfg)+"):")
 	for i, s := range steps {
 		fmt.Fprintf(w, "  %d. %s\n     %s\n", i+1, s.Why, s.Command(cfg.HermesPath))
 	}
+	for _, s := range NotifierSteps(notifierOff) {
+		fmt.Fprintf(w, "\nWarning: %s\n  %s\n", s.Why, s.Command(cfg.HermesPath))
+	}
 	fmt.Fprintln(w, `
-Then restart the gateway of each profile: Hermes reads its toolsets and Skills when the
-gateway starts, and this command restarts nothing.
+Then restart the gateway that serves each profile: Hermes reads its toolsets and Skills
+when the gateway starts, and this command restarts nothing. By default one gateway, the
+host, serves every profile (restart that one); a profile that runs its own gateway
+(gateway.standalone) has to be restarted on its own.
 
 To find the address behind an alias, list what another node shows:
   sidera-adapter-console directory --node <node id>

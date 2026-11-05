@@ -32,7 +32,17 @@ const (
 	// VersionFile, in the control directory, replaces the recorded output of
 	// `--version`.
 	VersionFile = "version.txt"
+	// NotifierFile, in the control directory, replaces the recorded output of
+	// `config get kanban.notify_in_gateway`, whichever profile is asked; a file named
+	// NotifierFile with "-<profile>" before the extension answers for that profile only.
+	NotifierFile = "notifier.txt"
 )
+
+// NotifierFileOf is the file that answers `config get kanban.notify_in_gateway` for one
+// profile.
+func NotifierFileOf(profile string) string {
+	return strings.TrimSuffix(NotifierFile, ".txt") + "-" + profile + ".txt"
+}
 
 // The modes.
 const (
@@ -114,6 +124,9 @@ func recorded(args []string, control string) int {
 	if len(args) > 3 && args[0] == "kanban" && args[1] == "--board" {
 		cmd = strings.Join(args[3:], " ")
 	}
+	if len(args) > 2 && args[0] == "-p" {
+		cmd = strings.Join(args[2:], " ") // hermes -p <profile> <command>
+	}
 	file := ""
 	switch cmd {
 	case "--version":
@@ -122,6 +135,16 @@ func recorded(args []string, control string) int {
 			if b, err := os.ReadFile(filepath.Join(control, VersionFile)); err == nil {
 				os.Stdout.Write(b)
 				return 0
+			}
+		}
+	case "config get kanban.notify_in_gateway":
+		file = filepath.Join("config-get", "unset-default.txt")
+		if control != "" {
+			for _, name := range []string{NotifierFileOf(args[1]), NotifierFile} {
+				if b, err := os.ReadFile(filepath.Join(control, name)); err == nil {
+					os.Stdout.Write(b)
+					return 0
+				}
 			}
 		}
 	case "boards list --json":

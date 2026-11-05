@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/kanban"
 )
 
 // CronPlatform is the Hermes platform of scheduled jobs. A cron job is an agent turn
@@ -68,6 +70,28 @@ func Plan(profiles, platforms []string, skillFile string, skillDir func(profile 
 			Why:      "profile " + profile + ": give its agents the Skill that explains how to delegate and answer",
 			CopyFrom: skillFile,
 			CopyTo:   filepath.Join(skillDir(profile), "SKILL.md"),
+		})
+	}
+	return steps
+}
+
+// NotifierSteps are the commands that turn the Kanban notifier on in the profiles whose
+// configuration has it off, each with what happens while it is off. A gateway reads the
+// setting from the profile it was started from: the default profile for the one gateway
+// that serves every profile, or the profile itself when it runs its own gateway. They
+// are advice and not part of the plan: `setup` never changes that setting, nor does
+// --apply run them, since a gateway that has it off may be configured so on purpose.
+func NotifierSteps(off []string) []Step {
+	steps := make([]Step, 0, len(off))
+	for _, profile := range off {
+		whose := "a gateway started from it wakes no conversation, so a completed card is written but no agent hears of it."
+		if profile == kanban.DefaultProfile {
+			whose = "the one gateway that serves every profile is started from it and wakes no conversation, " +
+				"so a completed card is written but no agent hears of it."
+		}
+		steps = append(steps, Step{
+			Why:  "the Kanban notifier is off in profile " + profile + " (" + kanban.NotifierSetting + " is false): " + whose + " To turn it on:",
+			Args: []string{"-p", profile, "config", "set", kanban.NotifierSetting, "true"},
 		})
 	}
 	return steps

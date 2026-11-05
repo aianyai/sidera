@@ -26,18 +26,36 @@ import (
 // that is upgraded under a running adapter, or a profile created later, is found
 // within that time. Between probes the check is the one cheap command that needs
 // the board.
+//
+// The same verification reads whether the gateways that wake the conversations run
+// the Kanban notifier. A notifier that is off does not make Hermes unusable: cards
+// are still read and written, so receiving goes on, but no conversation is woken by
+// what is written, and the daemon is told so in the same availability report.
 type gate struct {
-	board       *kanban.Client
-	report      func(context.Context, adapterproto.AvailabilityParams) error
-	log         *slog.Logger
-	now         func() time.Time
-	verifyEvery time.Duration
+	board        *kanban.Client
+	wakeProfiles []string
+	report       func(context.Context, adapterproto.AvailabilityParams) error
+	log          *slog.Logger
+	now          func() time.Time
+	verifyEvery  time.Duration
 
 	// mu is held from the decision that the state changed until the daemon has been
 	// told, so that the reports reach the daemon in the order of the changes.
 	mu         sync.Mutex
 	down       bool
 	verifiedAt time.Time
+	// notifierOff is the detail of the condition while a notifier is off, else empty.
+	// It is what the last verification found; one that could not read it leaves it.
+	notifierOff string
+	// reported is the state the daemon was last told.
+	reported availability
+}
+
+// availability is what the daemon is told: that Hermes is unusable, or else which
+// notifier detail stands.
+type availability struct {
+	down     bool
+	notifier string
 }
 
 // Check asks whether Hermes can be used, and reports a change. A failure caused by
@@ -45,8 +63,12 @@ type gate struct {
 func (g *gate) Check(ctx context.Context) error {
 	full := g.verificationDue()
 	var err error
+	notifier := notifierReading{}
 	if full {
 		err = g.board.Probe(ctx)
+		if err == nil {
+			notifier = g.readNotifier(ctx)
+		}
 	} else {
 		var ok bool
 		ok, err = g.board.BoardExists(ctx)
@@ -57,8 +79,41 @@ func (g *gate) Check(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	g.set(ctx, err, full)
+	g.set(ctx, err, full, notifier)
 	return err
+}
+
+// notifierReading is what a verification found about the notifiers; read is false
+// when it did not look or could not tell.
+type notifierReading struct {
+	read   bool
+	detail string // empty when every notifier is on
+}
+
+func (g *gate) readNotifier(ctx context.Context) notifierReading {
+	off, err := g.board.NotifierDisabled(ctx, g.wakeProfiles)
+	if err != nil {
+		if ctx.Err() == nil {
+			g.log.Warn("could not read whether the Hermes gateway's Kanban notifier is on", "error", err)
+		}
+		return notifierReading{}
+	}
+	return notifierReading{read: true, detail: notifierOffDetail(off)}
+}
+
+// notifierOffDetail is the condition that says in whose configuration the notifier is
+// off, empty when it is on everywhere that is read.
+func notifierOffDetail(off []string) string {
+	if len(off) == 0 {
+		return ""
+	}
+	which := "profile "
+	if len(off) > 1 {
+		which = "profiles "
+	}
+	return detail(fmt.Sprintf("the Hermes gateway's Kanban notifier is disabled in the configuration of %s%s (%s is false): "+
+		"a gateway started from it wakes no conversation, so replies are written to cards but nothing wakes the agent",
+		which, strings.Join(off, ", "), kanban.NotifierSetting))
 }
 
 // verificationDue reports whether the next check has to be the whole probe.
@@ -68,9 +123,9 @@ func (g *gate) verificationDue() bool {
 	return g.down || g.verifiedAt.IsZero() || g.now().Sub(g.verifiedAt) >= g.verifyEvery
 }
 
-// set records the outcome of a check and reports a change of state, and only a
-// change: the daemon replaces the previous snapshot with each one it gets.
-func (g *gate) set(ctx context.Context, err error, full bool) {
+// set records the outcome of a check and reports a change of what the daemon is told,
+// and only a change: the daemon replaces the previous snapshot with each one it gets.
+func (g *gate) set(ctx context.Context, err error, full bool, notifier notifierReading) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
@@ -79,19 +134,36 @@ func (g *gate) set(ctx context.Context, err error, full bool) {
 	case full:
 		g.verifiedAt = g.now()
 	}
-	changed := (err != nil) != g.down
+	if notifier.read {
+		g.notifierOff = notifier.detail
+	}
 	g.down = err != nil
-	if !changed {
+	now := availability{down: g.down}
+	if !g.down {
+		now.notifier = g.notifierOff
+	}
+	before := g.reported
+	if now == before {
 		return
 	}
+	g.reported = now
+
 	snapshot := adapterproto.AvailabilityParams{Conditions: []adapterproto.Availability{}}
-	if err != nil {
+	switch {
+	case now.down:
 		g.log.Warn("hermes kanban is not usable; receiving and polling are paused", "error", err)
 		snapshot.Conditions = append(snapshot.Conditions, adapterproto.Availability{
 			Condition: adapterproto.ConditionDependencyMissing,
 			Detail:    detail(fmt.Sprintf("hermes kanban is not usable, so no card is read or written and messages wait in Sidera: %v", err)),
 		})
-	} else {
+	case now.notifier != "":
+		g.log.Warn(now.notifier)
+		snapshot.Conditions = append(snapshot.Conditions, adapterproto.Availability{
+			Condition: adapterproto.ConditionDependencyMissing,
+			Detail:    now.notifier,
+		})
+	}
+	if before.down && !now.down {
 		g.log.Info("hermes kanban is usable again")
 	}
 	if rerr := g.report(ctx, snapshot); rerr != nil && ctx.Err() == nil {

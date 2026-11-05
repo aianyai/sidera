@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -132,5 +133,43 @@ func TestWriteSkillLeavesTheStateDirectoryOwnerOnly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// A profile whose gateway has the Kanban notifier off is named in the plan, with the
+// command that turns it on, and one that has it on is not.
+func TestPlanWarnsOfAProfileWithTheNotifierOff(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		off  []string
+		want []string
+	}{
+		{"on everywhere", nil, nil},
+		{"the default off", []string{"default"}, []string{
+			"the Kanban notifier is off in profile default (kanban.notify_in_gateway is false)",
+			"hermes -p default config set kanban.notify_in_gateway true",
+		}},
+		{"another profile off", []string{"feishu"}, []string{
+			"off in profile feishu (kanban.notify_in_gateway is false): a gateway started from it",
+			"hermes -p feishu config set kanban.notify_in_gateway true",
+		}},
+		{"two off", []string{"feishu", "default"}, []string{
+			"hermes -p feishu config set kanban.notify_in_gateway true",
+			"hermes -p default config set kanban.notify_in_gateway true",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			printPlan(&out, config.Config{HermesPath: "hermes", HermesHome: "/h", Board: "lane"}, "/s/SKILL.md", nil, tc.off)
+			text := out.String()
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the plan lacks %q:\n%s", want, text)
+				}
+			}
+			if len(tc.want) == 0 && strings.Contains(text, "notifier") {
+				t.Errorf("the plan mentions the notifier although it is on:\n%s", text)
+			}
+		})
 	}
 }

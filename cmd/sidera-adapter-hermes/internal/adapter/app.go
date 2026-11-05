@@ -127,7 +127,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	if err := eps.adopt(p.DirectEndpoints); err != nil {
 		return adapterproto.StartResult{}, fmt.Errorf("recording the endpoints the daemon lists: %w", err)
 	}
-	gate := &gate{board: board, report: a.conn.Availability, log: a.log, now: a.now, verifyEvery: a.tm.verifyEvery}
+	gate := &gate{board: board, wakeProfiles: cfg.WakeProfiles(), report: a.conn.Availability, log: a.log, now: a.now, verifyEvery: a.tm.verifyEvery}
 	a.env = &Env{Config: cfg, Board: board, State: store, Log: a.log, Now: a.now, StateDir: a.stateDir, conn: a.conn, endpoints: eps}
 	handlers := a.flows(a.env)
 	a.receiver = newReceiver(a.conn, eps, store, gate, handlers.Messages, a.log, a.now, a.tm)
@@ -175,8 +175,8 @@ func (a *App) EndpointPending(_ context.Context, p adapterproto.PendingParams) {
 	}
 }
 
-// Probe judges what the adapter depends on: the daemon's capability and the Hermes
-// command line with its board.
+// Probe judges what the adapter depends on: the daemon's capability, the Hermes
+// command line with its board, and the Kanban notifier that wakes conversations.
 func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterproto.ProbeResult, error) {
 	res, err := a.Base.Probe(ctx, p)
 	if err != nil {
@@ -200,6 +200,21 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		hermes.State, hermes.Detail = adapterproto.DependencyMissing, detail(err.Error())
 	}
 	res.Dependencies = append(res.Dependencies, hermes)
+	if hermes.State != adapterproto.DependencyOK {
+		return res, nil
+	}
+	// Receiving and writing cards work without the notifier, but nothing wakes the
+	// conversation of a card that is completed, so the owner is told here as well.
+	notifier := adapterproto.Dependency{Name: "hermes-notifier", State: adapterproto.DependencyOK}
+	off, err := env.Board.NotifierDisabled(ctx, env.Config.WakeProfiles())
+	switch {
+	case err != nil:
+		notifier.State = adapterproto.DependencyMissing
+		notifier.Detail = detail(fmt.Sprintf("could not read whether the Kanban notifier is on: %v", err))
+	case len(off) > 0:
+		notifier.State, notifier.Detail = adapterproto.DependencyMissing, notifierOffDetail(off)
+	}
+	res.Dependencies = append(res.Dependencies, notifier)
 	return res, nil
 }
 

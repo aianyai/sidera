@@ -177,7 +177,10 @@ its own declaration; update the node).
 **Probe.** The dependency `daemon` (the capability) and the dependency `hermes`,
 which is the client's check: the program resolves and is not a Windows batch shim,
 its version is in the supported range, `hermes kanban` runs, the board exists, and no
-Hermes profile is named `sidera`, `sidera-inbox` or `sidera:*`.
+Hermes profile is named `sidera`, `sidera-inbox` or `sidera:*`. When that holds, a
+further dependency, `hermes-notifier`, says whether the Kanban notifier is on for the
+profiles that wake conversations (below, under availability): `missing` with the reason
+when it is off or cannot be read.
 
 **Shutdown.** The loops are stopped, whatever the intent. The adapter starts no process
 that outlives it (a Hermes command ends with its call, or is killed with its
@@ -200,6 +203,64 @@ the condition in the `availability` of its instance in `sidera adapter list`. On
 daemon in the order of the changes (the gate holds its lock until the daemon has been
 told). A Windows batch shim is not a check of the gate: the client refuses to run it
 (`kanban-cli`), and the gate reports that refusal like any other.
+
+**The notifier.** What wakes a Hermes conversation when a card is completed is the
+Kanban notifier of a gateway. It is a task of the gateway process, it runs only in a running
+gateway, and it does not start when the configuration it reads has
+`kanban.notify_in_gateway: false` (Hermes 0.22.2, `gateway/kanban_watchers.py`; the
+default is on; the setting is read when the gateway starts). With it off every card is
+still written, so nothing is lost, but no agent is woken, which without a message would
+look like a peer that never answers. The gate (`kanban.NotifierDisabled`, `hermes -p
+<profile> config get kanban.notify_in_gateway`) reads the setting in the same
+verification as the probe, for `home_profile`, the `creator_profiles` and the default
+profile (below, for why), and reports the condition `dependency_missing` with the detail
+"the Hermes gateway's Kanban notifier is disabled in the configuration of profile P
+(kanban.notify_in_gateway is false): a gateway started from it wakes no conversation, so
+replies are written to cards but nothing wakes the agent". It does not pause receiving or
+polling: the condition describes a degraded lane, not an unusable one. It is cleared when a
+later verification finds the notifier on everywhere that is read, and replaced by the "not
+usable" condition while Hermes itself fails (the notifier is read again when Hermes is
+back). A setting that cannot be read is logged and leaves the last answer. The check does
+not see a gateway that is not running, a host started from a profile other than the
+default, or the profile of a card from a creator it was not told of (served when
+`creator_profiles` is empty; its profile is not known before the card exists).
+
+**Gateway modes.** Hermes runs either as one host gateway that serves every profile (the
+default; `gateway.multiplex_profiles` is on unless something prevents it) or as one
+gateway per profile (a profile with `gateway.standalone: true`, or a profile whose own
+gateway keeps the host from taking it over). The adapter works in both without being told
+which, because what it does depends on three things that are the same in both, and where
+they differ it covers both (Hermes 0.22.2):
+
+1. *Which gateway delivers a wake.* A gateway's notifier selects the subscriptions whose
+   `notifier_profile` is the profile it was started from, a profile that has adapters of its
+   own in it, or, in the host, a profile that a `profile_routes` entry pins a chat to
+   (`gateway/kanban_watchers_notifier.py`, `_Collector`; `hermes_cli/kanban_db_notify.py`,
+   `_notify_profile_filter`), and delivers through an adapter of the profile the
+   subscription names (`_adapter_for_subscription`; `gateway/authz_mixin.py`,
+   `_adapters_for_profile`): the default profile's bot, a served profile's own bot, or the
+   default's bot for a routed chat. With a gateway per profile that is the profile's own
+   gateway. The adapter stamps the profile that owns the chat: `home_profile` for the home
+   target and, for a conversation, the profile recorded on the subscription the agent's
+   own `kanban_create` made (Hermes stamps the session's profile, `tools/kanban_tools.py`),
+   which Hermes copies unchanged to a card created with `--parent` (`kanban_db.py`). That is
+   what each mode selects on, so the stamp is right in both. `home_profile` must be the
+   profile that owns the bot of the home chat.
+2. *Which configuration governs the notifier.* The process reads `kanban.notify_in_gateway`
+   from the profile it was started from: in the host that is normally the default profile,
+   whatever profile a wake is for; in a gateway per profile it is that profile. The command
+   line cannot say which arrangement runs (it is process state, not configuration), so the
+   check reads the profile's setting and the default profile's, and reports either one being
+   off, naming the profile. A setting that is off in a profile the host does not read is a
+   warning that does not apply; a host started from a third profile is not seen.
+3. *Where the tools and the Skill are read.* In the host each turn runs in the scope of the
+   profile that owns the conversation: the profile's `config.yaml` supplies its
+   `platform_toolsets` and its `skills` directory supplies the Skill
+   (`gateway/run_turn.py`, `_profile_scope_for_source`, `_run_agent`;
+   `gateway/run.py`, `_profile_runtime_scope`, `_load_gateway_config`;
+   `hermes_constants.get_hermes_home`). In a gateway per profile they are the profile's own.
+   `setup` therefore prepares each profile it is given (`tools enable`, the Skill file), and
+   in both modes the gateway that serves the profile has to be restarted afterwards.
 
 ### Endpoints in the program
 
@@ -774,7 +835,16 @@ on standard input.
 `tools enable` rewrites the toolset lists of the platform in it (it writes the platform's
 whole list, not only `kanban`). It never restarts a gateway: a restart interrupts the
 conversations the gateway is serving, which is the owner's call; the output says the
-owner must restart the gateway of each profile for the tools and the Skill to take effect.
+owner must restart the gateway that serves each profile for the tools and the Skill to
+take effect: by default the one host gateway that serves every profile, and for a profile
+with its own gateway (`gateway.standalone`) that one.
+For each profile it prepares it also reads `kanban.notify_in_gateway` and, when it is
+false, prints a warning with the command that turns it on (`hermes -p <profile> config set
+kanban.notify_in_gateway true`); the command is advice and `--apply` does not run it, since
+the setting may be off on purpose. It reads the profiles it prepares and the default
+profile, as the gate does (Gateway modes), and names each one whose configuration has it
+off. A profile whose setting cannot be read is reported on
+standard error and the run goes on.
 To find the address behind an alias, the output points to `sidera-adapter-console
 directory --node <id>`; no directory client is built here. When the alias table changes
 the owner runs `setup` again, since the Skill lists the aliases. The output also says that

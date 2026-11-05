@@ -213,6 +213,43 @@ func TestNoDrivingAHermesOutOfRange(t *testing.T) {
 	}
 }
 
+// A notifier that is off leaves Hermes usable, so messages are read and cards are
+// written as usual, but the owner is told through availability and the probe that
+// nothing will wake a conversation.
+func TestNotifierOffIsReportedAndReceivingGoesOn(t *testing.T) {
+	d := &daemon{directAccess: true}
+	d.recvAnswer = unacknowledged(d, message("m1", "do it"))
+	s := &scripted{verdict: always(Written)}
+	h := start(t, options{d: d, flows: s.flows, notifier: "false\n"})
+	h.pending(h.instanceRef())
+	h.eventually("the message to be acknowledged", func() bool { return len(d.acks) > 0 })
+	h.eventually("the availability report", func() bool { return len(d.available) > 0 })
+
+	d.mu.Lock()
+	report := d.available[0].Conditions
+	n := len(d.available)
+	d.mu.Unlock()
+	if n != 1 || len(report) != 1 || report[0].Condition != adapterproto.ConditionDependencyMissing ||
+		!strings.Contains(report[0].Detail, "notifier is disabled in the configuration of profile default") ||
+		!strings.Contains(report[0].Detail, "kanban.notify_in_gateway") {
+		t.Errorf("availability %+v (%d reports), want one dependency_missing naming the disabled notifier", report, n)
+	}
+
+	var res adapterproto.ProbeResult
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := h.peer.Call(ctx, adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{}}, &res); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]adapterproto.DependencyState{}
+	for _, dep := range res.Dependencies {
+		states[dep.Name] = dep.State
+	}
+	if states["hermes"] != adapterproto.DependencyOK || states["hermes-notifier"] != adapterproto.DependencyMissing {
+		t.Errorf("dependencies %+v, want hermes ok and hermes-notifier missing", res.Dependencies)
+	}
+}
+
 // A message the adapter already processed, redelivered because the acknowledgement
 // was lost, is acknowledged without the handler.
 func TestProcessedMessageIsNotHandledAgain(t *testing.T) {

@@ -22,7 +22,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `endpoints.go` | The instance endpoint, registration on first use, hiding, adoption of the endpoints the daemon lists, idle retirement. |
 | `receive.go` | The receive loop. |
 | `poll.go` | The board poll loop. |
-| `gate.go` | The check that Hermes can be used, and the availability report. |
+| `gate.go` | The check that Hermes can be used and that its Kanban notifier is on, and the availability report. |
 | `timers.go` | The timer loop: recovery once, then a tick. |
 | `laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go` | The lane's flows: shared plumbing and the `Inbound` seam; cards (plan, claim, send, settle, fail); replies; recovery, ticks and closing sessions. |
 | `inbound.go`, `answer.go`, `notice.go` | The inbound half: request cards made of messages and continuations of conversations (`wake` is the one place a card is made to wake a conversation); reply cards sent back to the sender; the node's own notices. |
@@ -42,6 +42,9 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
   and a profile that makes the dispatcher start workers: the gate runs the client's
   whole probe at the start, after every failure and at intervals. A read that is not
   followed by an acknowledgement uses up one of the message's leases.
+- **A notifier that is off degrades the report and pauses nothing** (`gate`): cards are
+  still read and written, and the daemon is told, with the same condition and a detail
+  that names the setting, that nothing wakes a conversation.
 - **Availability reports reach the daemon in the order of the changes**: the gate holds
   its lock from the decision to the end of the report.
 - **A send never names a delivery deadline** (`Env.Send`, `Outgoing`). The idempotency

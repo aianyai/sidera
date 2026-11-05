@@ -238,6 +238,16 @@ func Decode(values adapterproto.ConfigValues) (Config, error) {
 	return c, nil
 }
 
+// WakeProfiles are the profiles whose gateways wake the conversations this instance
+// answers: the home profile and, when cards are limited to some creators, those
+// profiles. A card of any other profile is served only when creator_profiles is empty,
+// and its profile is then not known before the card exists.
+func (c Config) WakeProfiles() []string {
+	profiles := append([]string{c.Home.Profile}, c.CreatorProfiles...)
+	slices.Sort(profiles)
+	return slices.Compact(profiles)
+}
+
 // reader collects every problem of a configuration instead of stopping at the
 // first, so that the owner fixes them in one pass.
 type reader struct {

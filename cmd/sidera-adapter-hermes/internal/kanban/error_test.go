@@ -26,6 +26,7 @@ var recordedErrors = map[string]Class{
 	"complete-empty":        Permanent,
 	"complete-open-parents": Permanent,
 	"complete-terminal":     Permanent,
+	"config-get-unset":      Transient, // a Hermes that lacks the key: nothing to act on, and the next read may differ
 	"create-no-title":       Permanent,
 	"create-unknown-parent": Permanent,
 	"db-locked":             Transient,
