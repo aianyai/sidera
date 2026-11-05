@@ -24,8 +24,9 @@ protocol has a version of its own.
   not including, 0.23.0. To start: `sidera adapter install` the `adapters/hermes` package
   of the release, `sidera adapter enable hermes --config <file>`, then run
   `sidera-adapter-hermes setup` from the package, which writes the Skill that teaches the
-  agent to write cards and prints the Hermes commands that enable its Kanban tools, and
-  restart the gateway yourself. A message or an answer that does not arrive is reported to the
+  agent to write cards and says which toolsets (`kanban`, `skills`) a platform of the agent
+  still lacks and the entry to add to its configuration by hand, and restart the gateway
+  yourself. A message or an answer that does not arrive is reported to the
   conversation, from the node's own notices. The guide is the Hermes section of
   `docs/guide/adapters.md`.
 - **Go SDK: the reasons a refused send carries are named.** `adapterproto` gains

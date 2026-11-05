@@ -264,8 +264,9 @@ they differ it covers both (Hermes 0.22.2):
    (`gateway/run_turn.py`, `_profile_scope_for_source`, `_run_agent`;
    `gateway/run.py`, `_profile_runtime_scope`, `_load_gateway_config`;
    `hermes_constants.get_hermes_home`). In a gateway per profile they are the profile's own.
-   `setup` therefore prepares each profile it is given (`tools enable`, the Skill file), and
-   in both modes the gateway that serves the profile has to be restarted afterwards.
+   `setup` therefore prepares each profile it is given (the Skill file, and a reading of its
+   toolsets), and in both modes the gateway that serves the profile has to be restarted
+   afterwards.
 
 A wake for an `api_server` chat of a profile other than the host's default is delivered
 by a host gateway only when that chat already has a session in that profile's `state.db`:
@@ -810,10 +811,20 @@ format, the modes or the inbound flow updates the text in the same commit.
 prints the steps. `--profile` is a Hermes profile whose agents delegate (its name follows the
 profile rule of `home_profile`) and `--platform`
 a platform they delegate from; both repeat, and default to `home_profile` and
-`home_platform`. `cron` is always added to the platforms. The steps, for each profile:
+`home_platform`. `cron` is always added to the platforms. The one step, for each profile, is
+placing `SKILL.md` as `<profile directory>/skills/sidera/SKILL.md`.
 
-1. `hermes -p <profile> tools enable kanban --platform <platform>` for each platform;
-2. placing `SKILL.md` as `<profile directory>/skills/sidera/SKILL.md`.
+For each profile and platform it also reads which of `kanban` and `skills` are enabled (the
+reading `kanban.ToolsetsMissing`, which the gate also uses) and, for each platform where one is not, prints a
+warning with the exact change to make by hand: the profile's `config.yaml` (named by `hermes
+-p <profile> config path`), the list `platform_toolsets.<platform>`, and the items to add to
+it. When the file has no such list the platform uses Hermes's defaults, and a list holding
+only `kanban` would switch them off; the warning says to write `[hermes-<platform>, kanban]`
+instead (Hermes expands the platform's composite toolset and keeps the explicit item:
+`tools list` showed 18 toolsets enabled for that list and 1 for `[kanban]`; the composite is
+named `hermes-<platform>`, with `-` for `_`). A toolset named in `agent.disabled_toolsets`
+stays off whatever the list says, and the warning says so. A platform that cannot be read is
+reported on standard error and left out; the run goes on.
 
 *Where the configuration comes from.* The document is the one given to `sidera adapter
 enable` or `sidera adapter config` and is decoded with `config.Decode`, so the checks
@@ -836,19 +847,27 @@ config path` names `config.yaml`, which lies in it) rather than computed, so the
 of profiles stays Hermes's. A run replaces the file of the same name.
 
 *`--apply`.* Without it `setup` only prints, apart from writing the Skill into the
-state directory and asking Hermes where a profile lives. With it each step is shown and
-asked (`y/N`; anything but yes skips it), then done: Hermes's own commands, run with
+state directory and asking Hermes where a profile lives and what it has enabled (with
 `HERMES_HOME` and `HERMES_KANBAN_HOME` from the configuration, the profile pin and the
-Kanban worker variables of the owner's shell removed (the environment the adapter gives
-its own Hermes commands, `kanban.ChildEnv`), and without standard input, and the file
-placement. A failing step stops the run. Hermes reports a refusal of
-`tools enable` (such as an unknown platform) on standard output and exits 0, so the
-output shown is the only report of it. `--config -` is refused with `--apply`, which asks
-on standard input.
+Kanban worker variables of the owner's shell removed: the environment the adapter gives
+its own Hermes commands, `kanban.ChildEnv`; and without standard input). With it each step
+is shown and asked (`y/N`; anything but yes skips it), then done: the placing of the Skill
+file. A failing step stops the run. `--config -` is refused with `--apply`, which asks on
+standard input.
 
-*What it never does.* It never edits `config.yaml`: Hermes owns the file's format, and
-`tools enable` rewrites the toolset lists of the platform in it (it writes the platform's
-whole list, not only `kanban`). It never restarts a gateway: a restart interrupts the
+*Why setup does not change toolsets.* `hermes tools enable kanban --platform <platform>`
+writes the platform's whole list, not one entry. On Hermes 0.22.2 a profile whose
+`platform_toolsets.feishu` was `[image_gen, no_mcp]` held `[feishu_doc, feishu_drive,
+image_gen, kanban]` afterwards (`hermes_cli/tools_config.py`, `_save_platform_tools`): the
+`no_mcp` entry, which switches off every MCP server on the platform (`_merge_mcp_servers`),
+was dropped, so the servers would load there, and two toolsets the owner had not chosen
+were added. For a platform with no list (`--platform cron`) it wrote the whole default list
+as an explicit one, which no longer follows the defaults of Hermes. What a hand-picked list
+means is the owner's to say, so `setup` reads the state and prints the one entry to add; it
+does not run a command that rewrites the list, and `--apply` does not either.
+
+*What it never does.* It never edits `config.yaml` and never runs a Hermes command that
+does (above). It never restarts a gateway: a restart interrupts the
 conversations the gateway is serving, which is the owner's call; the output says the
 owner must restart the gateway that serves each profile for the tools and the Skill to
 take effect: by default the one host gateway that serves every profile, and for a profile

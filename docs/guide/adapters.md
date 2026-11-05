@@ -286,6 +286,13 @@ process and no session.
   with the reason, and `setup` warns of the profiles it prepares. It checks the profile's
   own setting and the default profile's, since it cannot see which gateway runs, and it
   does not tell you that a gateway is not running.
+- The toolsets `kanban` and `skills` enabled on every platform the agent delegates from
+  (`home_platform`, and `cron` for scheduled jobs). `kanban` gives the agent the tools that
+  create a card; `skills` lets it load the Sidera Skill that says how to address one. Hermes
+  leaves `kanban` off by default, and a profile whose toolset list for a platform was chosen
+  by hand may lack either. Without `skills` the agent creates an ordinary card that this
+  adapter never sees. The adapter checks the home platform and says in the instance's
+  availability which toolset is missing; `setup` checks all the platforms it is given.
 
 **Install and enable.** The configuration has required settings, so it is given when
 the instance is enabled. Save it as `hermes.json`:
@@ -343,19 +350,31 @@ the aliases and nothing more. Find the address behind a name with
 `creator_profiles` narrows who may ask, but Hermes lets a command-line caller state any
 creator, so treat it as a second line of defence, not a boundary.
 
-**Setup.** Hermes needs two things before its agents can delegate: the Kanban tools,
-which are off by default on the chat platforms and on cron, and a Skill that tells the
-agent how to write a card. `setup` writes the Skill from your alias table and board and prints the
-Hermes commands that enable the tools and place the Skill. The program is in the
+**Setup.** Hermes needs two things before its agents can delegate: the Kanban tools
+(toolset `kanban`, off by default on the chat platforms and on cron), and a Skill that tells
+the agent how to write a card, which the agent can load only while the toolset `skills` is
+on. `setup` writes the Skill from your alias table and board, prints the step that places the
+Skill, and reads which of the two toolsets each platform has. The program is in the
 package you installed:
 
 ```sh
 ~/sidera-release/adapters/hermes/bin/sidera-adapter-hermes setup --config hermes.json --profile <profile>
 ```
 
-It prints the steps and changes nothing in Hermes. Add `--apply` to have it run them, each
-after a `y/N` question. `--profile` names a profile whose agents delegate and repeats; the
-platforms are `home_platform` and `cron`, and `--platform` adds more.
+It prints the steps and changes nothing in Hermes. Add `--apply` to have it place the Skill
+in each profile, after a `y/N` question. `--profile` names a profile whose agents delegate and
+repeats; the platforms are `home_platform` and `cron`, and `--platform` adds more.
+
+For a platform that lacks `kanban` or `skills`, `setup` prints the file to edit (the
+profile's `config.yaml`) and the entry to add to `platform_toolsets.<platform>`, for example
+`kanban` added to the list under `platform_toolsets: feishu:`. If the file has no list for
+that platform, write `[hermes-<platform>, kanban]` (for `cron`, `[hermes-cron, kanban]`)
+rather than `[kanban]` alone, which would switch the platform's other toolsets off. A
+toolset named in `agent.disabled_toolsets` stays off whatever the list says, so remove it
+there. `hermes tools enable` is deliberately not run: it rewrites the platform's whole
+list, and on Hermes 0.22.2 it dropped a `no_mcp` entry (which turns off every MCP server on
+the platform) and added toolsets that nobody had chosen. After the edit, `hermes -p
+<profile> tools list --platform <platform>` shows whether the toolset is on.
 
 After `setup`, **restart the gateway that serves each profile yourself**: by default the
 one gateway that serves every profile, and any profile with its own gateway on its own.

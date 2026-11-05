@@ -13,57 +13,84 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/config"
 )
 
-func TestPlan(t *testing.T) {
+// The plan is the Skill file for each profile and nothing else: no Hermes command, since
+// `hermes tools enable` rewrites a platform's whole toolset list.
+func TestPlanPlacesTheSkillAndRunsNoHermesCommand(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "h")
 	skillDir := func(profile string) string { return filepath.Join(home, profile, "skills", "sidera") }
 	placed := func(profile string) string {
 		return "place /s/SKILL.md as " + quote(filepath.Join(skillDir(profile), "SKILL.md"))
 	}
-	cases := []struct {
-		name      string
-		profiles  []string
-		platforms []string
-		want      []string
-	}{
-		{
-			name:     "one platform: that platform and cron, then the Skill",
-			profiles: []string{"default"}, platforms: []string{"feishu"},
-			want: []string{
-				"hermes -p default tools enable kanban --platform cron",
-				"hermes -p default tools enable kanban --platform feishu",
-				placed("default"),
-			},
-		},
-		{
-			name:     "cron named by the owner is not repeated",
-			profiles: []string{"default"}, platforms: []string{"cron", "telegram", "telegram"},
-			want: []string{
-				"hermes -p default tools enable kanban --platform cron",
-				"hermes -p default tools enable kanban --platform telegram",
-				placed("default"),
-			},
-		},
-		{
-			name:     "every profile gets its own tools and its own copy of the Skill",
-			profiles: []string{"default", "feishu"}, platforms: []string{"feishu"},
-			want: []string{
-				"hermes -p default tools enable kanban --platform cron",
-				"hermes -p default tools enable kanban --platform feishu",
-				placed("default"),
-				"hermes -p feishu tools enable kanban --platform cron",
-				"hermes -p feishu tools enable kanban --platform feishu",
-				placed("feishu"),
-			},
-		},
+	steps := Plan([]string{"default", "feishu"}, "/s/SKILL.md", skillDir)
+	var got []string
+	for _, s := range steps {
+		if !s.IsCopy() {
+			t.Errorf("step %q runs Hermes: %v", s.Why, s.Args)
+		}
+		got = append(got, s.Command("hermes"))
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var got []string
-			for _, s := range Plan(c.profiles, c.platforms, "/s/SKILL.md", skillDir) {
-				got = append(got, s.Command("hermes"))
+	if want := []string{placed("default"), placed("feishu")}; !slices.Equal(got, want) {
+		t.Errorf("steps:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestPlatformsAlwaysIncludeCronOnce(t *testing.T) {
+	for _, tc := range []struct{ asked, want []string }{
+		{[]string{"feishu"}, []string{"cron", "feishu"}},
+		{[]string{"telegram", "cron", "telegram"}, []string{"cron", "telegram"}},
+	} {
+		if got := Platforms(tc.asked); !slices.Equal(got, tc.want) {
+			t.Errorf("Platforms(%v) = %v, want %v", tc.asked, got, tc.want)
+		}
+	}
+}
+
+// A platform whose agents lack a toolset is named in the plan with the entry to add by
+// hand to the profile's configuration, and the plan says why it does not run
+// `hermes tools enable`; platforms that have both toolsets are not mentioned.
+func TestPlanSaysWhichToolsetsToEnableByHand(t *testing.T) {
+	const file = "/home/profiles/feishu/config.yaml"
+	for _, tc := range []struct {
+		name string
+		gaps []ToolsetGap
+		want []string
+	}{
+		{"both present", nil, nil},
+		{"kanban missing", []ToolsetGap{{Profile: "feishu", Platform: "feishu", ConfigFile: file, Missing: []string{"kanban"}}}, []string{
+			"profile feishu on platform feishu has not enabled the toolset(s) kanban",
+			"edit " + file + " by hand:",
+			"add kanban to the list platform_toolsets.feishu",
+			"add it as [hermes-feishu, kanban]",
+		}},
+		{"skills missing", []ToolsetGap{{Profile: "feishu", Platform: "api_server", ConfigFile: file, Missing: []string{"skills"}}}, []string{
+			"toolset(s) skills",
+			"add skills to the list platform_toolsets.api_server",
+			"add it as [hermes-api-server, skills]",
+		}},
+		{"both missing, two platforms", []ToolsetGap{
+			{Profile: "feishu", Platform: "cron", ConfigFile: file, Missing: []string{"kanban", "skills"}},
+			{Profile: "feishu", Platform: "feishu", ConfigFile: file, Missing: []string{"kanban"}},
+		}, []string{
+			"platform cron has not enabled the toolset(s) kanban, skills",
+			"add kanban, skills to the list platform_toolsets.cron",
+			"platform feishu has not enabled the toolset(s) kanban:",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			printPlan(&out, config.Config{HermesPath: "hermes", HermesHome: "/h", Board: "lane"}, "/s/SKILL.md", nil, nil, tc.gaps)
+			text := out.String()
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the plan lacks %q:\n%s", want, text)
+				}
 			}
-			if !slices.Equal(got, c.want) {
-				t.Errorf("steps:\n got %q\nwant %q", got, c.want)
+			explained := strings.Contains(text, "setup does not run 'hermes tools enable'")
+			if explained != (len(tc.gaps) > 0) {
+				t.Errorf("the explanation of why 'tools enable' is not run is present: %v, with %d gaps:\n%s", explained, len(tc.gaps), text)
+			}
+			if len(tc.gaps) == 0 && strings.Contains(text, "has not enabled") {
+				t.Errorf("the plan names a missing toolset although none is:\n%s", text)
 			}
 		})
 	}
@@ -164,7 +191,7 @@ func TestPlanWarnsOfAProfileWithTheNotifierOff(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			printPlan(&out, config.Config{HermesPath: "hermes", HermesHome: "/h", Board: "lane"}, "/s/SKILL.md", nil, tc.off)
+			printPlan(&out, config.Config{HermesPath: "hermes", HermesHome: "/h", Board: "lane"}, "/s/SKILL.md", nil, tc.off, nil)
 			text := out.String()
 			for _, want := range tc.want {
 				if !strings.Contains(text, want) {

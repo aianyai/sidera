@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,11 +11,12 @@ import (
 
 // CronPlatform is the Hermes platform of scheduled jobs. A cron job is an agent turn
 // that can delegate like a chat, but its toolsets are set apart from the chat
-// platforms', so it is enabled on its own.
+// platforms', so it is checked on its own.
 const CronPlatform = "cron"
 
 // Step is one thing the owner does so that Hermes agents can delegate, with the reason
-// for it. It is either a Hermes command (Args) or the placing of the Skill file (Copy).
+// for it. It is either the placing of the Skill file (CopyFrom, CopyTo) or a Hermes
+// command (Args), which the plan only shows as advice and never runs.
 type Step struct {
 	Why string
 	// Args are the arguments of the hermes program, the profile option included.
@@ -46,26 +48,15 @@ func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Plan lists the steps that let the Hermes agents of the profiles delegate over
-// Sidera: the kanban tools on every platform they delegate from and on cron, then the
-// Skill that tells the agent how to use them. skillFile is the generated Skill and
-// skillDir returns the directory a profile keeps the Skill in. Only Hermes's own
-// commands change Hermes's configuration; the file is never edited directly, since
-// Hermes owns its format. The Skill is placed as a file because `skills install`
-// takes a registry identifier or an HTTP(S) URL and no local path.
-func Plan(profiles, platforms []string, skillFile string, skillDir func(profile string) string) []Step {
-	platforms = append(slices.Clone(platforms), CronPlatform)
-	slices.Sort(platforms)
-	platforms = slices.Compact(platforms)
-
-	var steps []Step
+// Plan lists the steps `--apply` does: the Skill that tells the agent of each profile how
+// to delegate and answer, placed in the profile's skills directory. skillFile is the
+// generated Skill and skillDir returns the directory a profile keeps the Skill in. The
+// Skill is placed as a file because `skills install` takes a registry identifier or an
+// HTTP(S) URL and no local path. Hermes's configuration is not part of the plan: see
+// ToolsetAdvice.
+func Plan(profiles []string, skillFile string, skillDir func(profile string) string) []Step {
+	steps := make([]Step, 0, len(profiles))
 	for _, profile := range profiles {
-		for _, platform := range platforms {
-			steps = append(steps, Step{
-				Why:  "profile " + profile + ": give the agents of " + platform + " the kanban tools, which a delegation is made with",
-				Args: []string{"-p", profile, "tools", "enable", "kanban", "--platform", platform},
-			})
-		}
 		steps = append(steps, Step{
 			Why:      "profile " + profile + ": give its agents the Skill that explains how to delegate and answer",
 			CopyFrom: skillFile,
@@ -73,6 +64,64 @@ func Plan(profiles, platforms []string, skillFile string, skillDir func(profile 
 		})
 	}
 	return steps
+}
+
+// Platforms are the platforms whose toolsets are checked: the ones asked for, sorted
+// and without repeats, and cron.
+func Platforms(asked []string) []string {
+	platforms := append(slices.Clone(asked), CronPlatform)
+	slices.Sort(platforms)
+	return slices.Compact(platforms)
+}
+
+// ToolsetGap is a platform of a profile whose agents lack toolsets they delegate with.
+type ToolsetGap struct {
+	Profile, Platform string
+	// ConfigFile is the profile's config.yaml, which holds platform_toolsets.
+	ConfigFile string
+	// Missing are the toolsets that are not enabled, never empty.
+	Missing []string
+}
+
+// ToolsetAdvice tells the owner, for each gap, which toolsets are missing and the change
+// to make by hand in the profile's configuration, then why setup does not make it. The
+// text is empty when there is no gap.
+//
+// The change is not made by `hermes tools enable`: that command writes the whole list of
+// the platform. Hermes 0.22.2 against a list [image_gen, no_mcp] wrote [feishu_doc,
+// feishu_drive, image_gen, kanban]: the no_mcp entry, which switches off every MCP
+// server on the platform, was dropped, and two toolsets the owner had not chosen were
+// added; against a platform with no list it wrote the full list of the defaults. The
+// owner adds one entry to a list they already read.
+func ToolsetAdvice(gaps []ToolsetGap) string {
+	if len(gaps) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, g := range gaps {
+		items := strings.Join(g.Missing, ", ")
+		fmt.Fprintf(&b, "\nWarning: the agent of profile %s on platform %s has not enabled the toolset(s) %s: "+
+			"it cannot delegate over Sidera or load the Sidera Skill (an agent that has the kanban tools "+
+			"and not the Skill creates plain cards that nothing sends). To enable %s, edit %s by hand:\n"+
+			"  add %s to the list platform_toolsets.%s\n"+
+			"  (if the file has no platform_toolsets.%s, add it as [%s, %s]: the platform's default toolset keeps the "+
+			"toolsets it has now, which a list of %s alone would switch off)\n",
+			g.Profile, g.Platform, items, items, g.ConfigFile, items, g.Platform, g.Platform,
+			defaultToolset(g.Platform), items, items)
+	}
+	b.WriteString(`
+setup does not run 'hermes tools enable' for this: it writes the platform's whole toolset list, so an entry
+such as no_mcp (which switches off every MCP server on the platform) is dropped and other toolsets are
+added. A toolset named in agent.disabled_toolsets stays off whatever the list says; remove it there.
+'hermes -p <profile> tools list --platform <platform>' shows what is enabled, and setup reads it the same way.
+`)
+	return b.String()
+}
+
+// defaultToolset is the name Hermes gives the toolset that holds a platform's default
+// tools: hermes-<platform>, with a dash for an underscore (hermes-api-server).
+func defaultToolset(platform string) string {
+	return "hermes-" + strings.ReplaceAll(platform, "_", "-")
 }
 
 // NotifierSteps are the commands that turn the Kanban notifier on in the profiles whose

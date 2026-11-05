@@ -37,9 +37,10 @@ const DefaultInstance = "hermes"
 const Usage = `usage: sidera-adapter-hermes setup --config <file|-> [--home <dir>] [--instance <name>]
                                    [--profile <name>]... [--platform <name>]... [--apply]
 
-Writes the Sidera Skill for the instance's alias table and prints the steps that let
-Hermes use it. With --apply it runs the Hermes commands among them, asking before
-each. It edits no Hermes configuration file itself and restarts no gateway.
+Writes the Sidera Skill for the instance's alias table, prints the steps that let
+Hermes use it and says which toolsets (kanban, skills) a platform still lacks, with the
+change to make by hand. With --apply it places the Skill in each profile, asking before
+each. It changes no Hermes configuration and restarts no gateway.
 
   --config    the instance configuration, the document given to 'sidera adapter
               enable' or 'sidera adapter config' ('-' reads standard input and is
@@ -49,7 +50,7 @@ each. It edits no Hermes configuration file itself and restarts no gateway.
   --profile   a Hermes profile whose agents delegate; repeatable (default: home_profile)
   --platform  a platform whose agents delegate; repeatable (default: home_platform).
               cron is always included
-  --apply     run the Hermes commands, each after a y/N question
+  --apply     place the Skill in each profile, each after a y/N question
 `
 
 // Env is what the command is given by its process.
@@ -151,25 +152,27 @@ func run(o options, env Env) error {
 	defer stop()
 	profiles := orDefault(o.profiles, cfg.Home.Profile)
 	platforms := orDefault(o.platforms, cfg.Home.Platform)
-	skillDirs := map[string]string{}
+	configFiles := map[string]string{}
 	for _, p := range profiles {
-		if skillDirs[p], err = profileSkillDir(ctx, cfg, p); err != nil {
+		if configFiles[p], err = profileConfigFile(ctx, cfg, p); err != nil {
 			return err
 		}
 	}
-	steps := Plan(profiles, platforms, skillFile, func(p string) string { return skillDirs[p] })
-	printPlan(env.Stdout, cfg, skillFile, steps, notifierOff(ctx, cfg, profiles, env.Stderr))
+	steps := Plan(profiles, skillFile, func(p string) string { return profileSkillDir(configFiles[p]) })
+	board := newBoard(cfg, env.Stderr)
+	printPlan(env.Stdout, cfg, skillFile, steps, notifierOff(ctx, board, profiles, env.Stderr),
+		toolsetGaps(ctx, board, profiles, Platforms(platforms), configFiles, env.Stderr))
 	if !o.apply {
 		return nil
 	}
-	return apply(ctx, cfg, steps, env)
+	return apply(steps, env)
 }
 
-// profileSkillDir is where a profile keeps the Skill. Hermes finds a skill in any
-// directory under the profile's skills directory that holds a SKILL.md, and keeps the
-// profile's directory next to its configuration file, which `config path` names. Asking
-// Hermes is the one way to learn it without repeating how Hermes lays profiles out.
-func profileSkillDir(ctx context.Context, cfg config.Config, profile string) (string, error) {
+// profileConfigFile is the config.yaml of a profile. Hermes keeps the profile's
+// directory around its configuration file, and `config path` names the file; asking
+// Hermes is the one way to learn where a profile lives without repeating how Hermes
+// lays profiles out.
+func profileConfigFile(ctx context.Context, cfg config.Config, profile string) (string, error) {
 	cmd := exec.CommandContext(ctx, cfg.HermesPath, "-p", profile, "config", "path")
 	cmd.Env = hermesChildEnv(cfg)
 	out, err := cmd.Output()
@@ -180,17 +183,35 @@ func profileSkillDir(ctx context.Context, cfg config.Config, profile string) (st
 	if len(lines) == 0 || !filepath.IsAbs(lines[len(lines)-1]) {
 		return "", fmt.Errorf("hermes -p %s config path printed %q, want the path of config.yaml", profile, strings.TrimSpace(string(out)))
 	}
-	return filepath.Join(filepath.Dir(lines[len(lines)-1]), "skills", SkillName), nil
+	return lines[len(lines)-1], nil
+}
+
+// profileSkillDir is where a profile keeps the Skill, given its config.yaml. Hermes
+// finds a skill in any directory under the profile's skills directory that holds a
+// SKILL.md.
+func profileSkillDir(configFile string) string {
+	return filepath.Join(filepath.Dir(configFile), "skills", SkillName)
+}
+
+// newBoard is the client through which setup asks Hermes what it reads of the adapter's
+// own configuration (the notifier, the toolsets), so that the adapter and setup read
+// the same way. It is nil, with a warning on w, when the configuration cannot make one:
+// the owner's setup does not depend on the reading.
+func newBoard(cfg config.Config, w io.Writer) *kanban.Client {
+	board, err := kanban.New(kanban.Config{Executable: cfg.HermesPath, Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome, Board: cfg.Board})
+	if err != nil {
+		fmt.Fprintln(w, "sidera-adapter-hermes: setup: warning:", err)
+		return nil
+	}
+	return board
 }
 
 // notifierOff names the profiles whose gateway does not run the Kanban notifier,
 // asking Hermes as the adapter does (the client is the one home of that question). A
 // profile that cannot be read is said so on w and left out, while the profiles that
-// could be read are still named: the owner's setup does not depend on the reading.
-func notifierOff(ctx context.Context, cfg config.Config, profiles []string, w io.Writer) []string {
-	board, err := kanban.New(kanban.Config{Executable: cfg.HermesPath, Home: cfg.HermesHome, KanbanHome: cfg.KanbanHome, Board: cfg.Board})
-	if err != nil {
-		fmt.Fprintln(w, "sidera-adapter-hermes: setup: warning:", err)
+// could be read are still named.
+func notifierOff(ctx context.Context, board *kanban.Client, profiles []string, w io.Writer) []string {
+	if board == nil {
 		return nil
 	}
 	off, err := board.NotifierDisabled(ctx, profiles)
@@ -198,6 +219,29 @@ func notifierOff(ctx context.Context, cfg config.Config, profiles []string, w io
 		fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read whether the Kanban notifier is on in every profile: %v\n", err)
 	}
 	return off
+}
+
+// toolsetGaps names the platforms of the profiles whose agents lack a toolset they
+// delegate with, asking Hermes as the gate does. A platform that cannot be read is said
+// so on w and left out, while the others are still named.
+func toolsetGaps(ctx context.Context, board *kanban.Client, profiles, platforms []string, configFiles map[string]string, w io.Writer) []ToolsetGap {
+	if board == nil {
+		return nil
+	}
+	var gaps []ToolsetGap
+	for _, profile := range profiles {
+		for _, platform := range platforms {
+			missing, err := board.ToolsetsMissing(ctx, profile, platform)
+			if err != nil {
+				fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read which toolsets profile %s has on platform %s: %v\n", profile, platform, err)
+				continue
+			}
+			if len(missing) > 0 {
+				gaps = append(gaps, ToolsetGap{Profile: profile, Platform: platform, ConfigFile: configFiles[profile], Missing: missing})
+			}
+		}
+	}
+	return gaps
 }
 
 // StateDir is where the daemon keeps an instance's private state: adapter-state/<instance>
@@ -283,16 +327,17 @@ func orDefault(given multi, fallback string) []string {
 	return []string{fallback}
 }
 
-func printPlan(w io.Writer, cfg config.Config, skillFile string, steps []Step, notifierOff []string) {
+func printPlan(w io.Writer, cfg config.Config, skillFile string, steps []Step, notifierOff []string, gaps []ToolsetGap) {
 	fmt.Fprintf(w, "Wrote the Skill for %d alias(es): %s\n", len(cfg.Aliases), skillFile)
 	fmt.Fprintf(w, "The Skill names the board %q, so the agent and the adapter use the same one.\n\n", cfg.Board)
-	fmt.Fprintln(w, "Steps (Hermes commands; HERMES_HOME is "+cfg.HermesHome+envKanban(cfg)+"):")
+	fmt.Fprintln(w, "Steps (HERMES_HOME is "+cfg.HermesHome+envKanban(cfg)+"):")
 	for i, s := range steps {
 		fmt.Fprintf(w, "  %d. %s\n     %s\n", i+1, s.Why, s.Command(cfg.HermesPath))
 	}
 	for _, s := range NotifierSteps(notifierOff) {
 		fmt.Fprintf(w, "\nWarning: %s\n  %s\n", s.Why, s.Command(cfg.HermesPath))
 	}
+	fmt.Fprint(w, ToolsetAdvice(gaps))
 	fmt.Fprintln(w, `
 Then restart the gateway that serves each profile: Hermes reads its toolsets and Skills
 when the gateway starts, and this command restarts nothing. By default one gateway, the
@@ -312,14 +357,12 @@ func envKanban(cfg config.Config) string {
 	return ", HERMES_KANBAN_HOME is " + cfg.KanbanHome
 }
 
-// apply does the steps one at a time, each after the owner said yes. A step that fails
-// stops the run: the later ones were planned on the assumption that it worked. Hermes
-// reports a refusal of `tools enable` (an unknown platform, for one) on standard output
-// and exits 0, so the output the owner sees is the only report of it.
-func apply(ctx context.Context, cfg config.Config, steps []Step, env Env) error {
+// apply places the Skill, one profile at a time, each after the owner said yes. A step
+// that fails stops the run.
+func apply(steps []Step, env Env) error {
 	in := bufio.NewReader(env.Stdin)
 	for i, s := range steps {
-		fmt.Fprintf(env.Stdout, "\n[%d/%d] %s\n", i+1, len(steps), s.Command(cfg.HermesPath))
+		fmt.Fprintf(env.Stdout, "\n[%d/%d] %s\n", i+1, len(steps), s.Command(""))
 		fmt.Fprint(env.Stdout, "Run it? [y/N] ")
 		answer, err := in.ReadString('\n')
 		if err != nil && answer == "" {
@@ -329,22 +372,11 @@ func apply(ctx context.Context, cfg config.Config, steps []Step, env Env) error 
 			fmt.Fprintln(env.Stdout, "skipped")
 			continue
 		}
-		if s.IsCopy() {
-			data, err := os.ReadFile(s.CopyFrom)
-			if err == nil {
-				err = writeFile(s.CopyTo, data, 0o755, 0o644)
-			}
-			if err != nil {
-				return fmt.Errorf("step %d failed: %w", i+1, err)
-			}
-			continue
+		data, err := os.ReadFile(s.CopyFrom)
+		if err == nil {
+			err = writeFile(s.CopyTo, data, 0o755, 0o644)
 		}
-		cmd := exec.CommandContext(ctx, cfg.HermesPath, s.Args...)
-		cmd.Env = hermesChildEnv(cfg)
-		// No standard input: the commands ask nothing, and one given the owner's input
-		// would read the answers to the questions that follow.
-		cmd.Stdout, cmd.Stderr = env.Stdout, env.Stderr
-		if err := cmd.Run(); err != nil {
+		if err != nil {
 			return fmt.Errorf("step %d failed: %w", i+1, err)
 		}
 	}
