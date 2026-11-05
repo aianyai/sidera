@@ -127,7 +127,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	if err := eps.adopt(p.DirectEndpoints); err != nil {
 		return adapterproto.StartResult{}, fmt.Errorf("recording the endpoints the daemon lists: %w", err)
 	}
-	gate := &gate{board: board, wakeProfiles: cfg.WakeProfiles(), report: a.conn.Availability, log: a.log, now: a.now, verifyEvery: a.tm.verifyEvery}
+	gate := &gate{board: board, wakeProfiles: cfg.WakeProfiles(), homeProfile: cfg.Home.Profile, homePlatform: cfg.Home.Platform, report: a.conn.Availability, log: a.log, now: a.now, verifyEvery: a.tm.verifyEvery}
 	a.env = &Env{Config: cfg, Board: board, State: store, Log: a.log, Now: a.now, StateDir: a.stateDir, conn: a.conn, endpoints: eps}
 	handlers := a.flows(a.env)
 	a.receiver = newReceiver(a.conn, eps, store, gate, handlers.Messages, a.log, a.now, a.tm)
@@ -176,7 +176,8 @@ func (a *App) EndpointPending(_ context.Context, p adapterproto.PendingParams) {
 }
 
 // Probe judges what the adapter depends on: the daemon's capability, the Hermes
-// command line with its board, and the Kanban notifier that wakes conversations.
+// command line with its board, the Kanban notifier that wakes conversations and the
+// toolsets of the agent that delegates.
 func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterproto.ProbeResult, error) {
 	res, err := a.Base.Probe(ctx, p)
 	if err != nil {
@@ -219,6 +220,21 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		notifier.Detail = detail(fmt.Sprintf("could not read whether the Kanban notifier is on: %v", err))
 	}
 	res.Dependencies = append(res.Dependencies, notifier)
+
+	// An agent without the kanban or skills toolset on the home platform cannot
+	// delegate over Sidera, or does not know how to: it creates a plain card instead.
+	toolsets := adapterproto.Dependency{Name: "hermes-toolsets", State: adapterproto.DependencyOK}
+	home := env.Config.Home
+	missing, err := env.Board.ToolsetsMissing(ctx, home.Profile, home.Platform)
+	switch {
+	case err != nil:
+		toolsets.State = adapterproto.DependencyMissing
+		toolsets.Detail = detail(fmt.Sprintf("could not read which toolsets the agent of profile %s on platform %s has: %v",
+			home.Profile, home.Platform, err))
+	case len(missing) > 0:
+		toolsets.State, toolsets.Detail = adapterproto.DependencyMissing, toolsetsMissingDetail(home.Profile, home.Platform, missing)
+	}
+	res.Dependencies = append(res.Dependencies, toolsets)
 	return res, nil
 }
 

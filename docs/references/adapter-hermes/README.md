@@ -181,7 +181,10 @@ Hermes profile is named `sidera`, `sidera-inbox` or `sidera:*`. When that holds,
 further dependency, `hermes-notifier`, says whether the Kanban notifier is on for the
 profiles that wake conversations (below, under availability): `missing` with the reason
 when it is off in a profile or cannot be read in any (a profile known to be off is named even
-when another could not be read).
+when another could not be read). A last dependency, `hermes-toolsets`, says whether the agent of
+the home conversation (`home_profile`, `home_platform`) has the `kanban` and `skills` toolsets
+(below, under availability): `missing` with the toolsets that are not enabled, or with the
+reason they could not be read.
 
 **Shutdown.** The loops are stopped, whatever the intent. The adapter starts no process
 that outlives it (a Hermes command ends with its call, or is killed with its
@@ -229,6 +232,28 @@ stands. The check does
 not see a gateway that is not running, a host started from a profile other than the
 default, or the profile of a card from a creator it was not told of (served when
 `creator_profiles` is empty; its profile is not known before the card exists).
+
+**The toolsets.** An agent delegates with the Kanban tools (toolset `kanban`) and learns
+how to address the lane from the Skill (toolset `skills`, which lets it list and load a
+skill). Hermes 0.22.2 leaves `kanban` off by default on every platform
+(`hermes_cli/tools_config.py`, `_DEFAULT_OFF_TOOLSETS`) and `skills` on, so a platform needs
+`kanban` added, and an owner who picked a platform's list by hand may have left either out.
+With `skills` off the agent still has the Kanban tools and no instructions: one created a
+plain card on the current board with an assignee of its own choosing, which this adapter never
+saw, and the lane looked like a peer that never answers. The gate
+(`kanban.ToolsetsMissing`, `hermes -p <home_profile> tools list --platform=<home_platform>`)
+reads the two toolsets in the same verification as the notifier, for the conversation the
+adapter wakes by default, and reports the condition `dependency_missing` with the detail "the
+Hermes agent of profile P on platform X has not enabled the toolset(s) T: it cannot delegate
+over Sidera or load the Sidera Skill". It is built like the notifier's: it pauses nothing, it
+is cleared when a later verification finds both enabled and replaced by the "not usable"
+condition while Hermes itself fails, and a reading that fails is logged and leaves the last
+answer. When the notifier and the toolsets are both found wanting the daemon gets two
+conditions. The profiles of `creator_profiles` and the other platforms a card may come from
+are not read: the home conversation is the one the adapter knows before a card exists, and
+`setup` reads every profile and platform the owner names. The answer is the configuration as
+Hermes resolves it (a saved list, or the platform's defaults, with `agent.disabled_toolsets`
+applied last); it does not show that the gateway was restarted since the file changed.
 
 **Gateway modes.** Hermes runs either as one host gateway that serves every profile (the
 default; `gateway.multiplex_profiles` is on unless something prevents it) or as one
@@ -1074,7 +1099,7 @@ or the home target.
 
 | What | Code | Tests |
 | ---- | ---- | ----- |
-| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `gate_test.go` (what the gate tells the daemon over a series of checks, and the probe's notifier dependency), `manifest_test.go` |
+| The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `gate_test.go` (what the gate tells the daemon over a series of checks, and the probe's notifier dependency), `TestMissingSkillsToolsetIsReportedAndReceivingGoesOn` in `adapter_test.go` (a missing toolset of the home conversation's agent: the condition, the probe's dependency, and receiving going on), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
 | The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `setup_test.go` |

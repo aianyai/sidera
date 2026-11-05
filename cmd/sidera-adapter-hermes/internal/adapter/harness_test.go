@@ -115,7 +115,9 @@ type options struct {
 	hermesVersion string
 	// notifier, if set, is the fake Hermes' answer to reading the notifier setting.
 	notifier string
-	now      func() time.Time
+	// tools, if set, is the fake Hermes' answer to listing the toolsets of a platform.
+	tools string
+	now   func() time.Time
 	// tick, if set, replaces the interval of the timer loop; a long one leaves the
 	// cards to the flows an event starts.
 	tick time.Duration
@@ -151,6 +153,11 @@ func start(t *testing.T, o options) *harness {
 	}
 	if o.notifier != "" {
 		if err := os.WriteFile(filepath.Join(hermesCtl, kanbantest.NotifierFile), []byte(o.notifier), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if o.tools != "" {
+		if err := os.WriteFile(filepath.Join(hermesCtl, kanbantest.ToolsFile), []byte(o.tools), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

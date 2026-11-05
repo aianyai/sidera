@@ -22,7 +22,7 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 | `endpoints.go` | The instance endpoint, registration on first use, hiding, adoption of the endpoints the daemon lists, idle retirement. |
 | `receive.go` | The receive loop. |
 | `poll.go` | The board poll loop. |
-| `gate.go` | The check that Hermes can be used and that its Kanban notifier is on, and the availability report. |
+| `gate.go` | The check that Hermes can be used, that its Kanban notifier is on and that the home conversation's agent has the kanban and skills toolsets, and the availability report. |
 | `timers.go` | The timer loop: recovery once, then a tick. |
 | `laneflows.go`, `delegate.go`, `reply.go`, `upkeep.go` | The lane's flows: shared plumbing and the `Inbound` seam; cards (plan, claim, send, settle, fail); replies; recovery, ticks and closing sessions. |
 | `inbound.go`, `answer.go`, `notice.go` | The inbound half: request cards made of messages and continuations of conversations (`wake` is the one place a card is made to wake a conversation); reply cards sent back to the sender; the node's own notices. |
@@ -45,8 +45,13 @@ is in [`docs/references/adapter-hermes/`](../../../../docs/references/adapter-he
 - **A notifier that is off degrades the report and pauses nothing** (`gate`): cards are
   still read and written, and the daemon is told, with the same condition and a detail
   that names the setting, that nothing wakes a conversation.
+- **A missing toolset of the home conversation's agent degrades the report and pauses
+  nothing** (`gate`): the agent without `kanban` cannot delegate and the one without
+  `skills` cannot load the Skill (it creates a plain card the adapter never sees). The
+  condition names the profile, the platform and the toolsets. A reading that fails leaves
+  the last answer.
 - **One full verification at a time** (`gate.verify`): the loops ask together and a check
-  that finds one in progress takes its result, so the notifier is read once and an older
+  that finds one in progress takes its result, so the notifier and the toolsets are read once and an older
   reading never replaces a newer one.
 - **Availability reports reach the daemon in the order of the changes**: the gate holds
   its lock from the decision to the end of the report.

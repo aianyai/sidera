@@ -28,12 +28,14 @@ import (
 // the board.
 //
 // The same verification reads whether the gateways that wake the conversations run
-// the Kanban notifier. There is one verification at a time: the three loops ask the
+// the Kanban notifier, and whether the agent of the home conversation has the toolsets
+// it delegates with. There is one verification at a time: the three loops ask the
 // gate together, and a caller that arrives while one runs waits for it and takes its
 // result, so that Hermes is not asked by several processes at once and a slow, older
-// answer never replaces a newer one. A notifier that is off does not make Hermes unusable: cards
-// are still read and written, so receiving goes on, but no conversation is woken by
-// what is written, and the daemon is told so in the same availability report.
+// answer never replaces a newer one. A notifier that is off, or a toolset that is
+// missing, does not make Hermes unusable: cards are still read and written, so
+// receiving goes on, but no conversation is woken by what is written, or the agent
+// cannot delegate, and the daemon is told so in the same availability report.
 type gate struct {
 	board        *kanban.Client
 	wakeProfiles []string
@@ -41,6 +43,10 @@ type gate struct {
 	log          *slog.Logger
 	now          func() time.Time
 	verifyEvery  time.Duration
+
+	// homeProfile and homePlatform are the conversation the adapter wakes by default:
+	// the agent there is the one that delegates over this lane.
+	homeProfile, homePlatform string
 
 	// mu is held from the decision that the state changed until the daemon has been
 	// told, so that the reports reach the daemon in the order of the changes.
@@ -50,6 +56,8 @@ type gate struct {
 	// notifierOff is the detail of the condition while a notifier is off, else empty.
 	// It is what the last verification found; one that could not read it leaves it.
 	notifierOff string
+	// toolsetsMissing is the same for the toolsets of the home conversation's agent.
+	toolsetsMissing string
 	// reported is the state the daemon was last told.
 	reported availability
 
@@ -64,13 +72,21 @@ type verification struct {
 	done     chan struct{}
 	err      error
 	notifier notifierReading
+	toolsets toolsetsReading
 }
 
 // availability is what the daemon is told: that Hermes is unusable, or else which
-// notifier detail stands.
+// notifier and toolset details stand.
 type availability struct {
 	down     bool
 	notifier string
+	toolsets string
+}
+
+// reading is what a verification found out beyond the probe.
+type reading struct {
+	notifier notifierReading
+	toolsets toolsetsReading
 }
 
 // Check asks whether Hermes can be used, and reports a change. A failure caused by
@@ -78,9 +94,9 @@ type availability struct {
 func (g *gate) Check(ctx context.Context) error {
 	full := g.verificationDue()
 	var err error
-	notifier := notifierReading{}
+	var found reading
 	if full {
-		notifier, err = g.verify(ctx)
+		found, err = g.verify(ctx)
 	} else {
 		var ok bool
 		ok, err = g.board.BoardExists(ctx)
@@ -91,21 +107,21 @@ func (g *gate) Check(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	g.set(ctx, err, full, notifier)
+	g.set(ctx, err, full, found)
 	return err
 }
 
-// verify runs the whole probe and, when Hermes is usable, reads the notifiers. A call
-// that arrives while another runs waits for it and returns its result.
-func (g *gate) verify(ctx context.Context) (notifierReading, error) {
+// verify runs the whole probe and, when Hermes is usable, reads the notifiers and the
+// toolsets. A call that arrives while another runs waits for it and returns its result.
+func (g *gate) verify(ctx context.Context) (reading, error) {
 	g.flightMu.Lock()
 	if v := g.verifying; v != nil {
 		g.flightMu.Unlock()
 		select {
 		case <-v.done:
-			return v.notifier, v.err
+			return reading{v.notifier, v.toolsets}, v.err
 		case <-ctx.Done():
-			return notifierReading{}, ctx.Err()
+			return reading{}, ctx.Err()
 		}
 	}
 	v := &verification{done: make(chan struct{})}
@@ -115,12 +131,13 @@ func (g *gate) verify(ctx context.Context) (notifierReading, error) {
 	v.err = g.board.Probe(ctx)
 	if v.err == nil {
 		v.notifier = g.readNotifier(ctx)
+		v.toolsets = g.readToolsets(ctx)
 	}
 	g.flightMu.Lock()
 	g.verifying = nil
 	g.flightMu.Unlock()
 	close(v.done)
-	return v.notifier, v.err
+	return reading{v.notifier, v.toolsets}, v.err
 }
 
 // notifierReading is what a verification found about the notifiers; read is false
@@ -162,6 +179,39 @@ func notifierOffDetail(off []string) string {
 		which, strings.Join(off, ", "), kanban.NotifierSetting))
 }
 
+// toolsetsReading is what a verification found about the toolsets of the home
+// conversation's agent; read is false when it did not look or could not tell.
+type toolsetsReading struct {
+	read   bool
+	detail string // empty when every required toolset is enabled
+}
+
+// readToolsets reads which of the toolsets the agent delegates with are enabled for the
+// home profile and platform. What cannot be read is logged and says nothing, so that the
+// last answer stands.
+func (g *gate) readToolsets(ctx context.Context) toolsetsReading {
+	missing, err := g.board.ToolsetsMissing(ctx, g.homeProfile, g.homePlatform)
+	if err != nil {
+		if ctx.Err() == nil {
+			g.log.Warn("could not read which toolsets the Hermes agent of the home conversation has",
+				"profile", g.homeProfile, "platform", g.homePlatform, "error", err)
+		}
+		return toolsetsReading{}
+	}
+	return toolsetsReading{read: true, detail: toolsetsMissingDetail(g.homeProfile, g.homePlatform, missing)}
+}
+
+// toolsetsMissingDetail is the condition that says which toolsets the agent of a
+// conversation lacks, empty when none is missing.
+func toolsetsMissingDetail(profile, platform string, missing []string) string {
+	if len(missing) == 0 {
+		return ""
+	}
+	return detail(fmt.Sprintf("the Hermes agent of profile %s on platform %s has not enabled the toolset(s) %s: "+
+		"it cannot delegate over Sidera or load the Sidera Skill (`sidera-adapter-hermes setup` prints the change to make)",
+		profile, platform, strings.Join(missing, ", ")))
+}
+
 // verificationDue reports whether the next check has to be the whole probe.
 func (g *gate) verificationDue() bool {
 	g.mu.Lock()
@@ -171,7 +221,7 @@ func (g *gate) verificationDue() bool {
 
 // set records the outcome of a check and reports a change of what the daemon is told,
 // and only a change: the daemon replaces the previous snapshot with each one it gets.
-func (g *gate) set(ctx context.Context, err error, full bool, notifier notifierReading) {
+func (g *gate) set(ctx context.Context, err error, full bool, found reading) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
@@ -180,13 +230,17 @@ func (g *gate) set(ctx context.Context, err error, full bool, notifier notifierR
 	case full:
 		g.verifiedAt = g.now()
 	}
-	if notifier.read {
-		g.notifierOff = notifier.detail
+	if found.notifier.read {
+		g.notifierOff = found.notifier.detail
+	}
+	if found.toolsets.read {
+		g.toolsetsMissing = found.toolsets.detail
 	}
 	g.down = err != nil
 	now := availability{down: g.down}
 	if !g.down {
 		now.notifier = g.notifierOff
+		now.toolsets = g.toolsetsMissing
 	}
 	before := g.reported
 	if now == before {
@@ -195,18 +249,21 @@ func (g *gate) set(ctx context.Context, err error, full bool, notifier notifierR
 	g.reported = now
 
 	snapshot := adapterproto.AvailabilityParams{Conditions: []adapterproto.Availability{}}
-	switch {
-	case now.down:
+	if now.down {
 		g.log.Warn("hermes kanban is not usable; receiving and polling are paused", "error", err)
 		snapshot.Conditions = append(snapshot.Conditions, adapterproto.Availability{
 			Condition: adapterproto.ConditionDependencyMissing,
 			Detail:    detail(fmt.Sprintf("hermes kanban is not usable, so no card is read or written and messages wait in Sidera: %v", err)),
 		})
-	case now.notifier != "":
-		g.log.Warn(now.notifier)
+	}
+	for _, text := range []string{now.notifier, now.toolsets} {
+		if text == "" {
+			continue
+		}
+		g.log.Warn(text)
 		snapshot.Conditions = append(snapshot.Conditions, adapterproto.Availability{
 			Condition: adapterproto.ConditionDependencyMissing,
-			Detail:    now.notifier,
+			Detail:    text,
 		})
 	}
 	if before.down && !now.down {
