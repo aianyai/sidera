@@ -31,7 +31,7 @@ at once.
 
 | Setting | Meaning | Default |
 | ------- | ------- | ------- |
-| `hermes_path` | The Hermes executable | `hermes` |
+| `hermes_path` | The Hermes executable: an absolute path, or a bare name looked up on the `PATH` of the adapter process, which is the `PATH` the daemon was started with (a Hermes installed later is not found until the daemon restarts) | `hermes` |
 | `hermes_home` | `HERMES_HOME` given to every Hermes process; absolute, required | none |
 | `kanban_home` | Optional `HERMES_KANBAN_HOME`; absolute | none |
 | `board` | The slug of the one board served (`[a-z0-9][a-z0-9_-]{0,63}`) | none |

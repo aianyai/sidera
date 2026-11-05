@@ -259,6 +259,11 @@ process and no session.
 - The `hermes` command, found on the daemon's `PATH` or named by `hermes_path`. On
   Windows it must be an executable, not a `.cmd` or `.bat` shim: the adapter refuses to
   run a shim, and the probe reports Hermes as missing.
+- The adapter is started by the daemon and looks `hermes` up on the `PATH` the daemon was
+  started with, so Hermes installed after the daemon started (the Windows installer, for
+  one, adds `%LOCALAPPDATA%\hermes\bin` to the user `PATH`) is not found until the
+  daemon is restarted. Set `hermes_path` to the absolute path of the executable, or
+  restart the daemon.
 - A Hermes release from 0.22.2 up to, but not including, 0.23.0. Hermes is a 0.x project
   and a minor release may rename a flag or a field of the output the adapter reads, so
   the adapter does not read or write anything while Hermes is outside this range, tells
