@@ -12,7 +12,7 @@ why `--apply` does only what it does are in
 | `Run`, `Env` | The command: flags, reading the configuration, writing the Skill, printing the plan, `--apply`. Exit codes 0, 1, 2. |
 | `Skill`, `skill.tmpl` | The Skill text; the template holds the prose, the code fills in the alias list. |
 | `Plan`, `Step`, `Platforms` | The steps `--apply` does, placing the Skill in each profile (pure: the profile directories are an argument), and the platforms checked. |
-| `ToolsetGap`, `ToolsetAdvice` | The platforms whose agents lack `kanban` or `skills`, and the entry to add by hand. Pure text; the reading is `kanban.Client.ToolsetsMissing`. |
+| `ToolsetGap`, `ToolsetAdvice` | The platforms whose agents lack `kanban` or `skills`, and the change to make by hand: the toolset to add, or for a platform with no list the whole list. Pure text; the reading is `kanban.Client.Toolsets`. |
 
 ## Invariants
 
@@ -37,7 +37,12 @@ why `--apply` does only what it does are in
   installation the configuration names.
 - **A Hermes command gets no standard input.** The questions of `--apply` are read from it,
   and a child given the same stream would take the answers meant for the next question.
-- **Toolsets are read the way the gate reads them** (`kanban.Client.ToolsetsMissing`), so
+- **The list advised for a platform with no list names toolsets, never a composite.**
+  It is the toolsets enabled now followed by the missing ones. A composite name such as
+  `hermes-<platform>` means different things on different platforms (it opts in to
+  platform-only toolsets on discord, and is not the platform's default on whatsapp_cloud or a
+  plugin platform), so it is not a safe stand-in for "the defaults".
+- **Toolsets are read the way the gate reads them** (`kanban.Client.Toolsets`), so
   that what `setup` reports and what the adapter's availability says are one answer. A
   platform that cannot be read is said on standard error and left out.
 - The text of the Skill describes what the adapter does (`adapter` and `card`): a change

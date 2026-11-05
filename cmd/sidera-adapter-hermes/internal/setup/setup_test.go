@@ -47,7 +47,10 @@ func TestPlatformsAlwaysIncludeCronOnce(t *testing.T) {
 
 // A platform whose agents lack a toolset is named in the plan with the entry to add by
 // hand to the profile's configuration, and the plan says why it does not run
-// `hermes tools enable`; platforms that have both toolsets are not mentioned.
+// `hermes tools enable`; platforms that have both toolsets are not mentioned. For a
+// platform with no list the advice is the explicit list of what the platform has now plus
+// what is missing, never the name of a composite toolset: that name is wrong or means
+// more on some platforms (discord, whatsapp_cloud, the plugin platforms).
 func TestPlanSaysWhichToolsetsToEnableByHand(t *testing.T) {
 	const file = "/home/profiles/feishu/config.yaml"
 	for _, tc := range []struct {
@@ -56,24 +59,39 @@ func TestPlanSaysWhichToolsetsToEnableByHand(t *testing.T) {
 		want []string
 	}{
 		{"both present", nil, nil},
-		{"kanban missing", []ToolsetGap{{Profile: "feishu", Platform: "feishu", ConfigFile: file, Missing: []string{"kanban"}}}, []string{
+		{"kanban missing", []ToolsetGap{{Profile: "feishu", Platform: "feishu", ConfigFile: file,
+			Enabled: []string{"web", "skills"}, Missing: []string{"kanban"}}}, []string{
 			"profile feishu on platform feishu has not enabled the toolset(s) kanban",
 			"edit " + file + " by hand:",
-			"add kanban to the list platform_toolsets.feishu",
-			"add it as [hermes-feishu, kanban]",
+			"make sure the list platform_toolsets.feishu holds kanban, and agent.disabled_toolsets does not",
+			"add it as [web, skills, kanban]",
 		}},
-		{"skills missing", []ToolsetGap{{Profile: "feishu", Platform: "api_server", ConfigFile: file, Missing: []string{"skills"}}}, []string{
+		{"skills missing", []ToolsetGap{{Profile: "feishu", Platform: "api_server", ConfigFile: file,
+			Enabled: []string{"web", "kanban"}, Missing: []string{"skills"}}}, []string{
 			"toolset(s) skills",
-			"add skills to the list platform_toolsets.api_server",
-			"add it as [hermes-api-server, skills]",
+			"make sure the list platform_toolsets.api_server holds skills,",
+			"add it as [web, kanban, skills]",
 		}},
 		{"both missing, two platforms", []ToolsetGap{
-			{Profile: "feishu", Platform: "cron", ConfigFile: file, Missing: []string{"kanban", "skills"}},
-			{Profile: "feishu", Platform: "feishu", ConfigFile: file, Missing: []string{"kanban"}},
+			{Profile: "feishu", Platform: "cron", ConfigFile: file, Enabled: []string{"web"}, Missing: []string{"kanban", "skills"}},
+			{Profile: "feishu", Platform: "feishu", ConfigFile: file, Enabled: []string{"web", "skills"}, Missing: []string{"kanban"}},
 		}, []string{
 			"platform cron has not enabled the toolset(s) kanban, skills",
-			"add kanban, skills to the list platform_toolsets.cron",
+			"make sure the list platform_toolsets.cron holds kanban, skills,",
+			"platform cron has not enabled the toolset(s) kanban, skills",
+			"add it as [web, kanban, skills]",
 			"platform feishu has not enabled the toolset(s) kanban:",
+		}},
+		{"discord, whose composite would switch on the admin toolsets", []ToolsetGap{{Profile: "feishu", Platform: "discord", ConfigFile: file,
+			Enabled: []string{"web", "skills"}, Missing: []string{"kanban"}}}, []string{
+			"add it as [web, skills, kanban]",
+		}},
+		{"whatsapp_cloud and a plugin platform, whose composites are not named hermes-<platform>", []ToolsetGap{
+			{Profile: "feishu", Platform: "whatsapp_cloud", ConfigFile: file, Enabled: []string{"web", "skills"}, Missing: []string{"kanban"}},
+			{Profile: "feishu", Platform: "irc", ConfigFile: file, Enabled: []string{"web", "skills"}, Missing: []string{"kanban"}},
+		}, []string{
+			"platform_toolsets.whatsapp_cloud, add it as [web, skills, kanban]",
+			"platform_toolsets.irc, add it as [web, skills, kanban]",
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +106,9 @@ func TestPlanSaysWhichToolsetsToEnableByHand(t *testing.T) {
 			explained := strings.Contains(text, "setup does not run 'hermes tools enable'")
 			if explained != (len(tc.gaps) > 0) {
 				t.Errorf("the explanation of why 'tools enable' is not run is present: %v, with %d gaps:\n%s", explained, len(tc.gaps), text)
+			}
+			if strings.Contains(text, "[hermes-") {
+				t.Errorf("the advice names a composite toolset:\n%s", text)
 			}
 			if len(tc.gaps) == 0 && strings.Contains(text, "has not enabled") {
 				t.Errorf("the plan names a missing toolset although none is:\n%s", text)

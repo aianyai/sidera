@@ -79,6 +79,8 @@ type ToolsetGap struct {
 	Profile, Platform string
 	// ConfigFile is the profile's config.yaml, which holds platform_toolsets.
 	ConfigFile string
+	// Enabled are the toolsets the platform has now, as Hermes lists them.
+	Enabled []string
 	// Missing are the toolsets that are not enabled, never empty.
 	Missing []string
 }
@@ -92,7 +94,10 @@ type ToolsetGap struct {
 // feishu_drive, image_gen, kanban]: the no_mcp entry, which switches off every MCP
 // server on the platform, was dropped, and two toolsets the owner had not chosen were
 // added; against a platform with no list it wrote the full list of the defaults. The
-// owner adds one entry to a list they already read.
+// owner adds one entry to a list they already read, or, for a platform with no list, the
+// list of what the platform has now plus what is missing: a list that held only the
+// missing toolsets would switch the rest off, and the composite toolset that stands for
+// a platform's defaults is not a safe stand-in (see the text printed below).
 func ToolsetAdvice(gaps []ToolsetGap) string {
 	if len(gaps) == 0 {
 		return ""
@@ -100,28 +105,26 @@ func ToolsetAdvice(gaps []ToolsetGap) string {
 	var b strings.Builder
 	for _, g := range gaps {
 		items := strings.Join(g.Missing, ", ")
+		explicit := "[" + strings.Join(append(slices.Clone(g.Enabled), g.Missing...), ", ") + "]"
 		fmt.Fprintf(&b, "\nWarning: the agent of profile %s on platform %s has not enabled the toolset(s) %s: "+
 			"it cannot delegate over Sidera or load the Sidera Skill (an agent that has the kanban tools "+
 			"and not the Skill creates plain cards that nothing sends). To enable %s, edit %s by hand:\n"+
-			"  add %s to the list platform_toolsets.%s\n"+
-			"  (if the file has no platform_toolsets.%s, add it as [%s, %s]: the platform's default toolset keeps the "+
-			"toolsets it has now, which a list of %s alone would switch off)\n",
-			g.Profile, g.Platform, items, items, g.ConfigFile, items, g.Platform, g.Platform,
-			defaultToolset(g.Platform), items, items)
+			"  make sure the list platform_toolsets.%s holds %s, and agent.disabled_toolsets does not\n"+
+			"  (if the file has no platform_toolsets.%s, add it as %s: the toolsets the platform has now, then %s)\n",
+			g.Profile, g.Platform, items, items, g.ConfigFile, g.Platform, items, g.Platform, explicit, items)
 	}
 	b.WriteString(`
 setup does not run 'hermes tools enable' for this: it writes the platform's whole toolset list, so an entry
 such as no_mcp (which switches off every MCP server on the platform) is dropped and other toolsets are
 added. A toolset named in agent.disabled_toolsets stays off whatever the list says; remove it there.
+A list written for a platform that had none names the toolsets the platform has now, so it no longer
+follows later changes to Hermes's defaults for that platform. A composite name such as hermes-<platform>
+is not used in its place: it does not mean the same on every platform (a list holding hermes-discord
+switches on the discord and discord_admin toolsets, which the platform does not have by default; on a
+platform whose composite has another name or no definition, the list keeps nothing but the added toolsets).
 'hermes -p <profile> tools list --platform <platform>' shows what is enabled, and setup reads it the same way.
 `)
 	return b.String()
-}
-
-// defaultToolset is the name Hermes gives the toolset that holds a platform's default
-// tools: hermes-<platform>, with a dash for an underscore (hermes-api-server).
-func defaultToolset(platform string) string {
-	return "hermes-" + strings.ReplaceAll(platform, "_", "-")
 }
 
 // NotifierSteps are the commands that turn the Kanban notifier on in the profiles whose

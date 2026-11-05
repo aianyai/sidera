@@ -12,7 +12,7 @@ without the adapter around it.
 
 | Name | Holds |
 | ---- | ----- |
-| `New(Config)` / `Client` | One board of one Hermes home. Methods: `List`, `Show`, `Create`, `Claim`, `Block`, `Comment`, `Complete`, `Attach`, `Attachments`, `NotifyList`, `NotifySubscribe`, `Version`, `Assignees`, `BoardExists`, `NotifierEnabled`, `NotifierDisabled`, `ToolsetsMissing`, `Probe` (one at a time; a caller meanwhile gets its result). `RemoveLeftoverAttachFiles` clears what an interrupted `Attach` left. |
+| `New(Config)` / `Client` | One board of one Hermes home. Methods: `List`, `Show`, `Create`, `Claim`, `Block`, `Comment`, `Complete`, `Attach`, `Attachments`, `NotifyList`, `NotifySubscribe`, `Version`, `Assignees`, `BoardExists`, `NotifierEnabled`, `NotifierDisabled`, `Toolsets`, `Probe` (one at a time; a caller meanwhile gets its result). `RemoveLeftoverAttachFiles` clears what an interrupted `Attach` left. |
 | `Error`, `Class`, `ErrTransient`, `ErrPermanent`, `ErrArgTooLong`, `ErrArgInvalid`, `ErrUnexpectedOutput` | The failure of every method (`client.go` runs, `error.go` classifies). |
 | `BlockKind` | The four block kinds Hermes accepts; the one home of that vocabulary. |
 | `SupportedFrom`, `SupportedBefore`, `ParseVersion`, `CheckVersion`, `CheckExecutable`, `CheckProfiles` | The probe rules; pure functions apart from `Probe`. |

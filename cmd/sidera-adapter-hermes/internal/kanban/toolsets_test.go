@@ -12,30 +12,39 @@ import (
 )
 
 // What `tools list` printed on Hermes 0.22.2 for each state a platform's toolsets can
-// be in, and which of the required toolsets are not enabled. unset is the platform with
+// be in, which of the required toolsets are not enabled, and how many toolsets are
+// enabled (what setup lists when it advises a list for a platform that has none). unset is the platform with
 // no platform_toolsets entry: the defaults, which leave kanban off. disabled-globally
 // has both in the platform's list and skills in agent.disabled_toolsets, which wins.
 func TestToolsetsMissingFromRecordedLists(t *testing.T) {
 	for _, tc := range []struct {
-		sample string
-		want   []string
+		sample  string
+		want    []string
+		enabled int
 	}{
-		{"unset", []string{ToolsetKanban}},
-		{"cron-unset", []string{ToolsetKanban}},
-		{"explicit-neither", []string{ToolsetKanban, ToolsetSkills}},
-		{"explicit-kanban-only", []string{ToolsetSkills}},
-		{"explicit-skills-only", []string{ToolsetKanban}},
-		{"explicit-both", nil},
-		{"disabled-globally", []string{ToolsetSkills}},
+		{"unset", []string{ToolsetKanban}, 17},
+		{"cron-unset", []string{ToolsetKanban}, 17},
+		{"explicit-neither", []string{ToolsetKanban, ToolsetSkills}, -1},
+		{"explicit-kanban-only", []string{ToolsetSkills}, -1},
+		{"explicit-skills-only", []string{ToolsetKanban}, -1},
+		{"explicit-both", nil, -1},
+		{"disabled-globally", []string{ToolsetSkills}, -1},
 	} {
 		t.Run(tc.sample, func(t *testing.T) {
 			b, err := os.ReadFile(filepath.Join("testdata", "tools-list", tc.sample+".txt"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := parseMissingToolsets(string(b), RequiredToolsets)
-			if err != nil || !slices.Equal(got, tc.want) {
-				t.Errorf("missing = %v, err = %v; want %v", got, err, tc.want)
+			got, err := parseToolsets(string(b), RequiredToolsets)
+			if err != nil || !slices.Equal(got.Missing, tc.want) {
+				t.Errorf("missing = %v, err = %v; want %v", got.Missing, err, tc.want)
+			}
+			if slices.Contains(got.Enabled, ToolsetKanban) == slices.Contains(got.Missing, ToolsetKanban) ||
+				slices.Contains(got.Enabled, ToolsetSkills) == slices.Contains(got.Missing, ToolsetSkills) {
+				t.Errorf("enabled %v and missing %v do not split the required toolsets", got.Enabled, got.Missing)
+			}
+			if tc.enabled >= 0 && len(got.Enabled) != tc.enabled {
+				t.Errorf("%d toolsets enabled (%v), want %d", len(got.Enabled), got.Enabled, tc.enabled)
 			}
 		})
 	}
@@ -54,36 +63,36 @@ func TestToolsetsListWithoutTheRowsIsRefused(t *testing.T) {
 		"no skills row":    "Built-in toolsets (feishu):\n  ✓ enabled  kanban  📌 Kanban\n",
 		"rows only of MCP": "Built-in toolsets (feishu):\nMCP servers:\n  ✓ enabled  kanban  x\n  ✓ enabled  skills  x\n",
 	} {
-		if got, err := parseMissingToolsets(out, RequiredToolsets); err == nil {
-			t.Errorf("%s: read as missing %v, want a refusal", name, got)
+		if got, err := parseToolsets(out, RequiredToolsets); err == nil {
+			t.Errorf("%s: read as %+v, want a refusal", name, got)
 		}
 	}
 }
 
 // The client asks Hermes for the profile and platform given, and an answer it cannot
-// read is an error, not a verdict.
-func TestToolsetsMissingThroughHermes(t *testing.T) {
+// read is an error, not a verdict. The fake answers only for that profile and platform;
+// for any other it gives a recording in which both toolsets are enabled.
+func TestToolsetsThroughHermes(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		file string // answer of the fake; empty leaves the recording
-		want []string
-		err  error
+		name   string
+		answer string
+		want   ToolsetReading
+		err    error
 	}{
-		{"recorded", "", nil, nil},
-		{"kanban off", "  ✗ disabled  kanban  x\n  ✓ enabled  skills  x\n", []string{ToolsetKanban}, nil},
-		{"unreadable", "✗ Unknown platform 'x'. Valid: feishu\n", nil, ErrUnexpectedOutput},
+		{"kanban off", "  ✗ disabled  kanban  x\n  ✓ enabled  web  x\n  ✓ enabled  skills  x\n",
+			ToolsetReading{Enabled: []string{"web", "skills"}, Missing: []string{ToolsetKanban}}, nil},
+		{"unreadable", "✗ Unknown platform 'x'. Valid: feishu\n", ToolsetReading{}, ErrUnexpectedOutput},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctl := t.TempDir()
 			t.Setenv(kanbantest.ControlEnv, ctl)
-			if tc.file != "" {
-				if err := os.WriteFile(filepath.Join(ctl, kanbantest.ToolsFile), []byte(tc.file), 0o600); err != nil {
-					t.Fatal(err)
-				}
+			if err := os.WriteFile(filepath.Join(ctl, kanbantest.ToolsFileOf("ops", "slack")), []byte(tc.answer), 0o600); err != nil {
+				t.Fatal(err)
 			}
-			got, err := fakeClient(t, kanbantest.ModeBoard).ToolsetsMissing(context.Background(), "feishu", "feishu")
-			if !errors.Is(err, tc.err) || (tc.err == nil && err != nil) || !slices.Equal(got, tc.want) {
-				t.Errorf("missing = %v, err = %v; want %v, %v", got, err, tc.want, tc.err)
+			got, err := fakeClient(t, kanbantest.ModeBoard).Toolsets(context.Background(), "ops", "slack")
+			if !errors.Is(err, tc.err) || (tc.err == nil && err != nil) ||
+				!slices.Equal(got.Enabled, tc.want.Enabled) || !slices.Equal(got.Missing, tc.want.Missing) {
+				t.Errorf("reading = %+v, err = %v; want %+v, %v", got, err, tc.want, tc.err)
 			}
 		})
 	}

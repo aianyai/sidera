@@ -241,7 +241,7 @@ skill). Hermes 0.22.2 leaves `kanban` off by default on every platform
 With `skills` off the agent still has the Kanban tools and no instructions: one created a
 plain card on the current board with an assignee of its own choosing, which this adapter never
 saw, and the lane looked like a peer that never answers. The gate
-(`kanban.ToolsetsMissing`, `hermes -p <home_profile> tools list --platform=<home_platform>`)
+(`kanban.Toolsets`, `hermes -p <home_profile> tools list --platform=<home_platform>`)
 reads the two toolsets in the same verification as the notifier, for the conversation the
 adapter wakes by default, and reports the condition `dependency_missing` with the detail "the
 Hermes agent of profile P on platform X has not enabled the toolset(s) T: it cannot delegate
@@ -839,17 +839,25 @@ a platform they delegate from; both repeat, and default to `home_profile` and
 `home_platform`. `cron` is always added to the platforms. The one step, for each profile, is
 placing `SKILL.md` as `<profile directory>/skills/sidera/SKILL.md`.
 
-For each profile and platform it also reads which of `kanban` and `skills` are enabled (the
-reading `kanban.ToolsetsMissing`, which the gate also uses) and, for each platform where one is not, prints a
-warning with the exact change to make by hand: the profile's `config.yaml` (named by `hermes
--p <profile> config path`), the list `platform_toolsets.<platform>`, and the items to add to
-it. When the file has no such list the platform uses Hermes's defaults, and a list holding
-only `kanban` would switch them off; the warning says to write `[hermes-<platform>, kanban]`
-instead (Hermes expands the platform's composite toolset and keeps the explicit item:
-`tools list` showed 18 toolsets enabled for that list and 1 for `[kanban]`; the composite is
-named `hermes-<platform>`, with `-` for `_`). A toolset named in `agent.disabled_toolsets`
-stays off whatever the list says, and the warning says so. A platform that cannot be read is
-reported on standard error and left out; the run goes on.
+For each profile and platform it also reads which toolsets are enabled (the reading
+`kanban.Toolsets`, which the gate also uses) and, for each platform where `kanban` or `skills` is
+not, prints a warning with the exact change to make by hand: the profile's `config.yaml` (named
+by `hermes -p <profile> config path`), the list `platform_toolsets.<platform>`, and the toolsets
+the list has to hold. When the file has no such list the platform uses Hermes's defaults, and a
+list holding only `kanban` would switch them off; the warning says to write the explicit list of
+the toolsets the platform has now (the enabled rows of the same `tools list` reading) followed
+by the missing ones. Hermes 0.22.2 resolves that list to exactly the platform's current set plus
+the missing toolsets, on every platform it knows, plugin platforms included. A composite name
+such as `hermes-<platform>` is not used: it does not mean the same on every platform. On
+`discord` a saved list that holds the composite also switches on `discord` and `discord_admin`
+(role and channel management), which are off for a platform with no list; the composite of
+`whatsapp_cloud` is `hermes-whatsapp`, not the name derived from the platform; and a plugin
+platform has no composite, so a list naming one resolves to the added toolsets alone. The cost
+of the explicit list is that it fixes the platform's current set, so the platform no longer
+follows later changes to Hermes's defaults. A toolset named in `agent.disabled_toolsets` stays
+off whatever the list says, so the warning asks that the list holds the toolset and that
+`agent.disabled_toolsets` does not. A platform that cannot be read is reported on standard error
+and left out; the run goes on.
 
 *Where the configuration comes from.* The document is the one given to `sidera adapter
 enable` or `sidera adapter config` and is decoded with `config.Decode`, so the checks

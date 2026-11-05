@@ -231,13 +231,14 @@ func toolsetGaps(ctx context.Context, board *kanban.Client, profiles, platforms 
 	var gaps []ToolsetGap
 	for _, profile := range profiles {
 		for _, platform := range platforms {
-			missing, err := board.ToolsetsMissing(ctx, profile, platform)
+			reading, err := board.Toolsets(ctx, profile, platform)
 			if err != nil {
 				fmt.Fprintf(w, "sidera-adapter-hermes: setup: warning: could not read which toolsets profile %s has on platform %s: %v\n", profile, platform, err)
 				continue
 			}
-			if len(missing) > 0 {
-				gaps = append(gaps, ToolsetGap{Profile: profile, Platform: platform, ConfigFile: configFiles[profile], Missing: missing})
+			if len(reading.Missing) > 0 {
+				gaps = append(gaps, ToolsetGap{Profile: profile, Platform: platform, ConfigFile: configFiles[profile],
+					Enabled: reading.Enabled, Missing: reading.Missing})
 			}
 		}
 	}

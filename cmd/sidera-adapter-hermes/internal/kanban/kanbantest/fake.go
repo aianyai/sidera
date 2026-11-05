@@ -42,6 +42,12 @@ const (
 	ToolsFile = "tools.txt"
 )
 
+// ToolsFileOf is the file that answers `tools list --platform=<platform>` for one
+// profile and platform only; it takes the place of ToolsFile there.
+func ToolsFileOf(profile, platform string) string {
+	return strings.TrimSuffix(ToolsFile, ".txt") + "-" + profile + "-" + platform + ".txt"
+}
+
 // NotifierFileOf is the file that answers `config get kanban.notify_in_gateway` for one
 // profile.
 func NotifierFileOf(profile string) string {
@@ -157,9 +163,15 @@ func recorded(args []string, control string) int {
 	case "tools list":
 		file = filepath.Join("tools-list", "explicit-both.txt")
 		if control != "" {
-			if b, err := os.ReadFile(filepath.Join(control, ToolsFile)); err == nil {
-				os.Stdout.Write(b)
-				return 0
+			names := []string{ToolsFile}
+			if len(args) == 5 && args[0] == "-p" {
+				names = []string{ToolsFileOf(args[1], strings.TrimPrefix(args[4], "--platform=")), ToolsFile}
+			}
+			for _, name := range names {
+				if b, err := os.ReadFile(filepath.Join(control, name)); err == nil {
+					os.Stdout.Write(b)
+					return 0
+				}
 			}
 		}
 	case "boards list --json":

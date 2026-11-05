@@ -366,15 +366,19 @@ in each profile, after a `y/N` question. `--profile` names a profile whose agent
 repeats; the platforms are `home_platform` and `cron`, and `--platform` adds more.
 
 For a platform that lacks `kanban` or `skills`, `setup` prints the file to edit (the
-profile's `config.yaml`) and the entry to add to `platform_toolsets.<platform>`, for example
-`kanban` added to the list under `platform_toolsets: feishu:`. If the file has no list for
-that platform, write `[hermes-<platform>, kanban]` (for `cron`, `[hermes-cron, kanban]`)
-rather than `[kanban]` alone, which would switch the platform's other toolsets off. A
-toolset named in `agent.disabled_toolsets` stays off whatever the list says, so remove it
-there. `hermes tools enable` is deliberately not run: it rewrites the platform's whole
-list, and on Hermes 0.22.2 it dropped a `no_mcp` entry (which turns off every MCP server on
-the platform) and added toolsets that nobody had chosen. After the edit, `hermes -p
-<profile> tools list --platform <platform>` shows whether the toolset is on.
+profile's `config.yaml`) and the toolset to add to `platform_toolsets.<platform>`, for example
+`kanban` added to the list under `platform_toolsets: feishu:`. If the file has no list for that
+platform, `setup` prints the whole list to write: the toolsets the platform has now, followed by
+the missing one (a list of `[kanban]` alone would switch the platform's other toolsets off). That
+list fixes the platform's current set, so the platform no longer follows later changes to
+Hermes's defaults. A composite name such as `hermes-<platform>` is not used, because it does not
+mean the same on every platform: on Discord it also switches on the server-management toolsets,
+and on some platforms it is not a toolset at all. A toolset named in `agent.disabled_toolsets`
+stays off whatever the list says, so remove it there. `hermes tools enable` is deliberately not
+run: it rewrites the platform's whole list, and on Hermes 0.22.2 it dropped a `no_mcp` entry
+(which turns off every MCP server on the platform) and added toolsets that nobody had chosen.
+After the edit, `hermes -p <profile> tools list --platform <platform>` shows whether the toolset
+is on.
 
 After `setup`, **restart the gateway that serves each profile yourself**: by default the
 one gateway that serves every profile, and any profile with its own gateway on its own.

@@ -225,14 +225,14 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	// delegate over Sidera, or does not know how to: it creates a plain card instead.
 	toolsets := adapterproto.Dependency{Name: "hermes-toolsets", State: adapterproto.DependencyOK}
 	home := env.Config.Home
-	missing, err := env.Board.ToolsetsMissing(ctx, home.Profile, home.Platform)
+	reading, err := env.Board.Toolsets(ctx, home.Profile, home.Platform)
 	switch {
 	case err != nil:
 		toolsets.State = adapterproto.DependencyMissing
 		toolsets.Detail = detail(fmt.Sprintf("could not read which toolsets the agent of profile %s on platform %s has: %v",
 			home.Profile, home.Platform, err))
-	case len(missing) > 0:
-		toolsets.State, toolsets.Detail = adapterproto.DependencyMissing, toolsetsMissingDetail(home.Profile, home.Platform, missing)
+	case len(reading.Missing) > 0:
+		toolsets.State, toolsets.Detail = adapterproto.DependencyMissing, toolsetsMissingDetail(home.Profile, home.Platform, reading.Missing)
 	}
 	res.Dependencies = append(res.Dependencies, toolsets)
 	return res, nil

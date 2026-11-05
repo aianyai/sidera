@@ -190,7 +190,7 @@ type toolsetsReading struct {
 // home profile and platform. What cannot be read is logged and says nothing, so that the
 // last answer stands.
 func (g *gate) readToolsets(ctx context.Context) toolsetsReading {
-	missing, err := g.board.ToolsetsMissing(ctx, g.homeProfile, g.homePlatform)
+	reading, err := g.board.Toolsets(ctx, g.homeProfile, g.homePlatform)
 	if err != nil {
 		if ctx.Err() == nil {
 			g.log.Warn("could not read which toolsets the Hermes agent of the home conversation has",
@@ -198,7 +198,7 @@ func (g *gate) readToolsets(ctx context.Context) toolsetsReading {
 		}
 		return toolsetsReading{}
 	}
-	return toolsetsReading{read: true, detail: toolsetsMissingDetail(g.homeProfile, g.homePlatform, missing)}
+	return toolsetsReading{read: true, detail: toolsetsMissingDetail(g.homeProfile, g.homePlatform, reading.Missing)}
 }
 
 // toolsetsMissingDetail is the condition that says which toolsets the agent of a
