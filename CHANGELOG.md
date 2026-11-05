@@ -8,6 +8,24 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-04
+
+Sidera now has a Hermes Agent adapter, `sidera-adapter-hermes`, which connects a long-running
+Hermes to the other nodes through its own Kanban board. The direct endpoint of an adapter can
+now read the directory and the list of peers and set its own declaration, and a page it
+receives marks the node's own channel notices, so that a bridge can tell them from a message
+another endpoint wrote. The Go SDK exports the delivery timing an adapter reasons about and
+names the reasons a send is refused. State written by 0.13.x needs no migration by hand:
+nothing a node stores changes, and the Hermes adapter writes only state of its own. The adapter
+protocol stays at version 1, extended in place: `endpoint.directory`, `endpoint.peers` and
+`endpoint.declare` for a direct endpoint, behind the daemon capability
+`direct_endpoint_access` that `initialize` declares, and the member `feedback` of a message on
+a page, sent only to an adapter that declares the direct capability `feedback`. The
+node-to-node protocols do not change. **The Go SDK has a breaking change**:
+`adapterproto.SendRefusedData.Reason` is a `SendRefusedReason` and no longer a `string`. An
+installation of 0.12.0 or later updates with `sidera update`, and the nodes of a cluster can
+be upgraded one at a time, in any order.
+
 ### Added
 
 - **`sidera adapter list` shows what an adapter reports as unavailable.** An enabled, online
@@ -746,7 +764,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/aianyai/sidera/releases/tag/v0.14.0
 [0.13.0]: https://github.com/aianyai/sidera/releases/tag/v0.13.0
 [0.12.2]: https://github.com/aianyai/sidera/releases/tag/v0.12.2
 [0.12.1]: https://github.com/aianyai/sidera/releases/tag/v0.12.1
