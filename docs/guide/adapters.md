@@ -270,6 +270,29 @@ process and no session.
   assignees: Hermes starts a worker for a card whose assignee is a profile.
 - A daemon new enough to give an adapter direct endpoints that are hidden from the
   directory; on an older one the probe says the node needs an update.
+- A running Hermes gateway that serves each profile whose agents delegate, with its
+  Kanban notifier on, which is the default (`kanban.notify_in_gateway`). The agent is
+  woken by that gateway when a card is completed. It works the same with the one gateway
+  that serves every profile (Hermes' default) and with a gateway per profile; the notifier
+  reads the setting of the profile its gateway was started from, normally the default
+  profile for the shared one. Without a running gateway, or with the setting false,
+  results are written to cards but no conversation is woken. The adapter keeps working in
+  the second case and says so: `sidera adapter list` shows the instance's availability
+  with the reason, and `setup` warns of the profiles it prepares. It checks the profile's
+  own setting and the default profile's, since it cannot see which gateway runs, and it
+  does not tell you that a gateway is not running.
+- A daemon new enough to give an adapter direct endpoints that are hidden from the
+  directory; on an older one the probe says the node needs an update.
+- A running Hermes gateway that serves each profile whose agents delegate, with its
+  Kanban notifier on, which is the default (`kanban.notify_in_gateway`). By default one
+  gateway serves every profile, and the notifier reads the setting of the profile that
+  started it, normally the default profile; a profile with its own gateway uses its own.
+  The agent is woken by that gateway when a card is completed. Without a running gateway,
+  or with `kanban.notify_in_gateway: false`, results are written to cards but no
+  conversation is woken. The adapter keeps working in the second case and says so:
+  `sidera adapter list` shows the instance's availability with the reason, and `setup`
+  warns of each profile it prepares. It reports a profile only when the setting is off
+  wherever it could be governed, and it does not tell you that a gateway is not running.
 
 **Install and enable.** The configuration has required settings, so it is given when
 the instance is enabled. Save it as `hermes.json`:
@@ -341,9 +364,10 @@ It prints the steps and changes nothing in Hermes. Add `--apply` to have it run 
 after a `y/N` question. `--profile` names a profile whose agents delegate and repeats; the
 platforms are `home_platform` and `cron`, and `--platform` adds more.
 
-After `setup`, **restart the gateway of each profile yourself**. Hermes reads its tools
-and Skills when the gateway starts, and a restart interrupts the conversations it is
-serving, so Sidera never does it. `setup` never edits `config.yaml` either. Run it
+After `setup`, **restart the gateway that serves each profile yourself**: by default the
+one gateway that serves every profile, and any profile with its own gateway on its own.
+Hermes reads its tools and Skills when the gateway starts, and a restart interrupts the
+conversations it is serving, so Sidera never does it. `setup` never edits `config.yaml` either. Run it
 again whenever you change the aliases or the board, since the Skill lists them. The Skill
 names the board, and tells the agent to pass it on every Kanban tool call it makes for a
 Sidera card: without it Hermes puts the card on the board it has selected, where the
@@ -411,8 +435,15 @@ again. Nothing is acknowledged that was not written to a card.
 - One instance serves one board of one Hermes installation, and shows as one Hermes in
   the directory. Run one Hermes instance per node.
 - Only the releases of the range above. The adapter has been run on macOS against Hermes
-  0.22.2; Linux and Windows are expected to work, since the adapter only runs
-  the `hermes` command, and are not yet confirmed.
+  0.22.2 and on Linux against Hermes 0.22.7. Windows is expected to work, since the
+  adapter only runs the `hermes` command, and is not yet confirmed.
+- Hermes serves every profile from one gateway by default, so a profile created while it
+  runs is served at once. For a profile you make only for the adapter's tests, set
+  `gateway.standalone: true` in it first, or the running gateway serves it.
+- Disabling or removing the instance does not recall what it already sent. A new session
+  that was still queued for a node that could not be reached is created there when the
+  node is back (within the message's queue time), and nothing here is left to receive its
+  answer; the owner of that node closes it with `sidera endpoint close`.
 - On Windows `hermes` must be an `.exe`; a batch shim is refused, because `cmd.exe` would
   interpret the characters of the arguments, and some of them come from other agents.
 - Hermes clears the delivery settings of cards that are done and idle for 30 days. An

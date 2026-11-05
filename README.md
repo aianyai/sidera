@@ -35,8 +35,8 @@ Sidera 0.13.0 is the current release; 0.8.0 was the first public release.
 - Claude Code on macOS, Linux and Windows.
 - Codex on macOS, Linux and Windows.
 - Hermes Agent: a long-running Hermes delegates to agents on other machines, and is
-  reached by them, through its own Kanban board. Run so far on macOS; Linux and
-  Windows are not yet confirmed.
+  reached by them, through its own Kanban board. Run on macOS (Hermes 0.22.2) and Linux
+  (Hermes 0.22.7); Windows is not yet confirmed.
 - Interrupting a running turn, on Claude Code and Codex.
 - Creating a session on another machine and exchanging messages with it.
 - The console bridge: the owner starts sessions and reads replies from a terminal.

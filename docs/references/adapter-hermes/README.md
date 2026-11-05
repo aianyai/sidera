@@ -851,6 +851,32 @@ the owner runs `setup` again, since the Skill lists the aliases. The output also
 the Skill names the board, so that the agent and the adapter use the same one; a change of
 `board` needs `setup` again too.
 
+### Platforms and operating notes
+
+**Verified.** The adapter has run the whole lane on macOS against Hermes 0.22.2 and on
+Linux against Hermes 0.22.7, on a cluster of three nodes: delegations to Codex and Claude
+Code on other nodes with `new_session` and with follow-ups, requests from other nodes,
+a delegation that the agent made itself, and a channel notice relayed as a card. Windows
+is not yet verified: no Hermes has run there, so whether it installs a `hermes.exe` or a
+batch shim (which the client refuses) is open.
+
+**A running host serves a new profile.** The host gateway serves every profile, so a profile
+created while it runs is served at once, with its own credentials and configuration, unless
+it opts out with `gateway.standalone: true` in its configuration (`hermes -p <profile>
+config set gateway.standalone true`; Hermes calls it a temporary compatibility setting).
+Whoever creates a profile for the adapter or for a test of it should set that first, so
+that the host does not start serving it. The adapter neither creates profiles nor sets this.
+
+**A message already sent is not recalled.** Disabling or removing a Hermes instance, or
+the adapter's, stops what it does next; it does not call back what it sent. A
+`session.create` that is queued for a node that cannot be reached is delivered when the
+node is reachable again, as long as the message's queue time lasts (30 minutes by
+default), and creates a session there. That session belongs to no card any more: nothing
+on this side holds a record of it, no endpoint of ours is left to reply to, and the
+answer to its first message has nowhere to go. The owner of the node it was created on
+closes it (`sidera endpoint close <address>`); the node's own limit on endpoints counts
+it until then.
+
 ### Decisions
 
 All of them are in `lane` and take the records and the time as arguments.
