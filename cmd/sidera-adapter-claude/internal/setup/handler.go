@@ -110,6 +110,8 @@ func (h *Handler) look(ctx context.Context, req adaptersetup.Request, recorded b
 	cfg := h.current()
 	if recorded {
 		cfg = actingConfiguration(rec, cfg)
+	} else if err := refuseAnotherConfiguration(req, rec, cfg); err != nil {
+		return nil, err
 	}
 	d, err := h.desire(req, cfg)
 	if err != nil {
@@ -119,11 +121,28 @@ func (h *Handler) look(ctx context.Context, req adaptersetup.Request, recorded b
 	return &world{d: d, client: client, rec: rec, current: h.current(), obs: d.observe(ctx, client, clientErr)}, nil
 }
 
+// refuseAnotherConfiguration refuses a setup in a configuration other than the one its
+// items were made in. Every configuration's marketplace points at the same source
+// directory in the instance's state directory, so removing the setup of either would
+// delete the source the other's plugin is loaded from, and the record keeps one
+// configuration only. The way out is the removal, which works in the recorded
+// configuration whatever the environment names.
+func refuseAnotherConfiguration(req adaptersetup.Request, rec *adaptersetup.Record, cfg configuration) error {
+	recorded := actingConfiguration(rec, cfg)
+	if !rec.Installed() || recorded == cfg {
+		return nil
+	}
+	return fmt.Errorf("setup already made this instance's items in the Claude Code configuration %s, and this environment names %s; both would share the plugin's source in the instance's state directory, so removing either would break the other. Run `sidera adapter setup %s --remove` first: it works in the recorded configuration whatever the environment names", recorded.text(), cfg.text(), req.Instance)
+}
+
 // actingConfiguration is the configuration the items of the record were made in, else
 // the fallback.
 func actingConfiguration(rec *adaptersetup.Record, fallback configuration) configuration {
 	if rec.Installed() {
 		for _, id := range planOrder {
+			if id == idSource {
+				continue // a path in the state directory, not in a configuration
+			}
 			if r, ok := rec.Find(id); ok {
 				if cfg, ok := configurationOf(r.Target); ok {
 					return cfg

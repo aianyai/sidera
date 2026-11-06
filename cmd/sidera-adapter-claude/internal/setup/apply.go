@@ -125,7 +125,12 @@ func (w *world) remember(h *Handler, id string) error {
 	if w.rec == nil {
 		w.rec = &adaptersetup.Record{}
 	}
-	w.rec.AdapterVersion, w.rec.SideraProgram = h.o.Version, w.d.req.SideraProgram
+	w.rec.AdapterVersion = h.o.Version
+	// The program the registration names (the instance's sidera_path wins over the
+	// program that ran setup); one that cannot be found is not what any item names.
+	if w.d.programErr == nil {
+		w.rec.SideraProgram = w.d.command
+	}
 	w.rec.Set(adaptersetup.RecordItem{ID: id, Kind: w.d.kind(id), Target: w.d.target(id), Digest: w.d.digest[id], Version: h.o.Version})
 	return adaptersetup.WriteRecord(w.d.req.StateDir, *w.rec)
 }
@@ -198,7 +203,7 @@ func (w *world) reconcile() (adaptersetup.Reconciliation, error) {
 		if _, recorded := w.recorded(id); id == idPermission && s.exists && !recorded {
 			continue
 		}
-		wanted = append(wanted, adaptersetup.Wanted{ID: id, Kind: w.d.kind(id), Target: w.d.target(id), Digest: w.d.digest[id]})
+		wanted = append(wanted, w.d.wanted(id))
 	}
 	rc, err := adaptersetup.Reconcile(w.rec, wanted, func(r adaptersetup.RecordItem) (string, bool, error) {
 		s := w.obs.items[r.ID]
@@ -221,8 +226,31 @@ func (w *world) reconcile() (adaptersetup.Reconciliation, error) {
 	return rc, nil
 }
 
+func (d *desired) wanted(id string) adaptersetup.Wanted {
+	return adaptersetup.Wanted{ID: id, Kind: d.kind(id), Target: d.target(id), Digest: d.digest[id]}
+}
+
 // Check implements adaptersetup.Handler.
 func (h *Handler) Check(ctx context.Context, req adaptersetup.Request) (adaptersetup.Check, error) {
+	rec, err := adaptersetup.ReadRecord(req.StateDir)
+	if err != nil {
+		return adaptersetup.Check{}, err
+	}
+	if !rec.Installed() {
+		// Setup did nothing for this instance, so there is nothing to look at: Claude
+		// Code is not run, and the answer is that everything is still to set up (but
+		// what a person declined).
+		d, err := h.desire(req, h.current())
+		if err != nil {
+			return adaptersetup.Check{}, err
+		}
+		var wanted []adaptersetup.Wanted
+		for _, id := range planOrder {
+			wanted = append(wanted, d.wanted(id))
+		}
+		rc, err := adaptersetup.Reconcile(rec, wanted, nil)
+		return adaptersetup.Check{Drift: rc.CheckDrift()}, err
+	}
 	w, err := h.look(ctx, req, true)
 	if err != nil {
 		return adaptersetup.Check{}, err

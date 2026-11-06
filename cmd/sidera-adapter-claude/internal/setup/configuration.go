@@ -52,19 +52,21 @@ func (c configuration) environ(base []string) []string {
 	return environ.Compose(base, environ.Spec{Drop: func(name string) bool { return name == configVar }})
 }
 
+// A target is what the item is, then the marker, then the configuration. The what may
+// hold the marker's words (a settings path below a directory called "team in prod"), and so
+// may the directory; the configuration is always last, so it is read from the right.
 const (
-	inSeparator    = " in "
-	envTarget      = configVar + "="
-	defaultTarget  = "the default configuration "
-	defaultOpening = "("
+	inSeparator   = " in "
+	envMarker     = inSeparator + configVar + "="
+	defaultMarker = inSeparator + "the default configuration ("
 )
 
 // text names the configuration, as it appears in the target of a recorded item.
 func (c configuration) text() string {
 	if c.fromEnv {
-		return envTarget + c.dir
+		return strings.TrimPrefix(envMarker, inSeparator) + c.dir
 	}
-	return defaultTarget + defaultOpening + c.dir + ")"
+	return strings.TrimPrefix(defaultMarker, inSeparator) + c.dir + ")"
 }
 
 // target is the target of an item that lives in the configuration: what it is, where.
@@ -72,14 +74,12 @@ func (c configuration) target(what string) string { return what + inSeparator + 
 
 // configurationOf reads the configuration from a target made by target.
 func configurationOf(target string) (configuration, bool) {
-	_, text, ok := strings.Cut(target, inSeparator)
+	env, def := strings.LastIndex(target, envMarker), strings.LastIndex(target, defaultMarker)
 	switch {
-	case !ok:
-		return configuration{}, false
-	case strings.HasPrefix(text, envTarget):
-		return configuration{dir: strings.TrimPrefix(text, envTarget), fromEnv: true}, true
-	case strings.HasPrefix(text, defaultTarget+defaultOpening) && strings.HasSuffix(text, ")"):
-		return configuration{dir: strings.TrimSuffix(strings.TrimPrefix(text, defaultTarget+defaultOpening), ")")}, true
+	case env >= 0 && env > def:
+		return configuration{dir: target[env+len(envMarker):], fromEnv: true}, true
+	case def >= 0 && strings.HasSuffix(target, ")"):
+		return configuration{dir: strings.TrimSuffix(target[def+len(defaultMarker):], ")")}, true
 	}
 	return configuration{}, false
 }

@@ -156,7 +156,8 @@ outside any project: a `sidera` server registered for one project only wins in t
 not seen). A rule you already had is left as it is and
 is not removed by `--remove`. `--check` also reports a plugin you disabled or whose source directory is gone, which makes the Skill vanish from new
 sessions silently. Setup remembers which Claude Code configuration (`CLAUDE_CONFIG_DIR`, or `~/.claude`) it worked in, and `--remove`,
-`--check` and `--refresh` work in that one even if your environment names another. Details:
+`--check` and `--refresh` work in that one even if your environment names another. Setup itself
+refuses to start in another configuration while one is recorded: run `--remove` first. Details:
 [the reference](../references/adapter-claude/README.md#client-setup).
 
 **Needs.** The `claude` command, found on the daemon's `PATH` or named by `claude_path`,

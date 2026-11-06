@@ -23,7 +23,7 @@ and why, and [adapter setup](../../../../docs/references/adapter-setup/README.md
   planned nor reconciled: a plan refuses, a check reports it as `broken`.
 - **Nothing outside the record is changed without consent**, and nothing that the person changed
   since is changed at all: a refresh rewrites an item only while it is what setup recorded.
-- **Undo, check and refresh act in the recorded configuration**, plan and apply in the one the environment names (`look`, `actingConfiguration`). The record's `Items` are all setup changes: declines are `Handle`'s, and `rec.Installed()` stands where a record is tested for nil.
+- **Undo, check and refresh act in the recorded configuration**, plan and apply in the one the environment names (`look`, `actingConfiguration`). The record's `Items` are all setup changes: declines are `Handle`'s, and `rec.Installed()` stands where a record is tested for nil. A plan refuses while items are recorded in another configuration than the environment names (`refuseAnotherConfiguration`), and a check with no recorded item runs no `claude`.
 - **Claude Code is reached through its command**, except `settings.json`, which is edited with
   `adaptersetup.EditJSONFile`. The text of `claude mcp get` is parsed in one place (`parseMCPGet`).
 - The tests run the handler through `adaptersetup.Handle` against `fakeClaude`, and once

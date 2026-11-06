@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -513,8 +514,9 @@ func TestUndo(t *testing.T) {
 }
 
 // The configuration directory is part of what setup recorded: undo, check and refresh act
-// on it, whatever the environment of that run names; a plan and an apply act on the
-// environment's, because that is what the person is setting up now.
+// on it, whatever the environment of that run names. A plan and an apply act on the
+// environment's, because that is what the person is setting up now, and refuse while
+// items are recorded in another (TestAPlanRefusesAnotherConfigurationThanTheRecorded).
 func TestItemsAreActedOnInTheConfigurationTheyWereMadeIn(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "other-claude")
 	// The default configuration is not the same as the same directory named explicitly.
@@ -549,12 +551,6 @@ func TestItemsAreActedOnInTheConfigurationTheyWereMadeIn(t *testing.T) {
 				if op == adaptersetup.OpCheck && (res.Status != adaptersetup.StatusOK || len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "recorded")) {
 					t.Errorf("check: %s, drift %+v, notes %q; want ok with a note that says the recorded configuration was used", res.Status, res.Drift, res.Notes)
 				}
-			}
-
-			// A plan is for the environment's directory.
-			r.mustRun(adaptersetup.OpPlan)
-			if gotValue, _ := envValue(r.clientEnv, "CLAUDE_CONFIG_DIR"); gotValue != other {
-				t.Errorf("plan ran claude with CLAUDE_CONFIG_DIR %q, want %q", gotValue, other)
 			}
 
 			// The rule is removed from the recorded settings.json, and the outcome says so.
@@ -700,4 +696,134 @@ func TestAPluginBehindItsSourceIsStale(t *testing.T) {
 	r.claude.version = func() string { return "1.0.1" }
 	res = r.mustRun(adaptersetup.OpRefresh)
 	equal(t, "done", outcomeIDs(res.Outcomes, adaptersetup.OutcomeDone), []string{idPlugin})
+}
+
+// Two configurations of Claude Code would share the one marketplace directory in the
+// instance's state directory, so removing the setup of either would break the other's
+// plugin silently. A plan, and so an apply, refuses to start a setup in another
+// configuration than the recorded one, and says how to get out of it.
+func TestAPlanRefusesAnotherConfigurationThanTheRecorded(t *testing.T) {
+	other := filepath.Join(t.TempDir(), "other-claude")
+	for _, tc := range []struct {
+		name string
+		// asRecorded makes the rig's setup be made in the configuration; named says how
+		// the refusal calls it.
+		asRecorded func(r *rig)
+		named      string
+	}{
+		{"named by CLAUDE_CONFIG_DIR", func(r *rig) {}, "CLAUDE_CONFIG_DIR="},
+		{"the default", func(r *rig) {
+			r.config = filepath.Join(r.userHome, ".claude")
+			r.configEnv = ""
+		}, "the default configuration"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t)
+			tc.asRecorded(r)
+			r.setUp()
+			recorded := r.record()
+
+			r.configEnv = other
+			r.claude.calls = nil
+			_, err := r.run(adaptersetup.OpPlan)
+			if err == nil {
+				t.Fatal("plan in another configuration did not refuse")
+			}
+			for _, want := range []string{tc.named, r.config, "--remove"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("plan error %q does not say %q", err, want)
+				}
+			}
+			if _, err := r.run(adaptersetup.OpApply, planOrder...); err == nil {
+				t.Error("apply in another configuration did not refuse")
+			}
+			if got := r.record(); !reflect.DeepEqual(got.Items, recorded.Items) {
+				t.Errorf("the record changed: %+v, was %+v", got.Items, recorded.Items)
+			}
+			for _, call := range r.claude.calls {
+				if strings.Contains(call, "add") || strings.Contains(call, "install") || strings.Contains(call, "update") || strings.Contains(call, "remove") {
+					t.Errorf("claude was asked to change something: %v", r.claude.calls)
+				}
+			}
+
+			// The recorded configuration is still planned in, and once the setup is
+			// removed another one may be made.
+			res := r.undo(ids(r.mustRun(adaptersetup.OpRemove).Items)...)
+			if res.Status != adaptersetup.StatusOK {
+				t.Fatalf("undo: %+v", res.Outcomes)
+			}
+			if _, err := r.run(adaptersetup.OpPlan); err != nil {
+				t.Errorf("plan after the setup was removed: %v", err)
+			}
+		})
+	}
+}
+
+// A record of declines only holds no item, so it does not tie the instance to the
+// configuration it was made in.
+func TestADeclinedRecordDoesNotTieTheConfiguration(t *testing.T) {
+	r := newRig(t)
+	r.declined = ids(r.mustRun(adaptersetup.OpPlan).Items)
+	r.mustRun(adaptersetup.OpApply)
+	r.declined = nil
+	r.configEnv = filepath.Join(t.TempDir(), "other-claude")
+	if _, err := r.run(adaptersetup.OpPlan); err != nil {
+		t.Errorf("plan: %v", err)
+	}
+}
+
+// Without a record of something setup did, a check looks at nothing: Claude Code is not
+// run, and what it would have said (it cannot be run) is not reported for an instance
+// that never ran setup.
+func TestACheckWithoutARecordDoesNotRunClaude(t *testing.T) {
+	r := newRig(t)
+	r.clientIs = errors.New("not found")
+	res := r.mustRun(adaptersetup.OpCheck)
+	if *res.Recorded || res.Status != adaptersetup.StatusDrift {
+		t.Fatalf("check: %s recorded %v", res.Status, *res.Recorded)
+	}
+	for _, d := range res.Drift {
+		if d.Problem != adaptersetup.ProblemNeedsSetup {
+			t.Errorf("%s: %s, want only needs_setup", d.ID, d.Problem)
+		}
+	}
+	if len(res.Drift) != len(planOrder) {
+		t.Errorf("drift %v, want one needs_setup per item", driftOf(res))
+	}
+	r.clientIs = nil
+	r.mustRun(adaptersetup.OpCheck)
+	if len(r.claude.calls) != 0 {
+		t.Errorf("claude was asked %v", r.claude.calls)
+	}
+}
+
+// The record names the program the registration names: the instance's sidera_path wins
+// over the program that ran setup.
+func TestTheRecordKeepsTheProgramTheRegistrationNames(t *testing.T) {
+	r := newRig(t)
+	configured := filepath.Join(t.TempDir(), "configured-sidera")
+	if err := os.WriteFile(configured, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r.values["sidera_path"], _ = json.Marshal(configured)
+	r.setUp()
+	if got := r.record().SideraProgram; got != configured {
+		t.Errorf("record names the program %q, want %q", got, configured)
+	}
+}
+
+// A configuration directory may hold the words the target is split at; what was
+// recorded must still be read back as the configuration it was made in.
+func TestTheConfigurationIsReadBackFromATargetWhoseDirectoryHasInInIt(t *testing.T) {
+	for _, cfg := range []configuration{
+		{dir: "/work/team in prod/claude", fromEnv: true},
+		{dir: "/work/team in prod/claude"},
+	} {
+		for _, what := range []string{pluginID, serverName + " (user scope)", cfg.settings()} {
+			got, ok := configurationOf(cfg.target(what))
+			if !ok || got != cfg {
+				t.Errorf("target %q read as %+v (ok %v), want %+v", cfg.target(what), got, ok, cfg)
+			}
+		}
+	}
 }

@@ -13,7 +13,7 @@ import (
 // is removed, and that only after the plugin installed from it.
 func (h *Handler) Remove(_ context.Context, req adaptersetup.Request) ([]adaptersetup.Item, error) {
 	rec, err := adaptersetup.ReadRecord(req.StateDir)
-	if err != nil || rec == nil {
+	if err != nil || !rec.Installed() {
 		return nil, err
 	}
 	var items []adaptersetup.Item
@@ -91,12 +91,8 @@ func (h *Handler) Undo(ctx context.Context, req adaptersetup.Request) ([]adapter
 	if rec == nil {
 		return outcomes, nil
 	}
-	if len(rec.Items) == 0 {
-		err = adaptersetup.RemoveRecord(req.StateDir)
-	} else {
-		err = adaptersetup.WriteRecord(req.StateDir, *rec)
-	}
-	return outcomes, err
+	// Handle removes a record that holds no item after an undo.
+	return outcomes, adaptersetup.WriteRecord(req.StateDir, *rec)
 }
 
 func recordedItem(rec *adaptersetup.Record, id string) (adaptersetup.RecordItem, bool) {

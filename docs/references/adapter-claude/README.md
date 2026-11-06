@@ -219,8 +219,13 @@ environment names now, because that is what the person is setting up. Undo, chec
 in the recorded one: they run `claude` with `CLAUDE_CONFIG_DIR` set to it, or removed when it was
 the default, and edit its `settings.json`, whatever their own environment says. When the two
 differ, an undo and a refresh say so in the message of their outcomes and a check in a note. A
-setup run again in another configuration makes its items there and records those; what it made in
-the first one is then only removed by hand.
+setup run again with items recorded in another configuration **refuses** (a plan, and so an apply):
+the marketplace of every configuration points at the same source directory in the instance's state
+directory, so removing the setup of one would delete the source the other's plugin is loaded from,
+and the record keeps one configuration. The refusal names the recorded configuration and says to run
+`sidera adapter setup <instance> --remove`, which works in the recorded one whatever its environment
+names; once the record is gone a setup can be made in any configuration. A record that holds only
+declines ties nothing.
 
 **Items.** Five, in the order a plan lists them and does them; an item that is already as wanted
 is not listed.
@@ -240,7 +245,8 @@ its own. The program is the instance's `sidera_path` when the owner set one (loo
 `PATH` and made absolute, as the adapter finds it), else `sidera_program` of the request, so that
 a session the adapter starts and one a person opens run the same program; `--home` is named only
 when the data directory is not the default of the platform, because a client starts the server
-with an environment of its own.
+with an environment of its own. The record keeps the program the registration names, not the one that ran setup
+when `sidera_path` overrides it.
 
 **What is there already.** Every item is classified from what is seen in Claude Code, the record
 and what is wanted: not there is `create`; there and not what is wanted is `update` (the
@@ -273,7 +279,9 @@ local marketplace in place, so a rewritten source is already read by the next se
 brings the installed copy and its version along), and the registration when the program moved. It
 makes nothing that is gone and touches nothing that was changed: those are drift.
 
-**Check** reports, besides what refresh would rewrite (`stale`) and what is gone or edited
+**Check** with no record of an item setup made does not run `claude` and looks at nothing: it
+reports every item as `needs_setup` (but what a person declined), so an instance that never ran
+setup is not told that Claude Code cannot be run. Otherwise it reports, besides what refresh would rewrite (`stale`) and what is gone or edited
 (`missing`, `changed`), as `broken`: Claude Code that cannot be run or does not answer, an item that
 cannot be looked at (including an invalid `settings.json` and a marketplace that points elsewhere),
 a plugin that is disabled (setup does not enable it: that is the person's decision) or that Claude
@@ -297,7 +305,9 @@ on macOS, Linux and Windows):
   there and prints its `Command` and `Args` (the arguments in one string, joined by spaces).
   `claude plugin` commands take `--json` and say `already_in_goal_state` when there is nothing to
   do, which setup takes as success. `claude plugin install` enables a plugin that was disabled, which
-  is why setup installs only a plugin that is not installed.
+  is why setup installs only a plugin that is not installed. `claude plugin update` does not: it brings
+  the installed copy to the source's version and leaves a plugin the person disabled
+  (`enabledPlugins` is `false` in `settings.json`) disabled, so a refresh never re-enables it.
 - The Skill is loaded in sessions the adapter starts too, also with the data directory denied to
   the file tools; the plugin's directory may be inside it. The Skill is therefore one self-contained
   file.
