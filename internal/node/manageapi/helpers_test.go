@@ -81,9 +81,13 @@ type fakeService struct {
 	export engine.RevocationExport
 	// adapters and presets are what the reads of the adapters and the presets answer.
 	adapters engine.AdapterList
-	presets  config.Presets
-	network  engine.NetworkView
-	trust    engine.TrustView
+	// setupInfo is what AdapterSetupInfo answers, and setupAsked the instances it was
+	// asked about.
+	setupInfo  engine.AdapterSetupInfo
+	setupAsked []string
+	presets    config.Presets
+	network    engine.NetworkView
+	trust      engine.TrustView
 	// attach answers AttachSession, and attaches are the requests it was asked.
 	attach   func(ctx context.Context, r engine.AttachRequest) (engine.AttachResult, error)
 	attaches []engine.AttachRequest
@@ -136,6 +140,12 @@ func (f *fakeService) AdapterList(context.Context) (engine.AdapterList, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.adapters, nil
+}
+func (f *fakeService) AdapterSetupInfo(_ context.Context, instance string) (engine.AdapterSetupInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setupAsked = append(f.setupAsked, instance)
+	return f.setupInfo, nil
 }
 func (f *fakeService) Presets(context.Context) (config.Presets, error) {
 	f.mu.Lock()

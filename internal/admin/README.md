@@ -32,16 +32,18 @@ there may be mapped to it, never one on the agent interface (see
 | view          | `OpRead`, `OpQueryOperationResult` (the requester's own results).                                                                                                                                                           |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
 | full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter (one that replaces the package of an enabled instance is the local owner's); add or loosen a preset; loosen policy. A policy change is manage only when the policy package classifies it `Unchanged` or `Tighten`; `Loosen`, an unset or an unknown classification, and an unclassified preset change count as loosening. |
-| local owner   | `OpModifyAuthorizedList`; and the operations for managing a single node: `OpEnableAdapter`, `OpDisableAdapter`, `OpChangeEndpointSettings`, `OpChangeNodeSettings`, `OpAcknowledgeAlert`, `OpClearClockRollback`, `OpConfirmRevocationBackup`, `OpRetireIdentity`, `OpExportRevocation`, `OpAttachSession`, `OpStopDaemon`, `OpRestartDaemon`. |
+| local owner   | `OpModifyAuthorizedList`; and the operations for managing a single node: `OpEnableAdapter`, `OpDisableAdapter`, `OpChangeEndpointSettings`, `OpChangeNodeSettings`, `OpAcknowledgeAlert`, `OpClearClockRollback`, `OpConfirmRevocationBackup`, `OpRetireIdentity`, `OpExportRevocation`, `OpReadAdapterSetup`, `OpAttachSession`, `OpStopDaemon`, `OpRestartDaemon`. |
 
 Operations added for single-node management are held to the local owner until
 remote management exists: a level that cannot yet be exercised remotely cannot
 be validated, and loosening one later is a tested one-line change of
 `RequirementOf`. `OpExportRevocation` is among them and is never view level:
-its result is the statement that voids this node's identity. It is also the
-one operation above view that changes nothing (`Operation.ChangesState`): a request
-carries no operation ID and its result is never stored, because storing it would
-copy the statement into the stored results. `OpAttachSession` hands out a
+its result is the statement that voids this node's identity.
+`OpExportRevocation` and `OpReadAdapterSetup` are the two operations above view
+that change nothing (`Operation.ChangesState`); the second returns an instance's
+configuration, where a secret may be. A request for either carries no operation ID
+and its result is never stored, because storing it would copy the statement (or the
+configuration) into the stored results. `OpAttachSession` hands out a
 session's token, so it is the local owner's too. It changes state but is not
 replay protected (`Operation.ReplayProtected`): it is idempotent by its own key
 and repeated by design, so a request carries no operation ID and stores no result,

@@ -70,7 +70,7 @@ func TestEveryConfigChangeIsReplayProtected(t *testing.T) {
 // below, not the code under test.
 func TestWhichOperationsChangeStateAndAreReplayProtected(t *testing.T) {
 	notChanging := map[OpKind]bool{
-		OpUnknown: true, OpRead: true, OpQueryOperationResult: true, OpExportRevocation: true,
+		OpUnknown: true, OpRead: true, OpQueryOperationResult: true, OpExportRevocation: true, OpReadAdapterSetup: true,
 	}
 	notProtected := map[OpKind]bool{OpAttachSession: true}
 	for k := OpUnknown; k < opEnd; k++ {
@@ -87,8 +87,8 @@ func TestWhichOperationsChangeStateAndAreReplayProtected(t *testing.T) {
 }
 
 // TestValidateRequestForSingleNodeManagementOperations: exporting the
-// revocation statement and attaching a session need no operation ID (neither
-// stores a result); each of the other nine needs one, and the four that change
+// revocation statement, reading an instance's setup and attaching a session need no
+// operation ID (none stores a result); each of the other ten needs one, and the four that change
 // a versioned setting also need an expected version.
 func TestValidateRequestForSingleNodeManagementOperations(t *testing.T) {
 	id := OperationID{1}
@@ -99,7 +99,7 @@ func TestValidateRequestForSingleNodeManagementOperations(t *testing.T) {
 	for _, tc := range singleNodeManagementOperations {
 		op := Operation{Kind: tc.kind}
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.kind == OpExportRevocation || tc.kind == OpAttachSession {
+			if tc.kind == OpExportRevocation || tc.kind == OpReadAdapterSetup || tc.kind == OpAttachSession {
 				if got := ValidateRequest(Request{Op: op}); got != ReasonOK {
 					t.Fatalf("without an operation ID: ValidateRequest = %s, want %s", got, ReasonOK)
 				}

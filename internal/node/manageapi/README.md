@@ -43,8 +43,8 @@ The rows are in `methods.go` (`endpoints.list`, `endpoints.close`, `sessions.att
 the version is that of `network.json`, given by `network.show` and named by a change as
 the expected version, as for `node.set`; the rule for an address is `config`'s and the
 network's, judged by the engine, so a row only words the params and the result) and
-`methods_adapters.go` (`adapters.install|list|enable|config|disable|remove`,
-`presets.list|add|remove`) and
+`methods_adapters.go` (`adapters.install|list|setup_info|enable|config|disable|remove`,
+`presets.list|add|remove`; `adapters.setup_info` is a read authorized as an operation of the owner's alone, like the export of the revocation statement, because it returns the configuration of an instance, and the argv of the setup program in it is resolved by the engine, never read from a manifest here) and
 `methods_trust.go` (`trust.expect|forget|reject|request|list|remove|clear`: no version; the rules for a node
 and for a pairing are the engine's and `pairing`'s, so a row only reads the node, checks the form of
 the dial hints of `trust.request` and words the result; the one function that names the state of
@@ -195,7 +195,7 @@ presets: the operation each is authorized as (a preset is added as loosening and
 removed as narrowing), the strict reading of their params (a package named by a
 path that is not absolute, a member that is empty or null), what the engine is asked
 (an enabling that leaves out the instance is the request that names it after the
-adapter), and the golden answers of the two lists.
+adapter), the golden answers of the two lists, and `adapters.setup_info` (the shape of its answer, `setup_argv` null or the engine's argv, and that the engine is asked for the instance named).
 
 `client_test.go` checks request envelopes, complete unchanged responses, read and
 change metadata, explicit version presence, unknown outcomes with their operation

@@ -123,6 +123,11 @@ const (
 	// same each time, so it carries no operation ID and stores no result. The
 	// reply carries a token, so the local owner alone may ask.
 	OpAttachSession
+	// OpReadAdapterSetup reads what the core CLI needs to run the client setup of an
+	// adapter instance: the instance's configuration, which may hold a secret, and
+	// the program the installed package declares for it. It is a read that needs the
+	// local owner, not view: it changes nothing and carries no operation ID.
+	OpReadAdapterSetup
 	// OpStopDaemon asks the running daemon to shut down normally.
 	OpStopDaemon
 	// OpRestartDaemon asks the running daemon to shut down normally and start the
@@ -242,7 +247,7 @@ func RequirementOf(op Operation) (Requirement, bool) {
 		OpEnableAdapter, OpDisableAdapter, OpChangeEndpointSettings,
 		OpChangeNodeSettings, OpAcknowledgeAlert, OpClearClockRollback,
 		OpConfirmRevocationBackup, OpRetireIdentity, OpExportRevocation,
-		OpAttachSession, OpStopDaemon, OpRestartDaemon:
+		OpAttachSession, OpReadAdapterSetup, OpStopDaemon, OpRestartDaemon:
 		return RequireLocalOwner, true
 	default:
 		return 0, false
@@ -250,11 +255,11 @@ func RequirementOf(op Operation) (Requirement, bool) {
 }
 
 // ChangesState reports whether the operation changes state. A reading, the
-// query of a stored result and the export of the revocation statement do not:
-// the export is a read that needs a high level.
+// query of a stored result, the export of the revocation statement and the read of
+// an instance's setup do not: the last two are reads that need the local owner.
 func (op Operation) ChangesState() bool {
 	switch op.Kind {
-	case OpRead, OpQueryOperationResult, OpUnknown, OpExportRevocation:
+	case OpRead, OpQueryOperationResult, OpUnknown, OpExportRevocation, OpReadAdapterSetup:
 		return false
 	default:
 		return true
@@ -268,7 +273,7 @@ func (op Operation) ChangesState() bool {
 // repeated by design, so a stored result per repeat would only fill the store,
 // and a repeat must be able to update the state it changed. What does not change
 // state has nothing to guard, and the result of the revocation export must never
-// be stored.
+// be stored (nor the instance configuration the setup read returns).
 func (op Operation) ReplayProtected() bool {
 	return op.ChangesState() && op.Kind != OpAttachSession
 }

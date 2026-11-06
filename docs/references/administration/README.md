@@ -76,8 +76,14 @@ seven days, and a repeat must be able to update the state it changed, which
 returning a stored result would prevent. A request for it therefore carries no
 operation ID and no expected version, and its result is never stored.
 
+Reading what the core CLI needs to run the setup of an adapter instance
+(`OpReadAdapterSetup`) needs the local owner for the same reason as the export: the
+answer carries the instance's configuration, which may hold a secret, so it is no read
+at view level. It changes nothing, takes no operation ID, and its result is never
+stored.
+
 Two predicates on an operation say this: `ChangesState` (the reads, the query of
-a stored result and the export do not) and `ReplayProtected` (every operation
+a stored result, the export and the setup read do not) and `ReplayProtected` (every operation
 that changes state, but the attachment). The operation ID, the replay check and
 the stored result follow `ReplayProtected`.
 

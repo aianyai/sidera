@@ -34,9 +34,9 @@ type AgentService interface {
 // Everything that changes state comes through Execute, the one door of the
 // administrative rules (manage.go), except the attachment of a session; the others
 // only read. ExportRevocation reads
-// the statement that retires the node, and is the one read that is not judged as a
-// read: the interface authorizes it as an operation of the owner's alone, and it
-// stores nothing.
+// the statement that retires the node, and AdapterSetupInfo the configuration of an
+// instance: they are the reads that are not judged as a read, since the interface
+// authorizes each as an operation of the owner's alone, and they store nothing.
 type ManageService interface {
 	Endpoints(ctx context.Context) ([]EndpointView, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
@@ -44,6 +44,7 @@ type ManageService interface {
 	NodeSettings(ctx context.Context) (config.Node, error)
 	NetworkView(ctx context.Context) (NetworkView, error)
 	AdapterList(ctx context.Context) (AdapterList, error)
+	AdapterSetupInfo(ctx context.Context, instance string) (AdapterSetupInfo, error)
 	TrustView(ctx context.Context) (TrustView, error)
 	Presets(ctx context.Context) (config.Presets, error)
 	ExportRevocation(ctx context.Context) (RevocationExport, error)

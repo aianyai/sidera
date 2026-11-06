@@ -65,6 +65,7 @@ var catalogue = []struct {
 	{"confirming the revocation backup is for the local owner only", Operation{Kind: OpConfirmRevocationBackup}, RequireLocalOwner},
 	{"retiring the identity is for the local owner only", Operation{Kind: OpRetireIdentity}, RequireLocalOwner},
 	{"exporting the revocation statement is for the local owner only, not a read level", Operation{Kind: OpExportRevocation}, RequireLocalOwner},
+	{"reading the setup of an adapter instance returns its configuration, so it is for the local owner only, not a read level", Operation{Kind: OpReadAdapterSetup}, RequireLocalOwner},
 	{"attaching a session hands out its token, so it is for the local owner only", Operation{Kind: OpAttachSession}, RequireLocalOwner},
 	{"stopping the daemon is for the local owner only", Operation{Kind: OpStopDaemon}, RequireLocalOwner},
 	{"restarting the daemon is for the local owner only", Operation{Kind: OpRestartDaemon}, RequireLocalOwner},
@@ -111,6 +112,7 @@ var singleNodeManagementOperations = []struct {
 	{"confirm revocation backup", OpConfirmRevocationBackup},
 	{"retire identity", OpRetireIdentity},
 	{"export revocation", OpExportRevocation},
+	{"read adapter setup", OpReadAdapterSetup},
 	{"attach session", OpAttachSession},
 	{"stop daemon", OpStopDaemon},
 	{"restart daemon", OpRestartDaemon},
@@ -138,8 +140,8 @@ func TestSingleNodeManagementOperationsNeedTheLocalOwner(t *testing.T) {
 			}
 		})
 	}
-	if len(singleNodeManagementOperations) != 12 {
-		t.Fatalf("%d single-node management operations listed, want 12", len(singleNodeManagementOperations))
+	if len(singleNodeManagementOperations) != 13 {
+		t.Fatalf("%d single-node management operations listed, want 13", len(singleNodeManagementOperations))
 	}
 }
 

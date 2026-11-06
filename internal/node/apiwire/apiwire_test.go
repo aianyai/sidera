@@ -81,6 +81,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonSessionNotAttached:   {"not_found", "session_not_attached"},
 	// Closing an endpoint a person is using needs the owner's say so.
 	engine.ReasonAttachedCloseNotAllowed: {"refused", "attached_close_not_allowed"},
+	engine.ReasonPackageInvalid:          {"refused", "package_invalid"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {

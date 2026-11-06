@@ -238,7 +238,7 @@ to others.
 
 The run that replaced the programs goes on as the old program, talking to a daemon that has
 just become the new version; a new `update` talks to the daemon of an older release. So the
-four methods `update` calls must read the same across versions:
+five methods `update` and the setup of the adapters call must read the same across versions:
 
 | Method | What update relies on |
 | ------ | --------------------- |
@@ -246,10 +246,23 @@ four methods `update` calls must read the same across versions:
 | `daemon.restart` | param `expect_version`; result `restarting`, `program`, `version`, `start_id` |
 | `adapters.list` | `adapters[].id`, `adapters[].version` and `adapters[].fault`; `instances[].adapter` and `instances[].fault` |
 | `adapters.install` | param `source` (an absolute path); result `adapter.id`, `adapter.version`, `replaced`, `already_current` |
+| `adapters.setup_info` | param `instance`; result `instance`, `adapter`, `state_dir`, `config` (an object) and `setup_argv` (`null`, or the absolute program followed by its arguments); errors `not_found/instance_unknown`, `not_found/adapter_unknown`, `refused/package_invalid` |
 
 `daemon.restart` exists from 0.12.0. A daemon older than that answers `method_unknown`;
 `update` then does not restart it and tells the user to stop it with `sidera daemon stop`
 and start it the way it was started, the words of `daemon restart` in the same case.
+
+`adapters.setup_info` exists from 0.15.0 (a daemon of 0.14 answers `method_unknown`). It
+is what lets a program of one release run the setup of a package of another: the daemon
+resolves the setup program to an absolute argv, so the caller needs neither a manifest
+reader nor to know where the packages live. Everything needed to run the setup is in
+`setup_argv`: the caller executes it directly (no shell, the `os/exec` rules, as the
+launcher runs the entry) with its own working directory and environment, and a later
+version adds no member the caller must honour to run it correctly; a need like that
+becomes a new method. That is the pairing of an `update` that has
+just replaced the programs (the old program runs the new package's setup) and of a new
+command talking to the daemon of an older release that has the method; a rename or
+reshape of the result would make exactly that pairing fail.
 
 A later version may add members; it does not rename, remove or change the meaning of these.
 The command decodes the answers loosely (a member it does not know is ignored), so adding one

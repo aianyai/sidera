@@ -351,6 +351,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryNotFound, "session_not_attached", "no open endpoint is attached to this session")
 	case engine.ReasonAttachedCloseNotAllowed:
 		return New(CategoryRefused, "attached_close_not_allowed", "this endpoint is a session a person opened and is using; to close it anyway, send allow_attached: true (sidera endpoint close <address> --allow-attached)")
+	case engine.ReasonPackageInvalid:
+		return New(CategoryRefused, "package_invalid", "the installed package of the adapter cannot be loaded; install it again")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

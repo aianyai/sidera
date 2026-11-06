@@ -60,6 +60,7 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonNativeSessionCreated:    {-32603, ""},
 	engine.ReasonSessionNotAttached:      {-32603, ""},
 	engine.ReasonAttachedCloseNotAllowed: {-32603, ""},
+	engine.ReasonPackageInvalid:          {-32603, ""},
 
 	engine.ReasonNodeQueueFull:      {1012, `{"reason":"node_queue_full"}`},
 	engine.ReasonStorageFull:        {1012, `{"reason":"storage_full"}`},

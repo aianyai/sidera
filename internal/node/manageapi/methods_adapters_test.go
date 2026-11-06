@@ -1,7 +1,9 @@
 package manageapi
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,39 @@ func TestAdaptersListAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testin
 	}
 }
 
+// What an instance's setup is, as the owner is told: the program is the engine's
+// resolved argv, null when the package declares none, and the configuration is an
+// object even when the instance has no values.
+func TestAdaptersSetupInfoAnswersTheResolvedSetupOfTheInstance(t *testing.T) {
+	r := newRig(t)
+	for _, tc := range []struct {
+		name string
+		info engine.AdapterSetupInfo
+		want string
+	}{
+		{name: "a setup is declared", info: engine.AdapterSetupInfo{
+			Instance: "relay", Adapter: "relay", StateDir: "/home/adapter-state/relay",
+			Config:    map[string]json.RawMessage{"token": json.RawMessage(`"abc"`), "n": json.RawMessage(`2`)},
+			SetupArgv: []string{"/home/adapters/relay/versions/1.0.0/bin/setup", "--stdio"},
+		}, want: `{"result":{"instance":"relay","adapter":"relay","state_dir":"/home/adapter-state/relay",` +
+			`"config":{"n":2,"token":"abc"},"setup_argv":["/home/adapters/relay/versions/1.0.0/bin/setup","--stdio"]}}`},
+		{name: "no setup is declared", info: engine.AdapterSetupInfo{
+			Instance: "relay", Adapter: "relay", StateDir: "/home/adapter-state/relay", Config: map[string]json.RawMessage{},
+		}, want: `{"result":{"instance":"relay","adapter":"relay","state_dir":"/home/adapter-state/relay","config":{},"setup_argv":null}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.svc.setupInfo, r.svc.setupAsked = tc.info, nil
+			status, out := r.post("adapters.setup_info", `{"params":{"instance":"relay"}}`)
+			if status != 200 || strings.TrimSpace(string(out)) != tc.want {
+				t.Errorf("%d\n%s\nwant\n%s", status, out, tc.want)
+			}
+			if !reflect.DeepEqual(r.svc.setupAsked, []string{"relay"}) {
+				t.Errorf("the engine was asked about %v, want relay", r.svc.setupAsked)
+			}
+		})
+	}
+}
+
 // The presets as the owner lists them: the name, the statement about local sources
 // and what the preset says besides, in the form the file keeps, with the version a
 // change of the collection names.
@@ -108,6 +143,8 @@ func TestTheParamsOfTheMethodsForAdaptersAndPresetsAreReadStrictly(t *testing.T)
 		{"no instance to remove", "adapters.remove", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.instance"},
 		{"no instance to disable", "adapters.disable", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.instance"},
 		{"a listing that takes a member", "adapters.list", `{"params":{"all":true}}`, "params.all"},
+		{"no instance to read the setup of", "adapters.setup_info", `{"params":{}}`, "params.instance"},
+		{"a setup read that takes a member", "adapters.setup_info", `{"params":{"instance":"relay","also":1}}`, "params.also"},
 		{"a preset without a name", "presets.add", `{"operation_id":"` + id + `","expected_version":1,"params":{"preset":{"local_sources":"allow"}}}`, "params.name"},
 		{"a preset that is absent", "presets.add", `{"operation_id":"` + id + `","expected_version":1,"params":{"name":"x"}}`, "params.preset"},
 		{"a removal without a name", "presets.remove", `{"operation_id":"` + id + `","expected_version":1,"params":{}}`, "params.name"},

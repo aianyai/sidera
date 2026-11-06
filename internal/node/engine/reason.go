@@ -140,6 +140,11 @@ const (
 	// session a person opened and is using, and did not say it means that one. Nothing
 	// was closed.
 	ReasonAttachedCloseNotAllowed
+	// ReasonPackageInvalid: the installed package of the adapter could not be loaded
+	// (its pointer or manifest is missing, unreadable, invalid or of another adapter
+	// or version), so nothing is known of what it declares. Installing the package
+	// again recovers it.
+	ReasonPackageInvalid
 
 	reasonEnd
 )
@@ -185,6 +190,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonSessionNotAttached:   "session_not_attached",
 
 	ReasonAttachedCloseNotAllowed: "attached_close_not_allowed",
+	ReasonPackageInvalid:          "package_invalid",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

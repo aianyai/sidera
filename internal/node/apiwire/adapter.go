@@ -334,6 +334,8 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonSessionNotAttached:   internalCode,
 	// Closing an endpoint at the owner's request is no adapter's.
 	engine.ReasonAttachedCloseNotAllowed: internalCode,
+	// Reading what an installed package declares is the owner's request.
+	engine.ReasonPackageInvalid: internalCode,
 
 	engine.ReasonNodeQueueFull:      backPressure,
 	engine.ReasonStorageFull:        backPressure,

@@ -90,6 +90,52 @@ var adaptersList = &method{
 	},
 }
 
+// adapters.setup_info: what the core CLI needs to run the client setup of an
+// instance: the adapter, the state directory, the values the owner set for the
+// instance (as adapter.start passes them), and the program that runs the setup. The
+// daemon resolves the program, to an absolute path inside the package of the
+// installed version and revision the adapter's pointer names (the one the instance
+// runs, or will run once restarted) followed by the manifest's arguments, so that
+// the caller never reads a manifest: a command of an older release can run the setup
+// of a newer package. setup_argv is null when the
+// package declares no setup. It is authorized as an operation of the owner's alone
+// because the configuration may hold a secret; it stores nothing.
+var adaptersSetupInfo = &method{
+	name: "adapters.setup_info", op: admin.Operation{Kind: admin.OpReadAdapterSetup},
+	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			Instance string `json:"instance"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		if err := requireText(p.Instance, "params.instance"); err != nil {
+			return nil, err
+		}
+		return &plan{canonical: canonical(p), direct: func(ctx context.Context, svc engine.ManageService) (any, error) {
+			info, err := svc.AdapterSetupInfo(ctx, p.Instance)
+			if err != nil {
+				return nil, err
+			}
+			return setupInfoResult{
+				Instance: info.Instance, Adapter: info.Adapter, StateDir: info.StateDir,
+				Config: info.Config, SetupArgv: info.SetupArgv,
+			}, nil
+		}}, nil
+	},
+}
+
+// setupInfoResult is the result of adapters.setup_info. Config is an object, empty
+// for an instance with no values; SetupArgv is null, never absent, for a package
+// that declares no setup.
+type setupInfoResult struct {
+	Instance  string                     `json:"instance"`
+	Adapter   string                     `json:"adapter"`
+	StateDir  string                     `json:"state_dir"`
+	Config    map[string]json.RawMessage `json:"config"`
+	SetupArgv []string                   `json:"setup_argv"`
+}
+
 type adapterListResult struct {
 	Version   uint64              `json:"version"`
 	Adapters  []listedAdapterJSON `json:"adapters"`

@@ -475,7 +475,16 @@ its probe passes, and is not withdrawn when the adapter later becomes unusable, 
 the declaration does not flap; disabling the instance ends it. `AdapterList` reads the
 installed adapters, the instances and the probe of each enabled one at one command, with
 the availability snapshot of an online instance (the last `adapter.availability` of its
-connection) and the fault of a package that cannot run.
+connection) and the fault of a package that cannot run. `AdapterSetupInfo` reads, at one
+command, what runs the client setup of one instance: its adapter, state directory,
+configuration (the values the owner set, as `adapter.start` passes them; the manifest's
+field defaults are not applied) and the setup argv. The setup program is resolved from the installed
+package of the installed version and revision the adapter's pointer names (the one the
+instance runs, or will run once restarted) with the same function that resolves the
+manifest's `entry` for the launcher (`adapterhost.Command`), so a caller never reads a
+manifest. An instance that is not there is refused as `instance_unknown`, an adapter that
+is not installed as `ChangeAdapterNotInstalled`, and a package that could not be loaded
+as `package_invalid`: what it declares is not known, which is not declaring no setup.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's

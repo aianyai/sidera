@@ -122,7 +122,7 @@ func defaultMethods() (map[string]*method, error) {
 		identityExportRevocation, identityConfirmBackup, identityRetire, clockClearRollback,
 		nodeShow, nodeSet,
 		networkShow, networkAddressSet, networkAddressRemove, networkListenSet,
-		adaptersInstall, adaptersList, adaptersEnable, adaptersConfig, adaptersDisable, adaptersRemove,
+		adaptersInstall, adaptersList, adaptersSetupInfo, adaptersEnable, adaptersConfig, adaptersDisable, adaptersRemove,
 		presetsList, presetsAdd, presetsRemove,
 		trustExpect, trustForget, trustReject, trustRequest, trustList, trustRemove, trustClear,
 		endpointsList, endpointsClose, endpointsSet, sessionsAttach, daemonStop, daemonRestart, operationResult,
