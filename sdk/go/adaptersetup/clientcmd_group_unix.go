@@ -9,6 +9,11 @@ import (
 	"syscall"
 )
 
+// interruptSignals are the signals that end an adapter's setup program: the ones a
+// terminal and a process manager send. The client runs in a group of its own and gets
+// none of them, so the program has to act on them for the client.
+var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
 // killGroupOnCancel puts the program in a process group of its own and makes the end
 // of its context kill the whole group. A client installed with npm (`codex`) is a
 // wrapper that starts the native program and cannot forward a SIGKILL to it, so

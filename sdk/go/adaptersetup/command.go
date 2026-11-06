@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/signal"
 	"slices"
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
@@ -82,7 +83,9 @@ type Refresh struct {
 // -h and --help, reads one request from standard input and writes one result to
 // standard output; the exit codes are the program table's: 0 when a result was
 // written, 2 for a request it cannot take (it is not JSON, its version is not
-// supported, its op is not one) and 1 when the handler fails.
+// supported, its op is not one) and 1 when the handler fails. An interrupt or a
+// termination signal (and a hangup, where there is one) cancels the context the
+// handler runs under, so that the client it is running is killed with it.
 func Command(program string, h Handler) adapterkit.Command {
 	return func(args []string, s adapterkit.Streams) int {
 		if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
@@ -98,7 +101,12 @@ func Command(program string, h Handler) adapterkit.Command {
 			fmt.Fprintf(s.Stderr, "%s: setup: %v\n", program, err)
 			return adapterkit.ExitUsage
 		}
-		res, err := Handle(context.Background(), h, req)
+		// The client a handler runs is in a process group of its own and does not receive
+		// the terminal's Ctrl-C, so this program turns the signals that end it into the end
+		// of the handler's context, which ClientCommand.Run answers by killing the client.
+		ctx, stop := signal.NotifyContext(context.Background(), interruptSignals...)
+		defer stop()
+		res, err := Handle(ctx, h, req)
 		if err != nil {
 			fmt.Fprintf(s.Stderr, "%s: setup %s: %v\n", program, req.Op, err)
 			return adapterkit.ExitFailed

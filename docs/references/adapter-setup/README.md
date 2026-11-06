@@ -26,6 +26,12 @@ from the plan the program returned. Why: the program is run both by a person and
 `sidera update`, which must be able to run it without one; and a program that asks
 for itself would ask in its own words and its own way, once per adapter.
 
+The run is bounded: a program still running after five minutes is asked to stop with SIGTERM
+and killed if it has not stopped five seconds later. The program is given the chance because
+the client it drives is in a process group of its own, which only the program can stop (see
+[Running a client's command line](#running-a-clients-command-line)). On Windows there is no
+such request and the program is killed at once.
+
 A program that exits non-zero, or whose output is not a result the CLI can act on,
 is an error that names the instance and quotes the end of its standard error. The
 exit codes are those of [the command-line reference](../command-line/README.md#conventions-of-every-program):
@@ -293,8 +299,9 @@ error that says to enable the instance and start the daemon so that it runs once
 - the types of the contract and `Result.Validate`, which the CLI also applies to what it
   reads;
 - `Command`, the adapter program's `setup` command for `adapterkit.Program`: it decodes
-  the request, checks the version, calls the `Handler` method of the op, derives the
-  status and writes the result, mapping errors to the exit codes above;
+  the request, checks the version, calls the `Handler` method of the op under a context
+  that an interrupt or a termination signal cancels, derives the status and writes the
+  result, mapping errors to the exit codes above;
 - the record: `ReadRecord`, `WriteRecord`, `RemoveRecord`, `RecordPath`, `Digest`,
   `RequireStateDir`, and `Record.Installed` and `Record.IsDeclined`, which an adapter uses
   where it would test the record for nil (`recorded` is `rec.Installed()`, and a refresh
@@ -347,7 +354,9 @@ run always ends:
   because an npm-installed `codex` is a node wrapper that cannot forward a kill: killing the
   wrapper alone would leave the native program running, free to write the client's
   configuration after setup has reported a failure. A client in its own group also does not
-  receive a terminal's Ctrl-C; it ends when the context does. On Windows only the program
+  receive a terminal's Ctrl-C, so the setup program turns its own interrupt, termination and
+  hangup (the last only on Linux and macOS) into the end of the context it runs the handler
+  under (`Command` does so), and the client ends with it. On Windows only the program
   itself is killed, and a process it started may survive it. A grandchild that holds the
   output pipes open delays the return by at most a fixed 2 seconds, not for as long as it
   lives. The timeout is reported before the exit status, because a killed program's status

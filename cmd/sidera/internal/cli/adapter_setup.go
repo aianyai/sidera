@@ -148,8 +148,11 @@ func (execSetup) Run(ctx context.Context, argv []string, request []byte) ([]byte
 	var stdout bytes.Buffer
 	stderr := &tailWriter{max: setupStderrTail}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(request), &stdout, stderr
-	// A process the setup program started may keep the pipes open after it is gone.
+	// WaitDelay is the time a setup program has to stop after it is asked to (askToStop)
+	// before it is killed, and the time a process it started may keep the pipes open
+	// after it is gone.
 	cmd.WaitDelay = 5 * time.Second
+	askToStop(cmd)
 	if err := cmd.Run(); err != nil {
 		message := err.Error()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
