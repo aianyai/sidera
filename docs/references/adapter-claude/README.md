@@ -161,8 +161,9 @@ them.
 
 ### The program
 
-`sidera-adapter-claude` has three commands: `serve`, which the daemon starts (the manifest's
-`entry.args` is `["serve"]`), `package` and `version`. It does nothing else: `--help`, `-h` and
+`sidera-adapter-claude` has four commands: `serve`, which the daemon starts (the manifest's
+`entry.args` is `["serve"]`), `package`, `version` and `setup` (see [Client setup](#client-setup)),
+which the manifest's `setup` member names and `sidera adapter setup` runs. It does nothing else: `--help`, `-h` and
 `help` print the usage to standard output and exit 0, no argument prints the usage to standard
 error, an unknown command names itself and prints the usage there, and an argument after `serve`
 is refused with "serve takes no arguments" (all three exit 2). A program run by a person with
@@ -190,6 +191,121 @@ written; adding a platform is adding it to the manifest. The `version` in the em
 release version (`internal/release`) when it reads the manifest, for `initialize` and for the
 package alike, and a build without the release version writes `0.0.0-dev`. `<binary> version`
 prints the version, the commit and the Go version.
+
+### Client setup
+
+A session a person opens in Claude Code needs three things in Claude Code's own
+configuration to be a controller: the `sidera` MCP server registered, a rule that lets it call
+the server's tools without a person answering a prompt, and the Skill that tells it what Sidera
+is. `sidera-adapter-claude setup` brings them in line with an instance, under the contract of
+[adapter setup](../adapter-setup/README.md). It never reaches Claude Code's files by hand
+except `settings.json`; everything else goes through the `claude` command (`claude_path` of the
+instance, else `claude` on the `PATH`, and on Windows the native `claude.exe` as for a turn), run
+without a shell, with no standard input and a timeout of 60 seconds (an adapter-setup `ClientCommand`, whose
+rules also end the whole process group at the limit), the environment of the setup program without
+what would make Claude Code behave as the session that started it, and the instance's state
+directory as its working directory. Claude Code writes nothing into its working directory, and
+the state directory holds no project configuration, so `claude mcp get` sees only what is in
+the user's scope; the real-client test checks that the directory holds nothing but setup's own
+files afterwards.
+
+**The configuration directory is recorded.** What setup makes lives in one Claude Code
+configuration, `CLAUDE_CONFIG_DIR` or else `~/.claude`, and what `claude mcp` registers lives in
+another file when the variable is set (`<dir>/.claude.json`) than when it is not
+(`~/.claude.json`). So the default configuration and the same directory named by the variable are
+two, and the record keeps which one an item was made in, in the target of the marketplace, the
+plugin, the registration and the rule. A plan and an apply work in the configuration the
+environment names now, because that is what the person is setting up. Undo, check and refresh work
+in the recorded one: they run `claude` with `CLAUDE_CONFIG_DIR` set to it, or removed when it was
+the default, and edit its `settings.json`, whatever their own environment says. When the two
+differ, an undo and a refresh say so in the message of their outcomes and a check in a note. A
+setup run again in another configuration makes its items there and records those; what it made in
+the first one is then only removed by hand.
+
+**Items.** Five, in the order a plan lists them and does them; an item that is already as wanted
+is not listed.
+
+| Id | What | Consent | Digest in the record |
+| -- | ---- | ------- | -------------------- |
+| `plugin_source` | The plugin's source directory `<state_dir>/setup/claude/marketplace/`, for the owner alone: `.claude-plugin/marketplace.json`, `plugins/sidera/.claude-plugin/plugin.json` (its `version` is the adapter's) and `plugins/sidera/skills/sidera/SKILL.md`, which is `guidance.Skill()` | no | the paths and contents of the three files |
+| `plugin_marketplace` | `claude plugin marketplace add <source>`; requires the source | yes | the source path |
+| `plugin` | `claude plugin install sidera@sidera --scope user`; requires the marketplace | yes | the plugin's version |
+| `mcp_server` | `claude mcp add --scope user sidera -- <program> [--home <dir>] mcp` | yes | the command and the arguments as `claude mcp get` prints them |
+| `permission` | `mcp__sidera` in `permissions.allow` of `settings.json` | yes | the rule |
+
+The plugin holds the Skill and nothing else. The tools come from the server registered in the
+user's scope, so a session sees them as `mcp__sidera__*` and the one rule allows them; a server
+that the plugin carried would be named `mcp__plugin_sidera_sidera__*` and would need a rule of
+its own. The program is the instance's `sidera_path` when the owner set one (looked up on the
+`PATH` and made absolute, as the adapter finds it), else `sidera_program` of the request, so that
+a session the adapter starts and one a person opens run the same program; `--home` is named only
+when the data directory is not the default of the platform, because a client starts the server
+with an environment of its own.
+
+**What is there already.** Every item is classified from what is seen in Claude Code, the record
+and what is wanted: not there is `create`; there and not what is wanted is `update` (the
+registration is removed and added again, because `claude mcp add` refuses an existing server; a
+plugin is updated with `claude plugin marketplace update` and `claude plugin update`); there as wanted
+and not recorded is `adopt`, which only records it. The exception is the permission rule: a rule the
+person already had is not setup's, is neither listed nor recorded and is never removed. A plan
+**refuses** (the program exits 1 with the reasons, nothing changed) when it cannot look at an item
+or would have to build on something that is not setup's to change:
+
+- a marketplace named `sidera` that points at another path (setup never re-points a marketplace;
+  only one instance of the adapter can own the plugin);
+- a server named `sidera` in another scope than the user's. Setup sees the registrations Claude
+  Code resolves outside any project: a local-scope `sidera` that someone registered inside a
+  project wins in that project and is not seen from here;
+- a `settings.json` that is not strictly valid JSON, or whose `permissions` or `allow` has another
+  type. Claude Code ignores such a file as a whole, so repairing it would be guessing at what the
+  person meant;
+- Claude Code that cannot be run;
+- a `sidera_path` of the instance that cannot be found.
+
+What a person declined is still planned, so that they can change their mind; a check and a refresh
+do not report it (see [adapter setup](../adapter-setup/README.md#what-was-declined)), and a record
+that holds only declines is no record.
+
+**Refresh** rewrites, without asking, the recorded items that are intact and out of date: the source
+(a new adapter version changes `plugin.json`), the installed plugin when its version is behind
+(after the source, with `marketplace update` and `plugin update`; Claude Code loads a plugin from a
+local marketplace in place, so a rewritten source is already read by the next session, and the update
+brings the installed copy and its version along), and the registration when the program moved. It
+makes nothing that is gone and touches nothing that was changed: those are drift.
+
+**Check** reports, besides what refresh would rewrite (`stale`) and what is gone or edited
+(`missing`, `changed`), as `broken`: Claude Code that cannot be run or does not answer, an item that
+cannot be looked at (including an invalid `settings.json` and a marketplace that points elsewhere),
+a plugin that is disabled (setup does not enable it: that is the person's decision) or that Claude
+Code lists with `errors` (when the source directory is gone the plugin vanishes from new sessions
+without a word, and `claude mcp list` still exits 0), and a `sidera` program that does not exist.
+`claude mcp get` connects to the server it prints, so every look at the registration (a plan, a check, a refresh) starts `sidera mcp` once; it is run with `MCP_TIMEOUT=5000`, so a server that does not answer holds the look for about 5 seconds instead of about 30. Its text has no machine-readable form, and text with no `Type:` line, or of a stdio server with no `Command:` line, is an error (a plan refuses, a check says `broken`) rather than a registration with no command. When Claude Code cannot be run (not found, or not startable), the marketplace, the plugin and the registration are not looked at and are not reported as `missing`: the one `broken` entry for the client says why. A `sidera_path` that cannot be found is `broken` as the `program`, and a refresh does not register a program it cannot find. An installed plugin is compared with the source directory directly: `claude plugin list --json` gives the version of the installed copy (`version`) and that of the source Claude Code reads (`folderVersion`), and a copy behind its source is `stale` whatever the record says.
+
+**Remove** lists the recorded items, the plugin first, then its marketplace (requires the plugin),
+then the source (requires the marketplace and the plugin: a plugin whose source is gone vanishes
+from the client), then the registration and the rule. An item that is already gone is done. A
+registration whose command changed since, or a marketplace that now points elsewhere, is left as it
+is and dropped from the record: it is not setup's any more. A rule is removed only if setup added it. The plugin is uninstalled only while the marketplace `sidera` still points at this instance's source; if it points elsewhere the plugin is the other installation's and is left as it is, and dropped from the record.
+
+**What Claude Code does that setup relies on** (checked against Claude Code 2.1.317 to 2.1.319
+on macOS, Linux and Windows):
+
+- No command of Claude Code writes into the source directory (adding the marketplace, installing,
+  updating, uninstalling, a session); everything is written below the configuration directory. That
+  is why the daemon's checks of the state directory are not disturbed.
+- `claude mcp list` and `claude mcp get` have no `--json`; `get` exits 1 when the server is not
+  there and prints its `Command` and `Args` (the arguments in one string, joined by spaces).
+  `claude plugin` commands take `--json` and say `already_in_goal_state` when there is nothing to
+  do, which setup takes as success. `claude plugin install` enables a plugin that was disabled, which
+  is why setup installs only a plugin that is not installed.
+- The Skill is loaded in sessions the adapter starts too, also with the data directory denied to
+  the file tools; the plugin's directory may be inside it. The Skill is therefore one self-contained
+  file.
+- Claude Code does not set `CLAUDE_PID` for its MCP servers, in an interactive session or in
+  `-p`. Waking a controller therefore goes through the registry lookup by session id (see
+  [Attached sessions](#attached-sessions)), not through the process id.
+- A tool that was not allowed is denied while `claude -p` exits 0: whether a call was denied is read
+  from `permission_denials` in the JSON output, never from the exit code.
 
 ### Creating a session, as the runtime does it
 

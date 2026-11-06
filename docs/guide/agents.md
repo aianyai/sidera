@@ -172,7 +172,9 @@ directs the others. It is the **controller**. Sidera did not create it, but it c
 give it an endpoint of its own on the node: the controller then uses the same tools
 as a session Sidera started and is woken when a reply arrives.
 
-**Set it up once.** `sidera setup controller` prints what adds the `sidera` MCP server
+**Set it up once.** For Claude Code, `sidera adapter setup claude` does all of this and also installs
+the Sidera Skill ([Setting up an adapter's client](adapters.md#claude-code)); the rest of this
+section is the manual way, and the one for Codex. `sidera setup controller` prints what adds the `sidera` MCP server
 to Claude Code and to Codex, and what lets each of them call its tools without a person
 answering a prompt. It runs nothing and changes no configuration; you run or add what
 you need.

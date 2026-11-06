@@ -136,3 +136,17 @@ func TestManifestStartsTheProgramWithServe(t *testing.T) {
 		t.Fatalf("entry args %v", m.Entry.Args)
 	}
 }
+
+// The manifest says which command is the setup, and the program has that command.
+func TestTheManifestsSetupIsACommandOfTheProgram(t *testing.T) {
+	m, err := loadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Setup == nil || m.Setup.Program != m.Entry.Program || !slices.Equal(m.Setup.Args, []string{"setup"}) {
+		t.Fatalf("setup %+v, entry %+v", m.Setup, m.Entry)
+	}
+	if _, ok := program.Commands[m.Setup.Args[0]]; !ok {
+		t.Errorf("the program has no command %q", m.Setup.Args[0])
+	}
+}

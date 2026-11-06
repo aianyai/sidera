@@ -48,6 +48,14 @@ protocol has a version of its own.
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).
 
+- **`sidera adapter setup claude` sets up Claude Code.** It registers the `sidera` MCP server for your
+  user (`claude mcp add --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in
+  Claude Code's `settings.json`, and installs a plugin that gives every Claude Code session the
+  Sidera Skill, which tells it what Sidera is and how to use it. Each change to Claude Code is asked
+  about; `--check` reports a plugin you disabled, a plugin whose source is gone and a `settings.json`
+  that Claude Code would ignore; `--remove` undoes it. It never re-points a marketplace named
+  `sidera` that is somewhere else, and never edits a `settings.json` that is not valid JSON.
+
 ### Changed
 
 - **`sidera-adapter-hermes setup --config <file> --apply` is gone.** `sidera adapter setup`

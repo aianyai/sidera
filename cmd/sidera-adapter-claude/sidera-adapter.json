@@ -4,6 +4,7 @@
   "version": "@version@",
   "protocol": {"min": 1, "max": 1},
   "entry": {"program": "bin/sidera-adapter-claude", "args": ["serve"]},
+  "setup": {"program": "bin/sidera-adapter-claude", "args": ["setup"]},
   "platforms": [
     {"os": "darwin", "arch": "arm64"},
     {"os": "darwin", "arch": "amd64"},

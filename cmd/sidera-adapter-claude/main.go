@@ -6,7 +6,8 @@
 //
 // It does nothing unless it is told what: the subcommand serve (what the manifest's
 // entry says) serves, package writes the adapter package for a platform from a
-// binary built for it, and version prints its version. See usageText.
+// binary built for it, setup is the client setup `sidera adapter setup` runs, and
+// version prints its version. See usageText.
 package main
 
 import (
@@ -19,10 +20,12 @@ import (
 	"os/signal"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/setup"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/adapterkit/process"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -54,6 +57,8 @@ commands:
   serve      the adapter role; the daemon starts it, a person does not
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
              write an adapter package for 'sidera adapter install'
+  setup      bring Claude Code's configuration in line with an instance; run by
+             'sidera adapter setup', not by a person
   version [--json]
              the version, the commit and the Go version of this program
 `
@@ -65,6 +70,16 @@ var program = adapterkit.Program{
 	Serve:   serve,
 	Package: writePackage,
 	Build:   release.Read(),
+	Commands: map[string]adapterkit.Command{
+		"setup": adaptersetup.Command(programName, setup.New(setup.Options{Version: release.Version(), Environ: os.Environ(), Home: userHome()})),
+	},
+}
+
+// userHome is the home directory of the person running the program, where Claude Code's
+// default configuration is; empty when it is not known.
+func userHome() string {
+	home, _ := os.UserHomeDir()
+	return home
 }
 
 func main() {

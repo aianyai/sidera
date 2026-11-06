@@ -117,7 +117,15 @@ After `sidera adapter remove --force`, or when a setup was removed some other wa
 adapter installed in its client is still there. Removing it is the client's own business;
 this is what each adapter put where.
 
-- **Claude Code**: filled in with the adapter's setup.
+- **Claude Code**: setup registered the `sidera` MCP server, allowed its tools and installed
+  a plugin that carries the Skill. Undo them with the `claude` command, in this order:
+  `claude plugin uninstall sidera@sidera --scope user`, `claude plugin marketplace remove sidera`
+  and `claude mcp remove sidera --scope user`; then delete the `"mcp__sidera"` entry from
+  `permissions.allow` in `settings.json` of Claude Code's configuration directory
+  (`~/.claude`, or `CLAUDE_CONFIG_DIR`) unless you had added it yourself. Run the `claude` commands with
+  the same `CLAUDE_CONFIG_DIR` (or none) that was set when you ran setup. The plugin's source,
+  `adapter-state/<instance>/setup/claude/` in the data directory, goes with the instance; delete it
+  only after the marketplace is removed.
 - **Codex**: setup installed one plugin, `sidera@sidera`, from a plugin marketplace named
   `sidera` whose files were in the instance's state directory. Remove them with the Codex
   commands, in this order: `codex plugin remove sidera@sidera`, then
@@ -134,6 +142,22 @@ this is what each adapter put where.
 ## Claude Code
 
 Adapter details: [the Claude adapter reference](../references/adapter-claude/README.md).
+
+**Setup.** `sidera adapter setup claude` registers the `sidera` MCP server with Claude Code
+(`claude mcp add --scope user`, naming the `sidera` program that runs the command, or the
+instance's `sidera_path`, and `--home` when the data directory is not the default), adds the rule
+`mcp__sidera` to `permissions.allow` in Claude Code's `settings.json` so that a woken session
+can call the tools without a prompt, and installs a plugin that gives every session the Sidera
+Skill. It asks about each change; the plugin's source, in the instance's state directory, is
+written without asking. Setup refuses, saying why and changing nothing, a `settings.json` that is not
+valid JSON (Claude Code ignores such a file entirely), a marketplace named `sidera` that points
+somewhere else and a `sidera` server in another scope (it sees the registrations Claude Code resolves
+outside any project: a `sidera` server registered for one project only wins in that project and is
+not seen). A rule you already had is left as it is and
+is not removed by `--remove`. `--check` also reports a plugin you disabled or whose source directory is gone, which makes the Skill vanish from new
+sessions silently. Setup remembers which Claude Code configuration (`CLAUDE_CONFIG_DIR`, or `~/.claude`) it worked in, and `--remove`,
+`--check` and `--refresh` work in that one even if your environment names another. Details:
+[the reference](../references/adapter-claude/README.md#client-setup).
 
 **Needs.** The `claude` command, found on the daemon's `PATH` or named by `claude_path`,
 signed in; a controller session needs no `claude` command from the adapter. On Windows

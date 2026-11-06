@@ -25,6 +25,16 @@ adapter, the protocol types of `sdk/go/adapterproto` and `sdk/go/adapterkit/envi
 | `internal/reconcile/` | The answer to `prompt.reconcile`, from the facts the runtime gathered. |
 | `internal/turn/` | The state machine of the events a turn process gives rise to: when `turn.started` and `turn.ended` are sent, for a process just started and for one found again after a restart. |
 
+**The setup** under `internal/setup/` is the other place the adapter meets the world: it runs the
+`claude` command, reads and writes Claude Code's `settings.json` and the plugin source in the
+state directory. It follows the contract of `sdk/go/adaptersetup` and reaches Claude Code only through
+its `Client` interface, so its decisions are tested with a fake and its commands once against the real
+program.
+
+| Path | Holds |
+| ---- | ----- |
+| `internal/setup/` | The adapter's client setup: what to register, allow and install in Claude Code for an instance, the plugin source it writes, and the `claude` commands it runs. See the reference. |
+
 **The runtime** under `internal/runtime/` is where the adapter meets the world: it
 may read and write files, start and watch processes, run goroutines and read the
 clock. Everything it does to the world goes through a small interface, so that
@@ -38,7 +48,7 @@ library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys
 | `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and interrupting one; the adapter's own interface over `sdk/go/adapterkit/process`, which implements it on macOS, Linux and Windows. |
 
 `main.go` first lets the SDK's interrupt helper (Windows) take over when the executable was started as one, then runs its command line, an `adapterkit.Program`: the subcommand `serve` (the one the manifest's entry names) serves the adapter protocol over the standard input and output with
-`sdk/go/adapterkit`, `version [--json]` prints the version, and `--help`, no argument and an unknown command print the usage (`usageText`): nothing serves unless `serve` is named.
+`sdk/go/adapterkit`, `version [--json]` prints the version, `setup` is the client setup that `sidera adapter setup` runs (the manifest's `setup` member names it), and `--help`, no argument and an unknown command print the usage (`usageText`): nothing serves unless `serve` is named.
 `sidera-adapter.json` is the package manifest, built into the
 executable so that the identity answered in `initialize` is read from it; its version is
 the placeholder `@version@`, replaced by the release version when the manifest is read. The
