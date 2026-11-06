@@ -846,6 +846,7 @@ writes them to `setup/platforms.json` in the state directory (the platforms of t
 to those already there, or `home_platform` when there are none), the file goes when the last
 Skill is undone, and a check reads them again, so `--check` with no options reads the platforms
 setup advised on. A file that cannot be decoded counts as absent.
+The record's `sidera_program` is the program of the request that wrote it; no item depends on it, because the Skill never names the program, so a refresh has no paths to rewrite when it changes.
 
 *Items.* One item per profile, `skill:<profile>`, kind `skill`, target the profile's
 `skills/sidera/SKILL.md`, always with consent: the file is in Hermes's directory. The profile's

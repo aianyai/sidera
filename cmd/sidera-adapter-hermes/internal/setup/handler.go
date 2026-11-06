@@ -313,6 +313,9 @@ func (h Handler) Apply(ctx context.Context, req adaptersetup.Request) ([]adapter
 	// A record is written only when an item was put in it: one that holds none would be
 	// a setup that exists and does nothing.
 	if kept {
+		// No item names the sidera program: the Skill never mentions it. The record keeps
+		// the one setup was run with, which is what the field means when nothing in the
+		// items depends on it.
 		rec.AdapterVersion, rec.SideraProgram = release.Version(), req.SideraProgram
 		if err := adaptersetup.WriteRecord(req.StateDir, *rec); err != nil {
 			return nil, err
@@ -339,7 +342,7 @@ func writeSkill(path string, data []byte) error {
 // Remove implements adaptersetup.Handler: every recorded Skill.
 func (Handler) Remove(_ context.Context, req adaptersetup.Request) ([]adaptersetup.Item, error) {
 	rec, err := adaptersetup.ReadRecord(req.StateDir)
-	if err != nil || rec == nil {
+	if err != nil || !rec.Installed() {
 		return nil, err
 	}
 	var items []adaptersetup.Item
@@ -397,13 +400,16 @@ func (Handler) Undo(_ context.Context, req adaptersetup.Request) ([]adaptersetup
 		outcomes = append(outcomes, outcome(it, adaptersetup.OutcomeDone, ""))
 	}
 	if rec != nil {
-		if len(rec.Items) == 0 {
-			err = errors.Join(adaptersetup.RemoveRecord(req.StateDir), removePlatforms(req.StateDir))
-		} else {
-			err = adaptersetup.WriteRecord(req.StateDir, *rec)
-		}
-		if err != nil {
+		// The record is written as it stands; Handle removes one that holds no item (and
+		// the declines with it). The platforms file is the adapter's own and goes with the
+		// last Skill.
+		if err := adaptersetup.WriteRecord(req.StateDir, *rec); err != nil {
 			return nil, err
+		}
+		if !rec.Installed() {
+			if err := removePlatforms(req.StateDir); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return outcomes, nil
