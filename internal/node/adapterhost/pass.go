@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -54,7 +53,7 @@ func (s *supervisor) instance() (Instance, error) {
 			return Instance{
 				ID:       s.id,
 				Adapter:  a,
-				Dir:      filepath.Join(env.Home, filepath.FromSlash(a.Dir())),
+				Dir:      PackageDir(env.Home, a),
 				LockPath: LockPath(env.Home, s.id),
 				StateDir: StateDir(env.Home, s.id),
 			}, nil

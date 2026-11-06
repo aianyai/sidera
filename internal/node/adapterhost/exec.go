@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/childproc"
@@ -37,7 +36,8 @@ var _ Launcher = ExecLauncher{}
 // stream ends.
 func (l ExecLauncher) Launch(_ context.Context, inst Instance) (Process, error) {
 	entry := inst.Adapter.Manifest.Entry
-	cmd := exec.Command(filepath.Join(inst.Dir, filepath.FromSlash(entry.Program)), entry.Args...)
+	program, args := Command(inst.Dir, entry)
+	cmd := exec.Command(program, args...)
 	cmd.Env = append(os.Environ(), l.Env...)
 	cmd.Stderr = inst.Stderr
 	cmd.WaitDelay = execWaitDelay

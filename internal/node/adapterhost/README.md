@@ -26,6 +26,7 @@ and its own log goes through the handle the daemon gives it.
 | `Host.Counts` | What the host counts of the connection of an instance, for the question whether the system is quiet. |
 | `LockPath(home, instance)` | The file an instance's adapter locks: the one definition. |
 | `StateDir(home, instance)`, `StateDirIn(instance)` | The directory an instance's adapter keeps its state in, `adapter-state/<instance>`: the one definition, as an operating-system path and as a path inside the data directory. The host makes it owner-only before every launch, and refuses one that someone else can reach; the removal of the instance deletes it. |
+| `PackageDir(home, adapter)`, `Command(packageDir, program)` | The directory of an adapter's installed package, and the program and arguments that run a program of its manifest (the entry or the setup) from it: the one definition of what a manifest's program names on this machine, used by the launcher and by whoever resolves the setup program. |
 | `ExecLauncher` | The launcher that runs an adapter as a child process. |
 | `Engine`, `EndpointCalls`, `DirectoryCalls`, `ObservedCalls` | What the host asks of the engine: the life of a connection, notifications, and the requests an adapter makes. The last three are optional parts the engine takes on as it learns to answer them; `DirectoryCalls` is also what the host declares to every adapter as `direct_endpoint_access`. |
 | `Notification`, `GoneCause` | A notification of the adapter as the engine receives it, and why an adapter is reported as gone. |
