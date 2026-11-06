@@ -169,6 +169,15 @@ func walkWithTheRealClaude(t *testing.T, claude string, configSet bool) {
 	}
 }
 
+// programName is the file name of a program on this platform: Windows finds and starts
+// only a name with an executable extension.
+func programName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
 // A fake claude: a script that answers as a program does, to show how the CLI runs it.
 func fakeClaudeProgram(t *testing.T, body string) string {
 	t.Helper()
@@ -209,7 +218,7 @@ func TestMCPGetIsRunWithAShortConnectionTimeout(t *testing.T) {
 
 // A claude that cannot be started is told from one that failed.
 func TestAClaudeThatCannotBeStartedIsNotStarted(t *testing.T) {
-	cli, err := NewCLI(filepath.Join(t.TempDir(), "claude"), t.TempDir(), nil)
+	cli, err := NewCLI(filepath.Join(t.TempDir(), programName("claude")), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@ func TestPlanOfAnInstanceThatHasNothing(t *testing.T) {
 // What the server is registered with: the program that ran setup, or the instance's
 // sidera_path; the data directory only when it is not the default.
 func TestTheRegistrationNamesTheProgramAndTheHomeOnlyWhenNotDefault(t *testing.T) {
-	other := filepath.Join(t.TempDir(), "other-sidera")
+	other := filepath.Join(t.TempDir(), programName("other-sidera"))
 	if err := os.WriteFile(other, nil, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestACheckWithoutARecordDoesNotRunClaude(t *testing.T) {
 // over the program that ran setup.
 func TestTheRecordKeepsTheProgramTheRegistrationNames(t *testing.T) {
 	r := newRig(t)
-	configured := filepath.Join(t.TempDir(), "configured-sidera")
+	configured := filepath.Join(t.TempDir(), programName("configured-sidera"))
 	if err := os.WriteFile(configured, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
