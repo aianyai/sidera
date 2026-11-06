@@ -115,8 +115,8 @@ func (a *App) loadAttempt(ctx context.Context, at *attempt, p adapterproto.Sessi
 	switch {
 	case claude == "":
 		return failed(adapterproto.CreateFailDependencyMissing, "claude was not found"), true, nil
-	case claudeProblem(claude, hostOS) != "":
-		return failed(adapterproto.CreateFailDependencyMissing, claudeProblem(claude, hostOS)), true, nil
+	case claudeargs.ExecutableProblem(claude, hostOS) != "":
+		return failed(adapterproto.CreateFailDependencyMissing, claudeargs.ExecutableProblem(claude, hostOS)), true, nil
 	case sidera == "":
 		return failed(adapterproto.CreateFailDependencyMissing, "sidera was not found"), true, nil
 	}

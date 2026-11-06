@@ -39,7 +39,7 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	if claude == "" {
 		res.Dependencies = append(res.Dependencies, adapterproto.Dependency{Name: "claude", State: adapterproto.DependencyMissing, Detail: "claude was not found"})
 		conditions = append(conditions, adapterproto.Availability{Condition: adapterproto.ConditionDependencyMissing, Detail: "claude was not found"})
-	} else if problem := claudeProblem(claude, hostOS); problem != "" {
+	} else if problem := claudeargs.ExecutableProblem(claude, hostOS); problem != "" {
 		res.Dependencies = append(res.Dependencies, adapterproto.Dependency{Name: "claude", State: adapterproto.DependencyMissing, Detail: clip(problem)})
 		conditions = append(conditions, adapterproto.Availability{Condition: adapterproto.ConditionDependencyMissing, Detail: clip(problem)})
 	} else {

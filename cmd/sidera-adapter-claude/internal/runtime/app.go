@@ -179,14 +179,8 @@ func (a *App) Initialize(_ context.Context, conn *adapterkit.Conn, instance adap
 // environment finds it; "" when neither CLAUDE_CONFIG_DIR nor the home
 // directory is known.
 func claudeDir(environ []string) string {
-	if dir := claudeargs.ConfigDir(environ); dir != "" {
-		return dir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".claude")
+	home, _ := os.UserHomeDir()
+	return claudeargs.ConfigDirOrDefault(environ, home)
 }
 
 // Shutdown stops the monitors. A turn process is detached and runs on through a

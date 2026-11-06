@@ -1,6 +1,7 @@
 package claudeargs
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit/environ"
@@ -62,6 +63,32 @@ func ConfigDir(env []string) string {
 		if _, v, ok := strings.Cut(kv, "="); ok {
 			return v
 		}
+	}
+	return ""
+}
+
+// ConfigDirOrDefault is the configuration directory of Claude Code for a process with
+// this environment: CLAUDE_CONFIG_DIR, else .claude in home; "" when neither is known.
+func ConfigDirOrDefault(env []string, home string) string {
+	if dir := ConfigDir(env); dir != "" {
+		return dir
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude")
+}
+
+// ExecutableProblem says why the Claude executable at path cannot be used on the
+// operating system goos, empty when it can. On Windows only the native claude.exe
+// can: the npm wrapper claude.cmd, which a PATH lookup finds through PATHEXT, is
+// started through cmd.exe, so the turn process the adapter must recognise by its
+// executable is cmd.exe's child and a multi-line argument is cut at the first
+// line break.
+func ExecutableProblem(path, goos string) string {
+	if goos == "windows" && !strings.EqualFold(filepath.Ext(path), ".exe") {
+		return "claude is " + path + ", which is not a native claude.exe: a wrapper (claude.cmd) starts through cmd.exe, " +
+			"which Sidera cannot recognise as a turn or give a multi-line prompt; install Claude Code with its native installer"
 	}
 	return ""
 }

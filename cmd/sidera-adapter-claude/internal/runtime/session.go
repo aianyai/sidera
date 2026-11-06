@@ -123,8 +123,8 @@ func (a *App) launch(l turnLaunch) (proc.Started, error) {
 	switch {
 	case claude == "":
 		return proc.Started{}, errDependencyMissing{program: "claude"}
-	case claudeProblem(claude, hostOS) != "":
-		return proc.Started{}, errDependencyMissing{program: "claude", detail: claudeProblem(claude, hostOS)}
+	case claudeargs.ExecutableProblem(claude, hostOS) != "":
+		return proc.Started{}, errDependencyMissing{program: "claude", detail: claudeargs.ExecutableProblem(claude, hostOS)}
 	case sidera == "":
 		return proc.Started{}, errDependencyMissing{program: "sidera"}
 	}

@@ -15,7 +15,8 @@ What a Claude Code turn process is started with, as pure functions. Read
 | `SessionFlag(resume)` | `--resume` or `--session-id`: the flag that, with the uuid, marks a process as a turn process of the session. |
 | `IsTurnOf(args, claude, session)` | Whether a process's arguments make it a turn process of the session: argv[0] is the Claude executable as started and the arguments name the session with `--session-id` or `--resume`. |
 | `SystemPrompt(preset)` | The adapter's system prompt (the SDK's `guidance.Full` and one sentence of Claude's own) followed by the preset's. |
-| `SanitizeEnv(base)`, `Environ(base, extra, siderDir)`, `ConfigDir(env)` | The environment of a turn process: what is stripped from the adapter's, what is added, and the `PATH` entry for the `sidera` executable; and the runtime's configuration directory an environment names. |
+| `SanitizeEnv(base)`, `Environ(base, extra, siderDir)`, `ConfigDir(env)`, `ConfigDirOrDefault(env, home)` | The environment of a turn process: what is stripped from the adapter's, what is added, and the `PATH` entry for the `sidera` executable; and the runtime's configuration directory an environment names (`CLAUDE_CONFIG_DIR`, else `.claude` in the home directory). |
+| `ExecutableProblem(path, goos)` | Why the Claude executable at `path` cannot be started on `goos` (on Windows only the native `claude.exe`, not the `claude.cmd` wrapper), empty when it can. |
 | `UserLine(uuid, text)` | The one line of stream-json input, carrying the prompt's uuid. |
 | `MCPConfig(siderPath)` | The MCP configuration file's content; it holds no token. |
 
