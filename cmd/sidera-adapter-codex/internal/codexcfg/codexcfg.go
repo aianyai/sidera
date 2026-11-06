@@ -1,7 +1,8 @@
 // Package codexcfg turns the configuration the owner gave the adapter into what
 // Codex is told: the checks on an instance and a preset, the thread-level
 // configuration that gives a session its credentials, the sandbox policy and the
-// front ends a preset supports. It does no I/O; the field descriptions that the
+// front ends a preset supports. It does no I/O beyond the working directory it makes a
+// program path absolute against; the field descriptions that the
 // manifest declares are here too, so that what is declared and what is read are
 // one list.
 package codexcfg
@@ -130,6 +131,23 @@ func ParseInstance(v adapterproto.ConfigValues) (Instance, error) {
 		return Instance{}, err
 	}
 	return in, nil
+}
+
+// ResolveProgram names a program by an absolute path: the file lookPath finds for the
+// name, made absolute against the working directory. A client starts the program from a
+// working directory of its own, so a relative path would name something else there. A
+// program lookPath does not find is returned as it was given, with lookPath's error, for
+// the caller to report; it is the one resolution the adapter's threads and the setup of
+// the client's configuration share.
+func ResolveProgram(name string, lookPath func(string) (string, error)) (string, error) {
+	path, err := lookPath(name)
+	if err != nil {
+		return name, err
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs, nil
+	}
+	return path, nil
 }
 
 // Preset is a preset's configuration, checked.

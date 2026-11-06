@@ -867,8 +867,9 @@ what is left out is the owner's own Codex configuration, whose default model may
 expensive one, so a preset for unattended use names both. `codexcfg` holds the
 descriptions the manifest declares and the checks that read them, from one list.
 
-The program has three commands: `serve`, which the daemon starts (the manifest's
-`entry.args` is `["serve"]`), `package` and `version`. `--help`, `-h` and `help` print the usage
+The program has four commands: `serve`, which the daemon starts (the manifest's
+`entry.args` is `["serve"]`), `setup`, which `sidera adapter setup` runs (the manifest's
+`setup.args` is `["setup"]`; see "Client setup"), `package` and `version`. `--help`, `-h` and `help` print the usage
 to standard output and exit 0; no argument prints the usage to standard error, an unknown command
 names itself and prints the usage there, and an argument after `serve` is refused with "serve
 takes no arguments" (all three exit 2), so a program run by a person never waits on its input as
@@ -897,6 +898,157 @@ result at 10,000 tokens and counts CJK text conservatively); a receive through M
 at most 100 seconds, 20 less than the tool timeout the thread's configuration sets, and
 through the command line at most 8, since Codex moves a command that runs longer than
 about ten seconds to the background.
+
+### Client setup
+
+A session a person opens themselves reaches Sidera only if Codex has the `sidera` MCP
+server and approves its tools, and knows what Sidera is only if it has the Skill. The
+adapter's `setup` command (`internal/clientsetup/`, the contract in
+[adapter-setup](../adapter-setup/README.md)) puts all three in one **plugin** and installs
+it. The state directory holds the plugin's source, `<state_dir>/setup/codex/marketplace/`,
+owner-only throughout:
+
+| File | Content |
+| ---- | ------- |
+| `.agents/plugins/marketplace.json` | The marketplace `sidera` with the one plugin `sidera` (`source` a local path, `policy`, `category`) |
+| `plugins/sidera/.codex-plugin/plugin.json` | Name, description and `version`, the adapter's version |
+| `plugins/sidera/.mcp.json` | `mcpServers.sidera`: `command` the program, `args` `["mcp"]` (`["--home", <home>, "mcp"]` when the data directory is not the default) and `default_tools_approval_mode: "approve"` |
+| `plugins/sidera/skills/sidera/SKILL.md` | `guidance.Skill()`, one self-contained file |
+
+The program is the instance's `sidera_program` when the instance sets one, as for the
+sessions the adapter starts, and otherwise the program that ran setup (the request's
+`sidera_program`). It is resolved by the one function the adapter's threads use as well
+(`codexcfg.ResolveProgram`: looked up, then made absolute), so that a relative
+`sidera_program` becomes the same absolute path in the plugin's `.mcp.json` and in the
+threads. A name that is not found is written as it was given, and `check` says when it
+finds nothing. The record keeps the program the items name, not the one that ran setup.
+
+**Why the legacy plugin layout.** Codex has two plugin layouts. The portable one (the
+open "Agent Plugins" format) cannot name an absolute program (a bare name or a path
+inside the plugin only) and cannot state an approval mode. A session that nobody is
+there to ask fails a tool call that needs approval ("MCP tool call requires approval, but
+approval policy is never"), and the tools of Sidera are not all annotated as read-only,
+so without `approve` every call of `send` would stop at a prompt or fail. The legacy
+layout (`.codex-plugin`, `.mcp.json`) takes the entry as `config.toml` does, command and
+approval mode included, and `approve` is honoured under every approval policy. Codex
+calls it a compatibility fallback and its own scaffolding still writes it; no removal is
+announced.
+
+**The items.** Three are recorded: `plugin_source` (the directory above, no consent: it is
+the adapter's own file in its own state directory), `marketplace` (`codex plugin
+marketplace add <dir>`) and `plugin` (`codex plugin add sidera@sidera --json`), the last two
+with consent, each requiring the ones before it. A fourth, `mcp_server`, is only ever
+offered, with the action `remove`: a person's own `[mcp_servers.sidera]` in `config.toml`
+takes the place of the plugin's server of the same name, so the plugin's approval and
+program never apply. Setup offers `codex mcp remove sidera`. It is offered when the server
+Codex lists under that name is not the plugin's (another program or arguments, no
+`approve`, disabled), and not while the plugin is about to be installed over an installed
+one, because the server Codex lists is then the old plugin's; the next plan or check
+judges it. The `mcp_server` item is not recorded, so undo does not bring the person's
+entry back.
+
+**Refusals.** A marketplace named `sidera` that Codex already has from another directory is
+never re-pointed: the plan fails with a message that names both directories (Codex itself
+refuses to add it). One that Codex has from the directory setup writes, and a plugin that is
+installed, but that no record holds (the record was lost, or the instance was removed with
+`--force` and made again), are taken into the record with consent (`adopt`); adopting the
+plugin installs it again from the current files, which also makes sure that what is installed
+is what setup wrote.
+
+**Environment.** Setup runs the Codex command line named by the instance's `codex_program`
+with the environment of the program that runs setup, not the daemon's, so `CODEX_HOME` is
+that of the person who ran `sidera adapter setup` or `sidera update`. A controller needs the
+same `CODEX_HOME` as the daemon anyway. Every Codex command is a
+[`adaptersetup.ClientCommand`](../adapter-setup/README.md#running-a-clients-command-line):
+the program's absolute path, no shell, no standard input, a time limit of a minute and a
+process group that ends with it, and the end of its standard error is part of the error of
+a failure. Its working directory is the instance's **state directory**, which holds no
+`.codex/config.toml`: Codex reads the project configuration of a trusted project it is
+started in, which would change what setup sees and edits from one run to the next. A Codex
+that cannot be started because it is not there is reported as not installed.
+
+**What Codex is asked.** `codex plugin marketplace list --json` (decoded strictly; a reply
+that is not that list is an error, since reading it as "none" would plan to add a
+marketplace that exists), `codex plugin list --json`, `codex mcp list --json` and, for the
+approval mode that its JSON does not carry, the text of `codex mcp get sidera`.
+
+**An unreadable marketplace.** When any configured marketplace has no readable manifest,
+Codex fails every listing of marketplaces and plugins, and names each marketplace it cannot
+read with the directory it has for that one:
+
+```
+- `foo` at /path/to/foo: marketplace root does not contain a supported manifest
+```
+
+Only an error that names `sidera` at the directory setup writes means that **our** source is
+gone. An error that names another marketplace is that marketplace's problem, and setup then
+does not know whether the marketplace `sidera` or the plugin exists, or whether the plugin is
+enabled: `check` reports one entry (`broken`) saying that Codex cannot list plugins because
+that marketplace is unreadable and that the person must repair or remove it; `plan` fails with
+the same words and installs nothing; `refresh` rewrites the source files if they are stale
+but does not install the plugin (a plugin the person disabled would be enabled again);
+`undo` uninstalls the plugin but leaves the marketplace, whose directory it cannot see.
+An error that names no marketplace is treated as somebody else's, never as ours.
+
+**After the install, a self-check.** `plugin add` succeeds for a plugin whose layout Codex
+no longer reads, and then offers no server. So after installing, setup asks `codex mcp list
+--json` for the server `sidera`. If it is not there the `plugin` item is reported as failed,
+with a message that says the plugin layout may no longer be supported (the plugin stays
+recorded, so that it can be undone). The fallback, if the legacy layout is ever dropped, is a
+portable plugin that carries the Skill only, and the MCP server written to `config.toml`
+as `[mcp_servers.sidera]` with `default_tools_approval_mode = "approve"`, which Codex reads
+whatever the plugin layout is. A person's own entry of that name is then the right place for
+the server, and the item above no longer applies.
+
+**Refresh** (what `sidera update` runs; asks nothing, creates nothing). A recorded item is
+out of date when its recorded digest is not what this version writes: the plugin's version,
+its Skill, the program or the arguments changed. Setup rewrites the source directory, and
+then installs the plugin again with `codex plugin add`, which copies the plugin into Codex's
+cache again even at the same version. Codex never writes the source directory. It does not
+install when the source files or the marketplace are missing or were changed since setup
+wrote them, and it does not install when the person disabled the plugin: `plugin add` sets
+`enabled = true` again, which would undo their decision. Nor does it install when
+Codex cannot list plugins, since whether the plugin is disabled is then not known. All are
+reported (an outcome `skipped`, and the drift). A thread that uses the plugin's own server is moved to the new
+process within about three seconds, so a tool call in flight at that moment can be lost; the
+agent calls again, which is what agents do. A thread the adapter started brings its own
+`sidera` server in its configuration, which replaces the plugin's, so such a thread is not
+touched.
+
+**Check** lists, besides the digests of the recorded items (`missing`, `changed`, `stale`):
+the plugin's installed version is not the recorded one (`changed`); the plugin is disabled
+(`broken`; the entry tells the person to enable it in Codex or to run `sidera adapter setup
+<instance> --remove`, since setup does not enable it: that would be the person's choice undone); Codex
+lists no server `sidera` although the plugin is installed and enabled (`broken`); a server
+of that name that is not the plugin's hides it (`broken`, and `setup` offers the removal);
+the program the plugin starts does not exist (`broken`). When the source directory is gone
+the installed plugin keeps running from Codex's cache while Codex's listings fail (see "An
+unreadable marketplace"); check reports the source as `missing` and the marketplace as
+`broken` with Codex's message instead of failing. A Codex that cannot be run at all is one
+`broken` entry, so that the instance can still be removed; the checks that need no answer
+from Codex (the program exists, the source files' digests) are made anyway, and a source
+directory that cannot be read is its own `broken` entry that does not blame Codex. A hiding
+server whose removal the person declined is not reported again.
+
+**Declines.** The record is read and its items changed; `Declined` is the SDK's to write and
+is never touched. The record counts as present only when it holds an item
+(`Record.Installed`). The plan offers what the person declined again.
+
+**Removing a hiding server.** `codex mcp remove sidera` edits the user's `config.toml` only.
+After it, setup asks Codex again, and when a server of that name that is not the plugin's is
+still listed (it comes from a project's or a managed configuration) the item is reported as
+failed, not done.
+
+**Undo** uninstalls the plugin (`codex plugin remove`), removes the marketplace (only when it
+still points at the directory setup wrote) and deletes the source directory, in that order,
+each requiring the one before; an item that is declined, fails or is left because it is no
+longer ours stays in the record.
+
+**Adapter threads.** The adapter does not disable the plugin in the threads it starts: the
+thread's own `sidera` server (with its credentials in the environment) replaces the plugin's
+of the same name, no second server runs, and the plugin's Skill still reaches the thread.
+Disabling the plugin for a thread would take the Skill away with it. Nothing in the thread
+code depends on setup.
 
 ### Known limitations
 
@@ -1009,6 +1161,7 @@ about ten seconds to the background.
 | Reconciliation | `internal/reconcile/` |
 | Answers to the server's requests | `internal/serverreq/` |
 | Identity, capabilities, manifest, package | `internal/declare/` |
+| Client setup: the plugin's files, the Codex command line, the items | `internal/clientsetup/` (`bundle.go`, `client.go`, `handler.go`) |
 | The adapter's methods, events, reconnect | `internal/adapter/` |
 | The replacement of the server after an upgrade: the gate, the version check, the idleness test | `internal/adapter/replace.go` |
 | Attached sessions: attachment, the watch of a person's thread, queued prompts | `internal/adapter/attached.go` |
@@ -1024,7 +1177,8 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 `TestSandboxIsAProfileNotALegacyMode`, `TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
 `TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
-(the package); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
+(the package); `TestPlanOfAnInstanceWithNothing`, `TestCheck`, `TestRefresh`, `TestUndoLeavesWhatItDidNotUndoRecorded`
+and the rest of `internal/clientsetup` (the setup against a fake Codex that names each unreadable marketplace with its own directory); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,
 `TestCreateStartsOverWhenTheStoredThreadIsGone`, `TestCreateRefusals`,
 `TestStartAttachesSessions`, `TestStartAnswersByItsDeadlineWithManySlowSessions`,
 `TestStartAnswersBeforeTheServerIsReachedAndLoadsTheSessionsWhenItIs`, `TestDeliverPrompt`, `TestReconnect`, `TestServerRequests`,
@@ -1041,7 +1195,10 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 against a stand-in program).
 
 Against the installed Codex, in `internal/server/realcodex_test.go`,
-`realcodex_sandbox_test.go` and `realcodex_schema_test.go`, behind `-tags realcodex` and
+`realcodex_sandbox_test.go` and `realcodex_schema_test.go`, and `TestRealCodex` in
+`internal/clientsetup/realcodex_test.go` (the whole setup with a `CODEX_HOME` of its own:
+install, check, refresh, a marketplace of somebody else's that Codex cannot read, a hiding
+server, undo), behind `-tags realcodex` and
 `SIDERA_REALCODEX=1` (no account and no quota: the one test that runs turns uses a mock model;
 the temporary directory must be short enough for a socket path):
 

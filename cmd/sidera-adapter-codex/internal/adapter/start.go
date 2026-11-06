@@ -2,7 +2,6 @@ package adapter
 
 import (
 	"context"
-	"path/filepath"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
@@ -30,14 +29,9 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 		missing = append(missing, missingProgram{"codex", codexErr.Error()})
 		codexPath = inst.CodexProgram
 	}
-	sideraPath, err := a.opts.LookPath(inst.SideraProgram)
+	sideraPath, err := codexcfg.ResolveProgram(inst.SideraProgram, a.opts.LookPath)
 	if err != nil {
 		missing = append(missing, missingProgram{"sidera", err.Error()})
-		sideraPath = inst.SideraProgram
-	} else if abs, err := filepath.Abs(sideraPath); err == nil {
-		// The thread's MCP server is started by Codex from its own working
-		// directory, so the program is named by a path that holds there.
-		sideraPath = abs
 	}
 	version := ""
 	if codexErr == nil {

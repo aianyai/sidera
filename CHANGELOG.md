@@ -36,6 +36,14 @@ protocol has a version of its own.
   note under the plan, to change by hand, and `--check` reports it and exits 1 until you do;
   Sidera changes none of it. The platforms you name are remembered, so `--check` reads the same
   ones.
+- **`sidera adapter setup` for Codex.** `sidera adapter setup <codex instance>` installs a Codex
+  plugin that gives your own Codex sessions the `sidera` MCP server, with its tools approved in
+  advance, and a Skill that tells an agent what Sidera is; before, `sidera setup controller` only
+  printed the commands. It asks before it adds the plugin marketplace and installs the plugin, and
+  offers to remove an MCP server `sidera` of your own that would hide the plugin's. `--check`
+  also tells you when the plugin is disabled, when its files are gone or Codex no longer offers
+  the server, and `--refresh` (what `sidera update` runs) leaves a plugin you disabled
+  alone.
 - **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).

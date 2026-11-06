@@ -61,4 +61,8 @@ func TestWritePackage(t *testing.T) {
 	if len(m.Entry.Args) != 1 || m.Entry.Args[0] != "serve" {
 		t.Fatalf("entry args %v", m.Entry.Args)
 	}
+	// The client setup is the same binary, told to run its setup command.
+	if m.Setup == nil || m.Setup.Program != m.Entry.Program || len(m.Setup.Args) != 1 || m.Setup.Args[0] != "setup" {
+		t.Fatalf("setup %+v", m.Setup)
+	}
 }

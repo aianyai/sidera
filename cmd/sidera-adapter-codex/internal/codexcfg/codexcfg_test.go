@@ -2,6 +2,8 @@ package codexcfg
 
 import (
 	"encoding/json"
+	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -189,5 +191,32 @@ func TestParsePresetRefusesInstructionsThatAreNotUTF8(t *testing.T) {
 	_, problems := ParsePreset("p", v)
 	if !strings.Contains(strings.Join(problems, "; "), "UTF-8") {
 		t.Fatalf("problems = %q", problems)
+	}
+}
+
+// The program a client starts is named by an absolute path, because the client starts
+// it from a working directory of its own.
+func TestResolveProgram(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	look := func(name string) (string, error) {
+		switch name {
+		case "sidera":
+			return "bin/sidera", nil // a relative PATH entry
+		case "./here":
+			return "./here", nil
+		}
+		return "", errors.New("not found")
+	}
+	got, err := ResolveProgram("sidera", look)
+	if err != nil || !filepath.IsAbs(got) || filepath.Base(got) != "sidera" {
+		t.Errorf("a name found through a relative PATH entry = %q, %v", got, err)
+	}
+	if got, err := ResolveProgram("./here", look); err != nil || got != filepath.Join(dir, "here") {
+		t.Errorf("a relative path = %q, %v", got, err)
+	}
+	// A program that is not found is kept as it was given, with the reason.
+	if got, err := ResolveProgram("missing", look); err == nil || got != "missing" {
+		t.Errorf("a missing program = %q, %v", got, err)
 	}
 }

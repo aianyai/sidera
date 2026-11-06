@@ -3,8 +3,10 @@
 // it over standard input and output; standard error is its log.
 //
 // It does nothing unless it is told what: the subcommand serve (what the manifest's
-// entry says) serves, package writes the adapter package for a platform from a
-// binary built for it, and version prints its version. See usageText.
+// entry says) serves, setup brings Codex's own configuration in line with an instance
+// (it is run by `sidera adapter setup`, not by a person), package writes the adapter
+// package for a platform from a binary built for it, and version prints its version.
+// See usageText.
 package main
 
 import (
@@ -16,9 +18,11 @@ import (
 	"os/signal"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/adapter"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/clientsetup"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/declare"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
+	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 )
 
 const programName = "sidera-adapter-codex"
@@ -27,6 +31,8 @@ const usageText = `usage: sidera-adapter-codex <command>
 
 commands:
   serve      the adapter role; the daemon starts it, a person does not
+  setup      the client setup that 'sidera adapter setup' runs; it reads a request on
+             standard input and writes a result on standard output
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
              write an adapter package for 'sidera adapter install'
   version [--json]
@@ -40,6 +46,9 @@ var program = adapterkit.Program{
 	Serve:   runServe,
 	Package: declare.WritePackage,
 	Build:   release.Read(),
+	Commands: map[string]adapterkit.Command{
+		"setup": adaptersetup.Command(programName, clientsetup.New(release.Version())),
+	},
 }
 
 func main() {

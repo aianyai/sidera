@@ -118,7 +118,12 @@ adapter installed in its client is still there. Removing it is the client's own 
 this is what each adapter put where.
 
 - **Claude Code**: filled in with the adapter's setup.
-- **Codex**: filled in with the adapter's setup.
+- **Codex**: setup installed one plugin, `sidera@sidera`, from a plugin marketplace named
+  `sidera` whose files were in the instance's state directory. Remove them with the Codex
+  commands, in this order: `codex plugin remove sidera@sidera`, then
+  `codex plugin marketplace remove sidera`. Setup never edited your `config.toml` itself,
+  and an MCP server `sidera` that you or setup removed with `codex mcp remove sidera` is
+  not brought back. (They run with the `CODEX_HOME` your own Codex uses.)
 - **Hermes**: `sidera adapter setup` placed the Skill as `skills/sidera/SKILL.md` in the
   directory of each profile you prepared (`hermes -p <profile> config path` names the
   `config.yaml` that lies in it). Delete that `skills/sidera` directory in each profile, and
@@ -285,6 +290,23 @@ close. Closing archives the thread and keeps its record.
 - Some details of the server's life on Linux and Windows have not been run on those
   platforms; the reference lists them
   ([Known limitations](../references/adapter-codex/README.md#known-limitations)).
+
+**Setting up your own Codex sessions.** `sidera adapter setup <instance>` (see
+[Setting up an adapter's client](#setting-up-an-adapters-client)) installs a Codex plugin that
+gives every Codex session of yours the `sidera` MCP server, with its tools approved in
+advance, and a Skill that tells the agent what Sidera is. The plugin starts the
+program named by the instance's `sidera_program`, or else the `sidera` that ran setup (with
+`--home` when the data directory is not the default). Setup asks before it adds the
+marketplace and installs the plugin. If you had added the server yourself
+(`codex mcp add sidera ...`), that entry would hide the plugin's, so setup offers to remove
+it. If you turn the plugin off in `config.toml`, `--check` reports it and `--refresh` leaves
+it off. If another plugin marketplace of yours has lost its files, Codex cannot list plugins
+at all; setup then names that marketplace, changes nothing in Codex and waits until you repair or
+remove it. `sidera update` refreshes the plugin when the programs change, and a Codex session
+that is using it moves to the new process within a few seconds (a tool call in flight at
+that moment can be lost; the agent calls again). It runs with the `CODEX_HOME` of the
+program that runs it. The adapter's own sessions are not affected: they bring their own
+server.
 
 **Configuration.** Instance keys: `codex_program`, `sidera_program`. Preset keys (under
 `codex` in the preset file): `cwd`, `sandbox`, `approval_policy`, `approvals`, `model`,
