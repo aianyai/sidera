@@ -180,7 +180,7 @@ and asks `y/N` about each change to the client's configuration:
 ```sh
 sidera adapter setup claude          # Claude Code
 sidera adapter setup codex           # Codex
-sidera adapter setup claude --check  # exit 0 when nothing has drifted, 1 otherwise
+sidera adapter setup claude --check  # exit 0 when nothing has drifted or is still to set up, 1 otherwise
 sidera adapter setup claude --remove # undoes what it did, asking about each item
 ```
 

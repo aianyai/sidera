@@ -97,9 +97,9 @@ there is touched later: if you delete something it installed, a refresh does not
 back, and `--check` tells you it is gone. `--refresh` brings what setup recorded up to date
 without asking, for a program that has no person to ask. Words after `--` are passed to the
 adapter for the options it has of its own. An adapter that has no setup says so. An adapter may
-also have advice for you that setup does not do for you (which toolsets of the client to enable,
-say): it is shown as `note:` lines before the questions, and by `--check` as `note` lines after
-the drift; a note never makes `--check` fail.
+also have advice for you that setup does not do for you: it is shown as `note:` lines before
+the questions, and by `--check` as `note` lines after the drift; a note never makes
+`--check` fail.
 
 Before you remove an instance whose setup has recorded something, undo it with
 `--remove` (if that cannot finish because the client program is gone, it ends by saying that
@@ -131,7 +131,8 @@ this is what each adapter put where.
   commands, in this order: `codex plugin remove sidera@sidera`, then
   `codex plugin marketplace remove sidera`. Setup never edited your `config.toml` itself,
   and an MCP server `sidera` that you or setup removed with `codex mcp remove sidera` is
-  not brought back. (They run with the `CODEX_HOME` your own Codex uses.)
+  not brought back. (They run in the Codex home that setup recorded, `CODEX_HOME` or else
+  `~/.codex`, whatever your environment names now.)
 - **Hermes**: `sidera adapter setup` placed the Skill as `skills/sidera/SKILL.md` in the
   directory of each profile you prepared (`hermes -p <profile> config path` names the
   `config.yaml` that lies in it). Delete that `skills/sidera` directory in each profile, and
@@ -323,15 +324,19 @@ advance, and a Skill that tells the agent what Sidera is. The plugin starts the
 program named by the instance's `sidera_program`, or else the `sidera` that ran setup (with
 `--home` when the data directory is not the default). Setup asks before it adds the
 marketplace and installs the plugin. If you had added the server yourself
-(`codex mcp add sidera ...`), that entry would hide the plugin's, so setup offers to remove
-it. If you turn the plugin off in `config.toml`, `--check` reports it and `--refresh` leaves
+(`codex mcp add sidera ...`), setup offers to remove it only when that entry differs from the
+plugin's server, because it would hide the plugin's. An entry exactly like the plugin's (the same
+program and arguments, approved in advance) is kept, and the session gets the same server either
+way. If you turn the plugin off in `config.toml`, `--check` reports it and `--refresh` leaves
 it off. If another plugin marketplace of yours has lost its files, Codex cannot list plugins
 at all; setup then names that marketplace, changes nothing in Codex and waits until you repair or
 remove it. `sidera update` refreshes the plugin when the programs change, and a Codex session
 that is using it moves to the new process within a few seconds (a tool call in flight at
-that moment can be lost; the agent calls again). It runs with the `CODEX_HOME` of the
-program that runs it. The adapter's own sessions are not affected: they bring their own
-server.
+that moment can be lost; the agent calls again). Setup records the Codex home it set up
+(`CODEX_HOME`, or else `~/.codex`), and `--remove`, `--check` and the refresh that `sidera update`
+runs work in that recorded home, whatever your environment names now. Setup refuses to run while
+the record holds items made in another home, until `--remove` has run under the recorded home.
+The adapter's own sessions are not affected: they bring their own server.
 
 **Configuration.** Instance keys: `codex_program`, `sidera_program`. Preset keys (under
 `codex` in the preset file): `cwd`, `sandbox`, `approval_policy`, `approvals`, `model`,
