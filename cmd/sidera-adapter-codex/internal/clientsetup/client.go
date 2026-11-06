@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -160,9 +159,8 @@ func (c cli) run(ctx context.Context, args ...string) (string, error) {
 	}
 	cmd := adaptersetup.ClientCommand{Program: program, Args: args, Dir: c.dir, Env: c.env, Timeout: commandTimeout}
 	out, err := cmd.Run(ctx)
-	var notStarted *adaptersetup.NotStartedError
 	switch {
-	case errors.As(err, &notStarted) && errors.Is(err, os.ErrNotExist):
+	case adaptersetup.NotInstalled(err):
 		return "", fmt.Errorf("Codex is not installed: %w", err)
 	case err != nil:
 		return "", err

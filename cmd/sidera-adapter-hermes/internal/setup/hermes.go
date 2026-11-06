@@ -2,7 +2,6 @@ package setup
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -85,9 +84,8 @@ func (h installation) ConfigFile(ctx context.Context, profile string) (string, e
 		Timeout: hermesTimeout,
 	}
 	out, err := cmd.Run(ctx)
-	var notStarted *adaptersetup.NotStartedError
 	switch {
-	case errors.As(err, &notStarted) && errors.Is(err, os.ErrNotExist):
+	case adaptersetup.NotInstalled(err):
 		return "", fmt.Errorf("hermes is not installed: %w", err)
 	case err != nil:
 		return "", err

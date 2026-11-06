@@ -194,8 +194,33 @@ func TestClientCommandNotStarted(t *testing.T) {
 	if !errors.As(err, &notStarted) {
 		t.Fatalf("error = %v, want a NotStartedError", err)
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("error = %v, want one that is os.ErrNotExist", err)
+	if !adaptersetup.NotInstalled(err) {
+		t.Errorf("error = %v, want one that says the program is not installed", err)
+	}
+}
+
+// "Not installed" is told from the other reasons a start fails, and holds for both ways
+// os/exec words a missing program: Windows reports exec.ErrNotFound for a path without
+// an executable extension, which is not os.ErrNotExist.
+func TestNotInstalled(t *testing.T) {
+	notStarted := func(reason error) error {
+		return fmt.Errorf("wrapped: %w", &adaptersetup.NotStartedError{Program: "client", Err: reason})
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"missing file", notStarted(&os.PathError{Op: "fork/exec", Path: "client", Err: os.ErrNotExist}), true},
+		{"not found as exec words it", notStarted(&exec.Error{Name: "client", Err: exec.ErrNotFound}), true},
+		{"not allowed to run", notStarted(&os.PathError{Op: "fork/exec", Path: "client", Err: os.ErrPermission}), false},
+		{"a client that failed", errors.New("client failed"), false},
+		{"a missing file that is not a program", fmt.Errorf("read: %w", os.ErrNotExist), false},
+		{"no error", nil, false},
+	} {
+		if got := adaptersetup.NotInstalled(tc.err); got != tc.want {
+			t.Errorf("%s: NotInstalled(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
 	}
 }
 

@@ -52,7 +52,8 @@ type ClientOutput struct {
 
 // NotStartedError is the error of a program that could not be started, such as a client
 // that is not installed or not executable. Err is the operating system's reason, which
-// errors.Is can match (os.ErrNotExist, os.ErrPermission).
+// errors.Is can match (os.ErrPermission, for one). Whether the program is simply not
+// there is NotInstalled's to say, not errors.Is(err, os.ErrNotExist)'s: see there.
 type NotStartedError struct {
 	Program string
 	Err     error
@@ -62,6 +63,18 @@ func (e *NotStartedError) Error() string {
 	return fmt.Sprintf("%s could not be started: %v", e.Program, e.Err)
 }
 func (e *NotStartedError) Unwrap() error { return e.Err }
+
+// NotInstalled reports whether err is a *NotStartedError because there is no such
+// program. Every caller that reads "the client is not installed" from a failed start
+// asks this and not errors.Is(err, os.ErrNotExist): on Windows a missing program given
+// without an executable extension (an absolute path to "codex", say) is reported by
+// os/exec as exec.ErrNotFound, which does not match os.ErrNotExist, while the same path
+// with ".exe" is os.ErrNotExist.
+func NotInstalled(err error) bool {
+	var notStarted *NotStartedError
+	return errors.As(err, &notStarted) &&
+		(errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound))
+}
 
 // Run runs the command and waits for it. A non-zero exit is not an error here: callers
 // decide what an exit code means (a client's `get` of a missing server exits non-zero

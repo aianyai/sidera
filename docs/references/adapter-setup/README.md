@@ -391,7 +391,9 @@ run always ends:
   to say (`claude mcp get` of a missing server exits non-zero and that is the answer;
   `codex mcp remove` of one exits 0). A program that could not be started is a
   `*NotStartedError` wrapping the system's reason, so "the client is not installed"
-  (`errors.Is(err, os.ErrNotExist)`) is told from "the client failed". `Failure` words a
+  (`adaptersetup.NotInstalled(err)`) is told from "the client failed". It is not
+  `errors.Is(err, os.ErrNotExist)`: on Windows `os/exec` reports a missing program whose
+  path has no executable extension as `exec.ErrNotFound`, which that does not match. `Failure` words a
   command that did not do what was asked, with each argument quoted and the last 2000 bytes
   of its standard error. The message is reported and logged, so no secret is passed as an
   argument.
