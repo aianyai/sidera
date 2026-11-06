@@ -124,3 +124,15 @@ func TestPackageIsWrittenOnlyForAListedPlatform(t *testing.T) {
 		})
 	}
 }
+
+// The manifest tells the daemon to start the program with serve, the one command
+// that serves.
+func TestManifestStartsTheProgramWithServe(t *testing.T) {
+	m, err := loadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(m.Entry.Args, []string{"serve"}) {
+		t.Fatalf("entry args %v", m.Entry.Args)
+	}
+}

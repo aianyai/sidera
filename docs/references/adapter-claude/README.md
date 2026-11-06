@@ -159,6 +159,17 @@ wait 100 seconds on either front end. The manifest lists macOS, Linux and Window
 under the instance's `state_dir`, which the daemon provides, so the adapter has no setting for
 them.
 
+### The program
+
+`sidera-adapter-claude` has three commands: `serve`, which the daemon starts (the manifest's
+`entry.args` is `["serve"]`), `package` and `version`. It does nothing else: `--help`, `-h` and
+`help` print the usage to standard output and exit 0, no argument prints the usage to standard
+error, an unknown command names itself and prints the usage there, and an argument after `serve`
+is refused with "serve takes no arguments" (all three exit 2). A program run by a person with
+nothing to do therefore never waits on its input as if the daemon had started it. The commands
+are the kit's `adapterkit.Program`, the same in all four adapter programs. The daemon starts an installed adapter with the entry of the manifest in its own
+package, so the program and its arguments are always from the same release.
+
 ### The package
 
 ```

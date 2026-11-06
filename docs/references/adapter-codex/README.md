@@ -867,6 +867,16 @@ what is left out is the owner's own Codex configuration, whose default model may
 expensive one, so a preset for unattended use names both. `codexcfg` holds the
 descriptions the manifest declares and the checks that read them, from one list.
 
+The program has three commands: `serve`, which the daemon starts (the manifest's
+`entry.args` is `["serve"]`), `package` and `version`. `--help`, `-h` and `help` print the usage
+to standard output and exit 0; no argument prints the usage to standard error, an unknown command
+names itself and prints the usage there, and an argument after `serve` is refused with "serve
+takes no arguments" (all three exit 2), so a program run by a person never waits on its input as
+if the daemon had started it. The commands are the kit's `adapterkit.Program`, the same in all
+four adapter programs. The daemon starts an installed adapter with
+the entry of the manifest in its own package, so the program and its arguments are always from
+the same release.
+
 The manifest is generated from the constants the adapter answers `initialize` with
 (`declare.Manifest`), one package per platform with only that platform in `platforms`,
 since the list is what installation checks and the package holds one binary:

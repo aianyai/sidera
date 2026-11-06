@@ -4,8 +4,9 @@
 // daemon starts it from its package (sidera-adapter.json) and ends it by closing
 // its input; standard error carries its log, which holds no prompt and no token.
 //
-// With the subcommand package it instead writes the adapter package for a
-// platform from a binary built for it, and with version it prints its version.
+// It does nothing unless it is told what: the subcommand serve (what the manifest's
+// entry says) serves, package writes the adapter package for a platform from a
+// binary built for it, and version prints its version. See usageText.
 package main
 
 import (
@@ -47,21 +48,39 @@ func loadManifest() (manifest.Manifest, error) {
 	return m, nil
 }
 
+const usageText = `usage: sidera-adapter-claude <command>
+
+commands:
+  serve      the adapter role; the daemon starts it, a person does not
+  package --goos <os> --goarch <arch> --binary <file> --out <directory>
+             write an adapter package for 'sidera adapter install'
+  version [--json]
+             the version, the commit and the Go version of this program
+`
+
+// program is the command line of the executable.
+var program = adapterkit.Program{
+	Name:    programName,
+	Usage:   usageText,
+	Serve:   serve,
+	Package: writePackage,
+	Build:   release.Read(),
+}
+
 func main() {
 	// A helper process of the SDK's interrupt (Windows) is this executable started
 	// with an argument of its own; it does its work and ends here.
 	process.HandleHelperInvocation()
-	streams := adapterkit.Streams{Stdout: os.Stdout, Stderr: os.Stderr}
-	switch {
-	case len(os.Args) > 1 && os.Args[1] == "package":
-		os.Exit(adapterkit.RunPackage(programName, os.Args[2:], writePackage, streams))
-	case len(os.Args) > 1 && os.Args[1] == "version":
-		os.Exit(adapterkit.RunVersion(programName, os.Args[2:], release.Read(), streams))
-	}
+	os.Exit(program.Run(os.Args[1:], adapterkit.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}))
+}
+
+// serve is the command the manifest's entry names.
+func serve(s adapterkit.Streams) int {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, programName+":", err)
-		os.Exit(adapterkit.ExitFailed)
+		fmt.Fprintln(s.Stderr, programName+":", err)
+		return adapterkit.ExitFailed
 	}
+	return adapterkit.ExitOK
 }
 
 func run() error {

@@ -62,7 +62,7 @@ func Manifest(goos, goarch string) manifest.Manifest {
 		ID:              ID,
 		Version:         release.Version(),
 		Protocol:        adapterproto.SupportedRange(),
-		Entry:           manifest.Entry{Program: programName},
+		Entry:           manifest.Entry{Program: programName, Args: []string{"serve"}},
 		Platforms:       []manifest.Platform{{OS: goos, Arch: goarch}},
 		Requires:        []manifest.Requirement{{Program: "codex"}},
 		Config:          &manifest.Config{Instance: codexcfg.InstanceFields(), Preset: codexcfg.PresetFields()},

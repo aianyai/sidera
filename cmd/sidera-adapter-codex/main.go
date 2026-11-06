@@ -2,8 +2,9 @@
 // drive Codex sessions. The daemon starts it and speaks the adapter protocol with
 // it over standard input and output; standard error is its log.
 //
-// With the subcommand package it instead writes the adapter package for a
-// platform from a binary built for it, and with version it prints its version.
+// It does nothing unless it is told what: the subcommand serve (what the manifest's
+// entry says) serves, package writes the adapter package for a platform from a
+// binary built for it, and version prints its version. See usageText.
 package main
 
 import (
@@ -20,21 +21,39 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 )
 
-func main() {
-	streams := adapterkit.Streams{Stdout: os.Stdout, Stderr: os.Stderr}
-	switch {
-	case len(os.Args) > 1 && os.Args[1] == "package":
-		os.Exit(adapterkit.RunPackage(programName, os.Args[2:], declare.WritePackage, streams))
-	case len(os.Args) > 1 && os.Args[1] == "version":
-		os.Exit(adapterkit.RunVersion(programName, os.Args[2:], release.Read(), streams))
-	}
-	if err := serve(); err != nil {
-		fmt.Fprintln(os.Stderr, programName+":", err)
-		os.Exit(adapterkit.ExitFailed)
-	}
+const programName = "sidera-adapter-codex"
+
+const usageText = `usage: sidera-adapter-codex <command>
+
+commands:
+  serve      the adapter role; the daemon starts it, a person does not
+  package --goos <os> --goarch <arch> --binary <file> --out <directory>
+             write an adapter package for 'sidera adapter install'
+  version [--json]
+             the version, the commit and the Go version of this program
+`
+
+// program is the command line of the executable.
+var program = adapterkit.Program{
+	Name:    programName,
+	Usage:   usageText,
+	Serve:   runServe,
+	Package: declare.WritePackage,
+	Build:   release.Read(),
 }
 
-const programName = "sidera-adapter-codex"
+func main() {
+	os.Exit(program.Run(os.Args[1:], adapterkit.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}))
+}
+
+// runServe is the command the manifest's entry names.
+func runServe(s adapterkit.Streams) int {
+	if err := serve(); err != nil {
+		fmt.Fprintln(s.Stderr, programName+":", err)
+		return adapterkit.ExitFailed
+	}
+	return adapterkit.ExitOK
+}
 
 func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

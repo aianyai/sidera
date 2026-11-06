@@ -26,6 +26,12 @@ protocol has a version of its own.
 - **The Claude and Codex adapters give their sessions the same statement.** It was written
   twice and had drifted; it is now one text in the Go SDK (`guidance`), plus one sentence for
   each client.
+- **`sidera-adapter-claude` and `sidera-adapter-codex` no longer serve when run without a
+  command.** They serve only as `serve`, which their package manifests now say; `--help`, `-h`
+  and `help` print a usage text, and no argument or an unknown one is a usage error (exit 2)
+  instead of a program that silently waits on standard input. Update the adapters with
+  `sidera update` (or install their new packages) together with the daemon; a package built
+  before this change keeps working as it was.
 - **`package` and `version` behave the same in all four adapter programs.** A missing flag or an
   extra argument is a usage error (exit 2), success prints `package: <directory>`, and a package
   directory that already holds files is refused by the Claude and Codex programs too, as it already

@@ -53,7 +53,12 @@ func TestWritePackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manifest.Parse(raw); err != nil {
+	m, err := manifest.Parse(raw)
+	if err != nil {
 		t.Fatal(err)
+	}
+	// The program serves only when told to, so the daemon must tell it.
+	if len(m.Entry.Args) != 1 || m.Entry.Args[0] != "serve" {
+		t.Fatalf("entry args %v", m.Entry.Args)
 	}
 }
