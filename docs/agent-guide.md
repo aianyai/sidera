@@ -242,7 +242,8 @@ for a in console codex claude hermes; do bin/sidera-adapter-$a package --goos "$
 cp bin/sidera bin/sidera-adapter-console ~/.local/bin/
 ```
 
-The packages are then in `packages/<name>/`. On macOS and Linux, put `~/.local/bin`
+The packages are then in `packages/<name>/`; `--out` must name a directory that does not exist
+or is empty, so remove an old `packages/<name>` before building again. On macOS and Linux, put `~/.local/bin`
 on the `PATH` as in A.3 (`export PATH="$HOME/.local/bin:$PATH"`, and the login shell
 file with your owner's yes). On Windows, use the same commands in PowerShell and the
 `.exe` names, and copy the programs into `%USERPROFILE%\sidera\bin` and onto the

@@ -43,7 +43,7 @@ apply to what arrives.
 | `peers` | Calls `endpoint.peers`: one line per node the owner endpoint can address, this node first, `<node>  [this node  ]trust <trust>  connected\|not connected`. The node text is what `directory --node` takes. |
 | `status <message-id>` | `endpoint.message_status`: the delivery state of each recipient and the control reply. |
 | `package` | Writes an adapter package (below). |
-| `version` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version. |
+| `version [--json]` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version; with `--json`, the object `sidera version --json` writes. |
 
 `--body-file -` reads standard input. Every client command takes `--home` (the data
 directory: the flag, then `SIDERA_HOME`, then `~/.sidera` or on Windows

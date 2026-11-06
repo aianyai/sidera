@@ -151,8 +151,9 @@ comment on the card. The reserved orphan slot is why that always works.
 `sidera-adapter-hermes` has four commands: `serve`, which the daemon starts,
 `package --goos --goarch --binary --out`, which writes a package for
 `sidera adapter install`, `setup`, which prepares Hermes for the lane (see
-[The Skill and setup](#the-skill-and-setup)), and `version`. Exit codes are the
-console client's: 0 done, 1 failed, 2 usage.
+[The Skill and setup](#the-skill-and-setup)), and `version [--json]`. Exit codes are those of the
+table in [the command-line reference](../command-line/README.md#conventions-of-every-program): 0 done,
+1 failed, 2 usage. The program has no command whose outcome can be unknown, so it never exits 10.
 
 **Manifest.** The adapter declares only direct endpoints, up to 256 (the upper bound
 of `max_endpoints`; the node's own cap on endpoints applies as well), and no runtime

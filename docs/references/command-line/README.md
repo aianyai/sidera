@@ -418,7 +418,116 @@ and `apiwire` own category codes: success is 0, unexpected failure 1, usage 2,
 invalid argument 3, unauthenticated 4, not found 5, conflict 6, refused 7,
 backpressure 8, unavailable 9, unknown outcome 10. Foreground daemon and init
 failures use `daemon.ExitCode`; a fatal storage failure retains 74. All owned
-clients and daemon resources are closed before `main` calls `os.Exit`.
+clients and daemon resources are closed before `main` calls `os.Exit`. The adapter programs map
+into the same table; see [Conventions of every program](#conventions-of-every-program).
+
+## Conventions of every program
+
+Sidera has five programs: `sidera`, and the adapter programs `sidera-adapter-console`,
+`sidera-adapter-claude`, `sidera-adapter-codex` and `sidera-adapter-hermes`. They share the
+conventions below. Where one still differs, the difference is stated in the paragraph that
+states the rule; the differences are known and unfinished, and none of them is a second rule.
+
+**Exit codes.** There is one table, the one in [Output and errors](#output-and-errors):
+
+| Code | Meaning | Used by |
+| ---- | ------- | ------- |
+| 0 | success | all |
+| 1 | an ordinary failure | all |
+| 2 | usage error: unknown command or flag, a missing or surplus argument | all |
+| 3 | `invalid_argument` | `sidera` |
+| 4 | `unauthenticated` | `sidera` |
+| 5 | `not_found` | `sidera` |
+| 6 | `conflict` | `sidera` |
+| 7 | `refused` | `sidera` |
+| 8 | `backpressure` | `sidera` |
+| 9 | `unavailable` | `sidera` |
+| 10 | the outcome is not known (yet) | `sidera`, `sidera-adapter-console` |
+| 74 | a fatal storage failure | the foreground daemon and `init` of `sidera` |
+
+An adapter program keeps to this table: it uses 0, 1 and 2, and the console's client also uses 10
+for what `sidera` calls an unknown outcome (`new` got no reply within its `--timeout`, or the
+session is not confirmed). It does not sort a refusal of the node into the categories above; a
+refusal is 1 and its words are on standard error. A code is never given a second meaning in one
+program: 3 is `invalid_argument` and nothing else. (The one exception is not a command line: on
+Windows `sidera-adapter-claude` is started as a helper of the SDK's interrupt with arguments of
+its own, which `process.HandleHelperInvocation` answers before any command is read; its exit code 3
+means the process to interrupt is not running, and no person types that invocation.)
+
+**Global flags.** Only `sidera` has global flags: `--home <directory>`, `--json` and `-h`/`--help`,
+before or after the command (see [Commands](#commands)). The adapter programs have none. The
+client commands of the console take `--home` and `--instance` after the command name only (a known
+difference: `--home` before the command is a usage error), and `setup` of the Hermes program takes
+`--home` the same way. A flag of the adapter programs is never accepted before the command.
+
+**`--json`.** Every command of `sidera` that prints a result takes it, except `setup controller`
+and `mcp`, where it has no effect, and `recv`, which writes the node's page unchanged in both
+modes (see [Output and errors](#output-and-errors) for the shapes). Of the adapter programs only
+`version` takes it. `version --json` writes one object and a newline on standard output, with the
+same members from every program (`sidera`, and each adapter program):
+
+```
+{"version":"0.15.0","distribution":"archive","commit":"0123456789ab","modified":false,"go_version":"go1.26.0"}
+```
+
+`distribution` is left out when the build states none and `commit` when it carries none; `modified`
+and `go_version` are always there. The object does not name the program. `--json` on any other
+adapter command is a usage error (a known difference: the adapter programs have no machine-readable
+output of their commands yet).
+
+**Help.** `-h`, `--help` and (for the adapter programs) `help` print the usage on standard output
+and exit 0. With `sidera` the flag may follow any command (`sidera send --help` prints that
+command's usage, an example included, and a command that does not exist is a usage error). In an
+adapter program `--help` after `package` or `version` prints that command's usage, and so does it
+after `setup` of the Hermes program; after a client command of the console it prints the usage of
+the program, which lists every command. `serve` is the exception: it takes no argument, `--help`
+included, because it is the role the daemon starts and has no usage of its own. Running a program
+with no argument is a usage error (2): the usage goes to standard error (`sidera` prints only
+`error: a command is required; use --help`), and an unknown command is a usage error (2) that names
+it. A program therefore never starts doing something when it is run with nothing to do: `serve`
+has to be named, and the manifest of every adapter says so in `entry.args`. `sidera help <command>`
+does not exist.
+
+**`package` and `version` of the adapter programs.** They are one implementation
+(`sdk/go/adapterkit`), so they behave alike. `package --goos --goarch --binary --out` writes the
+adapter package of one platform and prints `package: <directory>`; a missing flag, an unknown flag
+or any other argument is a usage error; a directory that already holds files, or a platform the
+program refuses, is an ordinary failure (1) and nothing is written. Which platforms a program
+refuses differs: the Claude program has a fixed list of six (`darwin`, `linux` and `windows`, each
+on `amd64` and `arm64`) and refuses any other; the Codex, console and Hermes programs write a
+manifest for any operating system and architecture the manifest format knows (`GOOS` and `GOARCH`
+values). `version` prints `<program> <version> (commit <commit>[, modified], go<version>)`,
+with `commit unknown` when the build carries no commit, and takes `--json` and nothing else.
+
+**Error output.** Standard output carries the result and standard error the errors, of every
+program. `sidera` writes `error: <message>`, and `error: <category>/<code>: <message>` for what the
+node refused (see [Output and errors](#output-and-errors)). An adapter program writes
+`<program>: <message>`. After a usage error what follows depends on the command: an unknown command
+prints the usage, and so does a run with no command (without a message); a flag error of a client
+command of the console points at `help`; a flag error of `setup` of the Hermes program prints the
+usage of `setup`; `serve` with an argument, and `package` and `version` with a flag error, are the
+message alone. The words of
+a flag parser's complaint differ between the programs, and the message of an error is not a stable
+identifier; the exit code is.
+
+**Confirmation.** A command that changes the machine beyond the node's own state asks as `update`
+does: by default it shows the plan on standard error and asks one question for the whole plan
+(`Update? [y/N]`) on a terminal;
+`--yes` answers for it and is required when standard input is not a terminal (the command is then a
+usage error, 2, before it does anything); `--check` only reports, writes nothing and needs neither.
+`identity retire` does not ask and needs `--yes`. Known differences: the Hermes program's `setup`
+only prints the steps unless `--apply` is given, then asks about each step without testing for a
+terminal and has no `--yes`, and `sidera setup controller` only prints.
+
+**`-` is standard input.** A file argument of `-` reads standard input: `--body-file -` (`send`,
+`reply`, `control` and the console's `new`, `send` and `reply`), `preset add --file -`,
+`adapter enable --config -`, `adapter config --config -` and the Hermes program's `setup --config -`.
+`send` and `reply` of `sidera` also read standard input when no body flag is given; the console
+requires one (a known difference).
+
+Known differences that are about the shape of commands and not about these rules (a flag in one
+place and a positional argument in another, the unit of `--wait`, the verbs `show` and `list`, the
+names `whoami` and `new`) are not settled here.
 
 ## Verification
 
