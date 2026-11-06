@@ -61,6 +61,10 @@ type ManifestOptions struct {
 	// Program and Args are the entry of the adapter package.
 	Program string   `json:"program"`
 	Args    []string `json:"args,omitempty"`
+
+	// Setup declares the setup command of the program (`<program> setup`), the
+	// scripted setup of this package (see SetupCommand).
+	Setup bool `json:"setup,omitempty"`
 }
 
 // Texts the default markers match; the observed knob writes them.
@@ -147,6 +151,9 @@ func (o ManifestOptions) Manifest() manifest.Manifest {
 		Entry:           manifest.Entry{Program: o.Program, Args: append([]string(nil), o.Args...)},
 		Platforms:       []manifest.Platform{{OS: runtime.GOOS, Arch: runtime.GOARCH}},
 		Budgets:         append([]manifest.Budget(nil), o.Budgets...),
+	}
+	if o.Setup {
+		m.Setup = &manifest.Entry{Program: o.Program, Args: []string{"setup"}}
 	}
 	for _, f := range []adapterproto.Frontend{adapterproto.FrontendCLI, adapterproto.FrontendMCP} {
 		if s, ok := o.RecvWaitS[f]; ok {

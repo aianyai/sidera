@@ -10,6 +10,9 @@
 // environment, and the entry arguments of their packages tell them apart. Standard
 // error carries its log, which never holds message bodies. It ends when the daemon closes its input, or when the control
 // connection to the fixture ends.
+//
+// Run as `setup`, it is the scripted setup of the package (fakeadapter.SetupCommand):
+// one request on standard input, one result on standard output.
 package main
 
 import (
@@ -20,9 +23,13 @@ import (
 	"os/signal"
 
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
+	"github.com/aianyai/sidera/sdk/go/adapterkit"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		os.Exit(fakeadapter.SetupCommand()(os.Args[2:], adapterkit.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}))
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "sidera-fake-adapter:", err)
 		os.Exit(1)
