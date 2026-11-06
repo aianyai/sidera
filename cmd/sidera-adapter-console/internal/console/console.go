@@ -63,7 +63,7 @@ commands:
   peers                  list the nodes the owner endpoint can address
   status <message-id>    delivery state of a message sent from the owner endpoint
   whoami                 the address of the owner endpoint
-  version                the version, the commit and the Go version of this program
+  version [--json]       the version, the commit and the Go version of this program
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
                          write an adapter package for 'sidera adapter install'
   serve                  the adapter role; the daemon starts it, a person does not
