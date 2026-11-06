@@ -24,7 +24,7 @@ func (r *rig) targetOf(id string) string {
 
 func TestTheCodexHomeIsRecordedInTheTargetOfTheItemsInCodex(t *testing.T) {
 	for _, c := range []struct{ name, home, recorded string }{
-		{"named by the variable", "/h1", "CODEX_HOME=/h1"},
+		{"named by the variable", home1, "CODEX_HOME=" + home1},
 		{"the default", "", "the default Codex home"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -59,7 +59,7 @@ func TestCodexIsRunInTheHomeTheEnvironmentNames(t *testing.T) {
 		name, env, wantHome string
 		set                 bool
 	}{
-		{"named", "/h1", "/h1", true},
+		{"named", home1, home1, true},
 		{"default", "", "", false},
 		// Setup runs Codex in the state directory, so a relative home would be another
 		// directory there than where the person named it.
@@ -76,10 +76,22 @@ func TestCodexIsRunInTheHomeTheEnvironmentNames(t *testing.T) {
 	}
 }
 
-// otherHomes are the environments that name another Codex home than the one "/h1" of the
+// home1 and home2 are two Codex homes, absolute on every platform ("/h1" is "D:\h1" on
+// Windows), because setup records the absolute home it was given.
+var home1, home2 = mustAbs("/h1"), mustAbs("/h2")
+
+func mustAbs(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		panic(err)
+	}
+	return abs
+}
+
+// otherHomes are the environments that name another Codex home than the one home1 of the
 // setup: another one named, and the default one.
 var otherHomes = []struct{ name, home string }{
-	{"another home", "/h2"},
+	{"another home", home2},
 	{"the default home", ""},
 }
 
@@ -87,9 +99,9 @@ func TestUndoActsOnTheHomeSetupRecordedWhateverTheEnvironmentNames(t *testing.T)
 	for _, o := range otherHomes {
 		t.Run(o.name, func(t *testing.T) {
 			r := newRig(t)
-			r.useHome("/h1")
+			r.useHome(home1)
 			r.setUp()
-			recorded := r.fakeFor("/h1")
+			recorded := r.fakeFor(home1)
 			r.useHome(o.home)
 			res := r.run(undoReq(r, sourceID, pluginItem, marketplID))
 			want(t, "outcomes", outcomeIDs(res.Outcomes), []string{pluginItem + ":done", marketplID + ":done", sourceID + ":done"})
@@ -99,11 +111,11 @@ func TestUndoActsOnTheHomeSetupRecordedWhateverTheEnvironmentNames(t *testing.T)
 			if other := r.fakeFor(o.home); other.called("remove-plugin")+other.called("remove-marketplace") > 0 {
 				t.Errorf("undo touched the other home: %v", other.calls)
 			}
-			if got := envValue(r.clientEnv, homeVar); got != "/h1" {
-				t.Errorf("Codex ran with CODEX_HOME %q, want the recorded /h1", got)
+			if got := envValue(r.clientEnv, homeVar); got != home1 {
+				t.Errorf("Codex ran with CODEX_HOME %q, want the recorded %s", got, home1)
 			}
 			for _, out := range res.Outcomes {
-				if !strings.Contains(out.Message, "CODEX_HOME=/h1") {
+				if !strings.Contains(out.Message, "CODEX_HOME="+home1) {
 					t.Errorf("outcome %s says %q, want it to say that it acted on the recorded home", out.ID, out.Message)
 				}
 			}
@@ -117,7 +129,7 @@ func TestUndoActsOnTheHomeSetupRecordedWhateverTheEnvironmentNames(t *testing.T)
 func TestUndoOfTheDefaultHomeRunsCodexWithoutTheVariable(t *testing.T) {
 	r := newRig(t)
 	r.setUp()
-	r.useHome("/h2")
+	r.useHome(home2)
 	res := r.run(undoReq(r, pluginItem, marketplID, sourceID))
 	if r.f.installed || len(r.f.marketplaces) != 0 {
 		t.Errorf("the default home still holds the plugin (%v) or its marketplace (%v)", r.f.installed, r.f.marketplaces)
@@ -132,7 +144,7 @@ func TestUndoOfTheDefaultHomeRunsCodexWithoutTheVariable(t *testing.T) {
 
 func TestUndoInTheHomeItWasMadeInSaysNothingOfTheHome(t *testing.T) {
 	r := newRig(t)
-	r.useHome("/h1")
+	r.useHome(home1)
 	r.setUp()
 	for _, out := range r.run(undoReq(r, pluginItem, marketplID, sourceID)).Outcomes {
 		if out.Message != "" {
@@ -145,17 +157,17 @@ func TestCheckLooksInTheRecordedHomeAndSaysSoWhenTheEnvironmentNamesAnother(t *t
 	for _, o := range otherHomes {
 		t.Run(o.name, func(t *testing.T) {
 			r := newRig(t)
-			r.useHome("/h1")
+			r.useHome(home1)
 			r.setUp()
 			r.useHome(o.home)
 			res := r.run(r.req(adaptersetup.OpCheck))
 			if res.Status != adaptersetup.StatusOK {
 				t.Errorf("check = %s, drift %+v; the recorded home holds everything", res.Status, res.Drift)
 			}
-			if got := envValue(r.clientEnv, homeVar); got != "/h1" {
-				t.Errorf("Codex ran with CODEX_HOME %q, want the recorded /h1", got)
+			if got := envValue(r.clientEnv, homeVar); got != home1 {
+				t.Errorf("Codex ran with CODEX_HOME %q, want the recorded %s", got, home1)
 			}
-			if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "CODEX_HOME=/h1") {
+			if len(res.Notes) != 1 || !strings.Contains(res.Notes[0], "CODEX_HOME="+home1) {
 				t.Errorf("notes = %q, want one that names the recorded home", res.Notes)
 			}
 		})
@@ -164,7 +176,7 @@ func TestCheckLooksInTheRecordedHomeAndSaysSoWhenTheEnvironmentNamesAnother(t *t
 
 func TestCheckInTheRecordedHomeHasNoNote(t *testing.T) {
 	r := newRig(t)
-	r.useHome("/h1")
+	r.useHome(home1)
 	r.setUp()
 	if res := r.run(r.req(adaptersetup.OpCheck)); len(res.Notes) != 0 {
 		t.Errorf("notes = %q", res.Notes)
@@ -173,9 +185,9 @@ func TestCheckInTheRecordedHomeHasNoNote(t *testing.T) {
 
 func TestRefreshWorksInTheRecordedHomeAndSaysSo(t *testing.T) {
 	r := newRig(t)
-	r.useHome("/h1")
+	r.useHome(home1)
 	r.setUp()
-	recorded := r.fakeFor("/h1")
+	recorded := r.fakeFor(home1)
 	r.useHome("")
 	r.h.Version = "1.0.1"
 	res := r.run(r.req(adaptersetup.OpRefresh))
@@ -187,7 +199,7 @@ func TestRefreshWorksInTheRecordedHomeAndSaysSo(t *testing.T) {
 		t.Errorf("refresh installed in the other home: %v", other.calls)
 	}
 	for _, out := range res.Outcomes {
-		if !strings.Contains(out.Message, "CODEX_HOME=/h1") {
+		if !strings.Contains(out.Message, "CODEX_HOME="+home1) {
 			t.Errorf("outcome %s says %q, want it to name the recorded home", out.ID, out.Message)
 		}
 	}
@@ -200,7 +212,7 @@ func TestPlanRefusesWhenSetupWasMadeInAnotherHome(t *testing.T) {
 	for _, o := range otherHomes {
 		t.Run(o.name, func(t *testing.T) {
 			r := newRig(t)
-			r.useHome("/h1")
+			r.useHome(home1)
 			r.setUp()
 			r.useHome(o.home)
 			for _, op := range []adaptersetup.Op{adaptersetup.OpPlan, adaptersetup.OpApply} {
@@ -209,7 +221,7 @@ func TestPlanRefusesWhenSetupWasMadeInAnotherHome(t *testing.T) {
 					t.Fatalf("%s went ahead", op)
 				}
 				text := err.Error()
-				if !strings.Contains(text, "CODEX_HOME=/h1") || !strings.Contains(text, "--remove") {
+				if !strings.Contains(text, "CODEX_HOME="+home1) || !strings.Contains(text, "--remove") {
 					t.Errorf("%s says %q, want it to name the recorded home and to say to remove it first", op, text)
 				}
 			}
@@ -225,7 +237,7 @@ func TestPlanRefusesWhenSetupWasMadeInAnotherHome(t *testing.T) {
 
 func TestPlanInTheRecordedHomeIsNotRefused(t *testing.T) {
 	r := newRig(t)
-	r.useHome("/h1")
+	r.useHome(home1)
 	r.setUp()
 	r.run(r.req(adaptersetup.OpPlan))
 }
