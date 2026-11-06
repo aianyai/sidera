@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/guidance"
 	"github.com/aianyai/sidera/sdk/go/peer"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
@@ -22,7 +23,7 @@ const modernVersion = "2026-07-28"
 const versionKey = "io.modelcontextprotocol/protocolVersion"
 const capabilitiesKey = "io.modelcontextprotocol/clientCapabilities"
 const codexTurnMetadataKey = "x-codex-turn-metadata"
-const instructions = "Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."
+const instructions = guidance.Short
 
 // Config borrows Agent and Stderr. Run owns and closes Stdin and Stdout.
 // Its caller resolves environment, credentials and the node's home.

@@ -127,7 +127,7 @@ func (w *agentResponse) WriteHeader(status int) {
 func TestToolsCallThroughTheAgentSocket(t *testing.T) {
 	h, c, address := agentNode(t)
 	s := start(t, mcp.Config{Agent: c, Version: "test"})
-	s.exchange(t, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{}}}`, `{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sidera","version":"test"},"instructions":"Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."}}`)
+	s.exchange(t, `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{}}}`, `{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sidera","version":"test"},"instructions":"@instructions@"}}`)
 	want := `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"declaration\":{\"paused\":true,\"refuse_multi_recipient\":false,\"restrict_senders\":false,\"accept_from\":[],\"hidden_from_directory\":false}}\n"}],"isError":false}}`
 	s.exchange(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"declare","arguments":{"paused":true}}}`, want)
 	me, err := c.Me(context.Background())

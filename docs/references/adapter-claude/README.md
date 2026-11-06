@@ -568,19 +568,24 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
 - The MCP configuration of an instance is one file, `{"mcpServers":{"sidera":{"command":
   "<sidera>","args":["mcp"]}}}`, without a token: the MCP server inherits the
   environment of the process that starts it, which holds the token.
-- The adapter appends a fixed system prompt that says the session is connected to
-  Sidera, a channel to other agents and people in the owner's own cluster, and that
-  `recv` in a wake-up notice means the `recv` tool of the `sidera` MCP server or
-  `sidera recv`. Without it a session that has only the command-line front end
-  cannot know. It names the tools (`recv`, `reply`, `send`, `control`, `status`,
-  `ack`) and says that `recv` hands out a page that has not been acknowledged again
-  at once, with the same lease, and that the page is acknowledged with `ack`
-  (`sidera ack <lease>`) or by passing its lease to the next `recv` (`ack_lease`,
-  `sidera recv --ack <lease>`); only after that does `recv` with a wait wait for new
-  messages. A session that does not know it takes the same page, returned at once
-  by every wait, for a channel with no reply. It says nothing about how to treat a
-  message: that is the owner's policy and belongs in the preset's own text. The
-  Codex adapter states the same facts in its developer instructions.
+- The adapter appends a fixed system prompt (`claudeargs.SystemPrompt`): the statement
+  every adapter gives, `guidance.Full` of the SDK, then one sentence of Claude's own,
+  then the preset's `append_system_prompt` after a blank line. The statement says that
+  Sidera is the message channel to the other agents and people of the owner's own
+  cluster, what to use it for, that `recv` is the first call when a wake-up notice
+  arrives, what each tool does (`recv`, `reply`, `send`, `control`, `status`, `ack`)
+  and the command of the same name for each, and that `recv` hands out a page that
+  has not been acknowledged again at once, with the same lease; the page is
+  acknowledged with `ack` (`sidera ack <lease>`) or by passing its lease to the next
+  `recv` (`ack_lease`, `sidera recv --ack <lease>`), and only then does a `recv`
+  with a wait wait for new messages. A session that does not know it takes the same
+  page, returned at once by every wait, for a channel with no reply. Claude's own
+  sentence is for a session that has only the command-line front end: without it
+  such a session cannot know that `recv` in a wake-up notice means `sidera recv`.
+  The prompt says nothing about how to treat a message: that is the owner's policy
+  and belongs in the preset's own text. The Codex adapter gives the same statement in
+  its developer instructions, and `sidera mcp` the short form of it as the
+  instructions of the MCP server (see [mcp](../mcp/README.md)).
 - The standard input is a regular file, so that reaching its end closes it and no pipe
   ties the process to the adapter; standard output and error are files too. They are
   `<attempt>.in.jsonl`, `.out.jsonl` and `.err.jsonl` in the instance's state directory,

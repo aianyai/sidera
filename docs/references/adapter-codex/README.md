@@ -832,18 +832,22 @@ supports.
 
 Each thread gets developer instructions: the adapter's fixed statement of what Sidera
 is, then, after a blank line, the preset's `developer_instructions` when it has any
-(`codexcfg.DeveloperInstructions`). The statement says, as facts, that the session is
-connected to a channel on which it exchanges messages with other agents and people in
-its owner's own cluster, that it is woken by a short notification that a message is
-waiting, and which tools to use: the `sidera` MCP server's tools first (`recv`,
-`reply`, `send`, `control`, `status`, `ack`), the `sidera` command only where the
-sandbox lets it reach the channel. It also says that `recv` hands out a page that has
-not been acknowledged again at once, with the same lease, and that the page is
-acknowledged with `ack` (`sidera ack <lease>`) or by passing its lease to the next
-`recv` (`ack_lease`, `sidera recv --ack <lease>`); only after that does `recv` with a
-wait wait for new messages. It does not say how to treat a message (obey it,
-treat it as a task, ignore it): that is the owner's policy and belongs in the preset's
-own text. The Claude adapter appends a statement of the same facts to the system prompt.
+(`codexcfg.DeveloperInstructions`). The statement is `guidance.Full` of the SDK, the
+statement every adapter gives, then one sentence of Codex's own
+(`codexcfg.ChannelStatement`). It says, as facts, that Sidera is the message channel to
+the other agents and people of the owner's own cluster, what to use it for, that a
+wake-up notice only says that a message is waiting and `recv` is the first call, and
+what each tool of the `sidera` MCP server does (`recv`, `reply`, `send`, `control`,
+`status`, `ack`). It also says that `recv` hands out a page that has not been
+acknowledged again at once, with the same lease, and that the page is acknowledged
+with `ack` (`sidera ack <lease>`) or by passing its lease to the next `recv`
+(`ack_lease`, `sidera recv --ack <lease>`); only after that does `recv` with a wait
+wait for new messages. Codex's own sentence is that the tools come first and the
+`sidera` command works only where the sandbox lets it reach the channel. The statement
+does not say how to treat a message (obey it, treat it as a task, ignore it): that is
+the owner's policy and belongs in the preset's own text. The Claude adapter appends the
+same statement to the system prompt, and `sidera mcp` gives the short form of it as
+the instructions of the MCP server (see [mcp](../mcp/README.md)).
 
 `thread/start` and `thread/resume` both take `developerInstructions`, and the server
 keeps none of a thread's parameters with the thread, so the adapter sends the text at

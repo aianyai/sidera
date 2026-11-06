@@ -9,8 +9,8 @@ starting another probe. The caller resolves environment, home and credentials.
 
 The peer package owns framing, queues, cancellation and transport closure. This
 package selects the MCP dialect, including whole-frame duplicate-key and Unicode
-checks, and owns request-era selection, protocol results and the Agent tool
-catalogue. Its default request handler routes every accepted request through the
+checks, and owns request-era selection, protocol results, the Agent tool
+catalogue and the server's instructions, which are the SDK's `guidance.Short`. Its default request handler routes every accepted request through the
 same era validation before method dispatch, including unknown methods. The
 catalogue schemas also validate the arguments of a tool call as declared, so
 an undeclared argument or a value of the wrong type is a tool error naming it, not

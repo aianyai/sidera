@@ -8,6 +8,19 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **A session learns what Sidera is the first time it connects.** The `sidera` MCP server's
+  instructions used to be one line about the endpoint's limits; they now say that Sidera is the
+  message channel to the other agents and people of your cluster, what to use it for, to call
+  `recv` first when a notice says a message is waiting, and to acknowledge a page you read (with
+  `ack`, or by passing its lease as `ack_lease` to the next `recv`) so that it does not come
+  straight back. A Claude Code or Codex session you open yourself, which an adapter never
+  briefed, is told this too.
+- **The Claude and Codex adapters give their sessions the same statement.** It was written
+  twice and had drifted; it is now one text in the Go SDK (`guidance`), plus one sentence for
+  each client.
+
 ## [0.14.0] - 2026-11-05
 
 Sidera now has a Hermes Agent adapter, `sidera-adapter-hermes`, which connects a long-running

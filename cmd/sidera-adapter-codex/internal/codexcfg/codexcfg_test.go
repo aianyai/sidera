@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/guidance"
 )
 
 func values(kv map[string]any) adapterproto.ConfigValues {
@@ -165,10 +166,9 @@ func TestDeveloperInstructions(t *testing.T) {
 			}
 		})
 	}
-	for _, fact := range []string{"owner's own cluster", "other agents and people", "recv", "reply", "send", "control", "status", "ack", "sidera MCP server", "sandbox", "again at once", "sidera ack <lease>", "sidera recv --ack <lease>", "wait for new messages"} {
-		if !strings.Contains(ChannelStatement, fact) {
-			t.Errorf("the statement does not say %q", fact)
-		}
+	// The facts are the SDK's, proved there; the statement carries them whole.
+	if !strings.Contains(ChannelStatement, guidance.Full) {
+		t.Error("the statement does not carry the shared statement")
 	}
 }
 

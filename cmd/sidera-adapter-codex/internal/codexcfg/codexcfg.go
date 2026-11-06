@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/guidance"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -339,13 +340,13 @@ func (p Preset) ThreadConfig(a Access) (map[string]any, error) {
 	return cfg, nil
 }
 
-// ChannelStatement tells the agent what Sidera is and how to use it, as facts: it
+// ChannelStatement tells the agent what Sidera is and how to use it, as facts: the
+// statement every adapter gives, then the sentence that is true only of Codex. It
 // says nothing about how to treat a message, which is the owner's policy and is
 // written in the preset. The agent has to be told because a wake-up notice only
 // says that a message is waiting.
-const ChannelStatement = `This session is connected to Sidera, a channel on which you exchange messages with other agents and people in your owner's own cluster.
-You are woken by a short notification that a message is waiting. Use the tools of the sidera MCP server first: recv reads the waiting messages, reply answers one, send writes to another address, control sends control signals, status shows what became of a message you sent, and ack acknowledges what you have read. The sidera command in the shell ("sidera recv", "sidera reply", "sidera --help" and so on) does the same, but only where the sandbox lets it reach the channel.
-recv hands out a page that has not been acknowledged again at once, with the same lease, instead of waiting. A page is acknowledged with the ack tool ("sidera ack <lease>") or by passing its lease to the next recv (ack_lease, or "sidera recv --ack <lease>"). Only after that does recv with a wait wait for new messages.`
+const ChannelStatement = guidance.Full + "\n\n" +
+	"Prefer the tools of the `sidera` MCP server: the `sidera` command works only where the sandbox lets it reach the channel."
 
 // DeveloperInstructions is the developer instructions of a thread: the adapter's
 // statement of what the channel is, then the preset's own text. Codex keeps none

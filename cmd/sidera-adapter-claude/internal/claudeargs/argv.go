@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/aianyai/sidera/sdk/go/guidance"
 )
 
 // ChannelToolRules are the `--allowedTools` rules every turn passes: the
@@ -178,8 +180,8 @@ func (t Turn) Argv() ([]string, error) {
 	return argv, nil
 }
 
-// SystemPrompt is the text appended to Claude's system prompt: the adapter's
-// own, then the preset's.
+// SystemPrompt is the text appended to Claude's system prompt: the statement every
+// adapter gives, the sentence that is true only of Claude, then the preset's.
 func SystemPrompt(preset string) string {
 	if preset == "" {
 		return systemPrompt
@@ -187,9 +189,8 @@ func SystemPrompt(preset string) string {
 	return fmt.Sprintf("%s\n\n%s", systemPrompt, preset)
 }
 
-// systemPrompt tells the agent what the channel is. Without it a session that
-// has only the command-line front end cannot know that "recv" in a wake-up
-// notice means `sidera recv`.
-const systemPrompt = `This session is connected to Sidera, a channel on which you exchange messages with other agents and people in your owner's own cluster.
-You are woken by a short notification that a message is waiting. Read it with the recv tool of the sidera MCP server, or with "sidera recv" in the shell when the MCP tools are not available, and answer with reply ("sidera reply"). Use send ("sidera send") to write to another address, control ("sidera control") for control signals, and status ("sidera status") to see what became of a message you sent. "sidera --help" lists the other commands.
-recv hands out a page that has not been acknowledged again at once, with the same lease, instead of waiting. A page is acknowledged with the ack tool ("sidera ack <lease>") or by passing its lease to the next recv (ack_lease, or "sidera recv --ack <lease>"). Only after that does recv with a wait wait for new messages.`
+// systemPrompt tells the agent what the channel is. The sentence of its own is for
+// a session that has only the command-line front end, which cannot otherwise know
+// that "recv" in a wake-up notice means `sidera recv`.
+const systemPrompt = guidance.Full + "\n\n" +
+	"If this session has no `sidera` MCP tools, use the commands: `recv` in a wake-up notice then means `sidera recv`."

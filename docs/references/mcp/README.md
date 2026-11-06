@@ -144,6 +144,40 @@ that call's tool error (the words are in [the command line](../command-line/READ
   `unknown`, with the reason and that `recv` with `wait_s` collects replies instead).
   Later results have the one text item described below. The tool schemas do not change.
 
+## Server instructions
+
+`initialize` and `server/discover` both carry `instructions`, and the text is the same
+constant, `guidance.Short` of the [SDK](../../../sdk/go/guidance/README.md): one line
+that says what Sidera is (the message channel to the other agents and people of the
+owner's own cluster), what to use the channel for, to call `recv` first when a notice
+says a message is waiting, and that a page read must be acknowledged with `ack` or by
+passing its lease as `ack_lease` to the next `recv` (otherwise the same page comes
+straight back). It is what a session the owner opened learns about
+Sidera, because such a session has neither an adapter's fixed statement nor a Skill
+unless one is installed. It carries no endpoint data, which is what keeps the public
+cache of discovery safe. The texts name a tool only by its MCP name (`recv`), never by
+a client's composed name (`mcp__sidera__send` in Claude Code).
+
+The clients limit what they keep of it, so the text is one line, in the order of what
+matters most, and held by a test to the limits below:
+
+- Claude Code cuts server instructions at 4096 characters
+  (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH` changes the limit), per its
+  [MCP documentation](https://code.claude.com/docs/en/mcp).
+- Codex gives the instructions to the model as the description of the server's tool
+  namespace (`namespace_description` in `codex-rs/codex-mcp/src/rmcp_client.rs`). The
+  listing of deferred namespaces keeps only the first line of a description, cut to 250
+  characters (`MAX_NAMESPACE_DESCRIPTION_CHARS` in
+  `codex-rs/core/src/context/world_state/tools.rs`): its first 247 characters and
+  `...`. That is why the text is a single line and why its first three facts, what the
+  channel is, what to use it for and to call `recv` first, end within 247 characters;
+  only the acknowledgement rule can be cut there.
+
+The adapters give their sessions the longer statement of the same facts
+([Claude](../adapter-claude/README.md), [Codex](../adapter-codex/README.md)); the
+facts exist once in the SDK, and a test there fails when one text stops carrying
+one.
+
 ## Agent tools
 
 `tools/list` returns the fixed tools `me`, `declare`, `peers`, `directory`, `send`,
