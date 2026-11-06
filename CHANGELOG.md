@@ -26,6 +26,12 @@ protocol has a version of its own.
   the path the system reports for the running program, which on Linux has links resolved; it now
   keeps them, so a link that a package manager repoints keeps leading to the current version, and
   it is the same file `sidera update` replaces.
+- **`sidera adapter remove` refuses an instance whose adapter has recorded a client setup.**
+  Removing the instance deletes its state directory, and with it the files a client installation
+  (a Skill, for one) depends on. Run `sidera adapter setup <instance> --remove` first. When the
+  setup cannot be asked at all, the refusal offers `--force` to remove the instance without that
+  check and leave the client's setup in place (the guide says how to clean it up by hand). Instances whose adapter has no setup are removed as
+  before.
 - **A session learns what Sidera is the first time it connects.** The `sidera` MCP server's
   instructions used to be one line about the endpoint's limits; they now say that Sidera is the
   message channel to the other agents and people of your cluster, what to use it for, to call

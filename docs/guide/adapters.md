@@ -96,6 +96,30 @@ back, and `--check` tells you it is gone. `--refresh` brings what setup recorded
 without asking, for a program that has no person to ask. Words after `--` are passed to the
 adapter for the options it has of its own. An adapter that has no setup says so.
 
+Before you remove an instance whose setup has recorded something, undo it with
+`--remove`: `sidera adapter remove` refuses otherwise, because removing the instance deletes
+the files its client installation depends on. If the setup cannot even be asked whether it
+recorded something (the adapter is damaged), the refusal says so and
+`sidera adapter remove <instance> --force` removes the instance without
+asking it and leaves whatever it installed in the client in place; the next section says how to
+remove that by hand.
+
+### Cleaning up an adapter's client by hand
+
+After `sidera adapter remove --force`, or when a setup was removed some other way, what an
+adapter installed in its client is still there. Removing it is the client's own business;
+this is what each adapter put where.
+
+- **Claude Code**: filled in with the adapter's setup.
+- **Codex**: filled in with the adapter's setup.
+- **Hermes**: `sidera-adapter-hermes setup --apply` placed the Skill as
+  `skills/sidera/SKILL.md` in the directory of each profile you prepared (`hermes -p <profile>
+  config path` names the `config.yaml` that lies in it). Delete that `skills/sidera`
+  directory in each profile, and restart the gateway that serves the profile so that Hermes
+  stops offering the Skill. Setup never edits `config.yaml`, so the `kanban` and `skills`
+  toolsets you added to a platform by hand stay as they are: leave them or remove them as you
+  like. The copy of the Skill in the instance's state directory goes with the instance.
+
 ## Claude Code
 
 Adapter details: [the Claude adapter reference](../references/adapter-claude/README.md).

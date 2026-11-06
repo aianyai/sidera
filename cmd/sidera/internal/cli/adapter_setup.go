@@ -481,3 +481,46 @@ func (o *adapterSetupFlags) mode() (setupMode, error) {
 	}
 	return 0, usage("--check, --remove and --refresh are different modes: use one")
 }
+
+// refuseRemoveWhileSetUp is the guard of `adapter remove`: an instance whose adapter
+// has recorded a setup is not removed before it is undone. Removing the instance
+// deletes its state directory, and with it the source of what setup installed in the
+// client (a plugin whose source is there vanishes from the client without a word).
+// An instance or adapter the daemon does not know, and a daemon that cannot say, have
+// nothing to protect and are left to adapters.remove to answer; any other failure to
+// find out refuses the removal. A refusal because the check itself failed says how
+// --force removes the instance anyway, since an instance whose setup cannot run must not
+// be stuck; the refusal because a setup is recorded does not, because --force would leave
+// the client pointing at the directory the removal deletes, which is what the guard is for.
+func refuseRemoveWhileSetUp(ctx context.Context, client caller, exec setupExecutor, instance string, env setupEnv) error {
+	notRemoved := "the instance was not removed, because "
+	forceHint := fmt.Sprintf(". `sidera adapter remove %s --force` removes it without this check and leaves whatever setup installed in the client in place (see \"Cleaning up an adapter's client by hand\" in the adapters guide)", instance)
+	s, err := openSetupSession(ctx, client, exec, instance, env, nil)
+	if err != nil {
+		switch apiwire.FromError(err).Code {
+		case "instance_unknown", "adapter_unknown":
+			return nil
+		}
+		if errors.Is(err, errNoSetup) || errors.Is(err, errDaemonOlder) {
+			return nil
+		}
+		return &failure{notRemoved + "it cannot be found out whether its adapter has a setup: " + err.Error() + forceHint}
+	}
+	res, err := s.call(ctx, adaptersetup.OpCheck, nil, false)
+	if err != nil {
+		return &failure{notRemoved + "it cannot be told whether its setup has recorded anything: " + err.Error() + forceHint}
+	}
+	if *res.Recorded { // Validate requires the member of a check
+		return &failure{fmt.Sprintf("the instance was not removed: the setup of %s has recorded what it installed in a client, and removing the instance would delete the files that installation depends on. Run `sidera adapter setup %s --remove` first", instance, instance)}
+	}
+	return nil
+}
+
+// guardAdapterRemove is refuseRemoveWhileSetUp for the running program.
+func (c *command) guardAdapterRemove(ctx context.Context, client caller, home, instance string) error {
+	exe, err := c.programPath()
+	if err != nil {
+		return err
+	}
+	return refuseRemoveWhileSetUp(ctx, client, execSetup{}, instance, setupEnv{home: home, homeIsDefault: c.isDefaultDataDir(home), program: exe})
+}

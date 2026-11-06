@@ -144,6 +144,31 @@ matters for the contract:
 - **A request is built once per command** and differs between calls only in `op`,
   `accepted` and `undo`.
 
+### Removing the instance
+
+`sidera adapter remove` deletes the instance's state directory, which holds the record and,
+for some adapters, the source directory of what was installed in the client (a plugin
+whose source is gone vanishes from the client without a word). So before it calls the
+daemon, the command runs `check` of the instance's setup, if the adapter declares one, and
+refuses when a record exists (`check` always says `recorded`, which `Validate` requires, so
+the guard cannot read a missing member as "no record"): the person undoes it with
+`adapter setup <instance> --remove` first. That refusal does not offer `--force`, because
+`--force` would delete the directory a client installation still points at, which is what
+the guard prevents. Why `check` and not the record: the CLI never reads the record, and the adapter alone
+knows what its record means. An instance or adapter the daemon does not know, a daemon
+without `adapters.setup_info` (it cannot have a package with a setup) and an adapter without
+setup are not checked. If the check itself cannot be made (the package cannot be loaded, the
+program fails) the removal is refused with that error, because "no record" is not known;
+this is the refusal that offers `--force`.
+`check` itself returns an error only when the adapter cannot read its record; a client it
+cannot probe (not installed, not answering) is drift of the problem `broken`, so an
+instance whose client is gone is still removable. For an instance whose setup program is
+broken, `sidera adapter remove <instance> --force` skips the check: the instance is removed
+and whatever setup installed in the client is left in place, which the command says in a
+warning that points to the guide's manual cleanup for each adapter. The flag exists as the
+way out when the check cannot be made, so that no setup program can keep an instance from
+being removed.
+
 ## Versions
 
 Request and result both carry `version`, the major version of the contract. The core

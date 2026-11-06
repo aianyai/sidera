@@ -336,8 +336,10 @@ var adaptersDisable = &method{
 
 // adapters.remove: remove a disabled instance, with its settings. It is refused
 // while the instance is enabled and while session endpoints made through it are open.
-// It is authorized as disabling, since it only withdraws. What the adapter keeps in
-// its state directory stays: see the engine's RemoveAdapterInstanceOp.
+// It is authorized as disabling, since it only withdraws. The adapter's state directory
+// is deleted with the instance, once the adapter has ended; the engine's
+// RemoveAdapterInstanceOp says how, and what a state directory that cannot be moved
+// aside does to the removal. Only the stable endpoint ids stay.
 var adaptersRemove = &method{
 	name: "adapters.remove", op: admin.Operation{Kind: admin.OpDisableAdapter},
 	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {

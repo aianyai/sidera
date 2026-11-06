@@ -1299,6 +1299,35 @@ func TestAdapterSetupRunsTheAdaptersProgram(t *testing.T) {
 	if read(filepath.Join(clientDir, "a")) != "v1" || read(filepath.Join(stateDir, "setup", "files", "o")) != "own" {
 		t.Error("the files were not written")
 	}
+	// The instance is not removed while setup has recorded something in a client.
+	if _, diag := mustRun(1, "adapter", "remove", "work"); !strings.Contains(diag, "adapter setup work --remove") {
+		t.Errorf("adapter remove: stderr %q", diag)
+	}
+	if _, err := os.Stat(stateDir); err != nil {
+		t.Errorf("the refused removal took the state directory: %v", err)
+	}
+	// --remove undoes it, and the instance can then be removed.
+	mustRun(0, "adapter", "setup", "work", "--remove", "--yes")
+	if _, err := os.Stat(filepath.Join(clientDir, "a")); err == nil {
+		t.Error("the client file is still there")
+	}
+	mustRun(0, "adapter", "remove", "work")
+
+	// --force removes an instance whose setup has recorded something without asking its
+	// setup, and says where the manual cleanup is described.
+	mustRun(0, "adapter", "enable", "fake-setup", "--instance", "forced", "--config", configPath)
+	mustRun(0, "adapter", "disable", "forced")
+	forcedState := filepath.Join(home, "adapter-state", "forced")
+	if err := os.MkdirAll(forcedState, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(0, "adapter", "setup", "forced", "--yes")
+	if _, diag := mustRun(0, "adapter", "remove", "forced", "--force"); !strings.Contains(diag, "Cleaning up an adapter's client by hand") {
+		t.Errorf("adapter remove --force: stderr %q", diag)
+	}
+	if _, err := os.Stat(forcedState); err == nil {
+		t.Error("--force left the state directory")
+	}
 
 	// An adapter that declares no setup has none to run: the daemon answers null.
 	plain := harness.AdapterManifest(10)

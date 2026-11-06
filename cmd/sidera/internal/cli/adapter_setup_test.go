@@ -74,8 +74,6 @@ type inProcess struct {
 	// has the op, is what it answers to that op.
 	raw  string
 	byOp map[adaptersetup.Op]string
-	// exit, when set, is the exit code the program fails with.
-	exit int
 }
 
 func (p *inProcess) Run(_ context.Context, argv []string, request []byte) ([]byte, error) {
@@ -136,15 +134,19 @@ func newRig(t *testing.T, items ...fakeadapter.SetupItem) *setupRig {
 	return r
 }
 
+// infoAnswer is the daemon's answer to adapters.setup_info.
+func (r *setupRig) infoAnswer() func() (json.RawMessage, error) {
+	if r.infoError != nil {
+		return failed(r.infoError)
+	}
+	cfg, _ := json.Marshal(map[string]any{"setup": r.script})
+	stateDir, _ := json.Marshal(r.state)
+	return answered(fmt.Sprintf(`{"result":{"instance":"work","adapter":"fake","state_dir":%s,"config":%s,"setup_argv":%s}}`, stateDir, cfg, r.argv))
+}
+
 func (r *setupRig) session() (*setupSession, error) {
 	r.t.Helper()
-	cfg, _ := json.Marshal(map[string]any{"setup": r.script})
-	answer := failed(r.infoError)
-	if r.infoError == nil {
-		stateDir, _ := json.Marshal(r.state)
-		answer = answered(fmt.Sprintf(`{"result":{"instance":"work","adapter":"fake","state_dir":%s,"config":%s,"setup_argv":%s}}`, stateDir, cfg, r.argv))
-	}
-	node := &updateScript{answers: map[string][]func() (json.RawMessage, error){"adapters.setup_info": {answer}}}
+	node := &updateScript{answers: map[string][]func() (json.RawMessage, error){"adapters.setup_info": {r.infoAnswer()}}}
 	return openSetupSession(context.Background(), node, r.exec, "work", setupEnv{home: "/home/sidera", homeIsDefault: true, program: "/opt/sidera"}, r.options)
 }
 
@@ -492,6 +494,85 @@ func TestExecSetup(t *testing.T) {
 	}
 	if _, err := (execSetup{}).Run(context.Background(), []string{filepath.Join(t.TempDir(), "nothing")}, nil); err == nil {
 		t.Error("a program that is not there ran")
+	}
+}
+
+// An instance whose adapter has recorded a setup is not removed: its state directory
+// would go with it, and with that the source of what setup installed in the client.
+func TestRefuseRemoveWhileSetUp(t *testing.T) {
+	env := setupEnv{home: "/home/sidera", program: "/opt/sidera"}
+	setUp := func(r *setupRig) {
+		if _, _, err := r.run(modeSetup, "", true); err != nil {
+			t.Fatal(err)
+		}
+		r.exec.requests = nil
+	}
+	for _, tc := range []struct {
+		name    string
+		prepare func(*setupRig)
+		want    string // in the refusal; empty for a removal that goes on
+		checked bool   // whether the program was asked
+		force   bool   // whether the refusal offers --force: only when the check itself failed
+	}{
+		{"a record exists", setUp, "adapter setup work --remove", true, false},
+		{"a record exists although what it recorded is gone", func(r *setupRig) { setUp(r); os.Remove(filepath.Join(r.client, "a")) }, "adapter setup work --remove", true, false},
+		{"no record", func(*setupRig) {}, "", true, false},
+		{"setup was undone", func(r *setupRig) {
+			setUp(r)
+			if _, _, err := r.run(modeRemove, "", true); err != nil {
+				t.Fatal(err)
+			}
+			r.exec.requests = nil
+		}, "", true, false},
+		{"the adapter has no setup", func(r *setupRig) { r.argv = "null" }, "", false, false},
+		{"an older daemon", func(r *setupRig) {
+			r.infoError = apiwire.New(apiwire.CategoryNotFound, "method_unknown", "no such method")
+		}, "", false, false},
+		{"an instance the daemon does not know", func(r *setupRig) {
+			r.infoError = apiwire.New(apiwire.CategoryNotFound, "instance_unknown", "no such instance")
+		}, "", false, false},
+		{"an adapter that is not installed", func(r *setupRig) {
+			r.infoError = apiwire.New(apiwire.CategoryNotFound, "adapter_unknown", "no such adapter")
+		}, "", false, false},
+		{"a package that cannot be loaded", func(r *setupRig) {
+			r.infoError = apiwire.New(apiwire.CategoryRefused, "package_invalid", "the package cannot be loaded")
+		}, "package_invalid", false, true},
+		{"the setup program answers nonsense", func(r *setupRig) {
+			setUp(r)
+			os.RemoveAll(r.state)
+			r.script.Items = []fakeadapter.SetupItem{{ID: "bad", Content: "x"}}
+			r.exec.raw = "garbage"
+		}, "cannot be told whether its setup has recorded anything", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, clientA, ownO)
+			tc.prepare(r)
+			node := &updateScript{answers: map[string][]func() (json.RawMessage, error){}}
+			node.answers["adapters.setup_info"] = []func() (json.RawMessage, error){r.infoAnswer()}
+			err := refuseRemoveWhileSetUp(context.Background(), node, r.exec, "work", env)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			// Every refusal is a failure (exit 1) that says the instance was not removed. Only
+			// one because the check itself failed offers --force, so that an instance whose
+			// setup cannot run is not stuck; with a record, --force would leave the client
+			// pointing at the directory the removal deletes.
+			if tc.want != "" {
+				var f *failure
+				if !errors.As(err, &f) || !strings.Contains(err.Error(), "the instance was not removed") {
+					t.Errorf("err = %v; want a failure that says the instance was not removed", err)
+				}
+				if offers := strings.Contains(err.Error(), "--force"); offers != tc.force {
+					t.Errorf("err = %v; offers --force = %v, want %v", err, offers, tc.force)
+				}
+			}
+			if asked := len(r.exec.requests) > 0; asked != tc.checked {
+				t.Errorf("the program was asked = %v, want %v (%s)", asked, tc.checked, r.exec.ops())
+			}
+			if len(r.exec.requests) > 0 && r.exec.ops() != "check" {
+				t.Errorf("ops = %q; the guard only checks", r.exec.ops())
+			}
+		})
 	}
 }
 

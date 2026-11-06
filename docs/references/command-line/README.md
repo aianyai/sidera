@@ -50,7 +50,7 @@ arguments, purpose and one example.
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. |
 | `adapter install <package-directory>` / `adapter list` | Install a local package by its absolute path (another version, like the same version with other contents, replaces the installed package and restarts the instances that run, which keep their sessions; the same contents change nothing), or list installed packages, instances, probe results, the `fault` reason of an installed package that cannot be loaded or of an enabled instance whose package cannot run, and the `availability` conditions an online instance's adapter reports (a table cell of JSON in the human form). |
 | `adapter enable <id> [--instance <name>] [--config <file>] [--expected-version <n>]` / `adapter disable <instance> [--expected-version <n>]` | Enable or disable an instance. A config file of `-` reads stdin; `enable` takes one only for an instance that does not exist yet. |
-| `adapter remove <instance> [--expected-version <n>]` | Remove a disabled instance and its settings. Refused while the instance is enabled and while session endpoints made through it are open (the message says how many). The adapter's state directory is deleted with the instance (on Windows the removal is refused, naming the path, while a process still holds a file in it); the instance's endpoint ids stay. |
+| `adapter remove <instance> [--force] [--expected-version <n>]` | Remove a disabled instance and its settings. Refused while the instance is enabled and while session endpoints made through it are open (the message says how many). The adapter's state directory is deleted with the instance (on Windows the removal is refused, naming the path, while a process still holds a file in it); the instance's endpoint ids stay. Refused (exit 1) while the adapter's setup has recorded something in a client, and when it cannot be found out whether it has (`--force` skips the check, and is offered only in the second case); see [Adapter setup](#adapter-setup). |
 | `adapter setup <instance> [--check \| --remove \| --refresh] [--yes] [-- <adapter arguments>]` | Run the setup of the instance's adapter, which brings the client the adapter drives (its MCP registration, permissions, Skill) in line with the instance; see [Adapter setup](#adapter-setup). |
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
 | `endpoint list [--instance <name>]` / `endpoint close <addr> [--allow-attached]` | Read endpoints, including closed ones (`origin` says `created` or `attached` for a session), or close an endpoint. An attached session, which a person is using, is closed only with `--allow-attached`; without it the command fails with `refused/attached_close_not_allowed`. |
@@ -266,6 +266,21 @@ exit, quotes the end of its standard error (the last 2 KiB). A value of `action`
 or an outcome's status that a later release added is not refused: it is shown as it is
 (the last as a failure, with the adapter's message, and counted in the verdict), so that an
 old program can run the setup of an adapter that `update` has just installed.
+
+`adapter remove <instance>` asks the same setup first: when the adapter declares a setup and
+its `check` says a record exists, the removal is refused (exit 1) and the message says to run
+`adapter setup <instance> --remove`. The state directory goes with the instance, and with it
+the source of what setup installed in a client; the client's Skill would vanish without a
+word, which is why that refusal does not offer `--force`. When the check itself cannot be
+done (the package cannot be loaded, the setup program fails), the instance is not removed
+and the error is shown after "the instance was not removed, because", as a failure (1); this
+refusal names `--force`: `adapter remove <instance> --force` skips the check, so that an
+instance whose setup cannot run is not stuck. It removes the instance as usual and, once that has succeeded, prints on
+standard error a warning that the client setup of the instance was not checked, that
+whatever it installed in the client is still there, and where the guide describes the manual
+cleanup ("Cleaning up an adapter's client by hand"). An instance or adapter the daemon does not know, a daemon without
+`adapters.setup_info` and an adapter without setup are not checked, and the removal goes on as
+before.
 
 ### Network commands
 

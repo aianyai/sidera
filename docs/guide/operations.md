@@ -503,6 +503,12 @@ the message gives the count. It deletes the adapter's own directory,
 Windows it is refused with `instance_state_busy`, naming the directory, while a process
 still holds a file in it: end that process and run the command again.
 
+If `sidera adapter setup` has set up the client of the instance (see
+[Setting up an adapter's client](adapters.md#setting-up-an-adapters-client)), `remove` is
+refused until you have run `sidera adapter setup <instance> --remove`. If the setup cannot
+be asked at all, the refusal says so and offers `--force`, which removes the instance and
+leaves the client's setup in place.
+
 ## Back up the self-revocation
 
 Every node has a self-revocation: a signed statement that retires the node's

@@ -29,6 +29,8 @@ type managementPlan struct {
 	// expectVersion is the version `daemon restart` requires of the program the
 	// daemon starts again; empty requires none.
 	expectVersion string
+	// force, with adapters.remove, skips the check of the instance's client setup.
+	force bool
 }
 
 func (c *command) manage(ctx context.Context, args []string) error {
@@ -45,6 +47,11 @@ func (c *command) manage(ctx context.Context, args []string) error {
 		return err
 	}
 	defer client.Close()
+	if plan.method == "adapters.remove" && !plan.force {
+		if err := c.guardAdapterRemove(ctx, client, home, plan.params["instance"].(string)); err != nil {
+			return err
+		}
+	}
 	if plan.method == "identity.export_revocation" {
 		return c.exportRevocation(ctx, client, plan.exportOut)
 	}
@@ -88,6 +95,9 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	}
 	if err := c.managementResult(raw); err != nil {
 		return err
+	}
+	if plan.method == "adapters.remove" && plan.force {
+		fmt.Fprintf(c.Stderr, "warning: the client setup of %[1]s was not checked, and whatever it installed in the client, if anything, is still there. To clean it up by hand, see \"Cleaning up an adapter's client by hand\" in the adapters guide.\n", plan.params["instance"])
 	}
 	if !c.json {
 		switch plan.method {
@@ -362,6 +372,7 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 		plan.params["instance"], plan.params["config"] = p[0], data
 	case "adapters.disable", "adapters.remove":
 		plan.params["instance"] = p[0]
+		plan.force = o.force
 	case "endpoints.list":
 		addPresent(f, plan.params, "instance", "instance", o.instance)
 	case "endpoints.close":
@@ -446,6 +457,7 @@ type managementFlags struct {
 	file, instance, node, output string
 	expectVersion                string
 	all, yes, allowAttached      bool
+	force                        bool
 	version                      uint64
 	wait                         time.Duration
 }
@@ -463,6 +475,8 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&o.file, "config", "", "instance JSON file, or - for stdin")
 	case "endpoint list":
 		f.StringVar(&o.instance, "instance", "", "filter by instance")
+	case "adapter remove":
+		f.BoolVar(&o.force, "force", false, "remove the instance without checking its client setup, which is then left in place")
 	case "endpoint close":
 		f.BoolVar(&o.allowAttached, "allow-attached", false, "close a session a person opened and is using")
 	case "identity export-revocation":

@@ -55,7 +55,8 @@ and its bound values. A local value stays attached, including a body spelled
   complete is not sent to the adapter). The executor and the dialog are the seams the
   tests use; the same session is what `update` will use to refresh. `prompt.go` is the `[y/N]` question and the
   "no terminal, add --yes" refusal that `update` and `adapter setup` share. `program.go` is `programPath`, the path
-  of this program that `update`, `adapter setup` and `setup controller` all name.
+  of this program that `update`, `adapter setup` and `setup controller` all name. `refuseRemoveWhileSetUp` is the guard `manage` runs before
+  `adapters.remove`: a `check` of the instance's setup, and a refusal when it has a record.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request
