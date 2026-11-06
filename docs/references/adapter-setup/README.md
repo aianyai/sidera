@@ -127,7 +127,9 @@ rule that makes a user's deletion stand. `check` is the exception for drift: wit
 it still lists `needs_setup`, and the status is then `drift` with `recorded: false`.
 
 `update`'s report per instance is these statuses plus two the CLI decides: `skipped`
-(the adapter declares no setup) and `error` (the program failed).
+(there is no setup to refresh: the adapter declares none, the daemon has no `setup_info`, the
+adapter's package cannot be loaded, or the adapter is not installed) and `error` (the program
+failed, or the refresh had an item fail or the adapter reported an error).
 
 ## The command
 

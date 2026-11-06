@@ -181,7 +181,9 @@ daemon. How the foreground daemon starts the program again is in
 
 `update` is carried out by the command itself, with the management interface only for the
 daemon (`status`, `daemon.restart`, `adapters.list`, `adapters.install`, which a client
-that ignores unknown members of the answers reads across releases). What it does, what it
+that ignores unknown members of the answers reads across releases) and, for the refresh of
+the adapters' client setup, `adapters.setup_info` and the setup programs it names, run
+exactly as `adapter setup --refresh` runs them. What it does, what it
 refuses and why is [the update reference](../update/README.md).
 
 `--version` takes a release version with or without a leading `v`; anything else is usage
@@ -194,20 +196,27 @@ it cannot reach or believe a release.
 The plan, the question and the progress go to standard error, so that standard output is
 the report. The human report is `key value` lines: before the question `current`, `target`,
 `release` (the page of the release), `replace`, `restart daemon`, `install adapters`,
-`faulted adapters, installed again` and `faulted adapters not in this release (install them
-again by hand)`; after the run `program updated` (the paths), `daemon restarted version` or
+`faulted adapters, installed again`, `faulted adapters not in this release (install them
+again by hand)` and, while a daemon runs, `refresh the client setup that adapters recorded,
+where it is out of date`; after the run `program updated` (the paths), `daemon restarted version` or
 `daemon running version` or a note that none runs, one `adapter <id> version <v> replaced
 <bool>` (or `skipped`, or `failed`; `was faulted, installed again` for an adapter whose
 package could not run) per installed adapter, and a note that the `.old` programs are the
 way back and that the old version directories of replaced adapters are removed at the next
-daemon start. A check looks at the release and the running program only (not the daemon or
-the adapters): it prints `current`, `target`, `release`, `floor`, `update_available`,
+daemon start, and one `setup <instance> <status>` line per adapter instance (`refreshed`,
+`none`, `drift`, `skipped` or `error`, with the reason after `skipped` and `error`),
+followed by `setup <instance> item <id> <status>` for each item the refresh did, `setup
+<instance> drift <id> <problem> <summary>` for each difference it found and, for drift,
+`setup <instance> fix sidera adapter setup <instance>` (with `--home` before `adapter` when the data directory is not the default). An `error` is exit 1, drift is not. A check looks at the release and the running program only (not the daemon, the adapters
+or their setup): it prints `current`, `target`, `release`, `floor`, `update_available`,
 `admitted` and, when a run would stop, `refusal`, and with `--json` it is one object of
 exactly those members. A run with `--json` is one object: `current`, `target`, `release`,
-`admitted`, `floor`, `already_current` (never true while no daemon runs), `program`
+`admitted`, `floor`, `already_current` (never true while no daemon runs, nor when a refresh rewrote an item or failed), `program`
 (`updated`, `replaced`, `console_missing`, `restored`, `left`), `daemon` (`running`,
-`previous_version`, `restarted`, `version`) and `adapters` (each with `faulted` when its
-package could not run), and `error` when the run failed after it had done something (the
+`previous_version`, `restarted`, `version`), `adapters` (each with `faulted` when its
+package could not run) and `setup` (per instance: `instance`, `adapter`, `status`,
+`message`, `items` as `{id, status, message}`, `drift` as `{id, problem, summary}` and
+`fix`, the last four only when they have something to say), and `error` when the run failed after it had done something (the
 exit code is then 1; a failure before anything was done prints the error on standard error
 only).
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/launch"
 	"github.com/aianyai/sidera/cmd/sidera/internal/update/fetch"
@@ -144,7 +145,17 @@ func (s *session) run(ctx context.Context, want string) error {
 		// current that was not seen to be.
 		s.rep.AlreadyCurrent = node.running
 		s.rep.Adapters = append(s.rep.Adapters, node.skipped...)
-		return nil
+		if !node.running {
+			return nil
+		}
+		// An earlier run may have been cut short after it installed the adapters and
+		// before it refreshed their setup, so the refresh is not a consequence of
+		// installing: it is looked at every time, and a run that did any of it is not idle.
+		err := s.refreshSetups(ctx)
+		if err != nil || s.setupChanged() {
+			s.rep.AlreadyCurrent = false
+		}
+		return err
 	}
 
 	if err := s.verifyRelease(ctx); err != nil {
@@ -184,7 +195,14 @@ func (s *session) run(ctx context.Context, want string) error {
 			return err
 		}
 	}
-	return s.installAdapters(ctx, files, node)
+	installErr := s.installAdapters(ctx, files, node)
+	if !node.running {
+		return installErr
+	}
+	// Every instance is refreshed even when an installation failed: the refresh of an
+	// instance whose adapter was not replaced is the old adapter's, from its own
+	// record, and finds nothing to do.
+	return errors.Join(installErr, s.refreshSetups(ctx))
 }
 
 // discover learns which release is wanted and fills what the report says of it.
@@ -328,7 +346,7 @@ func (s *session) readNode(ctx context.Context) (nodeState, error) {
 func (s *session) plan(files string, needProgram bool, n nodeState) Plan {
 	p := Plan{
 		Current: s.rep.Current, Target: s.target, ReleaseURL: s.rep.ReleaseURL,
-		Daemon: n.running, Restart: n.restart, DaemonVersion: n.version,
+		Daemon: n.running, Restart: n.restart, DaemonVersion: n.version, RefreshSetup: n.running,
 	}
 	for _, f := range s.programs {
 		p.Replace = append(p.Replace, f.path)
@@ -458,6 +476,43 @@ func (s *session) installAdapters(ctx context.Context, files string, n nodeState
 		s.rep.Adapters = append(s.rep.Adapters, rep)
 	}
 	return errors.Join(errs...)
+}
+
+// refreshSetups refreshes the client setup of every adapter instance by the adapter
+// of the installed package, which decides from its own record whether there is
+// anything to do; an instance with no record is left alone. It runs only against a
+// daemon of the target version, because the setup of a package is run through the
+// daemon that reads it. Every instance is tried; the failures are returned together,
+// and drift, which only a person can settle, is reported and is not one.
+func (s *session) refreshSetups(ctx context.Context) error {
+	instances, err := s.cfg.Node.Instances(ctx)
+	if err != nil {
+		return fmt.Errorf("list the adapter instances: %w", err)
+	}
+	var errs []error
+	for _, in := range instances {
+		s.step("refreshing the setup of " + in.ID)
+		rep, err := s.cfg.Node.RefreshSetup(ctx, in.ID)
+		if err != nil {
+			rep = SetupReport{Status: SetupError, Message: err.Error()}
+		}
+		rep.Instance, rep.Adapter = in.ID, in.Adapter
+		if rep.Status == SetupError {
+			errs = append(errs, fmt.Errorf("refresh the setup of %s: %s", in.ID, rep.Message))
+		}
+		s.rep.Setup = append(s.rep.Setup, rep)
+	}
+	return errors.Join(errs...)
+}
+
+// setupChanged says whether the refresh rewrote an item, or failed to.
+func (s *session) setupChanged() bool {
+	for _, rep := range s.rep.Setup {
+		if rep.Status == SetupError || slices.ContainsFunc(rep.Items, func(i SetupItem) bool { return i.Status == "done" }) {
+			return true
+		}
+	}
+	return false
 }
 
 // channel is the step that brings the files of the target to this machine and says

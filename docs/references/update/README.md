@@ -1,7 +1,8 @@
 # update
 
 `sidera update` brings one installation to a release: the programs next to the running
-one, the daemon and the installed adapters. This topic is the rules of that run and the
+one, the daemon and the installed adapters, and refreshes the client setup that adapters
+recorded. This topic is the rules of that run and the
 reasons for them. The code is in
 [`cmd/sidera/internal/update`](../../../cmd/sidera/internal/update/README.md) and its four
 packages (`fetch`, `verify`, `unpack`, `swap`), the command in
@@ -38,7 +39,7 @@ does not say whether an earlier run left them behind, and its report has no `pro
 
 ### The run converges
 
-Every run looks at three things and does only the step that is missing, so a run that was
+Every run looks at four things and does only the step that is missing, so a run that was
 cut short by a crash, a power cut or Ctrl-C is finished by running again:
 
 1. **The programs.** `sidera`, and `sidera-adapter-console` when it is next to it, are
@@ -63,6 +64,32 @@ cut short by a crash, a power cut or Ctrl-C is finished by running again:
    keeps a node from being current. A third-party adapter with a release-shaped version older
    than the target cannot be told from the release's by its version, so such a run downloads
    the archive and then reports it as not in the release.
+4. **The client setup of the instances.** For every adapter instance the daemon lists, the
+   run asks the adapter to refresh what its setup recorded in a client (the `refresh` of
+   [the setup contract](../adapter-setup/README.md), the code of `sidera adapter setup
+   <instance> --refresh`). The adapter decides from its own record, so the step is
+   triggered by state and not by a package having been replaced: it runs on every run
+   that has a daemon of the target version, including one that has nothing to install, so
+   that a run cut short after the adapters were installed and before their setup was
+   refreshed is finished by the next. An instance with no record answers `none`, and an
+   adapter that declares no setup is `skipped`. It asks nothing of the owner: a refresh
+   rewrites only recorded items that still exist and never creates one (the plan shows it
+   as one line, "refresh the client setup that adapters recorded"). Its report is one
+   entry per instance, with a status that is the contract's own (`refreshed`, `none`,
+   `drift`) plus the two this step decides (`skipped`, `error`):
+
+   | Status | Meaning | Fails the run |
+   | ------ | ------- | ------------- |
+   | `refreshed` | A record exists; `items` say which items were rewritten, which may be none | no |
+   | `none` | No record: setup was never run for the instance, or was undone | no |
+   | `drift` | Something recorded is gone, was edited, or cannot work; `drift` lists it and `fix` is the command that settles it, `sidera adapter setup <instance>` (with `--home` when the data directory is not the default), which asks before it changes anything; an `error` that found drift carries it too | no |
+   | `skipped` | There is no setup to refresh, and `message` says why: the adapter declares none, the daemon has no `adapters.setup_info`, the adapter's package cannot be loaded (the installation step reports that as a note of its own, and the same condition must not fail every later update), or the adapter is not installed | no |
+   | `error` | The refresh could not be run or an item of it failed; `message` says why | yes |
+
+   Every instance is refreshed even when another failed or when an adapter's installation
+   failed (the old adapter then finds nothing to do from its own record), and the run
+   ends with the failures together, as for the installations. An `error` makes `sidera
+   update` exit 1 and the report is still printed.
 
 The order is the order of the dependencies. The adapters come last because a package is
 installed only into a daemon that reads it: an old daemon decodes a new manifest strictly
@@ -71,11 +98,15 @@ manifest has `setup`: `manifest: setup: unknown field`). The manifest grows in p
 no `manifest_version` bump, and that is safe only because of this order, so it is an
 invariant: the daemon is restarted into the new release before any adapter package is
 installed. Installing first would make the old daemon refuse the new packages, and the
-adapters would stay at the old version with the new programs around them. With no daemon running the adapters cannot be listed or installed, so the
+adapters would stay at the old version with the new programs around them. The refresh of
+the setup comes after the installations because it runs the setup program of the package
+that is installed then: the record is compared with what the new adapter writes. With no daemon running the adapters cannot be listed or installed, so the
 run replaces the programs and tells the owner to start the daemon and run `update` again;
-that second run replaces nothing and installs the adapters. A run with nothing to do (all
-three at the target, the adapters having been looked at) says `already_current` and downloads
-nothing. With no daemon running it never says so, because the adapters were not looked at.
+that second run replaces nothing and installs the adapters. A run with nothing to install (all
+three at the target, the adapters having been looked at) downloads nothing, still refreshes
+the setups, and says `already_current` unless a refresh rewrote an item or failed. With no
+daemon running it never says so, because the adapters were not looked at, and it does not
+refresh any setup.
 
 The version of the running program decides step 1, and the replacement puts the running
 program last (see Replacing the programs): a replacement cut between two programs leaves the
@@ -83,7 +114,19 @@ running one old, so the next run replaces the set again.
 
 The run goes on in the old program's process after the programs are replaced; it does not
 hand over to the new one. A new release's extra steps are therefore found by the next run,
-not the current one.
+not the current one. For the refresh of the setups that means: the run that replaces the
+programs of a release that has the step is made by the previous release's program, which
+does not have it, so it does not refresh; the first release whose programs run it is the one
+after. The upgrade from 0.14 to 0.15 is such a run, and 0.15 is also the first release in
+which adapters have a setup, so there is no record to refresh yet: the release notes of 0.15
+ask the owner to run `sidera adapter setup <instance>` once for each instance whose adapter
+has a setup; later updates refresh it.
+
+`--check` does not report the step. A check reads two small files and nothing else; it does
+not look at the daemon (see above), and to say what a refresh would do it would have to ask
+every instance's setup program, which starts a process and, for the adapters that drive a
+client, the client's own command line. `sidera adapter setup <instance> --check` reports the
+same drift for one instance when a person wants to know.
 
 ### Refusals
 
@@ -238,13 +281,15 @@ to others.
 
 The run that replaced the programs goes on as the old program, talking to a daemon that has
 just become the new version; a new `update` talks to the daemon of an older release. So the
-five methods `update` and the setup of the adapters call must read the same across versions:
+five methods `update` and the setup of the adapters call must read the same across versions
+(`adapters.list` is read for the instances as well, `instances[].instance` and
+`instances[].adapter`):
 
 | Method | What update relies on |
 | ------ | --------------------- |
 | `status` | `node.version`; `daemon.state` and `daemon.start_id` (for the wait) |
 | `daemon.restart` | param `expect_version`; result `restarting`, `program`, `version`, `start_id` |
-| `adapters.list` | `adapters[].id`, `adapters[].version` and `adapters[].fault`; `instances[].adapter` and `instances[].fault` |
+| `adapters.list` | `adapters[].id`, `adapters[].version` and `adapters[].fault`; `instances[].instance`, `instances[].adapter` and `instances[].fault` |
 | `adapters.install` | param `source` (an absolute path); result `adapter.id`, `adapter.version`, `replaced`, `already_current` |
 | `adapters.setup_info` | param `instance`; result `instance`, `adapter`, `state_dir`, `config` (an object) and `setup_argv` (`null`, or the absolute program followed by its arguments); errors `not_found/instance_unknown`, `not_found/adapter_unknown`, `refused/package_invalid` |
 
@@ -294,7 +339,10 @@ before it ships.
 the management client in `cmd/sidera/internal/cli/update.go`. Tests: the run against a local
 TLS server with a throwaway key and fake archives, a temporary program directory and a fake
 daemon (`update_test.go`; `TestRunWhenTheDaemonCannotRestart` guards the order of
-daemon and adapters: no adapter is installed when the restart fails); each subpackage by its own; the command's arguments, questions,
+daemon and adapters: no adapter is installed when the restart fails; `refresh_test.go` the
+refresh of the setups: every status of the report, the failure that makes the run exit 1,
+a run with nothing to install that still refreshes, the order after the installations and
+the daemon); each subpackage by its own; the command's arguments, questions,
 output and mapping of the management methods (`cli/update_test.go`). Replacing the running
 daemon's programs, exec and the platform behaviour of a real release are checked on real
 machines before a release, not by the unit tests.

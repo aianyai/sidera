@@ -75,7 +75,8 @@ func (c *command) update(ctx context.Context, args []string) error {
 		}
 		client := &lazyClient{home: home}
 		defer client.Close()
-		cfg.Node = &managementNode{node: client, random: c.random, home: home}
+		cfg.Node = &managementNode{node: client, random: c.random, home: home,
+			setupEnv: setupEnv{home: home, homeIsDefault: c.isDefaultDataDir(home), program: program}, setupExec: execSetup{}}
 	}
 	return c.runUpdate(ctx, cfg, updateRequest{want: want, check: o.check, yes: o.yes})
 }
@@ -120,7 +121,7 @@ func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, e
 	case p.Restart:
 		fmt.Fprintf(out, "restart daemon (running %s)\n", p.DaemonVersion)
 	case !p.Daemon:
-		fmt.Fprintln(out, "daemon not running: it is not restarted and the adapters are not installed; run sidera update again once it runs")
+		fmt.Fprintln(out, "daemon not running: it is not restarted, the adapters are not installed and their setup is not refreshed; run sidera update again once it runs")
 	}
 	if len(p.Adapters) > 0 {
 		fmt.Fprintf(out, "install adapters %s\n", strings.Join(p.Adapters, ", "))
@@ -133,6 +134,9 @@ func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, e
 	}
 	if len(p.FaultedMissing) > 0 {
 		fmt.Fprintf(out, "faulted adapters not in this release (install them again by hand) %s\n", strings.Join(p.FaultedMissing, ", "))
+	}
+	if p.RefreshSetup {
+		fmt.Fprintln(out, "refresh the client setup that adapters recorded, where it is out of date")
 	}
 	if yes {
 		return true, nil
@@ -227,8 +231,34 @@ func (c *command) printUpdate(rep update.Report, runErr error) error {
 	if replaced {
 		line("adapters the old version directories of replaced adapters are removed at the next daemon start")
 	}
+	for _, st := range rep.Setup {
+		printSetupReport(line, st)
+	}
 	_, err := io.WriteString(c.Stdout, b.String())
 	return err
+}
+
+// printSetupReport writes what became of the client setup of one instance, in the
+// lines `adapter setup` uses for items and drift.
+func printSetupReport(line func(string, ...any), st update.SetupReport) {
+	if st.Message != "" {
+		line("setup %s %s %s", st.Instance, st.Status, st.Message)
+	} else {
+		line("setup %s %s", st.Instance, st.Status)
+	}
+	for _, it := range st.Items {
+		if it.Message != "" {
+			line("setup %s item %s %s %s", st.Instance, it.ID, it.Status, it.Message)
+		} else {
+			line("setup %s item %s %s", st.Instance, it.ID, it.Status)
+		}
+	}
+	for _, d := range st.Drift {
+		line("setup %s drift %s %s %s", st.Instance, d.ID, d.Problem, d.Summary)
+	}
+	if st.Fix != "" {
+		line("setup %s fix %s", st.Instance, st.Fix)
+	}
 }
 
 // lazyClient opens the management client at its first call, so that a run that
@@ -264,6 +294,10 @@ type managementNode struct {
 	node   caller
 	random io.Reader
 	home   string
+	// setupEnv and setupExec are what the refresh of an instance's setup runs with: the
+	// facts every request carries, and the way to start the setup program.
+	setupEnv  setupEnv
+	setupExec setupExecutor
 }
 
 func (n *managementNode) Status(ctx context.Context) (update.NodeStatus, error) {
@@ -352,4 +386,80 @@ func (n *managementNode) Install(ctx context.Context, dir string) (update.Instal
 		return update.Installed{}, err
 	}
 	return update.Installed{ID: out.Adapter.ID, Version: out.Adapter.Version, AlreadyCurrent: out.AlreadyCurrent, Replaced: out.Replaced}, nil
+}
+
+func (n *managementNode) Instances(ctx context.Context) ([]update.Instance, error) {
+	raw, err := n.node.Call(ctx, "adapters.list", manageapi.Request{})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Instances []struct {
+			Instance string `json:"instance"`
+			Adapter  string `json:"adapter"`
+		} `json:"instances"`
+	}
+	if err := decodeResult(raw, &out); err != nil {
+		return nil, err
+	}
+	instances := make([]update.Instance, len(out.Instances))
+	for i, in := range out.Instances {
+		instances[i] = update.Instance{ID: in.Instance, Adapter: in.Adapter}
+	}
+	return instances, nil
+}
+
+// RefreshSetup is `adapter setup <instance> --refresh`, run through the same session
+// and mode, with its result in the update's words. An instance that has no setup to
+// refresh is skipped, with the reason: its adapter declares none, the daemon has no
+// adapters.setup_info, the adapter's package cannot be loaded (installing it reported
+// that as a note of its own, and a condition the update already reports must not fail
+// every later update) or the adapter is not installed. Every other way the refresh
+// cannot be made is an error. The report carries the command that settles drift.
+func (n *managementNode) RefreshSetup(ctx context.Context, instance string) (update.SetupReport, error) {
+	s, err := openSetupSession(ctx, n.node, n.setupExec, instance, n.setupEnv, nil)
+	switch {
+	case errors.Is(err, errNoSetup):
+		return update.SetupReport{Status: update.SetupSkipped, Message: "the adapter declares no setup"}, nil
+	case errors.Is(err, errDaemonOlder):
+		return update.SetupReport{Status: update.SetupSkipped, Message: "the daemon has no adapter setup"}, nil
+	case err != nil:
+		switch apiwire.FromError(err).Code {
+		case "package_invalid":
+			return update.SetupReport{Status: update.SetupSkipped, Message: "the adapter's package cannot be loaded; see its adapter line"}, nil
+		case "adapter_unknown":
+			return update.SetupReport{Status: update.SetupSkipped, Message: "the adapter is not installed"}, nil
+		}
+		return update.SetupReport{}, err
+	}
+	res, _, err := runSetup(ctx, s, modeRefresh, setupDialog{})
+	if err != nil {
+		return update.SetupReport{}, err
+	}
+	rep := update.SetupReport{Status: update.SetupStatus(res.Status)}
+	for _, o := range res.Outcomes {
+		status, message := outcomeWords(o)
+		rep.Items = append(rep.Items, update.SetupItem{ID: o.ID, Status: string(status), Message: message})
+	}
+	for _, d := range res.Drift {
+		rep.Drift = append(rep.Drift, update.SetupDifference{ID: d.ID, Problem: string(d.Problem), Summary: d.Summary})
+	}
+	if why := setupFailure(res); why != "" {
+		rep.Status, rep.Message = update.SetupError, why
+	}
+	if len(rep.Drift) > 0 {
+		rep.Fix = n.setupFix(instance)
+	}
+	return rep, nil
+}
+
+// setupFix is the command that settles the drift of an instance's setup, as a person
+// types it: a node whose data directory is not the default is named by --home, as the
+// command a client starts for the MCP server names it.
+func (n *managementNode) setupFix(instance string) string {
+	words := []string{"sidera"}
+	if !n.setupEnv.homeIsDefault {
+		words = append(words, "--home", shellWord(runtime.GOOS, n.setupEnv.home))
+	}
+	return strings.Join(append(words, "adapter", "setup", instance), " ")
 }

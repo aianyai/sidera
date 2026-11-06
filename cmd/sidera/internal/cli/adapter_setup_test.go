@@ -681,6 +681,15 @@ func TestAdapterSetupShowsWhatALaterReleaseAdds(t *testing.T) {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
+	t.Run("an error that names no failed item", func(t *testing.T) {
+		r := newRig(t, clientA)
+		r.exec.byOp = map[adaptersetup.Op]string{"refresh": `{"version":1,"op":"refresh","status":"error","recorded":true}`}
+		_, _, err := r.run(modeRefresh, "", false)
+		var f *failure
+		if !errors.As(err, &f) || strings.Contains(f.message, "0 item(s)") || !strings.Contains(f.message, "without a failed item") {
+			t.Errorf("err %v, want the error said without a count of zero items", err)
+		}
+	})
 	t.Run("a status of the result stays strict", func(t *testing.T) {
 		r := newRig(t)
 		r.exec.byOp = map[adaptersetup.Op]string{"check": `{"version":1,"op":"check","status":"fine","recorded":true}`}

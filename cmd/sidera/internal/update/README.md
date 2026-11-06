@@ -24,14 +24,16 @@ this is the map.
   GitHub client and the daemon are fields, so a test supplies a throwaway key, a local
   TLS server and a fake node; the command passes the built-in key and nothing a user can
   set reaches them.
-- `Node` is the daemon as the run needs it (status, restart, adapters, install). The
-  command implements it over the management client; this package imports no
-  management code.
+- `Node` is the daemon as the run needs it (status, restart, adapters, install, and for
+  the setups the instances and the refresh of one instance's setup). The command
+  implements it over the management client, running the refresh through the same session
+  as `sidera adapter setup --refresh`; this package imports no management code.
 
 ## Files
 
 - `update.go`: the types (`Config`, `Node`, `Plan`, `Report`) and `NormalizeVersion`.
-- `run.go`: `Run`, `Check`, the refusals, the node steps and the channel (how the
+- `run.go`: `Run`, `Check`, the refusals, the node steps (restart, install the adapters,
+  refresh the setups) and the channel (how the
   files of a build are obtained; only a release archive is, other builds are refused
   with the way to update them).
 - `archive.go`: the update lock, the cache directory, download, digest check, unpack
@@ -53,7 +55,11 @@ this is the map.
   its program ran as the release asked for; a refusal leaves every file as it was.
 - The order of the steps is the order of the dependencies: programs, then the daemon
   (so that it runs the new version), then the adapters (a new package is installed
-  only into a daemon that reads it).
+  only into a daemon that reads it), then the refresh of their setups (it runs the
+  installed package's setup program).
+- The refresh of the setups is looked at on every run that has a daemon of the target
+  version, also when nothing is to be installed; it is the adapter, from its record, that
+  decides there is nothing to do.
 - Each step is skipped when its result is already there, so a run that was cut short is
   finished by running again.
 - The archive is written to a file, that file is checked against the signed digest and

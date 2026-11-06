@@ -92,8 +92,9 @@ it cannot; with `--json` it says
 `update_available` and `admitted`; it looks at the release and this program only, not at
 the daemon or the adapters, which `sidera update` without `--check` finishes), unpacks the archive for this platform, runs the
 unpacked program to see that it is the release, and asks `Update? [y/N]` (`--yes` skips the
-question; without a terminal the command refuses unless it has `--yes`). Then, for each of
-these that is not at the new version yet:
+question; without a terminal the command refuses unless it has `--yes`). Then it does these
+steps in order; steps 1 to 3 are done only for what is not at the new version yet, and step 4
+is made every time:
 
 1. it replaces `sidera`, and `sidera-adapter-console` when it is in the same directory,
    all or none; the previous programs stay beside them as `sidera.old` and
@@ -108,12 +109,26 @@ these that is not at the new version yet:
    install`, in place: nothing is disabled, the instances restart and keep their sessions).
    The old version directory of a replaced adapter is removed at the next start of the
    daemon, not at once. An adapter that is newer than the release, or whose version is
-   not a release version (one you built or got elsewhere), is left as it is and listed.
+   not a release version (one you built or got elsewhere), is left as it is and listed;
+4. it asks the adapter of each instance to refresh what `sidera adapter setup` put in
+   your agent client (the Skill, the registration of the `sidera` server), so that it
+   follows the new release. It asks you nothing, rewrites only what `sidera adapter
+   setup` recorded and that is still there, and never puts back what you removed. The
+   report has a `setup` line for each instance: `refreshed`, `none` (nothing was ever set
+   up), `drift` (something is gone, was edited or cannot work; the line names the
+   command, `sidera adapter setup <instance>`, that asks before it changes anything),
+   `skipped` (the adapter has no setup, or its package cannot be loaded or is not installed;
+   the adapter line says which) or `error` (the refresh failed; `sidera update`
+   then exits 1, and running it again retries). The refresh is made by the program that
+   runs the update, and 0.15 is the first release in which adapters have a setup, so there is
+   nothing recorded to refresh yet: after the upgrade to 0.15 run `sidera adapter setup
+   <instance>` once for each instance whose adapter has a setup; later updates refresh it.
 
-Only the steps that are missing are done, so a run that was interrupted, or that stopped
-at an error, is finished by running `sidera update` again. If no daemon runs, only the
+Steps 1 to 3 are done only where something is missing, and in step 4 each adapter decides
+whether there is anything to do, so a run that was interrupted, or that stopped at an error,
+is finished by running `sidera update` again. If no daemon runs, only the
 programs are replaced and it says so: start the daemon, then run `sidera update` once
-more to install the adapters (until then it does not report the node as current). `--version 0.12.1` (or `v0.12.1`, a pre-release too) names
+more to install the adapters and refresh their setup (until then it does not report the node as current). `--version 0.12.1` (or `v0.12.1`, a pre-release too) names
 a release instead of the latest. It manages the data directory of `--home` or
 `SIDERA_HOME` like every command; another node on the machine needs its own
 `sidera update --home <directory>`, which finds the programs already new and only

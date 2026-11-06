@@ -224,9 +224,33 @@ type fakeNode struct {
 	restartErr error
 	installErr map[string]error
 
+	// instances are the adapter instances; setups is what the refresh of an instance's
+	// setup answers (a refresh that is not listed finds no record: none), setupErr the
+	// refreshes that cannot be made.
+	instances []Instance
+	setups    map[string]SetupReport
+	setupErr  map[string]error
+
 	restarts []string // expected versions asked
 	installs []string // directories installed
-	t        *testing.T
+	// steps is every restart, installation and refresh in the order they were asked.
+	steps []string
+	t     *testing.T
+}
+
+func (n *fakeNode) Instances(context.Context) ([]Instance, error) {
+	return append([]Instance(nil), n.instances...), nil
+}
+
+func (n *fakeNode) RefreshSetup(_ context.Context, instance string) (SetupReport, error) {
+	n.steps = append(n.steps, "refresh "+instance)
+	if err := n.setupErr[instance]; err != nil {
+		return SetupReport{}, err
+	}
+	if rep, ok := n.setups[instance]; ok {
+		return rep, nil
+	}
+	return SetupReport{Status: SetupNone}, nil
 }
 
 func (n *fakeNode) Status(context.Context) (NodeStatus, error) {
@@ -238,6 +262,7 @@ func (n *fakeNode) Status(context.Context) (NodeStatus, error) {
 
 func (n *fakeNode) Restart(_ context.Context, expect string) error {
 	n.restarts = append(n.restarts, expect)
+	n.steps = append(n.steps, "restart")
 	if n.restartErr != nil {
 		return n.restartErr
 	}
@@ -255,6 +280,7 @@ func (n *fakeNode) Adapters(context.Context) ([]Adapter, error) {
 func (n *fakeNode) Install(_ context.Context, dir string) (Installed, error) {
 	id := filepath.Base(dir)
 	n.installs = append(n.installs, dir)
+	n.steps = append(n.steps, "install "+id)
 	if !filepath.IsAbs(dir) {
 		n.t.Errorf("install of %s: not an absolute path", dir)
 	}

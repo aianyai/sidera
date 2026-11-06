@@ -16,6 +16,15 @@ protocol has a version of its own.
   has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
   up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter. The
   adapters themselves start using it in the releases that follow.
+- **`sidera update` refreshes the client setup of your adapters.** After it installs the new
+  adapters, it asks the adapter of each instance to bring what `sidera adapter setup` recorded in
+  your agent client up to date, without asking you, and reports one `setup` line per instance:
+  `refreshed`, `none`, `drift` (with the `sidera adapter setup <instance>` command that puts it
+  right), `skipped` or `error` (which makes `sidera update` exit 1; running it again retries). The
+  step runs on every update that finds a daemon, so an update that was cut short is finished by
+  the next. 0.15 is the first release in which adapters have a setup, so an update to it has
+  nothing recorded to refresh: after upgrading to 0.15 run `sidera adapter setup <instance>` once
+  for each instance whose adapter has a setup; later updates refresh it.
 - **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).

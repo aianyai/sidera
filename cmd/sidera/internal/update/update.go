@@ -35,6 +35,15 @@ type Node interface {
 	Adapters(ctx context.Context) ([]Adapter, error)
 	// Install installs the adapter package in dir, an absolute path.
 	Install(ctx context.Context, dir string) (Installed, error)
+	// Instances lists the adapter instances.
+	Instances(ctx context.Context) ([]Instance, error)
+	// RefreshSetup runs the refresh of the client setup of one instance, the same
+	// refresh as `sidera adapter setup <instance> --refresh`. An instance whose adapter
+	// declares no setup answers a report with the status SetupSkipped; an error is a
+	// refresh that could not be made at all (the report of a refresh that ran and had an
+	// item fail is a report with the status SetupError). The run fills the report's
+	// Instance and Adapter.
+	RefreshSetup(ctx context.Context, instance string) (SetupReport, error)
 }
 
 // ErrNotRunning is what Node.Status reports when no daemon runs.
@@ -53,6 +62,12 @@ type Adapter struct {
 	// of the package itself, or of one of the adapter's instances for the sake of it.
 	// Its version then says nothing of what runs, and it may be empty.
 	Faulted bool
+}
+
+// Instance is an adapter instance.
+type Instance struct {
+	ID      string
+	Adapter string
 }
 
 // Installed is the answer to an installation.
@@ -123,6 +138,9 @@ type Plan struct {
 	// release does not have, which the owner has to install by hand.
 	Faulted        []string
 	FaultedMissing []string
+	// RefreshSetup is true when the client setup of the instances that have one is to be
+	// refreshed, which every run does while the daemon runs.
+	RefreshSetup bool
 }
 
 // Release is what is known of the release asked for and of the running program's
@@ -153,12 +171,16 @@ type Verdict struct {
 type Report struct {
 	Release
 	// AlreadyCurrent is true when the programs, the daemon and the adapters were all
-	// at the target and a run had nothing to do. It is never true while no daemon
-	// runs, because the adapters cannot be looked at then.
+	// at the target and a run had nothing to do: no instance's client setup was
+	// refreshed or failed to be either (drift is not something a run does). It is never
+	// true while no daemon runs, because the adapters cannot be looked at then.
 	AlreadyCurrent bool            `json:"already_current,omitempty"`
 	Program        ProgramReport   `json:"program"`
 	Daemon         DaemonReport    `json:"daemon"`
 	Adapters       []AdapterReport `json:"adapters,omitempty"`
+	// Setup is what became of the client setup of each adapter instance, in the order
+	// the daemon lists them. It is empty while no daemon runs.
+	Setup []SetupReport `json:"setup,omitempty"`
 }
 
 // ProgramReport is what became of the programs.
@@ -199,11 +221,65 @@ type AdapterReport struct {
 	Error string `json:"error,omitempty"`
 }
 
+// SetupStatus says what became of the refresh of one instance's client setup.
+type SetupStatus string
+
+const (
+	// SetupRefreshed: a record exists and the recorded items that need it were
+	// brought up to date; Items say which, which may be none.
+	SetupRefreshed SetupStatus = "refreshed"
+	// SetupNone: nothing was ever set up for the instance, or it was undone.
+	SetupNone SetupStatus = "none"
+	// SetupDrift: something recorded is gone, was changed by hand or cannot work; a
+	// person decides, and Fix is the command that does.
+	SetupDrift SetupStatus = "drift"
+	// SetupSkipped: there is no setup to refresh: the instance's adapter declares none,
+	// the daemon cannot say, the adapter's package cannot be loaded, or the adapter is
+	// not installed. Message says which.
+	SetupSkipped SetupStatus = "skipped"
+	// SetupError: the refresh could not be made or an item of it failed; Message
+	// says why. It makes the run fail.
+	SetupError SetupStatus = "error"
+)
+
+// SetupReport is what became of the client setup of one instance.
+type SetupReport struct {
+	Instance string      `json:"instance"`
+	Adapter  string      `json:"adapter"`
+	Status   SetupStatus `json:"status"`
+	// Message says why the setup was skipped or the refresh failed.
+	Message string `json:"message,omitempty"`
+	// Items are what the refresh did, item by item.
+	Items []SetupItem `json:"items,omitempty"`
+	// Drift is what a refresh found and leaves to a person.
+	Drift []SetupDifference `json:"drift,omitempty"`
+	// Fix is the command that puts drift right, as the node renders it for the person
+	// who runs it; it is set whenever Drift is not empty.
+	Fix string `json:"fix,omitempty"`
+}
+
+// SetupItem is what became of one recorded item: its id, the status (done, skipped or
+// failed, or one a later release adds) and what the adapter said.
+type SetupItem struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// SetupDifference is one difference a refresh found: the item's id, how it differs
+// (missing, changed, stale, broken, needs_setup, or one a later release adds) and what
+// puts it right.
+type SetupDifference struct {
+	ID      string `json:"id"`
+	Problem string `json:"problem"`
+	Summary string `json:"summary"`
+}
+
 // Acted says whether a run changed or restored anything, or found that nothing needed
 // changing: the cases in which its report is worth showing although it failed.
 func (r Report) Acted() bool {
 	p := r.Program
-	return r.AlreadyCurrent || p.Updated || len(p.Restored) > 0 || len(p.Left) > 0 || r.Daemon.Restarted || len(r.Adapters) > 0
+	return r.AlreadyCurrent || p.Updated || len(p.Restored) > 0 || len(p.Left) > 0 || r.Daemon.Restarted || len(r.Adapters) > 0 || len(r.Setup) > 0
 }
 
 // NormalizeVersion reads the version a person asked for: the release version

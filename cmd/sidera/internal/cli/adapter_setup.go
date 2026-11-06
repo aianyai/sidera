@@ -354,11 +354,7 @@ func (c *command) printSetup(instance string, res adaptersetup.Result, applied b
 		}
 	}
 	for _, o := range res.Outcomes {
-		status, message := o.Status, o.Message
-		if o.Failed() && o.Status != adaptersetup.OutcomeFailed {
-			// A status of a later release: counted as a failure, with the adapter's words.
-			status, message = adaptersetup.OutcomeFailed, strings.TrimSpace(fmt.Sprintf("(its status %q is not known to this program) %s", o.Status, o.Message))
-		}
+		status, message := outcomeWords(o)
 		if message != "" {
 			line("item %s %s %s", o.ID, status, message)
 		} else {
@@ -372,10 +368,20 @@ func (c *command) printSetup(instance string, res adaptersetup.Result, applied b
 	return err
 }
 
-// setupVerdict turns a result into the exit of the command: items that failed, and
-// drift that a check or a refresh found, are exit 1; a record that does not exist is
-// not drift.
-func setupVerdict(instance string, res adaptersetup.Result) error {
+// outcomeWords is how an outcome is shown, here and in the report of `sidera update`:
+// its status and the adapter's message. A status of a later release, which counts as a
+// failure, is shown as one with a note that this program does not know it.
+func outcomeWords(o adaptersetup.Outcome) (status adaptersetup.OutcomeStatus, message string) {
+	if o.Failed() && o.Status != adaptersetup.OutcomeFailed {
+		return adaptersetup.OutcomeFailed, strings.TrimSpace(fmt.Sprintf("(its status %q is not known to this program) %s", o.Status, o.Message))
+	}
+	return o.Status, o.Message
+}
+
+// setupFailure says in words how the run of a setup program failed, or "" when it did
+// not: an item failed, or the program reported an error as a whole. It is the one place
+// that decides it, for the exit of `adapter setup` and for the report of `sidera update`.
+func setupFailure(res adaptersetup.Result) string {
 	failed := 0
 	for _, o := range res.Outcomes {
 		if o.Failed() {
@@ -383,9 +389,22 @@ func setupVerdict(instance string, res adaptersetup.Result) error {
 		}
 	}
 	switch {
-	case res.Status == adaptersetup.StatusError || failed > 0:
-		return &failure{fmt.Sprintf("the setup of %s did not complete: %d item(s) failed (see above)", instance, failed)}
-	case res.Status == adaptersetup.StatusDrift:
+	case failed > 0:
+		return fmt.Sprintf("%d item(s) failed", failed)
+	case res.Status == adaptersetup.StatusError:
+		return "the adapter reported an error without a failed item"
+	}
+	return ""
+}
+
+// setupVerdict turns a result into the exit of the command: items that failed, and
+// drift that a check or a refresh found, are exit 1; a record that does not exist is
+// not drift.
+func setupVerdict(instance string, res adaptersetup.Result) error {
+	if why := setupFailure(res); why != "" {
+		return &failure{fmt.Sprintf("the setup of %s did not complete: %s (see above)", instance, why)}
+	}
+	if res.Status == adaptersetup.StatusDrift {
 		return &failure{fmt.Sprintf("%s has drifted from its setup: %d difference(s) (see above)", instance, len(res.Drift))}
 	}
 	return nil

@@ -53,7 +53,8 @@ and its bound values. A local value stays attached, including a body spelled
   the questions, written to stderr and read from one reader, and `applyInStages` the one place that
   honours an item's `requires` once the questions are answered (an item whose required item did not
   complete is not sent to the adapter). The executor and the dialog are the seams the
-  tests use; the same session is what `update` will use to refresh. `prompt.go` is the `[y/N]` question and the
+  tests use; the same session is what `update` refreshes the setups with (`managementNode.RefreshSetup` in
+  `update.go` runs `runSetup` in refresh mode and puts the result in the update's words). `prompt.go` is the `[y/N]` question and the
   "no terminal, add --yes" refusal that `update` and `adapter setup` share. `program.go` is `programPath`, the path
   of this program that `update`, `adapter setup` and `setup controller` all name. `refuseRemoveWhileSetUp` is the guard `manage` runs before
   `adapters.remove`: a `check` of the instance's setup, and a refusal when it has a record.
