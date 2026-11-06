@@ -255,6 +255,34 @@ error that says to enable the instance and start the daemon so that it runs once
 
 Asking a person y/N is not in the SDK; the CLI asks.
 
+### Running a client's command line
+
+`ClientCommand.Run` is how a setup runs `claude`, `codex` and the like. Each rule is there
+so that what setup sees and changes is the user's own client configuration, and so that a
+run always ends:
+
+- **The program is an absolute path, run without a shell.** Nothing is looked up on `PATH`
+  at run time and no argument is ever interpreted by a shell.
+- **The working directory is required, and is a directory with no project configuration
+  of its own.** A client reads the configuration of the project it is started in (a
+  trusted project's `.codex/config.toml`, a `.mcp.json`), so run in the caller's
+  directory it would report, and change, something other than the user's configuration,
+  differing from one invocation of setup to the next.
+- **Standard input is the null device** (a nil `Stdin` is that on every platform), so a
+  client that would prompt reads end of file and fails instead of waiting on a terminal.
+- **The run is bounded.** A program that outlives its limit is killed and the error is a
+  timeout naming the program and the limit (`context.DeadlineExceeded`); a grandchild that
+  holds the output pipes open delays the return by at most a fixed 2 seconds, not for as
+  long as it lives. The timeout is reported before the exit status, because a killed
+  program's status would otherwise read as an exit code.
+- **The environment is the caller's policy**; nil is the caller's own.
+- **A non-zero exit is a result, not an error.** What an exit code means is the adapter's
+  to say (`claude mcp get` of a missing server exits non-zero and that is the answer;
+  `codex mcp remove` of one exits 0). A program that could not be started is a
+  `*NotStartedError` wrapping the system's reason, so "the client is not installed"
+  (`errors.Is(err, os.ErrNotExist)`) is told from "the client failed". `Failure` words a
+  command that did not do what was asked, with the last 2000 bytes of its standard error.
+
 ### Editing a client's JSON file
 
 `EditJSONFile(path, edit)` is how a setup edits a file the client owns and the user
