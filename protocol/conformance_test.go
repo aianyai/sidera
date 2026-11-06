@@ -548,6 +548,17 @@ func TestManifestRecvWaitLimitsMatchSchema(t *testing.T) {
 	}
 }
 
+// TestManifestSetupMatchesSchema: setup is judged by the same definition as
+// entry, so the program rules of the two cannot drift apart.
+func TestManifestSetupMatchesSchema(t *testing.T) {
+	raw := rawSchema(t, "manifest")
+	for _, member := range []string{"entry", "setup"} {
+		if got := sub(t, raw, "properties", member)["$ref"]; got != "#/$defs/Program" {
+			t.Errorf("%s: schema %v, want the Program definition", member, got)
+		}
+	}
+}
+
 func anyStrings(tb testing.TB, v any) []string {
 	tb.Helper()
 	list, ok := v.([]any)

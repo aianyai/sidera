@@ -84,6 +84,7 @@ func TestWritePackageForWindowsNamesTheProgramWithItsExtension(t *testing.T) {
 			Version:         "1.0.0",
 			Protocol:        adapterproto.Range{Min: 1, Max: 1},
 			Entry:           Entry{Program: program},
+			Setup:           &Entry{Program: program, Args: []string{"setup"}},
 			Platforms:       []Platform{{OS: "windows", Arch: "amd64"}},
 		}
 		dir := filepath.Join(t.TempDir(), "pkg")
@@ -100,6 +101,13 @@ func TestWritePackageForWindowsNamesTheProgramWithItsExtension(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(got.Entry.Program))); err != nil {
 			t.Errorf("%s: the program the manifest names is not in the package: %v", program, err)
+		}
+		// A setup that runs the one binary of the package names it the same way.
+		if got.Setup == nil || got.Setup.Program != got.Entry.Program {
+			t.Errorf("%s: setup %+v does not name the program %q", program, got.Setup, got.Entry.Program)
+		}
+		if m.Setup.Program != program {
+			t.Errorf("%s: WritePackage changed the caller's setup to %q", program, m.Setup.Program)
 		}
 	}
 }

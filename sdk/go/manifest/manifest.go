@@ -121,6 +121,12 @@ type Manifest struct {
 	Protocol adapterproto.Range `json:"protocol"`
 	// Entry says how to start the adapter.
 	Entry Entry `json:"entry"`
+	// Setup, when present, says how to run the adapter's client setup: the
+	// program the core CLI runs for an instance to bring its client's own
+	// configuration (plugins, tool registrations, permissions) in line with the
+	// instance. An adapter without it has no setup. The program is judged exactly
+	// like Entry's.
+	Setup *Entry `json:"setup,omitempty"`
 	// Platforms lists where the package runs.
 	Platforms []Platform `json:"platforms"`
 	// Requires lists programs the adapter needs, for display and the install
@@ -138,7 +144,8 @@ type Manifest struct {
 	AckMarkers *AckMarkers `json:"ack_markers,omitempty"`
 }
 
-// Entry says how to start the adapter.
+// Entry is a program inside the package and its arguments: how to start the
+// adapter (Manifest.Entry) or how to run its client setup (Manifest.Setup).
 type Entry struct {
 	// Program is a path inside the package: not absolute, with no ".." segment.
 	Program string   `json:"program"`
@@ -315,6 +322,11 @@ func (m Manifest) Validate() error {
 	if err := m.Entry.validate(); err != nil {
 		return under("entry", err)
 	}
+	if m.Setup != nil {
+		if err := m.Setup.validate(); err != nil {
+			return under("setup", err)
+		}
+	}
 	if n := len(m.Platforms); n < 1 || n > 64 {
 		return fail("platforms", "%d entries, need 1..64", n)
 	}
@@ -371,7 +383,7 @@ func length(s string, min, max int) error {
 	return nil
 }
 
-// Path rules of the entry program, in the form the schema states them: not
+// Path rules of the entry and setup programs, in the form the schema states them: not
 // absolute (a leading slash or backslash, or a drive letter) and no ".."
 // segment, with either slash or backslash as the separator.
 var (

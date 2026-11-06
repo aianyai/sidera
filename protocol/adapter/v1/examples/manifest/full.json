@@ -12,6 +12,12 @@
       "--stdio"
     ]
   },
+  "setup": {
+    "program": "bin/sidera-adapter-example",
+    "args": [
+      "setup"
+    ]
+  },
   "platforms": [
     {
       "os": "darwin",

@@ -66,7 +66,12 @@ cut short by a crash, a power cut or Ctrl-C is finished by running again:
 
 The order is the order of the dependencies. The adapters come last because a package is
 installed only into a daemon that reads it: an old daemon decodes a new manifest strictly
-and may refuse it. With no daemon running the adapters cannot be listed or installed, so the
+and refuses one that has a member it does not know (a 0.14 daemon refuses a package whose
+manifest has `setup`: `manifest: setup: unknown field`). The manifest grows in place, with
+no `manifest_version` bump, and that is safe only because of this order, so it is an
+invariant: the daemon is restarted into the new release before any adapter package is
+installed. Installing first would make the old daemon refuse the new packages, and the
+adapters would stay at the old version with the new programs around them. With no daemon running the adapters cannot be listed or installed, so the
 run replaces the programs and tells the owner to start the daemon and run `update` again;
 that second run replaces nothing and installs the adapters. A run with nothing to do (all
 three at the target, the adapters having been looked at) says `already_current` and downloads
@@ -256,7 +261,8 @@ before it ships.
 `cmd/sidera/internal/update` (the run, `Run` and `Check`); its subpackages; the command and
 the management client in `cmd/sidera/internal/cli/update.go`. Tests: the run against a local
 TLS server with a throwaway key and fake archives, a temporary program directory and a fake
-daemon (`update_test.go`); each subpackage by its own; the command's arguments, questions,
+daemon (`update_test.go`; `TestRunWhenTheDaemonCannotRestart` guards the order of
+daemon and adapters: no adapter is installed when the restart fails); each subpackage by its own; the command's arguments, questions,
 output and mapping of the management methods (`cli/update_test.go`). Replacing the running
 daemon's programs, exec and the platform behaviour of a real release are checked on real
 machines before a release, not by the unit tests.

@@ -530,7 +530,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Eight
+reader of an earlier shape is deployed that the change could break. Nine
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -539,6 +539,12 @@ have sent to a new version:
 - the manifest member `recv_wait_limits`, a new member of the manifest object.
   An older daemon decodes the manifest strictly and refuses a manifest that has
   the member;
+- the manifest member `setup`, how to run the adapter's client setup. An older
+  daemon refuses a manifest that has it (`setup: unknown field`). The only older
+  daemons that exist are Sidera's own releases, and `sidera update` restarts the
+  daemon before it installs adapter packages, so `update` never installs a
+  package into a daemon older than it; a newer package installed by hand into an
+  older daemon is refused with that error (see [update](../update/README.md));
 - the application code `node_busy` (`1012`). An older SDK's peer reads it as an
   application code it has no name for, which the effect rule already treats as
   no effect; only a reader that checks the error object against its own code
@@ -1671,6 +1677,7 @@ its entry) for the `package` subcommand of each adapter.
   "version": "0.3.1",
   "protocol": {"min": 1, "max": 1},
   "entry": {"program": "bin/sidera-adapter-example", "args": ["--stdio"]},
+  "setup": {"program": "bin/sidera-adapter-example", "args": ["setup"]},
   "platforms": [{"os": "darwin", "arch": "arm64"}, {"os": "linux", "arch": "amd64"}],
   "requires": [{"program": "example-runtime", "os": ["darwin", "linux"]}],
   "budgets": [{"frontend": "cli", "unit": "chars", "limit": 27000},
@@ -1688,7 +1695,10 @@ error.
 The rules are in [sdk/go/manifest/README.md](../../../sdk/go/manifest/README.md).
 In short: `id` and `version` are checked as the adapter reports them in
 `initialize`, and must equal them; the protocol range and the adapter's
-announcement are checked against each other; configuration uses a small field vocabulary; budgets map to the output
+announcement are checked against each other; `setup` is optional and declares the
+program (and arguments) the core CLI runs to bring an instance's client in line with
+the instance, a package path judged exactly like `entry`'s, one rule in the schema
+(`$defs/Program`) and in `manifest.Entry`; an adapter without it has no setup; configuration uses a small field vocabulary; budgets map to the output
 budget of `recv` for that front end, and a front end without one gets the default;
 `recv_wait_limits` give, per agent front end (`cli` or `mcp`, never `direct`), the
 longest an agent's `recv` may wait for a message, in whole seconds from 1 to 120
@@ -1753,6 +1763,11 @@ does not remove it.
   agent front ends; a wait needs no finer limit. The cap of 120 lives in
   `manifest.MaxRecvWaitSeconds` and the default in `adapterreg.DefaultRecvWait`,
   nowhere else.
+- **Setup is a program in the package, not a protocol method.** It runs from the
+  core CLI at the owner's request, when no adapter process need be running, and
+  it writes into the client's own configuration, which the adapter's runtime
+  session never does. The manifest therefore declares which program the CLI
+  runs, with the same path rules as `entry` so that one definition judges both.
 - **The budget is declared per front end** because the runtime shows different
   amounts through different tool paths; the author subtracts the safety margin so
   the daemon uses the limit as given.
@@ -1763,7 +1778,8 @@ does not remove it.
   `TestPlatformAndRequirementRules`,
   `TestConfigFieldRules`, `TestBudgetRules`, `TestRecvWaitLimitRules`,
   `TestParseRecvWaitLimits`, `TestAckMarkerShape`, `TestParse`, `FuzzParse`;
-  `protocol/conformance_test.go` `TestManifestRecvWaitLimitsMatchSchema`;
+  `protocol/conformance_test.go` `TestManifestRecvWaitLimitsMatchSchema` and
+  `TestManifestSetupMatchesSchema`;
   `internal/adapterreg` `TestAdmitDecisions` (a limit for an undeclared front
   end, a limit for `direct`) and `TestRecvWait`.
 

@@ -43,6 +43,11 @@ func srcPackage(t testing.TB, id, version string, extra map[string]string) *fsxt
 	return mem
 }
 
+// withSetup is the manifest of manifestOf with a setup program added.
+func withSetup(id, version, program string) string {
+	return strings.Replace(manifestOf(id, version), `"platforms"`, `"setup":{"program":"`+program+`","args":["setup"]},"platforms"`, 1)
+}
+
 func suffixReader() *bytes.Reader {
 	return bytes.NewReader([]byte{0xab, 0xcd, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06})
 }
@@ -216,6 +221,9 @@ func TestRefusedStageLeavesNothing(t *testing.T) {
 			m := srcPackage(t, "fresh", "0.1.0", nil)
 			removeFile(t, m, "bin/sidera-adapter-example")
 			return m
+		}},
+		{"a setup program that is not in the package", func() fsx.Reader {
+			return srcPackage(t, "fresh", "0.1.0", map[string]string{"sidera-adapter.json": withSetup("fresh", "0.1.0", "bin/sidera-setup")})
 		}},
 	}
 	for _, r := range rows {
@@ -1024,8 +1032,9 @@ func (m *modeFS) Rename(tag fsx.Tag, from, to string) error {
 	return err
 }
 
-// The entry program of a staged package is the one file that is executable;
-// every other file is private to the owner.
+// The entry program and the setup program of a staged package are the files that
+// are executable (one file when the setup runs the entry program); every other
+// file is private to the owner.
 func TestStagedFilesKeepTheirModes(t *testing.T) {
 	mem := fsxtest.NewMem()
 	fsys := &modeFS{Mem: mem, temp: map[string]fsx.Mode{}, final: map[string]fsx.Mode{}}
@@ -1035,12 +1044,16 @@ func TestStagedFilesKeepTheirModes(t *testing.T) {
 	putTree(t, mem, validTree(t))
 	c := rg.load()
 
-	staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
+	staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", map[string]string{
+		"sidera-adapter.json": withSetup("example", "2.0.0", "bin/sidera-setup"),
+		"bin/sidera-setup":    "#!setup\n",
+	}), suffixReader())
 	if err != nil {
 		t.Fatalf("StageAdapter: %v", err)
 	}
 	want := map[string]fsx.Mode{
 		path.Join(staged.Dir, "bin/sidera-adapter-example"): fsx.ModePrivateExec,
+		path.Join(staged.Dir, "bin/sidera-setup"):           fsx.ModePrivateExec,
 		path.Join(staged.Dir, "sidera-adapter.json"):        fsx.ModePrivate,
 		path.Join(staged.Dir, "lib/a/b.txt"):                fsx.ModePrivate,
 		path.Join(staged.Dir, "README"):                     fsx.ModePrivate,
@@ -1062,6 +1075,7 @@ func TestStagedFilesKeepTheirModes(t *testing.T) {
 
 const richManifest = `{"manifest_version":1,"id":"rich","version":"0.1.0","protocol":{"min":1,"max":1},` +
 	`"entry":{"program":"bin/sidera-adapter-example","args":["--serve"]},` +
+	`"setup":{"program":"bin/sidera-adapter-example","args":["setup"]},` +
 	`"platforms":[{"os":"linux","arch":"amd64"},{"os":"darwin","arch":"arm64"}],` +
 	`"requires":[{"program":"git","os":["linux","darwin"]}],` +
 	`"config":{"instance":[{"key":"limit","type":"integer","title":"Limit","default":3,"min":1,"max":9}],` +
@@ -1100,6 +1114,7 @@ func TestAdaptersReturnsCopiesOfTheManifests(t *testing.T) {
 
 	m := find()
 	m.Entry.Args[0] = "x"
+	m.Setup.Args[0] = "x"
 	m.Platforms[0].OS = "x"
 	m.Requires[0].OS[0] = "x"
 	m.Config.Instance[0].Title = "x"

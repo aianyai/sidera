@@ -384,8 +384,8 @@ of the directory. A package never changes after it is installed.
 
 `digest` is the SHA-256, in lower case hex, of the package's contents as staging
 copied them: every directory by its relative path and every file by its path, length
-and bytes, in sorted order. A file's mode is not part of it (the program's follows from
-the manifest, which is). It is how an installation tells the same package from a
+and bytes, in sorted order. A file's mode is not part of it (which files are executable
+follows from the manifest, which is hashed). It is how an installation tells the same package from a
 rebuilt one of the same version. `revision` numbers the directories of one version: the
 directory of revision 0 is `versions/<version>` and of revision n `versions/<version>~n` (a
 `~` is not part of a version, so the names never meet). An installation takes the first
@@ -400,8 +400,9 @@ invalid, like any optional field written empty.
 
 1. Staging, outside the single writer loop and holding none of its locks: the
    package is read through a reader
-   rooted at its directory (its manifest must parse, its entry program must be in
-   it, and no name in it may begin with `.tmp-`, `.trash-` or `.stage-`, which
+   rooted at its directory (its manifest must parse, its entry program and its
+   setup program, when the manifest declares one, must be in it, and no name in it
+   may begin with `.tmp-`, `.trash-` or `.stage-`, which
    the cleanup would remove silently), then copied to
    `versions/.stage-<hex>` beside the versions, because a rename needs one
    parent. The copy's manifest is parsed again and must name the same adapter

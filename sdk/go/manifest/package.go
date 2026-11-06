@@ -32,8 +32,12 @@ func Encode(m Manifest) ([]byte, error) {
 // for Windows (a single platform whose os is windows) the program gets the
 // extension `.exe` if the manifest names it without; Windows starts no file
 // without an executable extension, and every adapter's manifest therefore names
-// the program the same way on every platform. The manifest written carries the
-// program as it was written. Nothing is written when the manifest is invalid or
+// the program the same way on every platform. A setup program that names the
+// same binary gets the extension with it; any other setup program is a file the
+// caller adds to the package before WritePackage runs (the manifest is written
+// last, so a package cut short has no manifest), which the installer requires to
+// be there; on Windows it carries its own `.exe` name. The
+// manifest written carries the program as it was written. Nothing is written when the manifest is invalid or
 // the binary cannot be opened; the manifest is written last, so a package that was
 // cut short has no manifest to install from. Files already in dir are kept, and
 // those with the same names are replaced: refusing a directory that is not empty is
@@ -43,6 +47,13 @@ func WritePackage(dir string, m Manifest, binary string) error {
 		return err
 	}
 	if len(m.Platforms) == 1 && m.Platforms[0].OS == "windows" && !strings.HasSuffix(strings.ToLower(m.Entry.Program), ".exe") {
+		// A setup that runs the package's one binary names it as the entry does.
+		// The manifest is the caller's: setup is copied before it is changed.
+		if m.Setup != nil && m.Setup.Program == m.Entry.Program {
+			setup := *m.Setup
+			setup.Program += ".exe"
+			m.Setup = &setup
+		}
 		m.Entry.Program += ".exe"
 	}
 	raw, err := Encode(m)

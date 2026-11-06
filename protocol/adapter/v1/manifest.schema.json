@@ -18,23 +18,12 @@
       "$ref": "types.schema.json#/$defs/Range"
     },
     "entry": {
-      "description": "How to start the adapter. The program is a path inside the package: not absolute, no '..' segment.",
-      "type": "object",
-      "required": ["program"],
-      "additionalProperties": false,
-      "properties": {
-        "program": {
-          "type": "string", "minLength": 1, "maxLength": 256,
-          "not": {
-            "anyOf": [
-              { "pattern": "^[/\\\\]" },
-              { "pattern": "^[A-Za-z]:" },
-              { "pattern": "(^|[/\\\\])\\.\\.($|[/\\\\])" }
-            ]
-          }
-        },
-        "args": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "maxLength": 1024 } }
-      }
+      "description": "How to start the adapter.",
+      "$ref": "#/$defs/Program"
+    },
+    "setup": {
+      "description": "How to run the adapter's client setup: the program the core CLI runs for an instance to bring its client's own configuration in line with the instance. Absent when the adapter has no setup.",
+      "$ref": "#/$defs/Program"
     },
     "platforms": {
       "description": "The operating systems and architectures the package is built for, in Go's GOOS and GOARCH vocabulary.",
@@ -109,6 +98,25 @@
     }
   },
   "$defs": {
+    "Program": {
+      "description": "A program inside the package and its arguments. The program is a path inside the package: not absolute, no '..' segment.",
+      "type": "object",
+      "required": ["program"],
+      "additionalProperties": false,
+      "properties": {
+        "program": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "not": {
+            "anyOf": [
+              { "pattern": "^[/\\\\]" },
+              { "pattern": "^[A-Za-z]:" },
+              { "pattern": "(^|[/\\\\])\\.\\.($|[/\\\\])" }
+            ]
+          }
+        },
+        "args": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "maxLength": 1024 } }
+      }
+    },
     "GOOS": {
       "enum": ["aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows", "zos"]
     },

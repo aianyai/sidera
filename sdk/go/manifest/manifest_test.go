@@ -18,6 +18,7 @@ func base() manifest.Manifest {
 	return manifest.Manifest{
 		ManifestVersion: 1, ID: "example", Version: "0.3.1", Protocol: adapterproto.Range{Min: 1, Max: 1},
 		Entry:     manifest.Entry{Program: "bin/sidera-adapter-example", Args: []string{"--stdio"}},
+		Setup:     &manifest.Entry{Program: "bin/sidera-adapter-example", Args: []string{"setup"}},
 		Platforms: []manifest.Platform{{OS: "linux", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"}},
 		Requires:  []manifest.Requirement{{Program: "git", OS: []string{"linux", "darwin"}}},
 		Config: &manifest.Config{
@@ -112,6 +113,16 @@ func TestEntryRules(t *testing.T) {
 		{"65 arguments", func(m *manifest.Manifest) { m.Entry.Args = make([]string, 65) }, "entry.args", false},
 		{"an argument of 1024 characters", func(m *manifest.Manifest) { m.Entry.Args = []string{repeat("a", 1024)} }, "", false},
 		{"an argument of 1025 characters", func(m *manifest.Manifest) { m.Entry.Args = []string{repeat("a", 1025)} }, "entry.args[0]", false},
+	})
+}
+
+// setup is judged by the same rules as entry (one Entry type), so the full
+// table above is not repeated: this proves the wiring and where errors point.
+func TestSetupRules(t *testing.T) {
+	runManifestRows(t, []mrow{
+		{"a valid setup", func(m *manifest.Manifest) { m.Setup = &manifest.Entry{Program: "bin/setup", Args: []string{"x"}} }, "", false},
+		{"a setup program that climbs out", func(m *manifest.Manifest) { m.Setup = &manifest.Entry{Program: "../setup"} }, "setup.program", false},
+		{"65 setup arguments", func(m *manifest.Manifest) { m.Setup = &manifest.Entry{Program: "setup", Args: make([]string, 65)} }, "setup.args", false},
 	})
 }
 

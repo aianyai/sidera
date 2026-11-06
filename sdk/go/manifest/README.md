@@ -1,8 +1,8 @@
 # manifest
 
 The adapter package manifest, `sidera-adapter.json`: the file at the root of an
-adapter package that says what the adapter is, how to start it, where it runs,
-what it needs, what configuration
+adapter package that says what the adapter is, how to start it, how to run its client setup,
+where it runs, what it needs, what configuration
 it takes, how much output one `recv` may print for it and how long one `recv` may
 wait for a message. `Parse` reads it
 strictly and `Validate` states the structural rules once. The daemon reads the
@@ -20,7 +20,7 @@ the same rules in JSON Schema.
 | `Parse(data)` | Strict decode and `Validate`; the only way to get a `Manifest` from bytes |
 | `Manifest.Validate()` | Every structural rule; use it on a manifest built in code |
 | `Encode(m)` | The text of `sidera-adapter.json` for a manifest built in code: validated, indented, with a trailing newline |
-| `WritePackage(dir, m, binary)` | An installable package directory: the manifest and a copy of the binary built for the platform at the manifest's `entry.program`, with `.exe` added to both for a Windows package; what each adapter's `package` subcommand ends in |
+| `WritePackage(dir, m, binary)` | An installable package directory: the manifest and a copy of the binary built for the platform at the manifest's `entry.program`, with `.exe` added to both for a Windows package, and to a setup program that names the same binary; what each adapter's `package` subcommand ends in |
 | `FieldTypes()`, `BudgetFrontends()`, `Units()`, `KnownOS()`, `KnownArch()` | The vocabularies the schema is compared with |
 
 ## Rules
@@ -35,6 +35,10 @@ the same rules in JSON Schema.
 - `entry.program` is a path inside the package: not absolute (no leading slash or
   backslash, no drive letter) and with no `..` segment, split at either kind of
   slash. `entry.args` are strings.
+- `setup` is optional and has the shape and the rules of `entry` (both are an
+  `Entry`): the program, with its arguments, that the core CLI runs to bring an
+  instance's client in line with the instance. An adapter without it has no setup.
+  Errors name it as `setup.program` or `setup.args[i]`.
 - `platforms` is a non-empty list of distinct `os`/`arch` pairs in Go's GOOS and
   GOARCH vocabulary. `requires` is for display and the install check only; the
   probe is what proves a program works.
@@ -59,14 +63,21 @@ the same rules in JSON Schema.
   (`adapterreg.DefaultRecvWait`). A direct endpoint's `endpoint.recv` has its own
   cap, `adapterproto.MaxWaitSeconds`, which the adapter uses in `wait_s`; this
   field does not govern it.
-  Compatibility: the member was added to manifest version 1 in place, while no
-  implementation exists outside this repository, so an older daemon, which
-  decodes a manifest strictly, refuses a manifest that has it; a member added
-  after that needs a new `manifest_version`.
 - `ack_markers` has two lists, `replaced` and `truncated`, of markers. A marker
   is `{literal}` or `{regexp}`, exactly one. **Only that shape is checked here.**
   Whether the text is usable is decided in one place, when the daemon compiles the
   markers as it admits the adapter.
+
+## Compatibility
+
+`manifest_version` stays 1 while no implementation exists outside this
+repository: a member may be added (or removed) in place, as `recv_wait_limits`
+and `setup` were. A reader decodes strictly, so an older daemon refuses a package
+whose manifest has a member it does not know; the only older daemons are Sidera's
+own releases, and `sidera update` restarts the daemon before it installs the
+adapter packages. From the first implementation outside this repository on, a
+change of this kind needs a new `manifest_version`. The adapter-protocol
+reference lists the in-place changes.
 
 ## What the caller must guarantee
 
@@ -75,8 +86,13 @@ the same rules in JSON Schema.
   manifest's `entry.program`, which the installer requires the package to hold, so
   the two cannot differ. A package for one Windows platform gets `.exe` appended to
   `entry.program` if it lacks it (Windows starts no file without an executable
-  extension), in the file and in the manifest written; an adapter names its program
-  the same way for every platform and does not handle the extension.
+  extension), in the file and in the manifest written, and so is a `setup.program`
+  that names the same binary; an adapter names its program the same way for every
+  platform and does not handle the extension. A `setup.program` that names another
+  file is one the caller adds to the package before `WritePackage` runs (the
+  manifest is written last, so a package cut short has no manifest): the installer
+  requires every program the manifest names to be in the package, and on Windows
+  that file carries its own `.exe` name.
 - A `Manifest` that did not come from `Parse` is validated before use.
 - The front ends a budget or a receive wait limit names and the ones the adapter
   declares as capabilities must agree; that check needs both and lives in `internal/adapterreg`.

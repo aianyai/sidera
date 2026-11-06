@@ -177,6 +177,8 @@ func (s *session) run(ctx context.Context, want string) error {
 			return err
 		}
 	}
+	// Adapters are installed only after the daemon runs the target version: an
+	// older daemon refuses a newer manifest.
 	if node.restart {
 		if err := s.restartDaemon(ctx); err != nil {
 			return err

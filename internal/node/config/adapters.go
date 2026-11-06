@@ -265,10 +265,31 @@ func readPackage(src fsx.Reader) (pkg, error) {
 	// parent, which is what the copy needs.
 	slices.Sort(p.dirs)
 	slices.Sort(p.files)
-	if !slices.Contains(p.files, path.Clean(p.manifest.Entry.Program)) {
-		return p, &ChangeError{Reason: ChangeInvalid, Field: "entry.program", Err: fmt.Errorf("the package holds no file %q", p.manifest.Entry.Program)}
+	for _, prog := range packagePrograms(p.manifest) {
+		if !slices.Contains(p.files, path.Clean(prog.entry.Program)) {
+			return p, &ChangeError{Reason: ChangeInvalid, Field: prog.field, Err: fmt.Errorf("the package holds no file %q", prog.entry.Program)}
+		}
 	}
 	return p, nil
+}
+
+// packageProgram is a program the manifest names, with the manifest member that
+// names it.
+type packageProgram struct {
+	field string
+	entry manifest.Entry
+}
+
+// packagePrograms lists the programs a package must hold and that are installed
+// executable: the entry program and, when the manifest declares one, the setup
+// program. Both are checked to be files of the package at staging, so that a
+// setup the core CLI runs later is installed as executable as the adapter itself.
+func packagePrograms(m manifest.Manifest) []packageProgram {
+	programs := []packageProgram{{"entry.program", m.Entry}}
+	if m.Setup != nil {
+		programs = append(programs, packageProgram{"setup.program", *m.Setup})
+	}
+	return programs
 }
 
 // StageAdapter copies the package that src is rooted at into a staging
@@ -353,7 +374,10 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) (string, erro
 		}
 		fmt.Fprintf(sum, "dir\x00%s\x00", d)
 	}
-	program := path.Clean(p.manifest.Entry.Program)
+	var programs []string
+	for _, prog := range packagePrograms(p.manifest) {
+		programs = append(programs, path.Clean(prog.entry.Program))
+	}
 	var total int64
 	for _, f := range p.files {
 		data, err := src.ReadFileLimit(f, MaxPackageBytes-total)
@@ -367,7 +391,7 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) (string, erro
 		fmt.Fprintf(sum, "file\x00%s\x00%d\x00", f, len(data))
 		sum.Write(data)
 		mode := fsx.ModePrivate
-		if f == program {
+		if slices.Contains(programs, f) {
 			mode = fsx.ModePrivateExec
 		}
 		if err := tx.Replace(roleFile, path.Join(staged.Dir, f), data, mode); err != nil {
