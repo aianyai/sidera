@@ -25,8 +25,14 @@ type rig struct {
 	// homeIsDefault says whether the data directory is the default one.
 	homeIsDefault bool
 	config        map[string]json.RawMessage
-	// clientProgram and clientDir are what the last client was made for.
+	// environ is the environment of the setup program. Each Codex home has a Codex of its
+	// own: fakes holds them by the value of CODEX_HOME, "" for the default home, and f is
+	// the one of the home the rig starts in.
+	environ []string
+	fakes   map[string]*fakeCodex
+	// clientProgram, clientDir and clientEnv are what the last client was made for.
 	clientProgram, clientDir string
+	clientEnv                []string
 }
 
 func newRig(t *testing.T) *rig {
@@ -40,12 +46,47 @@ func newRig(t *testing.T) *rig {
 	if err := os.Mkdir(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, f: newFake(), state: state, program: program, home: filepath.Join(dir, "home"), homeIsDefault: true}
-	r.h = Handler{Version: "1.0.0", Skill: []byte("skill one"), NewClient: func(program, dir string) client {
-		r.clientProgram, r.clientDir = program, dir
-		return r.f
+	r := &rig{t: t, state: state, program: program, home: filepath.Join(dir, "home"), homeIsDefault: true,
+		environ: []string{"PATH=/usr/bin"}, fakes: map[string]*fakeCodex{}}
+	r.f = r.fakeFor("")
+	r.h = Handler{Version: "1.0.0", Skill: []byte("skill one"), Environ: r.environ, NewClient: func(program, dir string, env []string) client {
+		r.clientProgram, r.clientDir, r.clientEnv = program, dir, env
+		return r.fakeFor(envValue(env, homeVar))
 	}}
 	return r
+}
+
+// fakeFor is the Codex of the Codex home, made when it is first asked for.
+func (r *rig) fakeFor(home string) *fakeCodex {
+	if r.fakes[home] == nil {
+		r.fakes[home] = newFake()
+	}
+	return r.fakes[home]
+}
+
+// useHome makes the setup program's environment name the Codex home, the default one
+// when home is empty.
+func (r *rig) useHome(home string) {
+	r.environ = []string{"PATH=/usr/bin"}
+	if home != "" {
+		r.environ = append(r.environ, homeVar+"="+home)
+	}
+	r.h.Environ = r.environ
+}
+
+// envValue is the value of the variable in the environment, "" when it is not there.
+func envValue(env []string, name string) string {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, name+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// hasVar says whether the environment holds the variable at all.
+func hasVar(env []string, name string) bool {
+	return slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
 }
 
 func (r *rig) req(op adaptersetup.Op, accepted ...string) adaptersetup.Request {

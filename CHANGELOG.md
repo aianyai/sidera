@@ -134,7 +134,8 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
   them, and `sidera update` keeps them current. `sidera setup` in any form is now a usage error
   (exit 2) that names the new command. After upgrading to 0.15, run `sidera adapter setup
   <instance>` once for the instance of each client you use as a controller; a server you added
-  by hand is adopted or replaced in Claude Code, and offered for removal in Codex, after you say so.
+  by hand is adopted or replaced in Claude Code, and in Codex offered for removal when it differs
+  from the plugin's server, after you say so.
 
 ### Fixed
 

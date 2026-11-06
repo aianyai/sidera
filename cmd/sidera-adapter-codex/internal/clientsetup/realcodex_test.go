@@ -40,7 +40,7 @@ func TestRealCodex(t *testing.T) {
 	if err := os.Mkdir(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	h := New("1.0.0")
+	h := New("1.0.0", os.Environ())
 	run := func(req adaptersetup.Request) adaptersetup.Result {
 		t.Helper()
 		req.Version, req.Instance, req.StateDir, req.SideraProgram, req.HomeIsDefault = adaptersetup.Version, "codex", state, program, true
@@ -145,6 +145,59 @@ func TestRealCodex(t *testing.T) {
 	}
 	if s, err := c.Server(ctx, serverName); err != nil || s.Found {
 		t.Errorf("server after undo = %+v, %v", s, err)
+	}
+}
+
+// TestRealCodexUndoActsOnTheHomeSetupRecorded sets up in one CODEX_HOME and undoes from an
+// environment that names another: the plugin and marketplace of the first are removed, and
+// the second, which never had them, is left alone. Nothing outside the two temporary
+// homes is read or written.
+func TestRealCodexUndoActsOnTheHomeSetupRecorded(t *testing.T) {
+	if os.Getenv("SIDERA_REALCODEX") != "1" {
+		t.Skip("set SIDERA_REALCODEX=1 to run against the installed Codex")
+	}
+	codex, err := exec.LookPath("codex")
+	if err != nil {
+		t.Fatalf("codex is not installed: %v", err)
+	}
+	home1, home2 := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", home1)
+	root := t.TempDir()
+	program := filepath.Join(root, "sidera")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	run := func(home string, req adaptersetup.Request) (adaptersetup.Result, error) {
+		req.Version, req.Instance, req.StateDir, req.SideraProgram, req.HomeIsDefault = adaptersetup.Version, "codex", state, program, true
+		return adaptersetup.Handle(context.Background(), New("1.0.0", append(os.Environ(), "CODEX_HOME="+home)), req)
+	}
+	inHome := func(home string) cli {
+		return cli{program: codex, dir: state, env: currentHome([]string{"CODEX_HOME=" + home}).environ(os.Environ())}
+	}
+	plan, err := run(home1, adaptersetup.Request{Op: adaptersetup.OpPlan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := run(home1, adaptersetup.Request{Op: adaptersetup.OpApply, Accepted: itemIDs(plan.Items)}); err != nil || res.Status != adaptersetup.StatusOK {
+		t.Fatalf("apply = %+v, %v", res, err)
+	}
+	if _, err := run(home2, adaptersetup.Request{Op: adaptersetup.OpPlan}); err == nil || !strings.Contains(err.Error(), "CODEX_HOME="+home1) {
+		t.Fatalf("a plan in another home = %v, want a refusal that names the recorded home", err)
+	}
+	res, err := run(home2, adaptersetup.Request{Op: adaptersetup.OpApply, Undo: true, Accepted: []string{pluginItem, marketplID, sourceID}})
+	if err != nil || res.Status != adaptersetup.StatusOK {
+		t.Fatalf("undo from the other home = %+v, %v", res, err)
+	}
+	ctx := context.Background()
+	if p, err := inHome(home1).Plugin(ctx); err != nil || p.Installed {
+		t.Errorf("plugin in the recorded home after undo = %+v, %v", p, err)
+	}
+	if mp, err := inHome(home1).Marketplace(ctx, marketplaceName); err != nil || mp.Registered {
+		t.Errorf("marketplace in the recorded home after undo = %+v, %v", mp, err)
 	}
 }
 

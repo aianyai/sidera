@@ -203,8 +203,10 @@ After upgrading from a release before 0.15 run `sidera adapter setup <instance>`
 `sidera setup controller`, which only printed commands, is gone, and the update has
 nothing recorded to refresh until setup has run. If you added the server by hand earlier
 (`claude mcp add ...`, `codex mcp add ...`), setup adopts it in Claude Code when it is as
-wanted and replaces it otherwise, and in Codex offers to remove it, because it would hide the
-plugin's.
+wanted and replaces it otherwise. In Codex it offers to remove it when it differs from the
+plugin's server, because it would hide the plugin's; one that is exactly the plugin's (the same
+program and arguments, approved in advance) is kept, and Codex runs it in place of the plugin's,
+which makes no difference while the two are the same.
 What each change is, how to undo it by hand and the options of the command are in
 [Setting up an adapter's client](adapters.md#setting-up-an-adapters-client).
 

@@ -42,14 +42,19 @@ type Handler struct {
 	Version string
 	// Skill is the text of the plugin's SKILL.md.
 	Skill []byte
+	// Environ is the environment of the setup program. It names the Codex home
+	// (CODEX_HOME), and Codex is run in the environment of the home an item belongs to.
+	Environ []string
 	// NewClient makes the Codex command line named by program (the instance's
-	// codex_program), run in the directory dir; tests replace it.
-	NewClient func(program, dir string) client
+	// codex_program), run in the directory dir with the environment env; tests replace it.
+	NewClient func(program, dir string, env []string) client
 }
 
-// New returns the setup of the adapter of the given version.
-func New(version string) Handler {
-	return Handler{Version: version, Skill: guidance.Skill(), NewClient: func(program, dir string) client { return cli{program: program, dir: dir} }}
+// New returns the setup of the adapter of the given version, for a setup program with the
+// environment environ.
+func New(version string, environ []string) Handler {
+	return Handler{Version: version, Skill: guidance.Skill(), Environ: environ,
+		NewClient: func(program, dir string, env []string) client { return cli{program: program, dir: dir, env: env} }}
 }
 
 // env is what one request works from.
@@ -59,16 +64,32 @@ type env struct {
 	c     client
 	codex string
 	dir   string // the marketplace directory, in the instance's state directory
-	def   serverDef
-	want  bundle
+	// home is the Codex home the request acts on; current is the one the environment of
+	// this run names. A plan and an apply act on the current one; the other operations on
+	// the one the items were recorded in.
+	home, current codexHome
+	def           serverDef
+	want          bundle
 }
 
-func (h Handler) env(req adaptersetup.Request, needProgram bool) (*env, error) {
+// env gathers what a request works from. A request that acts on what was recorded
+// (recorded true) works in the Codex home of the record, whatever the environment names.
+func (h Handler) env(req adaptersetup.Request, needProgram, recorded bool) (*env, error) {
 	inst, err := codexcfg.ParseInstance(adapterproto.ConfigValues(req.Config))
 	if err != nil {
 		return nil, fmt.Errorf("the instance configuration: %w", err)
 	}
-	e := &env{h: h, req: req, codex: inst.CodexProgram, c: h.NewClient(inst.CodexProgram, req.StateDir),
+	current := currentHome(h.Environ)
+	home := current
+	if recorded {
+		rec, err := adaptersetup.ReadRecord(req.StateDir)
+		if err != nil {
+			return nil, err
+		}
+		home = actingHome(rec, current)
+	}
+	e := &env{h: h, req: req, codex: inst.CodexProgram, home: home, current: current,
+		c:   h.NewClient(inst.CodexProgram, req.StateDir, home.environ(h.Environ)),
 		dir: filepath.Join(req.StateDir, "setup", "codex", "marketplace")}
 	if !needProgram {
 		return e, nil
@@ -93,6 +114,71 @@ func (h Handler) env(req adaptersetup.Request, needProgram bool) (*env, error) {
 	e.want = render(h.Version, e.def, h.Skill)
 	return e, nil
 }
+
+// recordedHome is the Codex home the items of the record were made in, if it names one.
+func recordedHome(rec *adaptersetup.Record) (codexHome, bool) {
+	if rec.Installed() {
+		for _, id := range []string{marketplID, pluginItem} {
+			if r, ok := rec.Find(id); ok {
+				if home, ok := homeOf(r.Target); ok {
+					return home, true
+				}
+			}
+		}
+	}
+	return codexHome{}, false
+}
+
+// actingHome is the Codex home the items of the record were made in, else the fallback.
+func actingHome(rec *adaptersetup.Record, fallback codexHome) codexHome {
+	if home, ok := recordedHome(rec); ok {
+		return home
+	}
+	return fallback
+}
+
+// scopeNote says that a run acted on a Codex home other than the one its environment
+// names, empty when they are the same.
+func scopeNote(acting, current codexHome) string {
+	if acting == current {
+		return ""
+	}
+	return "this acted on the Codex home setup recorded, " + acting.text() + ", not on the one this environment names, " + current.text()
+}
+
+// noteScope adds the scope note to the message of every outcome.
+func (e *env) noteScope(outcomes []adaptersetup.Outcome) {
+	note := scopeNote(e.home, e.current)
+	for i := range outcomes {
+		switch {
+		case note == "":
+		case outcomes[i].Message == "":
+			outcomes[i].Message = note
+		default:
+			outcomes[i].Message += "; " + note
+		}
+	}
+}
+
+// Notes implements adaptersetup.Noter: a check says when the environment names another
+// Codex home than the one setup recorded its items in.
+func (h Handler) Notes(_ context.Context, req adaptersetup.Request) ([]string, error) {
+	if req.Op != adaptersetup.OpCheck {
+		return nil, nil
+	}
+	rec, err := adaptersetup.ReadRecord(req.StateDir)
+	if err != nil || !rec.Installed() {
+		return nil, err
+	}
+	current := currentHome(h.Environ)
+	if note := scopeNote(actingHome(rec, current), current); note != "" {
+		return []string{note}, nil
+	}
+	return nil, nil
+}
+
+func (e *env) marketplaceTarget() string { return e.home.target(marketplaceName) }
+func (e *env) pluginTarget() string      { return e.home.target(pluginID) }
 
 func mpDigest(root string) string {
 	return adaptersetup.Digest([]byte("marketplace\x00" + marketplaceName + "\x00" + root))
@@ -208,8 +294,8 @@ func (e *env) observe(ctx context.Context) observed {
 func (e *env) wanted() []adaptersetup.Wanted {
 	return []adaptersetup.Wanted{
 		{ID: sourceID, Kind: kindSource, Target: e.dir, Digest: e.want.digest()},
-		{ID: marketplID, Kind: kindMarketplace, Target: marketplaceName, Digest: mpDigest(e.dir)},
-		{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Digest: e.want.pluginDigest()},
+		{ID: marketplID, Kind: kindMarketplace, Target: e.marketplaceTarget(), Digest: mpDigest(e.dir)},
+		{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Digest: e.want.pluginDigest()},
 	}
 }
 
@@ -270,7 +356,7 @@ func recordedItem(rec *adaptersetup.Record, id string) (adaptersetup.RecordItem,
 
 // Plan implements adaptersetup.Handler.
 func (h Handler) Plan(ctx context.Context, req adaptersetup.Request) ([]adaptersetup.Item, error) {
-	e, err := h.env(req, true)
+	e, err := h.env(req, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +367,11 @@ func (e *env) plan(ctx context.Context) ([]adaptersetup.Item, error) {
 	rec, err := adaptersetup.ReadRecord(e.req.StateDir)
 	if err != nil {
 		return nil, err
+	}
+	// The source directory is one for all homes: a marketplace in another home points at
+	// it, and setup here would rewrite it under that marketplace.
+	if recorded, ok := recordedHome(rec); ok && recorded != e.current {
+		return nil, fmt.Errorf("setup of this instance was made in %s, and this environment names %s: both would use the same plugin source directory. Run `sidera adapter setup %s --remove` with %s first", recorded.text(), e.current.text(), e.req.Instance, recorded.setting())
 	}
 	o := e.observe(ctx)
 	switch {
@@ -319,10 +410,10 @@ func (e *env) plan(ctx context.Context) ([]adaptersetup.Item, error) {
 	_, mpRecorded := recordedItem(rec, marketplID)
 	switch {
 	case !o.mp.Registered:
-		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: marketplaceName, Action: adaptersetup.ActionCreate, Consent: true,
+		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: e.marketplaceTarget(), Action: adaptersetup.ActionCreate, Consent: true,
 			Summary: "add " + e.dir + " to Codex as the plugin marketplace " + marketplaceName})
 	case !mpRecorded:
-		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: marketplaceName, Action: adaptersetup.ActionAdopt, Consent: true,
+		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: e.marketplaceTarget(), Action: adaptersetup.ActionAdopt, Consent: true,
 			Summary: "take over the Codex plugin marketplace " + marketplaceName + ", which already points at " + e.dir})
 	}
 	rp, plRecorded := recordedItem(rec, pluginItem)
@@ -331,15 +422,15 @@ func (e *env) plan(ctx context.Context) ([]adaptersetup.Item, error) {
 	switch {
 	case !installed:
 		pluginPlanned = true
-		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Action: adaptersetup.ActionCreate, Consent: true,
+		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Action: adaptersetup.ActionCreate, Consent: true,
 			Summary: "install the Sidera plugin in Codex: the sidera MCP server, approved in advance, and the Sidera Skill"})
 	case !plRecorded:
 		pluginPlanned = true
-		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Action: adaptersetup.ActionAdopt, Consent: true,
+		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Action: adaptersetup.ActionAdopt, Consent: true,
 			Summary: "take over the installed sidera plugin and install it again from the current files" + enablesNote(o)})
 	case rp.Digest != e.want.pluginDigest() || o.pluginKnown() && o.pl.Version != rp.Version:
 		pluginPlanned = true
-		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Action: adaptersetup.ActionUpdate, Consent: true,
+		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Action: adaptersetup.ActionUpdate, Consent: true,
 			Summary: "install the current Sidera plugin in Codex over the installed one" + enablesNote(o)})
 	}
 	// A person's own [mcp_servers.sidera] replaces the plugin's server of the same name.
@@ -437,7 +528,7 @@ func (e *env) removeHidingServer(ctx context.Context) (string, error) {
 
 // Apply implements adaptersetup.Handler.
 func (h Handler) Apply(ctx context.Context, req adaptersetup.Request) ([]adaptersetup.Outcome, error) {
-	e, err := h.env(req, true)
+	e, err := h.env(req, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -479,14 +570,14 @@ func (h Handler) Apply(ctx context.Context, req adaptersetup.Request) ([]adapter
 				err = e.c.AddMarketplace(ctx, e.dir)
 			}
 			if err == nil {
-				rec.Set(adaptersetup.RecordItem{ID: marketplID, Kind: kindMarketplace, Target: marketplaceName, Digest: mpDigest(e.dir), Version: h.Version})
+				rec.Set(adaptersetup.RecordItem{ID: marketplID, Kind: kindMarketplace, Target: e.marketplaceTarget(), Digest: mpDigest(e.dir), Version: h.Version})
 				dirty = true
 			}
 		case pluginItem:
 			var installed bool
 			installed, err = e.installPlugin(ctx)
 			if installed {
-				rec.Set(adaptersetup.RecordItem{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Digest: e.want.pluginDigest(), Version: h.Version})
+				rec.Set(adaptersetup.RecordItem{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Digest: e.want.pluginDigest(), Version: h.Version})
 				dirty = true
 			}
 		case mcpServerID:
@@ -515,7 +606,7 @@ func (h Handler) Remove(_ context.Context, req adaptersetup.Request) ([]adapters
 	if err != nil || !rec.Installed() {
 		return nil, err
 	}
-	e, err := h.env(req, false)
+	e, err := h.env(req, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -526,11 +617,11 @@ func (h Handler) Remove(_ context.Context, req adaptersetup.Request) ([]adapters
 		}
 		items = append(items, it)
 	}
-	if _, ok := rec.Find(pluginItem); ok {
-		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Action: adaptersetup.ActionRemove, Consent: true, Summary: "uninstall the Sidera plugin from Codex"})
+	if r, ok := rec.Find(pluginItem); ok {
+		add(adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: r.Target, Action: adaptersetup.ActionRemove, Consent: true, Summary: "uninstall the Sidera plugin from Codex"})
 	}
-	if _, ok := rec.Find(marketplID); ok {
-		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: marketplaceName, Action: adaptersetup.ActionRemove, Consent: true, Summary: "remove the Codex plugin marketplace " + marketplaceName})
+	if r, ok := rec.Find(marketplID); ok {
+		add(adaptersetup.Item{ID: marketplID, Kind: kindMarketplace, Target: r.Target, Action: adaptersetup.ActionRemove, Consent: true, Summary: "remove the Codex plugin marketplace " + marketplaceName})
 	}
 	if _, ok := rec.Find(sourceID); ok {
 		add(adaptersetup.Item{ID: sourceID, Kind: kindSource, Target: e.dir, Action: adaptersetup.ActionRemove, Summary: "delete the files of the Sidera plugin in " + e.dir})
@@ -541,7 +632,7 @@ func (h Handler) Remove(_ context.Context, req adaptersetup.Request) ([]adapters
 // Undo implements adaptersetup.Handler. It undoes the accepted items in the order Remove
 // lists them, whatever the order of the ids, and leaves recorded what it did not undo.
 func (h Handler) Undo(ctx context.Context, req adaptersetup.Request) ([]adaptersetup.Outcome, error) {
-	e, err := h.env(req, false)
+	e, err := h.env(req, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -579,6 +670,7 @@ func (h Handler) Undo(ctx context.Context, req adaptersetup.Request) ([]adapters
 		}
 		outcomes = append(outcomes, outcome(it.ID, it.Kind, it.Target, status, message))
 	}
+	e.noteScope(outcomes)
 	// A record left with no item is removed by the caller, declines included.
 	if rec != nil {
 		if err := adaptersetup.WriteRecord(req.StateDir, *rec); err != nil {
@@ -692,7 +784,7 @@ func isStale(r adaptersetup.Reconciliation, id string) bool {
 
 // Check implements adaptersetup.Handler.
 func (h Handler) Check(ctx context.Context, req adaptersetup.Request) (adaptersetup.Check, error) {
-	e, err := h.env(req, true)
+	e, err := h.env(req, true, true)
 	if err != nil {
 		return adaptersetup.Check{}, err
 	}
@@ -722,7 +814,7 @@ func (h Handler) Refresh(ctx context.Context, req adaptersetup.Request) (adapter
 	if err != nil || !rec.Installed() {
 		return adaptersetup.Refresh{}, err
 	}
-	e, err := h.env(req, true)
+	e, err := h.env(req, true, true)
 	if err != nil {
 		return adaptersetup.Refresh{}, err
 	}
@@ -758,7 +850,7 @@ func (h Handler) Refresh(ctx context.Context, req adaptersetup.Request) (adapter
 	}
 	pluginStale := isStale(r, pluginItem)
 	if pluginStale {
-		it := adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: pluginID}
+		it := adaptersetup.Item{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget()}
 		switch {
 		case !sourceUsable:
 			out.Outcomes = append(out.Outcomes, outcome(it.ID, it.Kind, it.Target, adaptersetup.OutcomeSkipped, "the plugin's files or its marketplace are missing or changed, or the files could not be read or written; run setup"))
@@ -769,7 +861,7 @@ func (h Handler) Refresh(ctx context.Context, req adaptersetup.Request) (adapter
 		default:
 			installed, err := e.installPlugin(ctx)
 			if installed {
-				rec.Set(adaptersetup.RecordItem{ID: pluginItem, Kind: kindPlugin, Target: pluginID, Digest: e.want.pluginDigest(), Version: h.Version})
+				rec.Set(adaptersetup.RecordItem{ID: pluginItem, Kind: kindPlugin, Target: e.pluginTarget(), Digest: e.want.pluginDigest(), Version: h.Version})
 				dirty = true
 			}
 			if err != nil {
@@ -785,6 +877,7 @@ func (h Handler) Refresh(ctx context.Context, req adaptersetup.Request) (adapter
 			return adaptersetup.Refresh{}, err
 		}
 	}
+	e.noteScope(out.Outcomes)
 	out.Drift = append(r.Drift, e.broken(o, rec, pluginStale)...)
 	return out, nil
 }

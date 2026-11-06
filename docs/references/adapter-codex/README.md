@@ -944,8 +944,13 @@ program never apply. Setup offers `codex mcp remove sidera`. It is offered when 
 Codex lists under that name is not the plugin's (another program or arguments, no
 `approve`, disabled), and not while the plugin is about to be installed over an installed
 one, because the server Codex lists is then the old plugin's; the next plan or check
-judges it. The `mcp_server` item is not recorded, so undo does not bring the person's
-entry back.
+judges it. An entry that is the plugin's own (same program, same arguments, approved in
+advance, enabled), such as one added exactly as the instructions of earlier releases said, is
+kept and not offered: Codex still lets it take the place of the plugin's server (the
+configuration layer outranks the plugin layer and replaces the entry whole), so the plugin's
+server never starts, but a session gets the same server either way. The entry is offered as
+soon as it differs, for instance when the Sidera program moves and the plugin is updated.
+The `mcp_server` item is not recorded, so undo does not bring the person's entry back.
 
 **Refusals.** A marketplace named `sidera` that Codex already has from another directory is
 never re-pointed: the plan fails with a message that names both directories (Codex itself
@@ -966,6 +971,24 @@ a failure. Its working directory is the instance's **state directory**, which ho
 `.codex/config.toml`: Codex reads the project configuration of a trusted project it is
 started in, which would change what setup sees and edits from one run to the next. A Codex
 that cannot be started because it is not there is reported as not installed.
+
+**The Codex home is recorded.** What setup makes in Codex (the marketplace, the plugin in its
+cache) lives in one Codex home, `CODEX_HOME` or else `~/.codex`; a variable that is unset and
+one that is empty both mean the default, and a relative value is made absolute against the
+directory of the person, because Codex is run in the state directory, where the same text
+would name another directory. What setup made in one home is not in another, so the record
+keeps which one an item was made in, in the target of the `marketplace` and the `plugin`
+(`sidera in CODEX_HOME=/path`, or `sidera in the default Codex home (~/.codex)`). A plan and an
+apply work in the home the environment names now, because that is what the person is setting
+up; they refuse when the record holds items made in another home, since both homes' marketplaces
+would read the one source directory, and the message says to run `sidera adapter setup
+<instance> --remove` under the recorded `CODEX_HOME` first. Undo, check and refresh work in the
+recorded home: they run `codex` with `CODEX_HOME` set to it, or removed when it was the default,
+whatever their own environment says. Without this a removal run under another `CODEX_HOME` would
+find neither the plugin nor the marketplace there, report both "already removed", drop the record
+and delete the source directory, leaving the real home's marketplace pointing at a directory with
+no manifest, which makes Codex fail to list any marketplace or plugin. When the two homes differ,
+an undo and a refresh say so in the message of their outcomes and a check in a note.
 
 **What Codex is asked.** `codex plugin marketplace list --json` (decoded strictly; a reply
 that is not that list is an error, since reading it as "none" would plan to add a

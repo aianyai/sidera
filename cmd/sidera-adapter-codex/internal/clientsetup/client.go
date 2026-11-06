@@ -149,6 +149,8 @@ type cli struct {
 	// setup sees from one run to the next. Setup uses the state directory of the
 	// instance, which holds none.
 	dir string
+	// env is the environment of every run; it decides which Codex home Codex works in.
+	env []string
 }
 
 func (c cli) run(ctx context.Context, args ...string) (string, error) {
@@ -156,7 +158,7 @@ func (c cli) run(ctx context.Context, args ...string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Codex is not installed: %w", err)
 	}
-	cmd := adaptersetup.ClientCommand{Program: program, Args: args, Dir: c.dir, Timeout: commandTimeout}
+	cmd := adaptersetup.ClientCommand{Program: program, Args: args, Dir: c.dir, Env: c.env, Timeout: commandTimeout}
 	out, err := cmd.Run(ctx)
 	var notStarted *adaptersetup.NotStartedError
 	switch {

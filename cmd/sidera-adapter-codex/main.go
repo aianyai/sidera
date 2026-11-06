@@ -47,7 +47,7 @@ var program = adapterkit.Program{
 	Package: declare.WritePackage,
 	Build:   release.Read(),
 	Commands: map[string]adapterkit.Command{
-		"setup": adaptersetup.Command(programName, clientsetup.New(release.Version())),
+		"setup": adaptersetup.Command(programName, clientsetup.New(release.Version(), os.Environ())),
 	},
 }
 
