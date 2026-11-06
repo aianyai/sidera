@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -32,18 +33,39 @@ func RequireStateDir(stateDir string) error {
 	return nil
 }
 
-// WritePrivateFile writes data to path so that a reader sees the old content or
-// the new, never a part: it writes a file of its own beside path, flushes it and
-// renames it over path. The file is readable by its owner alone (mode 0600), and
-// so are the directories made above it (0700). On Windows a mode has no effect and
-// the file has the access its directory gives it, which for a state directory is the
-// owner's alone. The rename is not flushed to the directory: a crash can lose the
-// write, and setup is run again.
+// WritePrivateFile is WriteFile for a file only its owner reads: mode 0600, in
+// directories of 0700. On Windows a mode has no effect and the file has the access
+// its directory gives it, which for a state directory is the owner's alone.
 func WritePrivateFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	return WriteFile(path, data, 0o600, 0o700)
+}
+
+// WriteFile writes data to path so that a reader sees the old content or the new,
+// never a part: it writes a file of its own beside path, flushes it and renames it
+// over path. The file has fileMode, and so has an existing file it replaces, and the
+// directories made above it have dirMode (before the umask applies): the owner of the
+// place being written decides them, such as a client's profile whose files are 0644,
+// not this package. On Windows a mode has no effect. The rename is not flushed to the
+// directory: a crash can lose the write, and setup is run again.
+//
+// A symbolic link at path is followed, as EditJSONFile follows one, and the file it
+// leads to is written, so a file the person keeps in a dotfiles directory and links
+// into place stays a link. A directory is never made behind a link: a link to a
+// place whose directory is not there is an error.
+func WriteFile(path string, data []byte, fileMode, dirMode fs.FileMode) error {
+	target, viaLink, err := followLinks(path)
+	if err != nil {
 		return err
 	}
-	return replaceFile(path, data, 0o600, nil)
+	dir := filepath.Dir(target)
+	if viaLink {
+		if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+			return fmt.Errorf("%s is a link to %s, whose directory does not exist", path, target)
+		}
+	} else if err := os.MkdirAll(dir, dirMode); err != nil {
+		return err
+	}
+	return replaceFile(target, data, fileMode, nil)
 }
 
 // replaceFile writes data to a new file beside path with the given mode and

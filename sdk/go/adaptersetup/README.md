@@ -21,7 +21,7 @@ a program's commands).
 | `RequireStateDir`, `ErrNoStateDir` | The state-directory precondition; `Handle` applies it |
 | `Reconcile`, `Wanted`, `Probe`, `Reconciliation` | The classification a check and a refresh share: stale, changed, missing, needs setup; what the person declined is `Reconciliation.Declined`, not drift |
 | `Digest` | The text a record keeps of a file's content |
-| `WritePrivateFile` | Atomic write for the owner alone |
+| `WriteFile`, `WritePrivateFile` | Atomic write (temp file, fsync, rename) with the file and directory modes the caller names, a link at the path followed; `WritePrivateFile` is its 0600/0700 case |
 | `ClientCommand` (`Run`, `Failure`), `ClientOutput`, `NotStartedError` | One bounded run of a client's command line: the program by absolute path and without a shell, a working directory the caller names and that must exist, the null device as standard input, a time limit that reports itself as a timeout and kills the client's process group (Linux, macOS), a non-zero exit returned as a result; `Failure` words a failed command with the end of its standard error |
 | `EditJSONFile`, `ReadJSONFile`, `Object` (`ObjectAt`, `HasString`, `AddString`, `RemoveString`), `NewObject`, `ErrInvalidJSON`, `ErrChangedDuringEdit`, `ErrUnexpectedType` | Conservative edit of a strict-JSON file that a client owns: links followed from the directory they are really in, strict parse (UTF-8, no lone surrogate), order and style kept, mode kept, content compared before the rename; typed navigation that refuses a wrong type instead of overwriting it |
 

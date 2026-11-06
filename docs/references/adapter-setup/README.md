@@ -291,11 +291,18 @@ error that says to enable the instance and start the daemon so that it runs once
   changed or gone (drift, which a refresh leaves), or without a record (`needs_setup`,
   unless the person declined it);
   Because both ops read the same answer, a refresh can only rewrite what a check calls stale;
-- `WritePrivateFile`, the atomic write for the owner alone: a file of its own is written,
-  flushed and renamed over the target, mode 0600 in directories of 0700. On Windows the
-  mode has no effect and the file has the access its directory gives it, which under a
-  state directory is the owner's alone. The rename is not flushed to the directory: a
-  crash may lose the write, and setup is then run again.
+- `WriteFile(path, data, fileMode, dirMode)`, the atomic write: a file of its own is
+  written, flushed and renamed over the target, so a reader sees the old content or the new
+  and a crash leaves no empty file that a later refresh would not rewrite. The file and the
+  directories made above it get the modes the caller names, because the place being written
+  has an owner that decides them (a Hermes profile's files are 0644 and its directories 0755).
+  A link at the path is followed, as `EditJSONFile` follows one, and the file it leads to is
+  written: a Skill that the person keeps in a dotfiles directory and links into the profile
+  stays a link, where a rename over the link would silently cut it. A directory is not made
+  behind a link. `WritePrivateFile` is its case for the owner alone, mode 0600 in directories
+  of 0700; on Windows a mode has no effect and the file has the access its directory gives it,
+  which under a state directory is the owner's alone. The rename is not flushed to the
+  directory: a crash may lose the write, and setup is then run again.
 
 Asking a person y/N is not in the SDK; the CLI asks.
 
