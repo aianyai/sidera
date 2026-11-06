@@ -8,6 +8,8 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-06
+
 After upgrading to 0.15, run `sidera adapter setup <instance>` once for each Claude Code, Codex
 and Hermes instance; later updates keep what it sets up current. Adapters can now declare a
 setup program, and `sidera adapter setup` runs it to bring the configuration of the client
@@ -24,12 +26,14 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
 - **`sidera adapter setup <instance>`.** An adapter that drives a client with configuration of its
   own can now declare a setup program, and this command runs it: it shows what it would do, asks
   about each change to the client's configuration, and remembers what it did. `--check` reports what
-  has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
-  up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter.
-  The Claude, Codex and Hermes adapters declare one in this release. An item you decline is remembered: `--check` and `sidera update` do not report it as still to set up, and running the
+  has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was
+  recorded up to date without asking, and `--yes` accepts everything. Words after `--` go to the
+  adapter. The Claude, Codex and Hermes adapters declare one in this release. An item you decline is
+  remembered: `--check` and `sidera update` do not report it as still to set up, and running the
   command again offers it again. When `--remove` cannot finish because the client program is no
-  longer installed or an item changed since setup, it ends by saying that `sidera adapter remove <instance> --force` removes the
-  instance anyway, and where the guide lists what to clean up by hand.
+  longer installed or an item changed since setup, it ends by saying that `sidera adapter remove
+  <instance> --force` removes the instance anyway, and where the guide lists what to clean up by
+  hand.
 - **`sidera update` refreshes the client setup of your adapters.** After it installs the new
   adapters, it asks the adapter of each instance to bring what `sidera adapter setup` recorded in
   your agent client up to date, without asking you, and reports one `setup` line per instance:
@@ -41,13 +45,14 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
   the next. 0.15 is the first release in which adapters have a setup, so an update to it has
   nothing recorded to refresh: after upgrading to 0.15 run `sidera adapter setup <instance>` once
   for each instance whose adapter has a setup; later updates refresh it.
-- **`sidera adapter setup claude` sets up Claude Code.** It registers the `sidera` MCP server for your
-  user (`claude mcp add --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in
+- **`sidera adapter setup claude` sets up Claude Code.** It registers the `sidera` MCP server for
+  your user (`claude mcp add --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in
   Claude Code's `settings.json`, and installs a plugin that gives every Claude Code session the
   Sidera Skill, which tells it what Sidera is and how to use it. Each change to Claude Code is asked
-  about; `--check` reports a plugin you disabled, a plugin whose source is gone and a `settings.json`
-  that Claude Code would ignore; `--remove` undoes it. It never re-points a marketplace named
-  `sidera` that is somewhere else, and never edits a `settings.json` that is not valid JSON.
+  about; `--check` reports a plugin you disabled, a plugin whose source is gone and a
+  `settings.json` that Claude Code would ignore; `--remove` undoes it. It never re-points a
+  marketplace named `sidera` that is somewhere else, and never edits a `settings.json` that is not
+  valid JSON.
 - **The Hermes adapter has a setup in `sidera adapter setup`.** Run `sidera adapter setup hermes
   -- --profile <profile>` (and `--platform <platform>` for more platforms): it asks before it
   places the Skill in a profile, remembers that it did, and `--check`, `--refresh` and `--remove`
@@ -58,11 +63,11 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
   ones.
 - **`sidera adapter setup` for Codex.** `sidera adapter setup <codex instance>` installs a Codex
   plugin that gives your own Codex sessions the `sidera` MCP server, with its tools approved in
-  advance, and a Skill that tells an agent what Sidera is. It asks before it adds the plugin marketplace and installs the plugin, and
-  offers to remove an MCP server `sidera` of your own that would hide the plugin's. `--check`
-  also tells you when the plugin is disabled, when its files are gone or Codex no longer offers
-  the server, and `--refresh` (what `sidera update` runs) leaves a plugin you disabled
-  alone.
+  advance, and a Skill that tells an agent what Sidera is. It asks before it adds the plugin
+  marketplace and installs the plugin, and offers to remove an MCP server `sidera` of your own that
+  would hide the plugin's. `--check` also tells you when the plugin is disabled, when its files are
+  gone or Codex no longer offers the server, and `--refresh` (what `sidera update` runs) leaves a
+  plugin you disabled alone.
 - **Adapter packages can declare a setup program.** The manifest's optional `setup` member
   (`{program, args}`, with the shape and path rules of `entry`) names the program that
   `sidera adapter setup` runs. The manifest version stays 1, and a 0.14 daemon refuses a package
@@ -92,11 +97,11 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
   what this release writes, and otherwise replaced after you say so. The copy of the Skill in
   the instance's `skill` state directory is no longer written.
 - **`sidera adapter remove` refuses an instance whose adapter has recorded a client setup.**
-  Removing the instance deletes its state directory, and with it the files a client installation
-  (a Skill, for one) depends on. Run `sidera adapter setup <instance> --remove` first. When the
-  setup cannot be asked at all, the refusal offers `--force` to remove the instance without that
-  check and leave the client's setup in place (the guide says how to clean it up by hand). Instances whose adapter has no setup are removed as
-  before.
+  Removing the instance deletes its state directory, and with it the files a client installation (a
+  Skill, for one) depends on. Run `sidera adapter setup <instance> --remove` first. When the setup
+  cannot be asked at all, the refusal offers `--force` to remove the instance without that check and
+  leave the client's setup in place (the guide says how to clean it up by hand). Instances whose
+  adapter has no setup are removed as before.
 - **A session learns what Sidera is the first time it connects.** The `sidera` MCP server's
   instructions used to be one line about the endpoint's limits; they now say that Sidera is the
   message channel to the other agents and people of your cluster, what to use it for, to call
@@ -904,7 +909,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/aianyai/sidera/releases/tag/v0.15.0
 [0.14.0]: https://github.com/aianyai/sidera/releases/tag/v0.14.0
 [0.13.0]: https://github.com/aianyai/sidera/releases/tag/v0.13.0
 [0.12.2]: https://github.com/aianyai/sidera/releases/tag/v0.12.2
