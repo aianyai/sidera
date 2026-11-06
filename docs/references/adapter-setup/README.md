@@ -202,3 +202,54 @@ error that says to enable the instance and start the daemon so that it runs once
   crash may lose the write, and setup is then run again.
 
 Asking a person y/N is not in the SDK; the CLI asks.
+
+### Editing a client's JSON file
+
+`EditJSONFile(path, edit)` is how a setup edits a file the client owns and the user
+may also edit (Claude Code's `settings.json`). It is conservative because a mistake
+here costs the person their configuration, silently:
+
+- **A link is followed and the file it leads to is written.** A settings file is often
+  a link into a dotfiles directory; replacing it by a regular file would cut it from
+  there. Relative, chained and dangling links are followed. A relative link is
+  resolved from the directory the link is really in, as the kernel does, not from the path
+  it was reached by: with `~/.claude` a link into a dotfiles repository, a settings file
+  that is a link `../shared/settings.json` leads into the repository, not beside `~/.claude`.
+  A dangling link gets its target made, if the target's directory exists; a directory is
+  never made behind a link; a loop is an error.
+- **The file is parsed strictly, and refused otherwise.** Valid JSON with an object at
+  the root, no comment, no trailing comma, no byte-order mark, no repeated key (readers
+  disagree on which value wins), nothing after the object; an empty file is not an
+  object. The text must be valid UTF-8 and hold no half of a surrogate pair written as a
+  `\u` escape: a rewrite would replace either with U+FFFD, changing what the person wrote
+  without a word. The client reads such a file strictly and ignores a file it cannot read as a
+  whole, so repairing it would be guessing at what the person meant. The error says
+  that nothing was changed.
+- **The edit keeps the file's style.** Members keep their order and numbers their
+  spelling, and the indentation unit, the line ending and the final newline are those
+  of the file. The unit is that of the first member of the root object that starts a
+  line; an object whose members have no line break between them stays compact (a final
+  newline alone is not a layout), and a file with no member to learn from (`{}`, or a
+  file that is made) gets two spaces. Short arrays the person wrote on one line are
+  written one element per line.
+- **The mode is kept**; a file that does not exist is made with 0600 and, unless the
+  path was a link, its directory with 0700. The file is replaced by a rename, so a hard
+  link to it keeps the old content and the owner is that of the user running the setup.
+- **The content is read again just before the rename and compared** with what was
+  edited. If it differs (the client writes this file too) the edit is dropped with
+  `ErrChangedDuringEdit` and the other writer's content stands. The instant between the
+  comparison and the rename is not closed; it is the smallest this can make it without a
+  lock the client does not take.
+- **The edit navigates by type.** `Object` has `ObjectAt` (get or make a nested object),
+  `HasString`, `AddString` (only if absent) and `RemoveString` (every copy) on the array at
+  a key path. A key on the way that holds another type (`permissions` an array, `allow` a
+  string) is `ErrUnexpectedType` naming the path and what was found, and nothing is
+  overwritten. `ReadJSONFile` reads a file by the same rules (links, strict parsing) for a
+  check that only looks, and a missing file is an empty object.
+- An edit that reports no change writes nothing, so a rerun leaves the file byte for byte
+  and with its modification time.
+
+On Windows the rename is `MoveFileEx` with replacement, so an editor or client that
+holds the file open without sharing makes the write fail with an error, and the file
+stays as it was. The mode of the file is not meaningful there; the new file takes the
+access its directory gives.

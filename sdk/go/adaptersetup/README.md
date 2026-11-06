@@ -22,6 +22,7 @@ a program's commands).
 | `Reconcile`, `Wanted`, `Probe`, `Reconciliation` | The classification a check and a refresh share: stale, changed, missing, needs setup |
 | `Digest` | The text a record keeps of a file's content |
 | `WritePrivateFile` | Atomic write for the owner alone |
+| `EditJSONFile`, `ReadJSONFile`, `Object` (`ObjectAt`, `HasString`, `AddString`, `RemoveString`), `NewObject`, `ErrInvalidJSON`, `ErrChangedDuringEdit`, `ErrUnexpectedType` | Conservative edit of a strict-JSON file that a client owns: links followed from the directory they are really in, strict parse (UTF-8, no lone surrogate), order and style kept, mode kept, content compared before the rename; typed navigation that refuses a wrong type instead of overwriting it |
 
 ## Rules
 
