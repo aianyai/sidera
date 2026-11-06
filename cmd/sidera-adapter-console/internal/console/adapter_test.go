@@ -302,8 +302,18 @@ func TestNewThatGetsNoReplyIsUnsettled(t *testing.T) {
 		return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryAccepted}}}
 	}})
 	code := h.run("new", "node-2/rt", "--preset", "dev", "--timeout", "1")
-	if code != exitUnsettled || !strings.Contains(h.errOut.String(), "status 'msg-out-1'") {
-		t.Errorf("exit %d, stderr %q, want exit 3 pointing at status", code, h.errOut.String())
+	// 10 is the code of `sidera` for an unknown outcome.
+	if code != 10 || !strings.Contains(h.errOut.String(), "status 'msg-out-1'") {
+		t.Errorf("exit %d, stderr %q, want exit 10 pointing at status", code, h.errOut.String())
+	}
+}
+
+// Help asked for a command prints the usage on standard output and is not an error.
+func TestHelpOfACommandIsNotAnError(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := Main([]string{"new", "--help"}, Env{Getenv: func(string) string { return "" }, Stdout: &out, Stderr: &errOut})
+	if code != exitOK || !strings.Contains(out.String(), "usage: sidera-adapter-console") || errOut.Len() != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errOut.String())
 	}
 }
 

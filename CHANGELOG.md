@@ -39,6 +39,10 @@ protocol has a version of its own.
 - **`--help` of the console and Hermes programs writes the usage to standard output.** It went to
   standard error. `package --help` and `version --help` of all four programs print their usage
   and exit 0; they were usage errors.
+- **`sidera-adapter-console` exits 10, not 3, when the outcome is not known yet.** That is the
+  code `sidera` uses for it (`new` got no reply within its `--timeout`, or the session is not
+  confirmed); 3 is `invalid_argument` there. A script that tested for 3 tests for 10 now.
+  `sidera-adapter-console <command> --help` prints the usage and exits 0; it was a usage error.
 
 ### Fixed
 

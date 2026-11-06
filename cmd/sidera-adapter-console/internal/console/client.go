@@ -42,6 +42,10 @@ const (
 
 func runClient(args []string, env Env) int {
 	inv, err := parseCommand(args, env)
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Fprint(env.Stdout, usageText)
+		return exitOK
+	}
 	if err != nil {
 		fmt.Fprintln(env.Stderr, "sidera-adapter-console:", err)
 		fmt.Fprintln(env.Stderr, "run `sidera-adapter-console help` for the commands")

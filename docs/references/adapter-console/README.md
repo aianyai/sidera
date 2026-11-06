@@ -35,7 +35,7 @@ apply to what arrives.
 | Command | Does |
 | ------- | ---- |
 | `whoami` | Prints the address of the owner endpoint, `<node>/<endpoint>`. |
-| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `message: <id>`, then asks `endpoint.message_status` once a second until the control reply is there and prints `session: <address>`, the address of the session on the node of the runtime. |
+| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>, default 120]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `message: <id>`, then asks `endpoint.message_status` once a second until the control reply is there and prints `session: <address>`, the address of the session on the node of the runtime. |
 | `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message with its sender and id, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. |
 | `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. |
 | `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
@@ -59,9 +59,10 @@ is too old to do it for a direct endpoint, and exits 1. The console does not mak
 `endpoint.declare` requests: the owner endpoint keeps the declaration it starts with.
 
 Exit codes: 0 done; 1 refused or failed (the daemon's refusal is printed with its
-protocol code); 2 usage; 3 not settled: `new` got no reply within `--timeout`
-(the message id and the `status` command are printed), or the session is
-`unconfirmed` (its address is printed, it may exist).
+protocol code); 2 usage; 10 the outcome is not known yet, as for `sidera`: `new` got no reply
+within `--timeout` (the message id and the `status` command are printed), or the session is
+`unconfirmed` (its address is printed, it may exist). `--timeout` defaults to 120 seconds. These are
+codes of the table in [the command-line reference](../command-line/README.md#conventions-of-every-program).
 
 ### How replies arrive
 

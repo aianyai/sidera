@@ -513,7 +513,7 @@ interrupt or close a session it started: close one with
 `sidera endpoint close <session-address>` on the node that hosts it. The console reaches
 the daemon over a
 channel on this machine that only the owner can use, so run it as the user the node
-runs as. If `new` gets no control reply within its `--timeout` it exits with code 3 and
+runs as. If `new` gets no control reply within its `--timeout` (120 seconds unless you give another) it exits with code 10 and
 prints the message id to check with `status`.
 
 **Limits.**

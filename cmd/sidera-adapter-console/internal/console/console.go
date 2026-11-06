@@ -42,16 +42,17 @@ type Env struct {
 
 // Exit codes of the client commands.
 const (
-	exitOK        = adapterkit.ExitOK
-	exitFailed    = adapterkit.ExitFailed // the daemon, the adapter or the target refused or failed
-	exitUsage     = adapterkit.ExitUsage
-	exitUnsettled = 3 // nothing is wrong yet, but the outcome is not known: see the message
+	exitOK     = adapterkit.ExitOK
+	exitFailed = adapterkit.ExitFailed // the daemon, the adapter or the target refused or failed
+	exitUsage  = adapterkit.ExitUsage
+	// exitUnsettled: nothing is wrong yet, but what happened is not known: see the message.
+	exitUnsettled = adapterkit.ExitUnknownOutcome
 )
 
 const usageText = `usage: sidera-adapter-console <command> [flags]
 
 commands:
-  new <runtime-address> --preset <name> [--body <text> | --body-file <file>] [--timeout <seconds>]
+  new <runtime-address> --preset <name> [--body <text> | --body-file <file>] [--timeout <seconds>, default 120]
                          start a session on a runtime endpoint; prints the new session's address
   recv [--wait <seconds>]
                          print the messages waiting for the owner endpoint, then acknowledge them
@@ -71,7 +72,7 @@ flags of every client command:
   --home <directory>     the node's data directory (default: $SIDERA_HOME, then ~/.sidera, on Windows %LOCALAPPDATA%\Sidera)
   --instance <name>      the adapter instance (default: console)
 
-exit codes: 0 done, 1 failed, 2 usage, 3 not settled yet
+exit codes: 0 done, 1 failed, 2 usage, 10 outcome not known yet (the same codes as sidera)
 `
 
 // clientCommands are the commands of the client role, which talks to the adapter's
