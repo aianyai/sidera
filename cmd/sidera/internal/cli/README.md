@@ -21,7 +21,12 @@ and its bound values. A local value stays attached, including a body spelled
 `--json`. Parsing accepts flags after positional arguments and honors `--`.
 
 - `arguments.go`: command discovery and registration before global scanning.
-- `cli.go`: global parsing, dispatch, receive and acknowledgement arguments.
+- `cli.go`: global parsing and dispatch. An agent command is dispatched in two steps: `agentRequest`
+  (in `agent.go`) checks its arguments and builds its one call, and only then is the Agent client
+  opened, so a usage error is reported before any call and a data directory or socket that cannot
+  be used never hides it. `mcp` checks its arguments the same way before it opens the client.
+- `agent.go`: `agentRequest`, which turns the arguments of an agent command into its method,
+  parameters and the way its answer is written; the receive, acknowledge and status arguments.
 - `message.go`: message and control flags; one body source for send and reply.
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: human results; structured results use the shared JSON encoder.

@@ -1,20 +1,21 @@
 package cli
 
 import (
-	"context"
 	"flag"
 	"strings"
 )
 
-func (c *command) query(ctx context.Context, client agentCaller, args []string) error {
+// queryRequest checks the arguments of an identity, declaration, directory, peers
+// or probe command and builds its call.
+func (c *command) queryRequest(args []string) (agentRequest, error) {
 	f := c.arguments.flags
 	q := &c.arguments.query
 	p, err := parse(f, args[1:])
 	if err != nil {
-		return err
+		return agentRequest{}, err
 	}
 	if len(p) != 0 {
-		return usage(args[0] + " takes no positional arguments")
+		return agentRequest{}, usage(args[0] + " takes no positional arguments")
 	}
 	in := map[string]any{}
 	switch args[0] {
@@ -35,11 +36,7 @@ func (c *command) query(ctx context.Context, client agentCaller, args []string) 
 	case "probe":
 		in["frontend"] = "cli"
 	}
-	out, err := client.Call(ctx, args[0], in)
-	if err != nil {
-		return err
-	}
-	return c.result(out)
+	return agentRequest{method: args[0], params: in, show: c.result}, nil
 }
 
 type queryFlags struct {

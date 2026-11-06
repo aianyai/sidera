@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -60,32 +59,34 @@ func (c *command) body(f *flag.FlagSet, b bodyFlags) (string, error) {
 	return body, nil
 }
 
-func (c *command) message(ctx context.Context, client agentCaller, args []string) error {
+// messageRequest checks the arguments of a send, reply or control command, reads
+// its body and builds its call.
+func (c *command) messageRequest(args []string) (agentRequest, error) {
 	f := c.arguments.flags
 	m := &c.arguments.message
 	p, err := parse(f, args[1:])
 	if err != nil {
-		return err
+		return agentRequest{}, err
 	}
 	switch args[0] {
 	case "send":
 		if len(p) != 0 || !present(f, "to") {
-			return usage("send needs --to <address>")
+			return agentRequest{}, usage("send needs --to <address>")
 		}
 	case "reply":
 		if len(p) != 1 {
-			return usage("reply needs a message identifier")
+			return agentRequest{}, usage("reply needs a message identifier")
 		}
 	case "control":
 		if len(p) != 2 {
-			return usage("control needs an address and a signal")
+			return agentRequest{}, usage("control needs an address and a signal")
 		}
 	}
 	in := map[string]any{}
 	if args[0] != "control" || present(f, "body") || present(f, "body-file") {
 		text, err := c.body(f, m.body)
 		if err != nil {
-			return err
+			return agentRequest{}, err
 		}
 		in["body"] = text
 	}
@@ -102,13 +103,15 @@ func (c *command) message(ctx context.Context, client agentCaller, args []string
 		in["to"], in["signal"] = p[0], p[1]
 		addPresent(f, in, "preset", "preset", m.preset)
 	}
-	out, err := client.Call(ctx, args[0], in)
-	if err != nil {
-		return err
-	}
+	return agentRequest{method: args[0], params: in, show: c.showSent}, nil
+}
+
+// showSent writes the answer of a send, reply or control.
+func (c *command) showSent(out any) error {
 	if c.json {
 		return c.encode(out)
 	}
+	var err error
 	switch sent := out.(type) {
 	case agentapi.SendResult:
 		_, err = fmt.Fprintf(c.Stdout, "sent %s to %s\n", sent.MessageID, strings.Join(sent.To, ","))

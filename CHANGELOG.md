@@ -45,6 +45,11 @@ protocol has a version of its own.
 - **`serve` of the console and Hermes programs takes no argument.** `sidera-adapter-console serve
   --help` started the adapter and waited on standard input; any argument after `serve` is now a
   usage error (exit 2).
+- **A usage error of an agent command is reported before anything else.** The agent commands of
+  `sidera` (`send`, `reply`, `recv`, `ack`, `status`, `directory` and the rest) and `sidera mcp`
+  resolved the data directory and the daemon's socket before they read their arguments, so a
+  mistyped command in a broken environment showed the environment's error instead of the usage
+  error (exit 2).
 
 ## [0.14.0] - 2026-11-05
 

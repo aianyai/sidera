@@ -11,11 +11,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/manageapi"
 )
 
-// agentCaller is what an agent command calls the node through.
-type agentCaller interface {
-	Call(ctx context.Context, method string, in any) (any, error)
-}
-
 // attachingClient is the Agent client of an agent command. It attaches the session
 // the command runs in (attach) just before the command first calls the node, so a
 // command refused for its arguments attaches nothing. Every agent command makes one

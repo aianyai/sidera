@@ -268,107 +268,66 @@ func (c *command) run(ctx context.Context, args []string) error {
 			return c.manage(ctx, args)
 		}
 	}
-	probeToken := adapterproto.Token(c.Getenv("SIDERA_PROBE_TOKEN"))
-	home, err := c.dataDir()
+	if args[0] == "mcp" {
+		return c.serveMCP(ctx, args[1:])
+	}
+	// Every argument is checked before the client is opened: a usage error is
+	// reported before any call, and whatever is wrong with the data directory or
+	// the socket does not hide it.
+	req, err := c.agentRequest(args)
 	if err != nil {
 		return err
 	}
-	client, err := agentapi.NewClient(agentapi.ClientConfig{Home: home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: probeToken})
+	home, client, err := c.openAgent()
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 	agent := &attachingClient{Client: client, attach: func(ctx context.Context) error { return c.attachController(ctx, home, client) }}
-	switch args[0] {
-	case "mcp":
-		p, err := parse(c.arguments.flags, args[1:])
-		if err != nil {
-			return err
-		}
-		if len(p) != 0 {
-			return usage("mcp takes no positional arguments")
-		}
-		cfg := mcp.Config{
-			Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr,
-			Agent: client, Version: c.Release.Version, ProbeOnConnect: probeToken != "",
-		}
-		if controller.Wanted(c.Getenv) {
-			manage, err := manageapi.NewClient(manageapi.ClientConfig{Home: home})
-			if err != nil {
-				return err
-			}
-			defer manage.Close()
-			cfg.Controller = &controller.Config{Manage: manage, Getenv: c.Getenv, Getwd: os.Getwd}
-		}
-		return mcp.Run(ctx, cfg)
-	case "status":
-		p, err := parse(c.arguments.flags, args[1:])
-		if err != nil {
-			return err
-		}
-		if len(p) != 1 {
-			return usage("status needs a message identifier")
-		}
-		out, err := agent.Call(ctx, "status", map[string]any{"message_id": p[0]})
-		if err != nil {
-			return err
-		}
-		return c.result(out)
-	case "me", "peers", "directory", "declare", "probe":
-		return c.query(ctx, agent, args)
-	case "send", "reply", "control":
-		return c.message(ctx, agent, args)
-	case "recv":
-		f := c.arguments.flags
-		in := map[string]any{"frontend": "cli"}
-		p, err := parse(f, args[1:])
-		if err != nil {
-			return err
-		}
-		if len(p) != 0 {
-			return usage("recv takes no positional arguments")
-		}
-		addPresent(f, in, "wait", "wait_s", c.arguments.recv.wait)
-		addPresent(f, in, "msg", "msg", c.arguments.recv.msg)
-		addPresent(f, in, "part", "part", c.arguments.recv.part)
-		addPresent(f, in, "ack", "ack_lease", c.arguments.recv.ack)
-		out, err := agent.Call(ctx, "recv", in)
-		if err != nil {
-			return err
-		}
-		if c.afterRecv != nil {
-			c.afterRecv()
-		}
-		_, err = c.Stdout.Write(out.([]byte))
+	out, err := agent.Call(ctx, req.method, req.params)
+	if err != nil {
 		return err
-	case "ack":
-		p, err := parse(c.arguments.flags, args[1:])
-		if err != nil {
-			return err
-		}
-		if len(p) < 1 {
-			return usage("ack needs a lease")
-		}
-		in := map[string]any{"lease": p[0]}
-		var items []adapterproto.PartRef
-		for _, value := range p[1:] {
-			id, part, ok := strings.Cut(value, ":")
-			k, err := strconv.Atoi(part)
-			if !ok || err != nil {
-				return usage("ack items are message-id:part")
-			}
-			items = append(items, adapterproto.PartRef{MessageID: adapterproto.MessageID(id), Part: k})
-		}
-		if len(items) > 0 {
-			in["items"] = items
-		}
-		out, err := agent.Call(ctx, "ack", in)
-		if err != nil {
-			return err
-		}
-		return c.result(out)
 	}
-	return usage("unknown command: " + args[0])
+	return req.show(out)
+}
+
+// openAgent opens the Agent client of the command on the data directory.
+func (c *command) openAgent() (home string, client *agentapi.Client, err error) {
+	home, err = c.dataDir()
+	if err != nil {
+		return "", nil, err
+	}
+	client, err = agentapi.NewClient(agentapi.ClientConfig{Home: home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: adapterproto.Token(c.Getenv("SIDERA_PROBE_TOKEN"))})
+	return home, client, err
+}
+
+// serveMCP is `mcp`: the Agent tools over the standard streams.
+func (c *command) serveMCP(ctx context.Context, args []string) error {
+	p, err := parse(c.arguments.flags, args)
+	if err != nil {
+		return err
+	}
+	if len(p) != 0 {
+		return usage("mcp takes no positional arguments")
+	}
+	home, client, err := c.openAgent()
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	cfg := mcp.Config{
+		Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr,
+		Agent: client, Version: c.Release.Version, ProbeOnConnect: c.Getenv("SIDERA_PROBE_TOKEN") != "",
+	}
+	if controller.Wanted(c.Getenv) {
+		manage, err := manageapi.NewClient(manageapi.ClientConfig{Home: home})
+		if err != nil {
+			return err
+		}
+		defer manage.Close()
+		cfg.Controller = &controller.Config{Manage: manage, Getenv: c.Getenv, Getwd: os.Getwd}
+	}
+	return mcp.Run(ctx, cfg)
 }
 
 type receiveFlags struct {
