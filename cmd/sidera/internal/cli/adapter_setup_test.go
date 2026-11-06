@@ -880,3 +880,52 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 		}
 	})
 }
+
+// A removal that ends with an item failed or left alone may be one whose client is
+// gone for good; the report then says how to remove the instance anyway and where the
+// manual cleanup is described. A removal that did everything says nothing.
+func TestAdapterSetupRemoveUnfinishedSaysHowToLeave(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		fail     []string
+		edit     bool // change the file after setup, so the undo leaves it alone
+		wantHint bool
+	}{
+		{"an item failed", []string{"a"}, false, true},
+		{"an item was left alone", nil, true, true},
+		{"everything was removed", nil, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, clientA)
+			if _, _, err := r.run(modeSetup, "", true); err != nil {
+				t.Fatal(err)
+			}
+			r.script.Fail = tc.fail
+			if tc.edit {
+				if err := os.WriteFile(filepath.Join(r.client, "a"), []byte("edited"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s, err := r.session()
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, _, err := runSetup(context.Background(), s, modeRemove, setupDialog{out: &bytes.Buffer{}, yes: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hint := unfinishedRemovalHint("work", res)
+			if !tc.wantHint {
+				if hint != "" {
+					t.Errorf("hint %q for a removal that finished", hint)
+				}
+				return
+			}
+			for _, want := range []string{"sidera adapter remove work --force", "Cleaning up an adapter's client by hand"} {
+				if !strings.Contains(hint, want) {
+					t.Errorf("hint %q does not say %q", hint, want)
+				}
+			}
+		})
+	}
+}

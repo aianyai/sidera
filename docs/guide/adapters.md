@@ -102,7 +102,9 @@ say): it is shown as `note:` lines before the questions, and by `--check` as `no
 the drift; a note never makes `--check` fail.
 
 Before you remove an instance whose setup has recorded something, undo it with
-`--remove`: `sidera adapter remove` refuses otherwise, because removing the instance deletes
+`--remove` (if that cannot finish because the client program is gone, it ends by saying that
+`sidera adapter remove <instance> --force` removes the instance anyway and where the cleanup by
+hand is described): `sidera adapter remove` refuses otherwise, because removing the instance deletes
 the files its client installation depends on. If the setup cannot even be asked whether it
 recorded something (the adapter is damaged), the refusal says so and
 `sidera adapter remove <instance> --force` removes the instance without
