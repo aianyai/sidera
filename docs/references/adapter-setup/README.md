@@ -51,7 +51,7 @@ does not know).
 | `sidera_program` | The absolute path of the core program as it was launched, links kept, and never quoted; only when the launch path is not known, what the platform reports for the running executable, made absolute. It is the file `sidera update` replaces in place, so a client's configuration stays valid across an update, a package manager's link keeps pointing at the current version, and setup and a later refresh pass the same string. It goes into a client's configuration as data; a program that prints it for a shell quotes it itself |
 | `options` | The adapter's own arguments: the words after `--` on the command line, in order and untouched |
 | `accepted` | For `apply`: the ids of the items to do |
-| `declined` | For `apply` (not with `undo`), optional: the ids of the items that follow from a no: those that need consent and that the person answered no to, and those left alone because an item they require was declined (never asked, but the person decided against the chain). Not the items left alone because a required item failed or was skipped when applied, and nothing under `--yes`. See [What was declined](#what-was-declined) |
+| `declined` | For `apply` (not with `undo`), optional: the ids of the items that follow from a no: those that need consent and that the person answered no to, those left alone because an item they require was declined (never asked, but the person decided against the chain), and those that need no consent and that only declined items require (nothing would use them). Not the items left alone because a required item failed or was skipped when applied, and nothing under `--yes`. See [What was declined](#what-was-declined) |
 | `undo` | For `apply`: `accepted` names items of a `remove` listing, to be undone |
 
 ## Ops
@@ -87,7 +87,8 @@ phrase written as an instruction, which the CLI shows and asks as a question.
 
 `consent` says whether the CLI asks. An item with `consent: false` is one the adapter
 may do without asking: a file inside its own state directory, which nothing but the
-adapter reads. The CLI always includes those in `accepted`. Everything else is asked
+adapter reads. The CLI includes those in `accepted`, except one that other items
+require when none of those is going ahead (see `requires`). Everything else is asked
 one by one: whatever touches the client's configuration, adopts something that was
 there before, or removes something the user could have changed. A person who declines
 an item declines only it.
@@ -98,8 +99,15 @@ CLI, in one place, does not ask about an item whose required item was declined, 
 the items in stages so that an item whose required item did not complete (it failed, or
 was skipped) is not sent to the adapter, and says in the prompt or the report that it was
 left. So declining "uninstall the plugin" cannot leave an item that needs no consent,
-such as deleting the plugin's source, running. It names earlier items only, so that the
-order of the listing is a valid order of doing and there is no cycle.
+such as deleting the plugin's source, running. The same holds the other way round for an
+item that needs no consent and that other items require, such as the source a plugin is
+installed from: it is listed for them, so it is done only while at least one of them is
+going ahead. When the person declines all of them it is left alone, the listing says so,
+and it counts as declined; applying it alone would record a setup that serves nothing,
+make the instance count as installed in the client, and stand in the way of removing it.
+An item that needs no consent and that nothing requires is always done. `requires` names
+earlier items only, so that the order of the listing is a valid order of doing and there
+is no cycle.
 
 ### Results
 
@@ -284,10 +292,10 @@ item they declined is remembered, and `refresh` and `check` do not report it. Th
   that is started afresh asks about everything.
 
 The CLI sends `declined` only with the `apply` of a plain setup. It holds the items the
-person answered no to and the items left alone because an item they require was declined:
-all of them follow from a no, and the CLI decides them before anything is applied, so
-declining the source of a plugin does not leave the plugin's install reported after every
-update. An item left alone later, because a required item failed or was skipped when applied,
+person answered no to, the items left alone because an item they require was declined and
+the items that need no consent and that only declined items require: all of them follow
+from a no, and the CLI decides them before anything is applied, so declining the
+source of a plugin does not leave the plugin's install reported after every update. An item left alone later, because a required item failed or was skipped when applied,
 is not a decision and stays undeclined. The dialogue says which were declined and that they
 are not reported again.
 When every item is declined it still sends one `apply` with no `accepted`, to hand over the

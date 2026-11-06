@@ -192,12 +192,16 @@ type setupDialog struct {
 	yes bool
 }
 
-// choose shows the items and returns the ids of the ones to do: every item that
-// needs no consent, and the others as the person answers, one by one. An item whose
-// required item is not going ahead is neither asked nor done, and the listing says so.
+// choose shows the items and returns the ids of the ones to do: the items that need
+// no consent and the others as the person answers, one by one. Two things leave an
+// item alone, and the listing says so: an item whose required item is not going ahead
+// is neither asked nor done, and neither is an item that needs no consent when other
+// items require it and none of them is going ahead (it was listed for them, and
+// applying it alone would record a setup that serves nothing). An item that needs
+// no consent and that nothing requires is always done.
 // It also returns the items that follow from a no: the ones the person answered no to
-// and the ones left alone because an item they require was one of those. The person
-// decided against the whole chain, so none of it is reported again. None under --yes.
+// and the ones left alone for either reason above. The person decided against the
+// whole chain, so none of it is reported again. None under --yes.
 func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted []string, declined []adaptersetup.Item, err error) {
 	fmt.Fprintln(d.out, heading)
 	for _, it := range items {
@@ -207,11 +211,14 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 		}
 		fmt.Fprintf(d.out, "  %s %s [%s %s]%s\n", it.Action, it.Summary, it.Kind, it.Target, note)
 	}
-	accepted = []string{}
-	for _, it := range items {
-		if missing := slices.IndexFunc(it.Requires, func(id string) bool { return !slices.Contains(accepted, id) }); missing >= 0 {
+	// An item goes ahead only after the items it requires, so the questions are asked
+	// in the listing's order; whether an item that needs no consent is wanted depends
+	// on the items after it, so that is settled in a second pass, from the end.
+	going := make([]bool, len(items))
+	goingIDs := map[string]bool{}
+	for i, it := range items {
+		if missing := slices.IndexFunc(it.Requires, func(id string) bool { return !goingIDs[id] }); missing >= 0 {
 			fmt.Fprintf(d.out, "left alone: %s (it needs %s, which is not going ahead)\n", it.Summary, it.Requires[missing])
-			declined = append(declined, it)
 			continue
 		}
 		if it.Consent && !d.yes {
@@ -220,11 +227,32 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 				return nil, nil, err
 			}
 			if !ok {
-				declined = append(declined, it)
 				continue
 			}
 		}
-		accepted = append(accepted, it.ID)
+		going[i], goingIDs[it.ID] = true, true
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		if it.Consent || !going[i] {
+			continue
+		}
+		requiredBy := func(other adaptersetup.Item) bool { return slices.Contains(other.Requires, it.ID) }
+		if !slices.ContainsFunc(items, requiredBy) {
+			continue
+		}
+		if !slices.ContainsFunc(items, func(other adaptersetup.Item) bool { return requiredBy(other) && goingIDs[other.ID] }) {
+			fmt.Fprintf(d.out, "left alone: %s (nothing that needs it is going ahead)\n", it.Summary)
+			going[i], goingIDs[it.ID] = false, false
+		}
+	}
+	accepted = []string{}
+	for i, it := range items {
+		if going[i] {
+			accepted = append(accepted, it.ID)
+		} else {
+			declined = append(declined, it)
+		}
 	}
 	return accepted, declined, nil
 }

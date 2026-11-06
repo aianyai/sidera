@@ -724,6 +724,87 @@ func TestAdapterSetupHonoursRequires(t *testing.T) {
 	})
 }
 
+// An item that needs no consent exists for the items that require it (the source of a
+// plugin is read by the plugin's install). When the person declines every one of them it
+// is not applied: it would be recorded, the instance would then count as set up in the
+// client, and `adapter remove` would refuse for something that serves nothing. It is
+// left alone and counts as declined, so that check and refresh do not call it drift.
+func TestAdapterSetupLeavesAloneWhatNothingDependsOn(t *testing.T) {
+	source := fakeadapter.SetupItem{ID: "s", Content: "S"}
+	middle := fakeadapter.SetupItem{ID: "t", Content: "T", Requires: []string{"s"}}
+	plugin := fakeadapter.SetupItem{ID: "d", Consent: true, Content: "D", Requires: []string{"t"}}
+	other := fakeadapter.SetupItem{ID: "e", Consent: true, Content: "E", Requires: []string{"s"}}
+	files := func(r *setupRig) string {
+		var present []string
+		for id, path := range map[string]string{"s": filepath.Join(r.state, "setup", "files", "s"), "t": filepath.Join(r.state, "setup", "files", "t"),
+			"d": filepath.Join(r.client, "d"), "e": filepath.Join(r.client, "e")} {
+			if r.exists(path) {
+				present = append(present, id)
+			}
+		}
+		slices.Sort(present)
+		return strings.Join(present, "")
+	}
+
+	sameSet := func(got []string, want ...string) bool {
+		return len(got) == len(want) && slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want)))
+	}
+
+	t.Run("every dependent declined", func(t *testing.T) {
+		r := newRig(t, source, middle, plugin, other)
+		asked, _, err := r.run(modeSetup, "n\nn\n", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := files(r); got != "" {
+			t.Errorf("files made = %q, want none", got)
+		}
+		for _, want := range []string{"left alone: write s", "left alone: write t", "declined: write s"} {
+			if !strings.Contains(asked, want) {
+				t.Errorf("the dialogue does not say %q:\n%s", want, asked)
+			}
+		}
+		for _, req := range r.exec.requests {
+			if req.Op == adaptersetup.OpApply && len(req.Accepted) != 0 {
+				t.Errorf("apply sent accepted = %v, want none", req.Accepted)
+			}
+		}
+		if rec, err := adaptersetup.ReadRecord(r.state); err != nil || rec == nil || rec.Installed() || !sameSet(rec.Declined, "s", "t", "d", "e") {
+			t.Errorf("record = %+v (%v), want nothing installed and s, t, d, e declined", rec, err)
+		}
+		for _, mode := range []setupMode{modeCheck, modeRefresh} {
+			if _, report, err := r.run(mode, "", false); err != nil || strings.Contains(report, "drift") {
+				t.Errorf("mode %d reports drift: %v\n%s", mode, err, report)
+			}
+		}
+		env := setupEnv{home: "/home/sidera", program: "/opt/sidera"}
+		node := &updateScript{answers: map[string][]func() (json.RawMessage, error){"adapters.setup_info": {r.infoAnswer()}}}
+		if err := refuseRemoveWhileSetUp(context.Background(), node, r.exec, "work", env); err != nil {
+			t.Errorf("adapter remove is refused although nothing is installed: %v", err)
+		}
+	})
+
+	t.Run("one dependent accepted is enough", func(t *testing.T) {
+		r := newRig(t, source, middle, plugin, other)
+		if _, _, err := r.run(modeSetup, "n\ny\n", false); err != nil {
+			t.Fatal(err)
+		}
+		if got := files(r); got != "es" {
+			t.Errorf("files made = %q, want es (t serves only the declined d)", got)
+		}
+	})
+
+	t.Run("--yes applies everything", func(t *testing.T) {
+		r := newRig(t, source, middle, plugin, other)
+		if _, _, err := r.run(modeSetup, "", true); err != nil {
+			t.Fatal(err)
+		}
+		if got := files(r); got != "dest" {
+			t.Errorf("files made = %q, want dest", got)
+		}
+	})
+}
+
 // An enumeration value that a later release adds is shown as it is: a kind of drift
 // the CLI does not know is drift, an outcome status it does not know is a failure with
 // the adapter's message, and neither makes the result unusable.
