@@ -117,7 +117,11 @@ good, and why not an item: a plan with no items could not show it. The CLI shows
 notes before it asks and a check's after the drift lines; an older CLI ignores the member. The
 other ops do not carry notes, and `Validate` does not refuse them there, so that a later
 release can add them to more ops without breaking a CLI that is mid-update; the CLI shows
-those of a plan and a check only. `check` and `refresh` always say `recorded`: the guard of
+those of a plan and a check only. `notes` follows the rule of `check`: the adapter returns an
+error only when it cannot read the instance's own state, and a client it cannot probe gives no
+note or a note saying so, because the guard of `adapter remove` runs `check`, and an error
+from the notes would make an instance whose client is gone removable only with `--force`.
+`check` and `refresh` always say `recorded`: the guard of
 `adapter remove` acts on it, so a result without it is refused.
 
 The status of the result as a whole is derived by the SDK helper from the lists, so an
@@ -308,7 +312,7 @@ error that says to enable the instance and start the daemon so that it runs once
   of a record that is not installed answers as for none);
 - `Noter`, the optional interface of a `Handler` that has notes: `Handle` asks it for `plan`
   and `check` and puts the answer in `notes`, so a handler written before notes existed keeps
-  compiling and answers none;
+  compiling and answers none; it errors only as `Check` does (see [Results](#results));
 - `Reconcile`, the classification that a check and a refresh share: each item the adapter
   wants is probed at its recorded target and found intact, stale (a refresh rewrites it),
   changed or gone (drift, which a refresh leaves), or without a record (`needs_setup`,

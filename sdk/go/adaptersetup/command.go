@@ -53,7 +53,10 @@ type Handler interface {
 // something setup installs, so not an item of a plan and not drift of a check: which
 // toolsets of the client to enable, say. Handle asks it for OpPlan and OpCheck only,
 // after the op itself, and puts the notes in the result. The notes change nothing about
-// the status. An error is the adapter's failure to do the op at all.
+// the status. Notes follows Check's rule: it returns an error only when it cannot read the
+// instance's own state. A client it cannot probe gives no note, or a note that says so,
+// because `sidera adapter remove` runs Check, and an error from Notes would make an
+// instance whose client is gone unremovable without --force.
 type Noter interface {
 	Notes(ctx context.Context, req Request) ([]string, error)
 }
