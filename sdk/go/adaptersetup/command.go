@@ -63,7 +63,9 @@ type Noter interface {
 
 // Check is the answer of Handler.Check.
 type Check struct {
-	// Recorded says whether a record exists.
+	// Recorded is ignored: Handle takes recorded from the record itself
+	// (Record.Installed), so that an adapter's slip cannot make a record of declines
+	// alone block `adapter remove`.
 	Recorded bool
 	Drift    []Drift
 }
@@ -72,6 +74,7 @@ type Check struct {
 // refresh and nothing to report: Handle refuses outcomes and drift then, and an
 // outcome of the status done for an item the record does not hold.
 type Refresh struct {
+	// Recorded is ignored as Check.Recorded is: Handle takes it from the record.
 	Recorded bool
 	// Outcomes are the items it rewrote (or tried to and could not, or left on
 	// purpose); an item that was already current is not listed.
@@ -156,8 +159,10 @@ func ReadRequest(r io.Reader) (Request, error) {
 // of the request and with a status that follows from its lists. What an adapter
 // must not do is enforced here once, for every adapter: it does not touch an instance
 // without a state directory, and a refresh does not create anything or speak of a
-// record that is not there. A result that breaks such a rule, or is not valid, is the
-// adapter's bug and an error.
+// record that is not there. Two things are the record's to say and are taken from it
+// whatever the adapter answered: whether a check or a refresh finds a record (recorded,
+// which `adapter remove` acts on) and, after an apply, the set of declined ids. A result
+// that breaks such a rule, or is not valid, is the adapter's bug and an error.
 func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 	res := Result{Version: req.Version, Op: req.Op}
 	if req.Op != OpCheck && req.Op != OpRefresh {
@@ -183,6 +188,13 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		if req.Undo {
 			run = h.Undo
 		}
+		// The record as it was before the adapter touched it: the declines of earlier
+		// runs are read from here, so that an adapter that writes its record from
+		// scratch cannot drop them.
+		before, err := ReadRecord(req.StateDir)
+		if err != nil {
+			return Result{}, err
+		}
 		outcomes, err := run(ctx, req)
 		if err != nil {
 			return Result{}, err
@@ -190,7 +202,7 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		if req.Undo {
 			err = dropEmptyRecord(req.StateDir)
 		} else {
-			err = rememberDeclined(req)
+			err = rememberDeclined(req, before)
 		}
 		if err != nil {
 			return Result{}, err
@@ -204,12 +216,17 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		res.Recorded, res.Drift = &c.Recorded, c.Drift
+		rec, err := ReadRecord(req.StateDir)
+		if err != nil {
+			return Result{}, err
+		}
+		recorded := rec.Installed()
+		res.Recorded, res.Drift = &recorded, c.Drift
 		res.Status = StatusOK
 		switch {
 		case len(c.Drift) > 0:
 			res.Status = StatusDrift
-		case !c.Recorded:
+		case !recorded:
 			res.Status = StatusNone
 		}
 	case OpRefresh:
@@ -224,14 +241,15 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		if err := checkRefresh(rec, f); err != nil {
 			return Result{}, err
 		}
-		res.Recorded, res.Outcomes, res.Drift = &f.Recorded, f.Outcomes, f.Drift
+		recorded := rec.Installed()
+		res.Recorded, res.Outcomes, res.Drift = &recorded, f.Outcomes, f.Drift
 		res.Status = StatusRefreshed
 		switch {
 		case anyFailed(f.Outcomes):
 			res.Status = StatusError
 		case len(f.Drift) > 0:
 			res.Status = StatusDrift
-		case !f.Recorded:
+		case !recorded:
 			res.Status = StatusNone
 		}
 	}
@@ -281,12 +299,13 @@ func anyFailed(outcomes []Outcome) bool {
 
 // rememberDeclined keeps in the record what the person declined in an apply, so that
 // the declines have one writer for every adapter. It runs after the adapter's Apply,
-// which has written whatever it did: the declined set is what it was, plus
-// req.Declined, minus the items accepted now (the person wants them, whether or not
-// they worked) and minus the items the record holds. A record is made for declines
-// alone, since a person who declines everything leaves no other trace; and nothing is
-// written when the set does not change.
-func rememberDeclined(req Request) error {
+// which has written whatever it did to Items. The declined set starts from the record as
+// it was before the Apply (before, nil for none), not from what the adapter wrote back,
+// which may have forgotten it: it is that set, plus req.Declined, minus the items
+// accepted now (the person wants them, whether or not they worked) and minus the items
+// the record holds now. A record is made for declines alone, since a person who declines
+// everything leaves no other trace; and nothing is written when the set does not change.
+func rememberDeclined(req Request, before *Record) error {
 	rec, err := ReadRecord(req.StateDir)
 	if err != nil {
 		return err
@@ -294,7 +313,10 @@ func rememberDeclined(req Request) error {
 	if rec == nil {
 		rec = &Record{SideraProgram: req.SideraProgram}
 	}
-	declined := slices.Clone(rec.Declined)
+	var declined []string
+	if before != nil {
+		declined = slices.Clone(before.Declined)
+	}
 	for _, id := range req.Declined {
 		if !slices.Contains(declined, id) {
 			declined = append(declined, id)

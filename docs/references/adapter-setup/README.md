@@ -248,8 +248,10 @@ that item, one by one.
 
 A record "exists", as `check` and `refresh` say it in `recorded`, when it holds an item
 setup did. A record that holds only declines (the person said no to everything) records
-nothing that was done: the adapter answers for it as for no record, and `adapter remove`
-is not refused on its account.
+nothing that was done: it answers as no record, and `adapter remove` is not refused on its
+account. `Handle` sets `recorded` from the record itself (`Record.Installed`) and ignores
+what the adapter answered, so that a slip of one adapter cannot leave a person unable to
+remove an instance that has nothing to undo.
 
 ### What was declined
 
@@ -259,9 +261,10 @@ item they declined is remembered, and `refresh` and `check` do not report it. Th
 
 - **Who writes it.** `Handle` merges `declined` into the record once the adapter's `apply`
   returns, for every adapter. An adapter reads its record, changes `items` and writes it
-  back as it does today, and never edits `declined`; a record rewritten from scratch
-  would forget the earlier declines, which only brings the drift back. The declined set
-  becomes what it was plus `declined`, minus the ids in `accepted` (a person who accepts an
+  back as it does today, and never edits `declined`. `Handle` reads the record before it
+  calls the adapter and starts from the declines it held then, so that an adapter that
+  rewrites its record from scratch cannot forget them, which would only bring the drift
+  back. The declined set becomes what it was plus `declined`, minus the ids in `accepted` (a person who accepts an
   item later wants it, whether or not it worked) and minus the ids the record holds. A record
   is made when only declines are to be kept. A request without `declined` changes
   nothing.

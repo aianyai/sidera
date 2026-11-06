@@ -34,11 +34,13 @@ a program's commands).
   returned, and refuses a result that does not validate (a repeated item id is the
   adapter's bug, exit 1, nothing written). It also holds a refresh to the record: no
   outcome or drift without one, and nothing `done` that the record did not hold.
-- **Declines have one writer.** After an adapter's `Apply` returns, `Handle` merges
-  `Request.Declined` into the record (minus what was accepted or is recorded), and after
-  an `Undo` it removes a record that holds no item. An adapter reads and writes `Items`
-  only, answers `Recorded: rec.Installed()` and, in `Plan`, lists declined items like any
-  other.
+- **Declines have one writer, and `recorded` one source.** After an adapter's `Apply`
+  returns, `Handle` merges `Request.Declined` into the declines the record held before the
+  call (minus what was accepted or is recorded), so a record the adapter rebuilt from
+  scratch loses none, and after an `Undo` it removes a record that holds no item. It also
+  sets `recorded` of a check and a refresh from `Record.Installed`, whatever `Check.Recorded`
+  and `Refresh.Recorded` say. An adapter reads and writes `Items` only and, in `Plan`,
+  lists declined items like any other.
 - **Unknown members are ignored; an unsupported version is refused.** A request of a
   version outside `MinVersion` to `Version` is exit 2 and the handler is not called; the
   result carries the version of the request.

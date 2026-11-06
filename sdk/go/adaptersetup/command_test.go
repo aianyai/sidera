@@ -502,6 +502,73 @@ func TestRequestDeclinedIsOptional(t *testing.T) {
 	}
 }
 
+// rebuilder is a handler whose apply writes its record from scratch, the way an adapter
+// that forgets declines would: only its items.
+type rebuilder struct{ *script }
+
+func (r rebuilder) Apply(ctx context.Context, req adaptersetup.Request) ([]adaptersetup.Outcome, error) {
+	rec := adaptersetup.Record{AdapterVersion: "1"}
+	rec.Set(adaptersetup.RecordItem{ID: "x", Kind: "file", Target: "/t/x"})
+	return nil, adaptersetup.WriteRecord(req.StateDir, rec)
+}
+
+// The declines have one writer: an adapter whose apply rebuilds the record from scratch
+// cannot drop the declines of earlier runs, which would bring back the drift the person
+// decided against.
+func TestHandleKeepsEarlierDeclinesWhenTheAdapterRebuildsTheRecord(t *testing.T) {
+	state := t.TempDir()
+	if err := adaptersetup.WriteRecord(state, adaptersetup.Record{Declined: []string{"a"}}); err != nil {
+		t.Fatal(err)
+	}
+	req := adaptersetup.Request{Version: adaptersetup.Version, Op: adaptersetup.OpApply, StateDir: state, Accepted: []string{"x"}, Declined: []string{"b"}}
+	if _, err := adaptersetup.Handle(context.Background(), rebuilder{&script{}}, req); err != nil {
+		t.Fatal(err)
+	}
+	got, err := adaptersetup.ReadRecord(state)
+	if err != nil || got == nil || !slices.Equal(got.Declined, []string{"a", "b"}) || len(got.Items) != 1 {
+		t.Errorf("record = %+v, %v; want item x and the declines a, b", got, err)
+	}
+}
+
+// Whether a record exists is the record's to say, once for every adapter: a record that
+// holds only declines must never read as one, or `adapter remove` is refused for an
+// instance with nothing to undo, and an adapter's slip cannot make the answer wrong.
+func TestHandleSaysRecordedFromTheRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		record *adaptersetup.Record
+		said   bool // what the adapter answers
+		want   bool
+	}{
+		{"no record, the adapter says so", nil, false, false},
+		{"no record, the adapter says there is one", nil, true, false},
+		{"declines only, the adapter says there is a record", &adaptersetup.Record{Declined: []string{"a"}}, true, false},
+		{"an installed item, the adapter says there is none", &adaptersetup.Record{Items: []adaptersetup.RecordItem{{ID: "a", Kind: "file", Target: "/t/a"}}}, false, true},
+	} {
+		for _, op := range []adaptersetup.Op{adaptersetup.OpCheck, adaptersetup.OpRefresh} {
+			t.Run(tc.name+" "+string(op), func(t *testing.T) {
+				state := t.TempDir()
+				if tc.record != nil {
+					if err := adaptersetup.WriteRecord(state, *tc.record); err != nil {
+						t.Fatal(err)
+					}
+				}
+				h := &script{check: adaptersetup.Check{Recorded: tc.said}, refresh: adaptersetup.Refresh{Recorded: tc.said}}
+				res, err := adaptersetup.Handle(context.Background(), h, adaptersetup.Request{Version: adaptersetup.Version, Op: op, StateDir: state})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.Recorded == nil || *res.Recorded != tc.want {
+					t.Errorf("recorded = %v, want %v", res.Recorded, tc.want)
+				}
+				if !tc.want && res.Status != adaptersetup.StatusNone {
+					t.Errorf("status = %s, want none", res.Status)
+				}
+			})
+		}
+	}
+}
+
 // withNotes is a script that also has advice for the person.
 type withNotes struct {
 	*script
