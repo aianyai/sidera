@@ -42,11 +42,13 @@ func WritePrivateFile(path string, data []byte) error {
 
 // WriteFile writes data to path so that a reader sees the old content or the new,
 // never a part: it writes a file of its own beside path, flushes it and renames it
-// over path. The file has fileMode, and so has an existing file it replaces, and the
-// directories made above it have dirMode (before the umask applies): the owner of the
-// place being written decides them, such as a client's profile whose files are 0644,
-// not this package. On Windows a mode has no effect. The rename is not flushed to the
-// directory: a crash can lose the write, and setup is run again.
+// over path. A file that is made has fileMode and the directories made above it have
+// dirMode (before the umask applies): the owner of the place being written decides them,
+// such as a client's profile whose files are 0644, not this package. A file that is
+// already there keeps its own mode, as EditJSONFile keeps one, so that a person's 0600
+// dotfile linked into the place is not widened. On Windows a mode has no effect. The
+// rename is not flushed to the directory: a crash can lose the write, and setup is run
+// again.
 //
 // A symbolic link at path is followed, as EditJSONFile follows one, and the file it
 // leads to is written, so a file the person keeps in a dotfiles directory and links
@@ -64,6 +66,9 @@ func WriteFile(path string, data []byte, fileMode, dirMode fs.FileMode) error {
 		}
 	} else if err := os.MkdirAll(dir, dirMode); err != nil {
 		return err
+	}
+	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
+		fileMode = info.Mode().Perm()
 	}
 	return replaceFile(target, data, fileMode, nil)
 }

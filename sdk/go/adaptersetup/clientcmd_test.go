@@ -69,9 +69,6 @@ func TestHelperProcess(t *testing.T) {
 	case "pwd":
 		wd, _ := os.Getwd()
 		fmt.Fprint(os.Stdout, wd)
-	case "stdin":
-		n, err := os.Stdin.Read(make([]byte, 1))
-		fmt.Fprintf(os.Stdout, "%d %v", n, err)
 	}
 	os.Exit(0)
 }
@@ -126,7 +123,7 @@ func TestClientCommandRun(t *testing.T) {
 	}
 }
 
-func TestClientCommandRunsInTheDirectoryAndWithoutInput(t *testing.T) {
+func TestClientCommandRunsInTheDirectory(t *testing.T) {
 	c := helper(t, time.Minute, "pwd")
 	out, err := c.Run(context.Background())
 	if err != nil {
@@ -136,18 +133,6 @@ func TestClientCommandRunsInTheDirectoryAndWithoutInput(t *testing.T) {
 	got, _ := filepath.EvalSymlinks(string(out.Stdout))
 	if got != want {
 		t.Errorf("working directory = %q, want %q", got, want)
-	}
-
-	// Documentation, not a guard: the child sees end of file here whether Stdin is nil
-	// or the test's own input, because `go test` runs with the null device already, so a
-	// regression cannot show under it. It shows when the child is run from a terminal.
-	// The child must see end of file at once, not wait on this process's input.
-	out, err = helper(t, time.Minute, "stdin").Run(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out.Stdout) != "0 EOF" {
-		t.Errorf("a read of standard input gave %q, want %q", out.Stdout, "0 EOF")
 	}
 }
 

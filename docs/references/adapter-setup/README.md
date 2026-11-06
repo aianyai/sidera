@@ -272,6 +272,9 @@ item they declined is remembered, and `refresh` and `check` do not report it. Th
   lists as declined out of the drift (it is returned as `Reconciliation.Declined`); an
   item a later release wants, which nobody declined, is still `needs_setup`. An item that
   is recorded is never treated as declined.
+- **An item id keeps its meaning.** A decline is remembered by id, across releases. A later
+  release that changes what an item does gives it a new id; under the old one the person's
+  earlier no would hide the changed item from every check and refresh.
 - **A plan still offers it.** The person who runs `sidera adapter setup` by hand sees
   the plan, so they can change their mind. An adapter builds its plan from what it wants
   and what is there, and never filters it by `declined`; one that builds the plan from
@@ -323,9 +326,11 @@ error that says to enable the instance and start the daemon so that it runs once
   Because both ops read the same answer, a refresh can only rewrite what a check calls stale;
 - `WriteFile(path, data, fileMode, dirMode)`, the atomic write: a file of its own is
   written, flushed and renamed over the target, so a reader sees the old content or the new
-  and a crash leaves no empty file that a later refresh would not rewrite. The file and the
-  directories made above it get the modes the caller names, because the place being written
-  has an owner that decides them (a Hermes profile's files are 0644 and its directories 0755).
+  and a crash leaves no empty file that a later refresh would not rewrite. A file that is made,
+  and the directories made above it, get the modes the caller names, because the place being
+  written has an owner that decides them (a Hermes profile's files are 0644 and its directories
+  0755). A file that is already there keeps its own mode, as `EditJSONFile` keeps one: a
+  person's 0600 dotfile linked into the place is not widened.
   A link at the path is followed, as `EditJSONFile` follows one, and the file it leads to is
   written: a Skill that the person keeps in a dotfiles directory and links into the profile
   stays a link, where a rename over the link would silently cut it. A directory is not made
@@ -361,10 +366,12 @@ run always ends:
   because an npm-installed `codex` is a node wrapper that cannot forward a kill: killing the
   wrapper alone would leave the native program running, free to write the client's
   configuration after setup has reported a failure. A client in its own group also does not
-  receive a terminal's Ctrl-C, so the setup program turns its own interrupt, termination and
-  hangup (the last only on Linux and macOS) into the end of the context it runs the handler
-  under (`Command` does so), and the client ends with it. On Windows only the program
-  itself is killed, and a process it started may survive it. A grandchild that holds the
+  receive a terminal's Ctrl-C, so the setup program turns its own interrupt, termination
+  and hangup (the last only on Linux and macOS) into the end of the context it runs the
+  handler under (`Command` does so), and the client ends with it. A client in that
+  background group that opens the terminal gets SIGTTIN and stops; it is killed at the time
+  limit and shows as a timeout. On the other platforms (Windows) only the program itself is
+  killed, and a process it started may survive it. A grandchild that holds the
   output pipes open delays the return by at most a fixed 2 seconds, not for as long as it
   lives. The timeout is reported before the exit status, because a killed program's status
   would otherwise read as an exit code; but only when the program did not end by itself

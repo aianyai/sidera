@@ -456,15 +456,15 @@ func setupFailure(res adaptersetup.Result) string {
 }
 
 // unfinishedRemovalHint is what a removal that did not do every item ends with, or ""
-// when it did. An item that failed or was left alone may be one whose client program is
-// no longer installed, and then no rerun can undo it; `adapter remove` refuses an
-// instance with a recorded setup, so the way out has to be named here: --force removes
-// the instance without undoing what is left, which stays in the client until it is
-// cleaned up by hand.
+// when it did. An item that failed or was left alone may be one that cannot be undone:
+// its client program is gone, or the item changed since setup and the undo leaves what a
+// person edited. No rerun helps then, and `adapter remove` refuses an instance with a
+// recorded setup, so the way out has to be named here: --force removes the instance
+// without undoing what is left, which stays in the client until it is cleaned up by hand.
 func unfinishedRemovalHint(instance string, res adaptersetup.Result) string {
 	for _, o := range res.Outcomes {
 		if o.Status != adaptersetup.OutcomeDone {
-			return fmt.Sprintf("hint: if the client program is no longer installed, the rest cannot be undone: `sidera adapter remove %s --force` removes the instance anyway, and what setup installed in the client stays there (see \"Cleaning up an adapter's client by hand\" in the adapters guide for what to clean up)\n", instance)
+			return fmt.Sprintf("hint: items that cannot be undone (the client program is no longer installed, or the item changed since setup) stay as they are: `sidera adapter remove %s --force` removes the instance anyway, and the items not undone stay in the client (see \"Cleaning up an adapter's client by hand\" in the adapters guide for what to clean up)\n", instance)
 		}
 	}
 	return ""

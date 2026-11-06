@@ -17,7 +17,7 @@ protocol has a version of its own.
   up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter.
   Adapters use it in this release. An item you decline is remembered: `--check` and `sidera update` do not report it as still to set up, and running the
   command again offers it again. When `--remove` cannot finish because the client program is no
-  longer installed, it ends by saying that `sidera adapter remove <instance> --force` removes the
+  longer installed or an item changed since setup, it ends by saying that `sidera adapter remove <instance> --force` removes the
   instance anyway, and where the guide lists what to clean up by hand.
 - **`sidera update` refreshes the client setup of your adapters.** After it installs the new
   adapters, it asks the adapter of each instance to bring what `sidera adapter setup` recorded in

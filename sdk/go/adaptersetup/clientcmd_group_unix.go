@@ -19,6 +19,9 @@ var interruptSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP
 // wrapper that starts the native program and cannot forward a SIGKILL to it, so
 // killing the wrapper alone leaves the native program running, and it could still
 // write the client's configuration after the setup has reported a failure.
+//
+// The group is a background group of the terminal, so a client that opens the terminal
+// gets SIGTTIN, stops, and is killed when its time ends: it shows as a timeout.
 func killGroupOnCancel(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

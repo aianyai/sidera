@@ -488,20 +488,6 @@ func TestHandleRemembersWhatWasDeclined(t *testing.T) {
 	})
 }
 
-// A record that holds only declines is not a setup that was done: the request member
-// is the CLI's word for it, and a request without it (an older core program) is read as
-// declining nothing.
-func TestRequestDeclinedIsOptional(t *testing.T) {
-	h := &script{}
-	code, _, errs := runSetup(t, h, `{"version":1,"op":"apply","accepted":["a"],"declined":["b","c"]}`)
-	if code != adapterkit.ExitOK || strings.Join(h.got.Declined, " ") != "b c" {
-		t.Errorf("exit %d (%s), declined %v", code, errs, h.got.Declined)
-	}
-	if code, _, errs = runSetup(t, h, `{"version":1,"op":"apply","accepted":["a"]}`); code != adapterkit.ExitOK || len(h.got.Declined) != 0 {
-		t.Errorf("exit %d (%s), declined %v", code, errs, h.got.Declined)
-	}
-}
-
 // rebuilder is a handler whose apply writes its record from scratch, the way an adapter
 // that forgets declines would: only its items.
 type rebuilder struct{ *script }

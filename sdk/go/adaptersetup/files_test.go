@@ -9,9 +9,10 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 )
 
-// The file and the directories made above it get the modes the caller names, and an
-// existing file is given the file mode again: the owner of the place being written
-// (a Hermes profile, whose files are 0644) decides them, not this package.
+// A file that is made gets the file mode the caller names, and so do the directories made
+// above it: the owner of the place being written (a Hermes profile, whose files are
+// 0644) decides them, not this package. A file that is already there keeps its own mode,
+// so that a person's 0600 dotfile linked into the place is not widened.
 func TestWriteFileUsesTheModesItIsGiven(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a", "b", "file")
@@ -36,7 +37,7 @@ func TestWriteFileUsesTheModesItIsGiven(t *testing.T) {
 		return // a mode has no effect there
 	}
 	for p, want := range map[string]os.FileMode{
-		path: 0o644, deep: 0o644, filepath.Dir(deep): 0o755, filepath.Join(dir, "c"): 0o755,
+		path: 0o600, deep: 0o644, filepath.Dir(deep): 0o755, filepath.Join(dir, "c"): 0o755,
 	} {
 		if info, err := os.Stat(p); err != nil || info.Mode().Perm() != want {
 			t.Errorf("%s mode = %v, %v; want %v", p, info.Mode().Perm(), err, want)

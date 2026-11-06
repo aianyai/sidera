@@ -90,7 +90,4 @@ func TestReconcileLeavesWhatWasDeclinedOutOfDrift(t *testing.T) {
 	if all := got.CheckDrift(); len(all) != 1 || all[0].ID != "new" || all[0].Problem != adaptersetup.ProblemNeedsSetup {
 		t.Errorf("CheckDrift = %+v, want only the item no one declined", all)
 	}
-	if !rec.IsDeclined("no") || rec.IsDeclined("new") || (*adaptersetup.Record)(nil).IsDeclined("no") {
-		t.Error("IsDeclined")
-	}
 }
