@@ -261,7 +261,12 @@ func (c *command) run(ctx context.Context, args []string) error {
 		return c.setup(args[1:])
 	case "update":
 		return c.update(ctx, args[1:])
-	case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust":
+	case "adapter":
+		if len(args) > 1 && args[1] == "setup" {
+			return c.adapterSetup(ctx, args[2:])
+		}
+		return c.manage(ctx, args)
+	case "daemon", "alerts", "preset", "endpoint", "node", "identity", "clock", "network", "trust":
 		return c.manage(ctx, args)
 	case "status":
 		if len(args) == 1 {

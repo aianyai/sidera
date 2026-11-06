@@ -45,6 +45,17 @@ and its bound values. A local value stays attached, including a body spelled
   report, and implements the run's `Node` over the management client, opened at its first
   call so that a run that stops early never needs the data directory. It reads the answers
   loosely. `terminal*.go` say whether stdin is a terminal, which a run without `--yes` needs.
+- `adapter_setup.go`: `adapter setup`. `openSetupSession` asks the daemon (`adapters.setup_info`) how the
+  instance's setup runs and builds the one request every call of the command shares; `setupSession.call`
+  runs the program (`execSetup`: argv exec'd directly, request on stdin, result on stdout, the tail of
+  stderr quoted when it fails, five minutes at most) and checks the result with `Result.Validate`;
+  `runSetup` is the modes (plan or remove, ask, apply; check; refresh) over a session, `setupDialog`
+  the questions, written to stderr and read from one reader, and `applyInStages` the one place that
+  honours an item's `requires` once the questions are answered (an item whose required item did not
+  complete is not sent to the adapter). The executor and the dialog are the seams the
+  tests use; the same session is what `update` will use to refresh. `prompt.go` is the `[y/N]` question and the
+  "no terminal, add --yes" refusal that `update` and `adapter setup` share. `program.go` is `programPath`, the path
+  of this program that `update`, `adapter setup` and `setup controller` all name.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request

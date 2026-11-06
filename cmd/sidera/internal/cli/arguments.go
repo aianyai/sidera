@@ -15,6 +15,8 @@ type commandArguments struct {
 	management managementFlags
 	init       initFlags
 	update     updateFlags
+
+	adapterSetup adapterSetupFlags
 }
 
 func arguments(args []string) *commandArguments {
@@ -36,7 +38,11 @@ func arguments(args []string) *commandArguments {
 	case "update":
 		out.update.add(out.flags)
 	default:
-		out.management.add(out.flags, name)
+		if name == "adapter setup" {
+			out.adapterSetup.add(out.flags)
+		} else {
+			out.management.add(out.flags, name)
+		}
 	}
 	return out
 }

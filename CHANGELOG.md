@@ -10,12 +10,22 @@ protocol has a version of its own.
 
 ### Added
 
+- **`sidera adapter setup <instance>`.** An adapter that drives a client with configuration of its
+  own can now declare a setup program, and this command runs it: it shows what it would do, asks
+  about each change to the client's configuration, and remembers what it did. `--check` reports what
+  has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
+  up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter. The
+  adapters themselves start using it in the releases that follow.
 - **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).
 
 ### Changed
 
+- **`sidera setup controller` prints the path of the program as you started it.** It used to print
+  the path the system reports for the running program, which on Linux has links resolved; it now
+  keeps them, so a link that a package manager repoints keeps leading to the current version, and
+  it is the same file `sidera update` replaces.
 - **A session learns what Sidera is the first time it connects.** The `sidera` MCP server's
   instructions used to be one line about the endpoint's limits; they now say that Sidera is the
   message channel to the other agents and people of your cluster, what to use it for, to call

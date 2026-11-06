@@ -41,7 +41,7 @@ arguments, purpose and one example.
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
-| `setup controller` | Print what a person does once to let their own sessions become controllers: the command that adds the `sidera` MCP server to Claude Code (`claude mcp add --scope user sidera -- <sidera> mcp`, every session of the user) and the rule `"mcp__sidera"` to add to the `permissions.allow` list of `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows; `$CLAUDE_CONFIG_DIR/settings.json`, `%CLAUDE_CONFIG_DIR%\settings.json`, when that variable relocates Claude Code's configuration); the command that adds it to Codex (`codex mcp add sidera -- <sidera> mcp`, the user configuration) and the line `default_tools_approval_mode = "approve"` to add to the `[mcp_servers.sidera]` table in `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml`, when that variable relocates Codex's), because `codex mcp add` has no option for it; and one line saying what that enables. Without the permission step a woken controller stalls at a prompt only a person can answer: Claude Code asks for each tool call of a server unless a rule allows it, Codex for each call of a tool that is not read-only. `<sidera>` is the absolute path of the program that ran the command (`os.Executable`, as the platform reports it, made absolute and not resolved further; always in double quotes on Windows, which cmd and PowerShell both read literally for every character a user name may hold, and in single quotes elsewhere when the path needs them), never the bare name: a client starts the server without a shell, Codex on Windows reports `program not found` for the bare name although the program is on the user's `PATH`, and a Linux session that is not a login shell has no `~/.local/bin` on its `PATH`. A program whose path cannot be determined is a failure (exit 1) that prints nothing. A program in a temporary directory (`os.TempDir()` or `GOTMPDIR`), as a `go run` build is and deleted when it exits, is warned about on standard error, because the path printed would not last; the exit code and the printed text are unchanged. The printed text ends with a note that the path is stored in each configuration: after the program moves, `claude mcp remove --scope user sidera` must precede adding it again (it refuses an existing server), and the Codex approval line must be added again after `codex mcp add`, which rewrites the table with only the command and arguments. When the data directory is not the default (`--home` or `SIDERA_HOME`) both commands name it, `<sidera> --home <dir> mcp`, because a client starts the server with an environment of its own (Codex passes only an allow-list of variables, so `SIDERA_HOME` would not reach it). It only prints: it runs nothing, edits no configuration and needs no node; `--json` has no effect. |
+| `setup controller` | Print what a person does once to let their own sessions become controllers: the command that adds the `sidera` MCP server to Claude Code (`claude mcp add --scope user sidera -- <sidera> mcp`, every session of the user) and the rule `"mcp__sidera"` to add to the `permissions.allow` list of `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows; `$CLAUDE_CONFIG_DIR/settings.json`, `%CLAUDE_CONFIG_DIR%\settings.json`, when that variable relocates Claude Code's configuration); the command that adds it to Codex (`codex mcp add sidera -- <sidera> mcp`, the user configuration) and the line `default_tools_approval_mode = "approve"` to add to the `[mcp_servers.sidera]` table in `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows; `$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml`, when that variable relocates Codex's), because `codex mcp add` has no option for it; and one line saying what that enables. Without the permission step a woken controller stalls at a prompt only a person can answer: Claude Code asks for each tool call of a server unless a rule allows it, Codex for each call of a tool that is not read-only. `<sidera>` is the absolute path of the program that ran the command (as it was launched, links kept, the file `update` replaces; only when how it was launched is not known, `os.Executable` made absolute; always in double quotes on Windows, which cmd and PowerShell both read literally for every character a user name may hold, and in single quotes elsewhere when the path needs them), never the bare name: a client starts the server without a shell, Codex on Windows reports `program not found` for the bare name although the program is on the user's `PATH`, and a Linux session that is not a login shell has no `~/.local/bin` on its `PATH`. A program whose path cannot be determined is a failure (exit 1) that prints nothing. A program in a temporary directory (`os.TempDir()` or `GOTMPDIR`), as a `go run` build is and deleted when it exits, is warned about on standard error, because the path printed would not last; the exit code and the printed text are unchanged. The printed text ends with a note that the path is stored in each configuration: after the program moves, `claude mcp remove --scope user sidera` must precede adding it again (it refuses an existing server), and the Codex approval line must be added again after `codex mcp add`, which rewrites the table with only the command and arguments. When the data directory is not the default (`--home` or `SIDERA_HOME`) both commands name it, `<sidera> --home <dir> mcp`, because a client starts the server with an environment of its own (Codex passes only an allow-list of variables, so `SIDERA_HOME` would not reach it). It only prints: it runs nothing, edits no configuration and needs no node; `--json` has no effect. |
 | `version` | Print `sidera <version> (commit <commit>, go<version>)`, with `modified` after the commit when the build's checkout had uncommitted changes; with `--json`, the object `{"version", "distribution", "commit", "modified", "go_version"}` (`commit` is left out when the build carries none, and `distribution` when the build states none; the programs of a release archive report `archive`). It needs no running node and takes no arguments. A release build reports the release version; a build without it reports `0.0.0-dev` (see [`internal/release`](../../../internal/release/README.md)). |
 | `update [--check] [--version <version>] [--yes]` | Bring this installation to a release: the programs next to the running one, the running daemon and the installed adapters, doing only the steps that are missing. See [Updating](#updating). |
 | `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
@@ -51,6 +51,7 @@ arguments, purpose and one example.
 | `adapter install <package-directory>` / `adapter list` | Install a local package by its absolute path (another version, like the same version with other contents, replaces the installed package and restarts the instances that run, which keep their sessions; the same contents change nothing), or list installed packages, instances, probe results, the `fault` reason of an installed package that cannot be loaded or of an enabled instance whose package cannot run, and the `availability` conditions an online instance's adapter reports (a table cell of JSON in the human form). |
 | `adapter enable <id> [--instance <name>] [--config <file>] [--expected-version <n>]` / `adapter disable <instance> [--expected-version <n>]` | Enable or disable an instance. A config file of `-` reads stdin; `enable` takes one only for an instance that does not exist yet. |
 | `adapter remove <instance> [--expected-version <n>]` | Remove a disabled instance and its settings. Refused while the instance is enabled and while session endpoints made through it are open (the message says how many). The adapter's state directory is deleted with the instance (on Windows the removal is refused, naming the path, while a process still holds a file in it); the instance's endpoint ids stay. |
+| `adapter setup <instance> [--check \| --remove \| --refresh] [--yes] [-- <adapter arguments>]` | Run the setup of the instance's adapter, which brings the client the adapter drives (its MCP registration, permissions, Skill) in line with the instance; see [Adapter setup](#adapter-setup). |
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
 | `endpoint list [--instance <name>]` / `endpoint close <addr> [--allow-attached]` | Read endpoints, including closed ones (`origin` says `created` or `attached` for a session), or close an endpoint. An attached session, which a person is using, is closed only with `--allow-attached`; without it the command fails with `refused/attached_close_not_allowed`. |
 | `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings. |
@@ -209,6 +210,62 @@ exactly those members. A run with `--json` is one object: `current`, `target`, `
 package could not run), and `error` when the run failed after it had done something (the
 exit code is then 1; a failure before anything was done prints the error on standard error
 only).
+
+### Adapter setup
+
+`adapter setup <instance>` runs the setup program of the instance's adapter. The contract
+between the command and that program, and the reasons for it, are
+[the adapter-setup reference](../adapter-setup/README.md); this is the command's side.
+
+It needs the daemon: it calls `adapters.setup_info` for the instance, which gives the setup
+program as an absolute argv, the instance's state directory and the values the owner set,
+and runs the program with one request on its standard input (no shell, its own working
+directory and environment, at most five minutes). `sidera_program` in the request is the
+absolute path of the program as it was launched, links kept: the file `update` replaces
+in place, so a client's configuration that names it stays valid across an update and a
+link that a package manager repoints keeps leading to the current version; only when how
+the program was launched is not known, `os.Executable` made absolute. `update` and
+`setup controller` use the same path. A program in a temporary directory is warned about
+on standard error, as there, in the modes that write the path into a client's
+configuration (plain setup and `--refresh`). `home` is the data directory the command
+resolved, and `home_is_default` says whether it is the platform default. An adapter that
+declares no setup is a usage error (2): `the adapter of <instance> has no setup`. A daemon
+that does not know `adapters.setup_info` (older than this command) is a failure (1) that
+says to update it.
+
+Modes (at most one; the flags are checked before the daemon is called, and a violation is a
+usage error, 2):
+
+| Invocation | What it does | Exit |
+| ---------- | ------------ | ---- |
+| `adapter setup <instance>` | Runs `plan`, shows the items on standard error, asks `<summary>? [y/N]` for each item that needs consent, then runs `apply` with the ids of the accepted items and of every item that needs none. Nothing accepted and nothing that needs no consent means no `apply`; an empty plan is `nothing to do`. An item that `requires` an item that was declined is not asked about and not applied, and the listing says `left alone`; an item whose required item did not complete is applied in a later call only if it did, and is otherwise reported `skipped` with the reason | 0; 1 when an item failed |
+| `--remove` | The same with `remove`, then `apply` with `undo`: asks for each recorded item the setup would undo | as above |
+| `--check` | Runs `check` and reports; changes nothing | 0 with no drift, 1 with drift. An adapter with nothing to set up and no record is `none`, not drift; one that wants something and has no record reports it as drift (`needs_setup`) |
+| `--refresh` | Runs `refresh`: brings the recorded items that still exist up to date, asks nothing. It is the mode `sidera update` uses after it installs the adapters | 0, or 1 when something failed or has drifted |
+| `--yes` | With the first two modes: accepts every item without asking | |
+
+Without `--yes` the first two modes need a terminal on standard input, and refuse with usage
+error 2, before any request, when there is none: the same rule and words as `update`.
+`--yes` with `--check` or `--refresh` is a usage error, since they ask nothing. The refusal
+is one helper's, so `update` and `adapter setup` say it in the same words. The
+questions are asked one item at a time from one reader, so a line of answers is one answer
+per item; anything but `y` or `yes` is a no, and so is the end of the input. The words after
+the first `--` are the adapter's own arguments, in `options` of the request as typed
+(flag-looking words included).
+
+The plan and the questions go to standard error; standard output is the report, `key value`
+lines: `instance`, `status`, `recorded` (check and refresh), `nothing to do` or `nothing
+applied`, one `item <id> <status> [<message>]` per outcome and one `drift <id> <problem>
+<summary>` per difference. With `--json` it is one object: `instance` and the members of the
+program's last result (`version`, `op`, `status`, `recorded`, `items`, `outcomes`, `drift`).
+The last result is that of `apply` when items were applied and otherwise that of `plan` or
+`remove`. A setup program that exits non-zero, writes something that is not a result, or a
+result of another version, with a `status` this program does not know, or without `recorded`
+for a check or refresh, is a failure (1) that names the instance and the program and, for an
+exit, quotes the end of its standard error (the last 2 KiB). A value of `action`, `problem`
+or an outcome's status that a later release added is not refused: it is shown as it is
+(the last as a failure, with the adapter's message, and counted in the verdict), so that an
+old program can run the setup of an adapter that `update` has just installed.
 
 ### Network commands
 
@@ -460,7 +517,7 @@ client commands of the console take `--home` and `--instance` after the command 
 difference: `--home` before the command is a usage error), and `setup` of the Hermes program takes
 `--home` the same way. A flag of the adapter programs is never accepted before the command.
 
-**`--json`.** Every command of `sidera` that prints a result takes it, except `setup controller`
+**`--json`.** Every command of `sidera` that prints a result takes it (`adapter setup` writes the object described in [Adapter setup](#adapter-setup)), except `setup controller`
 and `mcp`, where it has no effect, and `recv`, which writes the node's page unchanged in both
 modes (see [Output and errors](#output-and-errors) for the shapes). Of the adapter programs only
 `version` takes it. `version --json` writes one object and a newline on standard output, with the
@@ -514,7 +571,7 @@ identifier; the exit code is.
 does: by default it shows the plan on standard error and asks one question for the whole plan
 (`Update? [y/N]`) on a terminal;
 `--yes` answers for it and is required when standard input is not a terminal (the command is then a
-usage error, 2, before it does anything); `--check` only reports, writes nothing and needs neither.
+usage error, 2, before it does anything); `--check` only reports, writes nothing and needs neither. `sidera adapter setup` asks the same way but one question per item, not one for the plan.
 `identity retire` does not ask and needs `--yes`. Known differences: the Hermes program's `setup`
 only prints the steps unless `--apply` is given, then asks about each step without testing for a
 terminal and has no `--yes`, and `sidera setup controller` only prints.

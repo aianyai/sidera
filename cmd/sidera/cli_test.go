@@ -29,6 +29,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -1217,6 +1218,99 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("daemon did not finish its orderly stop")
+	}
+}
+
+var fakeAdapterOnce sync.Once
+var fakeAdapterPath string
+var fakeAdapterErr error
+
+// fakeAdapterBinary builds the fake adapter program next to the CLI binary, which
+// TestMain removes.
+func fakeAdapterBinary(t *testing.T) string {
+	t.Helper()
+	fakeAdapterOnce.Do(func() {
+		fakeAdapterPath = filepath.Join(filepath.Dir(binary(t)), "sidera-fake-adapter")
+		if runtime.GOOS == "windows" {
+			fakeAdapterPath += ".exe"
+		}
+		if out, err := exec.Command("go", "build", "-o", fakeAdapterPath, "../sidera-fake-adapter").CombinedOutput(); err != nil {
+			fakeAdapterErr = fmt.Errorf("build the fake adapter: %w: %s", err, out)
+		}
+	})
+	if fakeAdapterErr != nil {
+		t.Fatal(fakeAdapterErr)
+	}
+	return fakeAdapterPath
+}
+
+// `adapter setup` against a real daemon and a real setup program, which only an
+// end-to-end run can show: the daemon resolves the program of the manifest, the CLI
+// runs it as a process with a request built from the daemon's answer (the owner's
+// configuration included), and what comes back is a result it can act on. The dialogue,
+// the modes and the verdicts are the unit tests' and are not repeated here.
+func TestAdapterSetupRunsTheAdaptersProgram(t *testing.T) {
+	home, _ := startDaemon(t)
+	clientDir := t.TempDir()
+	script := fakeadapter.SetupConfig{ClientDir: clientDir, Items: []fakeadapter.SetupItem{
+		{ID: "a", Consent: true, Content: "v1"}, {ID: "o", Content: "own"}}}
+	raw, err := json.Marshal(map[string]any{"setup": script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, "instance.json")
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun := func(want int, args ...string) (string, string) {
+		t.Helper()
+		code, out, diag := runHome(t, home, args...)
+		if code != want {
+			t.Fatalf("%v: exit %d, want %d\nstdout %q\nstderr %q", args, code, want, out, diag)
+		}
+		return out, diag
+	}
+
+	m := harness.AdapterManifest(10)
+	m.ID, m.Program, m.Setup = "fake-setup", fakeadapter.DefaultManifestOptions().Program, true
+	if err := m.WritePackage(filepath.Join(home, "package"), fakeAdapterBinary(t)); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(0, "adapter", "install", "package")
+	mustRun(0, "adapter", "enable", "fake-setup", "--instance", "work", "--config", configPath)
+	// The instance is disabled before it runs, so the test makes the state directory
+	// that the daemon would have made when it first ran.
+	mustRun(0, "adapter", "disable", "work")
+	stateDir := filepath.Join(home, "adapter-state", "work")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	read := func(path string) string {
+		b, _ := os.ReadFile(path)
+		return string(b)
+	}
+
+	// The words after -- reach the adapter, and the files its configuration names are
+	// written, so the configuration reached it through the daemon.
+	out, diag := mustRun(0, "adapter", "setup", "work", "--yes", "--", "--note", "n")
+	if !strings.Contains(out, "item a done") || !strings.Contains(out, "item o done") || !strings.Contains(diag, "(options: --note n)") {
+		t.Errorf("setup: stdout %q, stderr %q", out, diag)
+	}
+	if read(filepath.Join(clientDir, "a")) != "v1" || read(filepath.Join(stateDir, "setup", "files", "o")) != "own" {
+		t.Error("the files were not written")
+	}
+
+	// An adapter that declares no setup has none to run: the daemon answers null.
+	plain := harness.AdapterManifest(10)
+	plain.ID = "plain-adapter"
+	if err := plain.WritePackage(filepath.Join(home, "package-plain"), binary(t)); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(0, "adapter", "install", "package-plain")
+	mustRun(0, "adapter", "enable", "plain-adapter", "--instance", "plain")
+	mustRun(0, "adapter", "disable", "plain")
+	if _, diag := mustRun(2, "adapter", "setup", "plain", "--yes"); !strings.Contains(diag, "has no setup") {
+		t.Errorf("stderr %q", diag)
 	}
 }
 

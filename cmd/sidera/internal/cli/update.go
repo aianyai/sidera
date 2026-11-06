@@ -49,7 +49,7 @@ func (c *command) update(ctx context.Context, args []string) error {
 		return usage("--version: " + err.Error())
 	}
 	if !o.check && !o.yes && !isTerminal(c.Stdin) {
-		return usage("update asks before it changes anything, and there is no terminal to ask on: run it in a terminal, or add --yes (--check only reports)")
+		return noTerminalToAsk("update")
 	}
 	keys, err := verify.EmbeddedKeys()
 	if err != nil {
@@ -78,20 +78,6 @@ func (c *command) update(ctx context.Context, args []string) error {
 		cfg.Node = &managementNode{node: client, random: c.random, home: home}
 	}
 	return c.runUpdate(ctx, cfg, updateRequest{want: want, check: o.check, yes: o.yes})
-}
-
-// programPath is the file `update` replaces: the program as it was started, links
-// kept (a link is refused, not followed), or what the system reports when how it
-// was started is not known.
-func (c *command) programPath() (string, error) {
-	if c.LaunchErr == nil && c.Launch.Program != "" {
-		return c.Launch.Program, nil
-	}
-	path, err := c.Executable()
-	if err != nil {
-		return "", &failure{"cannot find the program that is running: " + err.Error()}
-	}
-	return path, nil
 }
 
 type updateRequest struct {
@@ -151,16 +137,7 @@ func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, e
 	if yes {
 		return true, nil
 	}
-	fmt.Fprint(out, "Update? [y/N] ")
-	answer, err := bufio.NewReader(c.Stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "y", "yes":
-		return true, nil
-	}
-	return false, nil
+	return askYes(out, bufio.NewReader(c.Stdin), "Update?")
 }
 
 // updateOutcome is what --json writes: the report, and why the run failed when it did.

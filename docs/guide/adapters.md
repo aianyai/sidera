@@ -73,6 +73,29 @@ How to read it:
   `CODEX_HOME` or `CLAUDE_CONFIG_DIR`, as your own sessions: that shared directory is
   how the adapter sees them.
 
+## Setting up an adapter's client
+
+Some adapters drive a client that keeps configuration of its own (Claude Code, Codex and
+Hermes: where the `sidera` tools are registered, which of them may run without asking, the
+Skill that tells an agent what Sidera is). `sidera adapter setup <instance>` brings that
+configuration in line with the instance. The daemon has to run, and the instance has to have
+run once so that it has a state directory.
+
+```sh
+sidera adapter setup claude          # shows what it would do, asks about each change
+sidera adapter setup claude --yes    # accepts everything, for a script
+sidera adapter setup claude --check  # exit 0 when nothing has drifted or is still to set up, 1 otherwise
+sidera adapter setup claude --remove # undoes what it did, asking about each item
+```
+
+It lists the items and asks `y/N` for every one that touches the client's own
+configuration; anything but `y` is a no. Without a terminal it needs `--yes`, like
+`sidera update`. Setup remembers what it did, and only what it did and only while it is still
+there is touched later: if you delete something it installed, a refresh does not put it
+back, and `--check` tells you it is gone. `--refresh` brings what setup recorded up to date
+without asking, for a program that has no person to ask. Words after `--` are passed to the
+adapter for the options it has of its own. An adapter that has no setup says so.
+
 ## Claude Code
 
 Adapter details: [the Claude adapter reference](../references/adapter-claude/README.md).

@@ -25,11 +25,11 @@ func (c *command) setup(args []string) error {
 	if len(p) != 0 {
 		return usage("setup controller takes no arguments")
 	}
-	exe, err := c.executablePath()
+	exe, err := c.programPath()
 	if err != nil {
 		return err
 	}
-	c.warnIfTemporary(exe)
+	c.warnIfTemporary(exe, "the path in the commands below")
 	mcp := c.mcpServerCommand(exe)
 	_, err = fmt.Fprintf(c.Stdout, `Run these once. This command only prints them; it changes no configuration.
 
@@ -69,21 +69,9 @@ func userFile(goos string, getenv func(string) string, envVar, dir, name string)
 	return "~/" + dir + "/" + name
 }
 
-// executablePath is the absolute path of the running program.
-func (c *command) executablePath() (string, error) {
-	exe, err := c.Executable()
-	if err == nil && !filepath.IsAbs(exe) {
-		exe, err = filepath.Abs(exe)
-	}
-	if err != nil {
-		return "", &failure{"cannot find the path of this program to put into the command: " + err.Error()}
-	}
-	return exe, nil
-}
-
 // mcpServerCommand is the command a client starts as the MCP server. It names the
-// program at exe, the running executable, by its absolute path: a client starts the server without a
-// shell, and neither a Windows client (Codex reports "program not found" for the bare
+// program at exe, the path of the running program (programPath), by its absolute path: a
+// client starts the server without a shell, and neither a Windows client (Codex reports "program not found" for the bare
 // name although the executable is on the user's PATH) nor a client of a Linux session
 // that is not a login shell (which has no ~/.local/bin on its PATH) can be relied on to
 // find it by name. A node whose data directory is not the default is named in it by
@@ -98,12 +86,12 @@ func (c *command) mcpServerCommand(exe string) string {
 }
 
 // warnIfTemporary warns when the program at exe is in a temporary directory, as the
-// program that `go run` builds is: it is deleted when the command ends, so the path the
-// printed commands name would not last.
-func (c *command) warnIfTemporary(exe string) {
+// program that `go run` builds is: it is deleted when the command ends, so the path
+// that whatWontLast names (printed, or kept in a client's configuration) would not last.
+func (c *command) warnIfTemporary(exe, whatWontLast string) {
 	for _, dir := range []string{os.TempDir(), c.Getenv("GOTMPDIR")} {
 		if rel, err := filepath.Rel(dir, exe); dir != "" && err == nil && filepath.IsLocal(rel) {
-			fmt.Fprintf(c.Stderr, "warning: this program runs from %s, a temporary directory, so the path in the commands below will not last. Run the command from an installed sidera.\n", exe)
+			fmt.Fprintf(c.Stderr, "warning: this program runs from %s, a temporary directory, so %s will not last. Run the command from an installed sidera.\n", exe, whatWontLast)
 			return
 		}
 	}

@@ -124,6 +124,26 @@ it still lists `needs_setup`, and the status is then `drift` with `recorded: fal
 `update`'s report per instance is these statuses plus two the CLI decides: `skipped`
 (the adapter declares no setup) and `error` (the program failed).
 
+## The command
+
+`sidera adapter setup <instance> [--check | --remove | --refresh] [--yes] [-- <adapter arguments>]`
+is the only caller of the contract besides `sidera update`; its flags, exit codes and
+output are in [the command-line reference](../command-line/README.md#adapter-setup). What
+matters for the contract:
+
+- **The CLI asks, the adapter obeys.** It runs `plan` (or `remove`), shows the items, asks
+  one question per item that needs consent and sends `apply` with the accepted ids and the
+  ids of the items that need none. An adapter never has to wonder whether it may.
+- **`--refresh` is the mode `update` uses.** It runs `refresh`, which asks nothing and
+  creates nothing; an instance whose record does not exist answers `none`, so the CLI
+  asks every instance that declares a setup and needs no record of its own.
+- **`--check` reads the same record**, so a person and `update` see the same drift.
+- **The daemon says how to run the program.** `adapters.setup_info` returns the argv, the
+  state directory and the owner's values, so the CLI never reads a manifest and an old
+  program can run a new package's setup.
+- **A request is built once per command** and differs between calls only in `op`,
+  `accepted` and `undo`.
+
 ## Versions
 
 Request and result both carry `version`, the major version of the contract. The core
