@@ -8,6 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+After upgrading to 0.15, run `sidera adapter setup <instance>` once for each Claude Code, Codex
+and Hermes instance; later updates keep what it sets up current. Adapters can now declare a
+setup program, and `sidera adapter setup` runs it to bring the configuration of the client
+they drive (an MCP registration, permissions, a Skill) in line with the instance, after asking.
+`sidera update` refreshes what was set up, and `sidera adapter remove` refuses an instance
+whose client still depends on its files. The adapter package manifest stays at version 1 with
+an optional `setup` member, and the management API gains `adapters.setup_info`. Install the
+0.15 adapter packages into a 0.15 daemon, which `sidera update` does in that order: a 0.14
+daemon refuses a package that carries the new member. Apart from that member, the adapter
+and node-to-node protocols do not change, and nothing a node stores needs a migration.
+
 ### Added
 
 - **`sidera adapter setup <instance>`.** An adapter that drives a client with configuration of its
@@ -23,11 +34,20 @@ protocol has a version of its own.
   adapters, it asks the adapter of each instance to bring what `sidera adapter setup` recorded in
   your agent client up to date, without asking you, and reports one `setup` line per instance:
   `refreshed`, `none`, `drift` (with the `sidera adapter setup <instance>` command that puts it
-  right), `skipped` or `error` (which makes `sidera update` exit 1; running it again retries). The
-  step runs on every update that finds a daemon, so an update that was cut short is finished by
+  right), `skipped` or `error` (which makes `sidera update` exit 1; running it again retries).
+  `sidera update --json` carries the same in a new `setup` array, one object per instance
+  (`instance`, `adapter`, `status`, and when they apply `message`, `items`, `drift` and `fix`).
+  The step runs on every update that finds a daemon, so an update that was cut short is finished by
   the next. 0.15 is the first release in which adapters have a setup, so an update to it has
   nothing recorded to refresh: after upgrading to 0.15 run `sidera adapter setup <instance>` once
   for each instance whose adapter has a setup; later updates refresh it.
+- **`sidera adapter setup claude` sets up Claude Code.** It registers the `sidera` MCP server for your
+  user (`claude mcp add --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in
+  Claude Code's `settings.json`, and installs a plugin that gives every Claude Code session the
+  Sidera Skill, which tells it what Sidera is and how to use it. Each change to Claude Code is asked
+  about; `--check` reports a plugin you disabled, a plugin whose source is gone and a `settings.json`
+  that Claude Code would ignore; `--remove` undoes it. It never re-points a marketplace named
+  `sidera` that is somewhere else, and never edits a `settings.json` that is not valid JSON.
 - **The Hermes adapter has a setup in `sidera adapter setup`.** Run `sidera adapter setup hermes
   -- --profile <profile>` (and `--platform <platform>` for more platforms): it asks before it
   places the Skill in a profile, remembers that it did, and `--check`, `--refresh` and `--remove`
@@ -43,17 +63,27 @@ protocol has a version of its own.
   also tells you when the plugin is disabled, when its files are gone or Codex no longer offers
   the server, and `--refresh` (what `sidera update` runs) leaves a plugin you disabled
   alone.
+- **Adapter packages can declare a setup program.** The manifest's optional `setup` member
+  (`{program, args}`, with the shape and path rules of `entry`) names the program that
+  `sidera adapter setup` runs. The manifest version stays 1, and a 0.14 daemon refuses a package
+  that carries the member, so install 0.15 adapter packages into a 0.15 daemon; `sidera update`
+  restarts the daemon before it installs the adapters, so it does this in the right order.
+- **The management method `adapters.setup_info`.** Given `{"instance"}`, it answers `{instance,
+  adapter, state_dir, config, setup_argv}`: the absolute command that runs the setup of the
+  instance's installed adapter, or `null` when the package declares none. `sidera` asks it
+  instead of reading the manifest, so that a program replaced by `sidera update` can run the
+  setup of a package it has never seen.
+- **The Go SDK has what an adapter author needs for a setup.** `sdk/go/adaptersetup` holds the
+  contract between `sidera` and a setup program (the request, the result, the record of what
+  was done, the remembered declines) and the code every adapter's setup shares: atomic file
+  writes that keep a file's mode, a conservative editor for a client's JSON file, and a bounded
+  run of a client's command line. `adapterkit.Program` is the command line of an adapter program
+  (`serve`, `package`, `version [--json]`, help and usage errors) written once, with the
+  adapter's own commands such as `setup` beside them, and
+  `sdk/go/guidance` is the statement about Sidera that sessions and Skills carry.
 - **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).
-
-- **`sidera adapter setup claude` sets up Claude Code.** It registers the `sidera` MCP server for your
-  user (`claude mcp add --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in
-  Claude Code's `settings.json`, and installs a plugin that gives every Claude Code session the
-  Sidera Skill, which tells it what Sidera is and how to use it. Each change to Claude Code is asked
-  about; `--check` reports a plugin you disabled, a plugin whose source is gone and a `settings.json`
-  that Claude Code would ignore; `--remove` undoes it. It never re-points a marketplace named
-  `sidera` that is somewhere else, and never edits a `settings.json` that is not valid JSON.
 
 ### Changed
 
