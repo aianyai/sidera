@@ -1,0 +1,244 @@
+package adaptersetup
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+
+	"github.com/aianyai/sidera/sdk/go/adapterkit"
+)
+
+// maxRequest bounds what the helper reads from standard input: a request holds an
+// instance's configuration and a few paths.
+const maxRequest = 4 << 20
+
+// Handler is an adapter's setup. The helper decodes the request, checks its
+// version, calls the method of its op and writes the result; the adapter writes
+// only what it does.
+//
+// Every method gets the whole Request, whose Version is the one the core program
+// speaks (between MinVersion and Version). Handle refuses an instance whose state
+// directory does not exist (RequireStateDir) before it calls Plan, Apply, Remove or
+// Undo, so a handler need not. An error is the adapter's failure to do the op at all:
+// it is written on standard error and the program exits 1. A failure of one item is an
+// Outcome, not an error.
+type Handler interface {
+	// Plan lists what setup would do and changes nothing.
+	Plan(ctx context.Context, req Request) ([]Item, error)
+	// Apply does the items req.Accepted names, which came from Plan, and returns an
+	// outcome for each. An id that Plan would not list now is skipped, not an error.
+	Apply(ctx context.Context, req Request) ([]Outcome, error)
+	// Remove lists the recorded items that setup would undo, each with the action
+	// ActionRemove, and changes nothing. An instance with no record has none.
+	Remove(ctx context.Context, req Request) ([]Item, error)
+	// Undo undoes the items req.Accepted names, which came from Remove, and returns
+	// an outcome for each.
+	Undo(ctx context.Context, req Request) ([]Outcome, error)
+	// Refresh brings the recorded items that still exist up to date, without asking.
+	Refresh(ctx context.Context, req Request) (Refresh, error)
+	// Check reports whether a record exists and what drifted; it changes nothing. It
+	// returns an error only when it cannot read the record. A client it cannot probe
+	// (not installed, not answering) is drift of the problem ProblemBroken, not an
+	// error: `sidera adapter remove` runs Check, and an instance whose client is gone
+	// must still be removable. Without a record it still reports what setup would have
+	// to make (ProblemNeedsSetup), so that --check says an instance has no setup yet.
+	Check(ctx context.Context, req Request) (Check, error)
+}
+
+// Check is the answer of Handler.Check.
+type Check struct {
+	// Recorded says whether a record exists.
+	Recorded bool
+	Drift    []Drift
+}
+
+// Refresh is the answer of Handler.Refresh. Without a record there is nothing to
+// refresh and nothing to report: Handle refuses outcomes and drift then, and an
+// outcome of the status done for an item the record does not hold.
+type Refresh struct {
+	Recorded bool
+	// Outcomes are the items it rewrote (or tried to and could not, or left on
+	// purpose); an item that was already current is not listed.
+	Outcomes []Outcome
+	// Drift is what it did not do: a recorded item that is gone or changed, and an
+	// item the adapter now wants that no record has.
+	Drift []Drift
+}
+
+// Command is the `setup` command of an adapter program, for adapterkit.Program's
+// Commands. program names the program in its messages. It takes no argument but
+// -h and --help, reads one request from standard input and writes one result to
+// standard output; the exit codes are the program table's: 0 when a result was
+// written, 2 for a request it cannot take (it is not JSON, its version is not
+// supported, its op is not one) and 1 when the handler fails.
+func Command(program string, h Handler) adapterkit.Command {
+	return func(args []string, s adapterkit.Streams) int {
+		if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+			fmt.Fprintf(s.Stdout, "usage: %s setup\nReads one setup request as JSON on standard input and writes one result as JSON on standard output; it is run by `sidera adapter setup`, not by a person.\n", program)
+			return adapterkit.ExitOK
+		}
+		if len(args) != 0 {
+			fmt.Fprintf(s.Stderr, "%s: setup takes no argument; it reads a request on standard input\n", program)
+			return adapterkit.ExitUsage
+		}
+		req, err := ReadRequest(s.Stdin)
+		if err != nil {
+			fmt.Fprintf(s.Stderr, "%s: setup: %v\n", program, err)
+			return adapterkit.ExitUsage
+		}
+		res, err := Handle(context.Background(), h, req)
+		if err != nil {
+			fmt.Fprintf(s.Stderr, "%s: setup %s: %v\n", program, req.Op, err)
+			return adapterkit.ExitFailed
+		}
+		enc := json.NewEncoder(s.Stdout)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(res); err != nil {
+			fmt.Fprintf(s.Stderr, "%s: setup %s: %v\n", program, req.Op, err)
+			return adapterkit.ExitFailed
+		}
+		return adapterkit.ExitOK
+	}
+}
+
+// ReadRequest reads one request from r and checks that this version of the package
+// can take it: a version from MinVersion to Version. A member it does not know is
+// ignored.
+func ReadRequest(r io.Reader) (Request, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxRequest+1))
+	if err != nil {
+		return Request{}, fmt.Errorf("cannot read the request: %w", err)
+	}
+	if len(data) > maxRequest {
+		return Request{}, errors.New("the request is too large")
+	}
+	var req Request
+	if err := json.Unmarshal(data, &req); err != nil {
+		return Request{}, fmt.Errorf("the request is not a JSON object: %w", err)
+	}
+	if req.Version < MinVersion || req.Version > Version {
+		supported := fmt.Sprintf("version %d", Version)
+		if MinVersion != Version {
+			supported = fmt.Sprintf("versions %d to %d", MinVersion, Version)
+		}
+		return Request{}, fmt.Errorf("the request is of version %d, and this adapter supports %s: update sidera and its adapters together", req.Version, supported)
+	}
+	if !req.Op.valid() {
+		return Request{}, fmt.Errorf("the request asks for %q, which is not an op of version %d", req.Op, Version)
+	}
+	return req, nil
+}
+
+// Handle calls the method of the request's op and builds the result, in the version
+// of the request and with a status that follows from its lists. What an adapter
+// must not do is enforced here once, for every adapter: it does not touch an instance
+// without a state directory, and a refresh does not create anything or speak of a
+// record that is not there. A result that breaks such a rule, or is not valid, is the
+// adapter's bug and an error.
+func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
+	res := Result{Version: req.Version, Op: req.Op}
+	if req.Op != OpCheck && req.Op != OpRefresh {
+		if err := RequireStateDir(req.StateDir); err != nil {
+			return Result{}, err
+		}
+	}
+	switch req.Op {
+	case OpPlan:
+		items, err := h.Plan(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		res.Status, res.Items = StatusOK, items
+	case OpRemove:
+		items, err := h.Remove(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		res.Status, res.Items = StatusOK, items
+	case OpApply:
+		run := h.Apply
+		if req.Undo {
+			run = h.Undo
+		}
+		outcomes, err := run(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		res.Status, res.Outcomes = StatusOK, outcomes
+		if anyFailed(outcomes) {
+			res.Status = StatusError
+		}
+	case OpCheck:
+		c, err := h.Check(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		res.Recorded, res.Drift = &c.Recorded, c.Drift
+		res.Status = StatusOK
+		switch {
+		case len(c.Drift) > 0:
+			res.Status = StatusDrift
+		case !c.Recorded:
+			res.Status = StatusNone
+		}
+	case OpRefresh:
+		rec, err := ReadRecord(req.StateDir)
+		if err != nil {
+			return Result{}, err
+		}
+		f, err := h.Refresh(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := checkRefresh(rec, f); err != nil {
+			return Result{}, err
+		}
+		res.Recorded, res.Outcomes, res.Drift = &f.Recorded, f.Outcomes, f.Drift
+		res.Status = StatusRefreshed
+		switch {
+		case anyFailed(f.Outcomes):
+			res.Status = StatusError
+		case len(f.Drift) > 0:
+			res.Status = StatusDrift
+		case !f.Recorded:
+			res.Status = StatusNone
+		}
+	}
+	if err := res.Validate(req.Op, req.Version); err != nil {
+		return Result{}, fmt.Errorf("the adapter built an invalid result: %w", err)
+	}
+	return res, nil
+}
+
+// checkRefresh holds a refresh to the record as it was before the refresh: with no
+// record there is nothing to report, and nothing the record does not hold is done. A
+// refresh that made an item would undo a user's deletion, which the reference promises
+// never happens; the check is here so that no adapter has to remember it.
+func checkRefresh(before *Record, f Refresh) error {
+	if before == nil {
+		if len(f.Outcomes) > 0 || len(f.Drift) > 0 {
+			return errors.New("the adapter's refresh reported outcomes or drift for an instance with no record; with no record the answer is none")
+		}
+		return nil
+	}
+	for _, o := range f.Outcomes {
+		if o.Status != OutcomeDone {
+			continue
+		}
+		if _, recorded := before.Find(o.ID); !recorded {
+			return fmt.Errorf("the adapter's refresh did the item %q, which the record does not hold: a refresh never creates", o.ID)
+		}
+	}
+	return nil
+}
+
+func anyFailed(outcomes []Outcome) bool {
+	for _, o := range outcomes {
+		if o.Failed() {
+			return true
+		}
+	}
+	return false
+}

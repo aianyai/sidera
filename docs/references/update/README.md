@@ -264,6 +264,25 @@ just replaced the programs (the old program runs the new package's setup) and of
 command talking to the daemon of an older release that has the method; a rename or
 reshape of the result would make exactly that pairing fail.
 
+The setup program itself is the same kind of pairing. The old program runs the new
+adapter's setup with the request of [the setup contract](../adapter-setup/README.md): one
+JSON request on its standard input, one JSON result on its standard output, both carrying
+`version` and both decoded leniently. What the old program relies on is therefore fixed by
+the contract's version, not by the release: the members of the request it sends
+(`version`, `op`, `home`, `home_is_default`, `instance`, `state_dir`, `config`,
+`sidera_program`, `options`, `accepted`, `undo`), the ops `plan`, `apply`, `refresh`,
+`check` and `remove`, the members of the result, the `status` values it acts on (`ok`,
+`refreshed`, `none`, `drift`, `error`) and the exit codes 0, 1 and 2. The new adapter
+answers in the version it was asked and still takes it (the contract's `MinVersion`), so
+a release can raise the version while this program, which predates it, is served.
+
+| A later release adds | The old program |
+| -------------------- | --------------- |
+| A member of the request or the result | Ignores it |
+| An `action` or a `problem` value | Shows it and acts on nothing but whether there is drift |
+| An outcome status | Counts it as a failure, with the adapter's message |
+| A result `status`, an `op`, or a change in what a member means | Is not served by it: it is a new `version`, and the adapter answers the old program in the old one |
+
 A later version may add members; it does not rename, remove or change the meaning of these.
 The command decodes the answers loosely (a member it does not know is ignored), so adding one
 breaks nothing. A change that cannot keep this is a change to the update procedure, made
