@@ -33,7 +33,7 @@ arguments, purpose and one example.
 | `declare [--paused=<bool>] [--refuse-multi-recipient=<bool>] [--restrict-senders=<bool>] [--accept-from <addr>,...] [--hidden=<bool>]` | Send only the fields explicitly supplied; `--accept-from=` clears the list. |
 | `peers` | List the node itself and the nodes it trusts directly: `NODE`, `SELF`, `TRUST` (`self` or `direct`) and `CONNECTED` per line. |
 | `directory [--node <id>] [--limit <n>] [--cursor <cursor>]` | Read one directory page. |
-| `send --to <addr> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--accept-before <seconds>] [--key <key>]` | Send a message; comma-separated recipients are passed to the Agent boundary's one-recipient check. |
+| `send --to <addr> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--accept-before <seconds>] [--key <key>]` | Send a message to exactly one recipient; a comma-separated list is passed on and refused by the Agent boundary with `invalid_argument/single_recipient_only` (exit 3). |
 | `reply <message-id> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--key <key>]` | Reply to a received message. |
 | `recv [--wait <seconds>] [--msg <id> --part <k>] [--ack <lease>]` | Receive a page with front end `cli`; `next.msg` and `next.part` in a page become `--msg` and `--part`. |
 | `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed. |

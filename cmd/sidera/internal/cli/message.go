@@ -132,7 +132,7 @@ func (m *messageFlags) add(f *flag.FlagSet, name string) {
 	f.StringVar(&m.content, "content-type", "", "content type")
 	f.StringVar(&m.key, "key", "", "explicit idempotency key")
 	if name == "send" {
-		f.StringVar(&m.to, "to", "", "one recipient")
+		f.StringVar(&m.to, "to", "", "the one recipient address")
 	}
 	if name != "control" {
 		f.StringVar(&m.thread, "thread", "", "thread identifier")

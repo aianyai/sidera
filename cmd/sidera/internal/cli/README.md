@@ -83,8 +83,9 @@ Agent flags are assembled into presence-preserving objects for `Client.Call`;
 explicit empty strings and zeroes reach the existing interface validation rather
 than disappearing through typed optional fields. Business rules stay in the
 Agent interface and engine. The dispatcher sends
-comma-separated `send --to` values as a list so the Agent boundary alone owns
-the one-recipient rule. A receive writes the client's page unchanged, adds no
+comma-separated `send --to` values as a list, so the Agent boundary alone decides how many
+recipients a message may have; it takes exactly one (`invalid_argument/single_recipient_only`,
+exit 3), and a list is refused there. A receive writes the client's page unchanged, adds no
 newline and does not acknowledge it. Errors use `apiwire` and its exit table;
 daemon failures retain `daemon.ExitCode`, including fatal storage code 74.
 The `mcp` command parses its empty local flag set, then calls `mcp.Run` directly
