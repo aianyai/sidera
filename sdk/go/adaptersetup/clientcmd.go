@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,13 +24,17 @@ const failureTail = 2000
 // ClientCommand is one run of a client's command line (`claude mcp get`, `codex plugin
 // add`) for an adapter's setup. Run starts it without a shell, with the null device as
 // standard input so that a client never waits on a terminal, and for a bounded time.
+// Where the platform has process groups the client runs in a group of its own, and the
+// end of the time (or of the caller's context) kills the whole group.
 type ClientCommand struct {
 	// Program is the absolute path of the executable; it is never looked up on PATH
 	// and never given to a shell.
 	Program string
-	Args    []string
-	// Dir is the working directory, and the caller must name a directory with no
-	// project configuration of its own. A client reads the configuration of the
+	// Args are the arguments. Failure quotes them into its message, which ends up in
+	// reports and logs, so a secret is never passed as an argument.
+	Args []string
+	// Dir is the working directory; it must exist. The caller must name a directory
+	// with no project configuration of its own. A client reads the configuration of the
 	// project it is started in, so in the caller's directory it could answer, and
 	// change, something other than the user's own configuration.
 	Dir string
@@ -60,10 +66,16 @@ func (e *NotStartedError) Unwrap() error { return e.Err }
 // Run runs the command and waits for it. A non-zero exit is not an error here: callers
 // decide what an exit code means (a client's `get` of a missing server exits non-zero
 // and that is the answer), and Failure words the cases that are failures. The errors
-// are: a command that is not allowed to run (a relative Program, no Dir, no Timeout), a
-// *NotStartedError, a timeout (which is context.DeadlineExceeded and names the program
-// and the limit), the end of ctx, and a program that exited while a process it left
-// behind held its output open.
+// are: a command that is not allowed to run (a relative Program, a Dir that is not a
+// directory, no Timeout), a *NotStartedError, a timeout (which is
+// context.DeadlineExceeded and names the program and the limit) and the end of ctx.
+//
+// A program that exited by itself, with a process it left behind still holding its
+// output open, has finished: once waitDelay has passed Go stops waiting for the output
+// and reports exec.ErrWaitDelay in place of a result that was a success, and Run
+// returns what the program wrote so far as that success. Only a run that ends in an
+// error can be an end of ctx or a timeout: a program that already exited 0 is a result,
+// even when ctx ended just after.
 func (c ClientCommand) Run(ctx context.Context) (ClientOutput, error) {
 	switch {
 	case !filepath.IsAbs(c.Program):
@@ -73,42 +85,65 @@ func (c ClientCommand) Run(ctx context.Context) (ClientOutput, error) {
 	case c.Timeout <= 0:
 		return ClientOutput{}, fmt.Errorf("%s: no time limit", c.Program)
 	}
+	// Checked here because Go reports a missing working directory as the program's
+	// own os.ErrNotExist, which the callers of Run read as "the client is not
+	// installed". The reason is worded, not wrapped, so errors.Is cannot say so either.
+	if info, err := os.Stat(c.Dir); err != nil || !info.IsDir() {
+		reason := "it is not a directory"
+		if err != nil {
+			reason = err.Error()
+		}
+		return ClientOutput{}, fmt.Errorf("%s: the working directory %s cannot be used: %s", c.Program, c.Dir, reason)
+	}
 	runCtx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, c.Program, c.Args...)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = c.Dir, c.Env, waitDelay
+	killGroupOnCancel(cmd)
 	// A nil Stdin is the null device on every platform: the program reads end of file.
 	cmd.Stdin = nil
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	startErr := cmd.Start()
-	var err error
-	if startErr == nil {
-		err = cmd.Wait()
+	if err := cmd.Start(); err != nil {
+		// Start fails with the context's error when it ended before the program began.
+		if ended := c.endOfRun(ctx, runCtx); ended != nil {
+			return ClientOutput{}, ended
+		}
+		return ClientOutput{}, &NotStartedError{Program: c.Program, Err: err}
 	}
-	// The context is checked before the error: a program killed at its limit ends with
-	// an ExitError ("signal: killed"), which would read as an exit code.
-	if ctx.Err() != nil {
-		return ClientOutput{}, fmt.Errorf("%s: stopped: %w", c.Program, ctx.Err())
+	err := cmd.Wait()
+	result := ClientOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
+		return result, nil
 	}
-	if runCtx.Err() != nil {
-		return ClientOutput{}, fmt.Errorf("%s: timed out after %s: %w", c.Program, c.Timeout, runCtx.Err())
+	if ended := c.endOfRun(ctx, runCtx); ended != nil {
+		return ClientOutput{}, ended
 	}
 	var exit *exec.ExitError
-	switch {
-	case startErr != nil:
-		return ClientOutput{}, &NotStartedError{Program: c.Program, Err: startErr}
-	case err == nil:
-		return ClientOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, nil
-	case errors.As(err, &exit):
-		return ClientOutput{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: exit.ExitCode()}, nil
-	default:
-		return ClientOutput{}, fmt.Errorf("%s: %w", c.Program, err)
+	if errors.As(err, &exit) {
+		result.ExitCode = exit.ExitCode()
+		return result, nil
 	}
+	return ClientOutput{}, fmt.Errorf("%s: %w", c.Program, err)
 }
 
-// Failure is the error for a command whose result is not what was asked: the command,
-// its exit code and the end of its standard error, which is where a client says why.
+// endOfRun is the error for a run that the end of ctx or of the time limit cut short,
+// or nil. It is asked before the exit status is read: a program killed at its limit
+// ends with an ExitError ("signal: killed"), which would read as an exit code.
+func (c ClientCommand) endOfRun(ctx, runCtx context.Context) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s: stopped: %w", c.Program, ctx.Err())
+	}
+	if runCtx.Err() != nil {
+		return fmt.Errorf("%s: timed out after %s: %w", c.Program, c.Timeout, runCtx.Err())
+	}
+	return nil
+}
+
+// Failure is the error for a command whose result is not what was asked: the command
+// with each argument quoted, so that an argument with a space or a quote reads as one,
+// its exit code and the end of its standard error, which is where a client says why. The
+// message names the arguments, so a caller never passes a secret as one.
 func (c ClientCommand) Failure(out ClientOutput) error {
 	detail := strings.TrimSpace(string(out.Stderr))
 	if len(detail) > failureTail {
@@ -117,5 +152,9 @@ func (c ClientCommand) Failure(out ClientOutput) error {
 	if detail == "" {
 		detail = "no output on standard error"
 	}
-	return fmt.Errorf("%s %s failed (exit %d): %s", c.Program, strings.Join(c.Args, " "), out.ExitCode, detail)
+	quoted := make([]string, len(c.Args))
+	for i, a := range c.Args {
+		quoted[i] = strconv.Quote(a)
+	}
+	return fmt.Errorf("%s %s failed (exit %d): %s", c.Program, strings.Join(quoted, " "), out.ExitCode, detail)
 }

@@ -307,25 +307,40 @@ run always ends:
 
 - **The program is an absolute path, run without a shell.** Nothing is looked up on `PATH`
   at run time and no argument is ever interpreted by a shell.
-- **The working directory is required, and is a directory with no project configuration
-  of its own.** A client reads the configuration of the project it is started in (a
-  trusted project's `.codex/config.toml`, a `.mcp.json`), so run in the caller's
-  directory it would report, and change, something other than the user's configuration,
-  differing from one invocation of setup to the next.
+- **The working directory is required, must exist, and is a directory with no project
+  configuration of its own.** A client reads the configuration of the project it is
+  started in (a trusted project's `.codex/config.toml`, a `.mcp.json`), so run in the
+  caller's directory it would report, and change, something other than the user's
+  configuration, differing from one invocation of setup to the next. A directory that is
+  missing or is not one is refused before anything starts, with an ordinary error: left to
+  the operating system it would come back as the program's own "no such file" and be read
+  as "the client is not installed".
 - **Standard input is the null device** (a nil `Stdin` is that on every platform), so a
   client that would prompt reads end of file and fails instead of waiting on a terminal.
-- **The run is bounded.** A program that outlives its limit is killed and the error is a
-  timeout naming the program and the limit (`context.DeadlineExceeded`); a grandchild that
-  holds the output pipes open delays the return by at most a fixed 2 seconds, not for as
-  long as it lives. The timeout is reported before the exit status, because a killed
-  program's status would otherwise read as an exit code.
+- **The run is bounded, and its end kills the client's process group.** A program that
+  outlives its limit (or whose caller's context ends) is killed and the error is a timeout
+  naming the program and the limit (`context.DeadlineExceeded`). On Linux and macOS the
+  client runs in a process group of its own and the kill is a SIGKILL to the whole group,
+  because an npm-installed `codex` is a node wrapper that cannot forward a kill: killing the
+  wrapper alone would leave the native program running, free to write the client's
+  configuration after setup has reported a failure. A client in its own group also does not
+  receive a terminal's Ctrl-C; it ends when the context does. On Windows only the program
+  itself is killed, and a process it started may survive it. A grandchild that holds the
+  output pipes open delays the return by at most a fixed 2 seconds, not for as long as it
+  lives. The timeout is reported before the exit status, because a killed program's status
+  would otherwise read as an exit code; but only when the program did not end by itself
+  with a result: one that exited 0 is a success even if the context ended just after, and so
+  is one that exited 0 while a grandchild still held its output (what it wrote by then is
+  returned).
 - **The environment is the caller's policy**; nil is the caller's own.
 - **A non-zero exit is a result, not an error.** What an exit code means is the adapter's
   to say (`claude mcp get` of a missing server exits non-zero and that is the answer;
   `codex mcp remove` of one exits 0). A program that could not be started is a
   `*NotStartedError` wrapping the system's reason, so "the client is not installed"
   (`errors.Is(err, os.ErrNotExist)`) is told from "the client failed". `Failure` words a
-  command that did not do what was asked, with the last 2000 bytes of its standard error.
+  command that did not do what was asked, with each argument quoted and the last 2000 bytes
+  of its standard error. The message is reported and logged, so no secret is passed as an
+  argument.
 
 ### Editing a client's JSON file
 

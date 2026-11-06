@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,25 @@ func TestHelperProcess(t *testing.T) {
 			os.Exit(3)
 		}
 		time.Sleep(5 * time.Second)
+	case "orphan-exit":
+		// The same grandchild, but this process finishes at once and successfully.
+		child := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "sleep")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		fmt.Fprint(os.Stdout, "out")
+	case "grandchild":
+		// A grandchild with no pipes of its own, whose process ID is written to the file
+		// named by the next argument; this process then waits to be killed.
+		child := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "sleep")
+		if err := child.Start(); err != nil {
+			os.Exit(3)
+		}
+		if err := os.WriteFile(args[2], []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+			os.Exit(4)
+		}
+		time.Sleep(5 * time.Second)
 	case "pwd":
 		wd, _ := os.Getwd()
 		fmt.Fprint(os.Stdout, wd)
@@ -66,7 +86,8 @@ func helper(t *testing.T, timeout time.Duration, args ...string) adaptersetup.Cl
 		Program: exe,
 		Args:    append([]string{"-test.run=TestHelperProcess", "--"}, args...),
 		Dir:     t.TempDir(),
-		Env:     append(os.Environ(), helperEnv+"=1"),
+		// GORACE: a test binary built with -race sleeps a second before it exits.
+		Env:     append(os.Environ(), helperEnv+"=1", "GORACE=atexit_sleep_ms=0"),
 		Timeout: timeout,
 	}
 }
@@ -117,6 +138,9 @@ func TestClientCommandRunsInTheDirectoryAndWithoutInput(t *testing.T) {
 		t.Errorf("working directory = %q, want %q", got, want)
 	}
 
+	// Documentation, not a guard: the child sees end of file here whether Stdin is nil
+	// or the test's own input, because `go test` runs with the null device already, so a
+	// regression cannot show under it. It shows when the child is run from a terminal.
 	// The child must see end of file at once, not wait on this process's input.
 	out, err = helper(t, time.Minute, "stdin").Run(context.Background())
 	if err != nil {
@@ -147,6 +171,27 @@ func TestClientCommandTimeout(t *testing.T) {
 	}
 }
 
+func TestClientCommandFailureQuotesArguments(t *testing.T) {
+	c := adaptersetup.ClientCommand{Program: "/bin/client", Args: []string{"mcp", "add", "two words", `a"b`}}
+	msg := c.Failure(adaptersetup.ClientOutput{ExitCode: 1}).Error()
+	if want := `/bin/client "mcp" "add" "two words" "a\"b" failed (exit 1)`; !strings.HasPrefix(msg, want) {
+		t.Errorf("failure %q does not start %q", msg, want)
+	}
+}
+
+// A program that exits 0 with a grandchild still holding its output pipes is a
+// success: the wait delay ends the wait for the pipes, and Go reports that as an error
+// in place of a nil result.
+func TestClientCommandExitedProgramWithLingeringPipesIsAResult(t *testing.T) {
+	out, err := helper(t, time.Minute, "orphan-exit").Run(context.Background())
+	if err != nil {
+		t.Fatalf("error = %v, want the output of the program that exited 0", err)
+	}
+	if string(out.Stdout) != "out" || out.ExitCode != 0 {
+		t.Errorf("stdout %q, exit %d; want %q, 0", out.Stdout, out.ExitCode, "out")
+	}
+}
+
 func TestClientCommandCancelIsNotATimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -174,14 +219,24 @@ func TestClientCommandRefusesWhatItCannotRunSafely(t *testing.T) {
 		"relative program":     func(c *adaptersetup.ClientCommand) { c.Program = "claude" },
 		"no working directory": func(c *adaptersetup.ClientCommand) { c.Dir = "" },
 		"no timeout":           func(c *adaptersetup.ClientCommand) { c.Timeout = 0 },
+		// Go reports a missing working directory as the program's own ErrNotExist, which
+		// callers read as "the client is not installed".
+		"working directory that does not exist": func(c *adaptersetup.ClientCommand) { c.Dir = filepath.Join(c.Dir, "absent") },
+		"working directory that is a file": func(c *adaptersetup.ClientCommand) {
+			file := filepath.Join(c.Dir, "file")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c.Dir = file
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := helper(t, time.Minute, "exit", "0")
 			edit(&c)
 			_, err := c.Run(context.Background())
 			var notStarted *adaptersetup.NotStartedError
-			if err == nil || errors.As(err, &notStarted) {
-				t.Errorf("error = %v, want a refusal that is not NotStartedError", err)
+			if err == nil || errors.As(err, &notStarted) || errors.Is(err, os.ErrNotExist) {
+				t.Errorf("error = %v, want a refusal that is neither NotStartedError nor os.ErrNotExist", err)
 			}
 		})
 	}
