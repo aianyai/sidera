@@ -212,7 +212,7 @@ func toolsetsMissingDetail(profile, platform string, missing []string) string {
 		return ""
 	}
 	return detail(fmt.Sprintf("the Hermes agent of profile %s on platform %s has not enabled the toolset(s) %s: "+
-		"it cannot delegate over Sidera or load the Sidera Skill (`sidera-adapter-hermes setup` prints the change to make)",
+		"it cannot delegate over Sidera or load the Sidera Skill (`sidera adapter setup <instance>` or, once it is set up, `sidera adapter setup <instance> --check` prints the change to make)",
 		profile, platform, strings.Join(missing, ", ")))
 }
 

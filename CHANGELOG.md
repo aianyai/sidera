@@ -14,9 +14,8 @@ protocol has a version of its own.
   own can now declare a setup program, and this command runs it: it shows what it would do, asks
   about each change to the client's configuration, and remembers what it did. `--check` reports what
   has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
-  up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter. The
-  adapters themselves start using it in the releases that follow. An item you decline is
-  remembered: `--check` and `sidera update` do not report it as still to set up, and running the
+  up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter.
+  Adapters use it in this release. An item you decline is remembered: `--check` and `sidera update` do not report it as still to set up, and running the
   command again offers it again. When `--remove` cannot finish because the client program is no
   longer installed, it ends by saying that `sidera adapter remove <instance> --force` removes the
   instance anyway, and where the guide lists what to clean up by hand.
@@ -29,12 +28,24 @@ protocol has a version of its own.
   the next. 0.15 is the first release in which adapters have a setup, so an update to it has
   nothing recorded to refresh: after upgrading to 0.15 run `sidera adapter setup <instance>` once
   for each instance whose adapter has a setup; later updates refresh it.
+- **The Hermes adapter has a setup in `sidera adapter setup`.** Run `sidera adapter setup hermes
+  -- --profile <profile>` (and `--platform <platform>` for more platforms): it asks before it
+  places the Skill in a profile, remembers that it did, and `--check`, `--refresh` and `--remove`
+  work on it. `--refresh` rewrites the Skill when you change the aliases or the board. What a
+  profile still lacks (the `kanban` and `skills` toolsets, the Kanban notifier) is shown as a
+  note under the plan, to change by hand, and `--check` reports it and exits 1 until you do;
+  Sidera changes none of it. The platforms you name are remembered, so `--check` reads the same
+  ones.
 - **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
   and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
   `commit`, `modified`, `go_version`).
 
 ### Changed
 
+- **`sidera-adapter-hermes setup --config <file> --apply` is gone.** `sidera adapter setup`
+  replaces it. The Skill you placed with the old command is taken over when it is identical to
+  what this release writes, and otherwise replaced after you say so. The copy of the Skill in
+  the instance's `skill` state directory is no longer written.
 - **`sidera setup controller` prints the path of the program as you started it.** It used to print
   the path the system reports for the running program, which on Linux has links resolved; it now
   keeps them, so a link that a package manager repoints keeps leading to the current version, and

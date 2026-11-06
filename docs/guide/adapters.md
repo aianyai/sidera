@@ -119,13 +119,12 @@ this is what each adapter put where.
 
 - **Claude Code**: filled in with the adapter's setup.
 - **Codex**: filled in with the adapter's setup.
-- **Hermes**: `sidera-adapter-hermes setup --apply` placed the Skill as
-  `skills/sidera/SKILL.md` in the directory of each profile you prepared (`hermes -p <profile>
-  config path` names the `config.yaml` that lies in it). Delete that `skills/sidera`
-  directory in each profile, and restart the gateway that serves the profile so that Hermes
-  stops offering the Skill. Setup never edits `config.yaml`, so the `kanban` and `skills`
-  toolsets you added to a platform by hand stay as they are: leave them or remove them as you
-  like. The copy of the Skill in the instance's state directory goes with the instance.
+- **Hermes**: `sidera adapter setup` placed the Skill as `skills/sidera/SKILL.md` in the
+  directory of each profile you prepared (`hermes -p <profile> config path` names the
+  `config.yaml` that lies in it). Delete that `skills/sidera` directory in each profile, and
+  restart the gateway that serves the profile so that Hermes stops offering the Skill. Setup
+  never edits `config.yaml`, so the `kanban` and `skills` toolsets you added to a platform by
+  hand stay as they are: leave them or remove them as you like.
 
 ## Claude Code
 
@@ -337,7 +336,7 @@ process and no session.
   profile for the shared one. Without a running gateway, or with the setting false,
   results are written to cards but no conversation is woken. The adapter keeps working in
   the second case and says so: `sidera adapter list` shows the instance's availability
-  with the reason, and `setup` warns of the profiles it prepares. It checks the profile's
+  with the reason, and `sidera adapter setup` warns of the profiles it prepares. It checks the profile's
   own setting and the default profile's, since it cannot see which gateway runs, and it
   does not tell you that a gateway is not running.
 - The toolsets `kanban` and `skills` enabled on every platform the agent delegates from
@@ -346,7 +345,7 @@ process and no session.
   leaves `kanban` off by default, and a profile whose toolset list for a platform was chosen
   by hand may lack either. Without `skills` the agent creates an ordinary card that this
   adapter never sees. The adapter checks the home platform and says in the instance's
-  availability which toolset is missing; `setup` checks all the platforms it is given.
+  availability which toolset is missing; `sidera adapter setup` checks all the platforms it is given.
 
 **Install and enable.** The configuration has required settings, so it is given when
 the instance is enabled. Save it as `hermes.json`:
@@ -407,39 +406,54 @@ creator, so treat it as a second line of defence, not a boundary.
 **Setup.** Hermes needs two things before its agents can delegate: the Kanban tools
 (toolset `kanban`, off by default on the chat platforms and on cron), and a Skill that tells
 the agent how to write a card, which the agent can load only while the toolset `skills` is
-on. `setup` writes the Skill from your alias table and board, prints the step that places the
-Skill, and reads which of the two toolsets each platform has. The program is in the
-package you installed:
+on. `sidera adapter setup` writes the Skill from your alias table and board into each profile
+you name, asks before it does, and reads which of the two toolsets each platform has. The
+instance has to have run once (enable it, start the daemon):
 
 ```sh
-~/sidera-release/adapters/hermes/bin/sidera-adapter-hermes setup --config hermes.json --profile <profile>
+sidera adapter setup hermes -- --profile <profile>
 ```
 
-It prints the steps and changes nothing in Hermes. Add `--apply` to have it place the Skill
-in each profile, after a `y/N` question. `--profile` names a profile whose agents delegate and
-repeats; the platforms are `home_platform` and `cron`, and `--platform` adds more.
+`--profile` names a profile whose agents delegate and repeats (the default is `home_profile`);
+`--platform` names a platform they delegate from and repeats (the default is `home_platform`),
+and setup remembers the platforms, so that `--check` reads the same ones; `-- --help` lists
+the options. Setup asks one question for each profile (`y/N`), or none with `--yes`. It places
+the Skill as `skills/sidera/SKILL.md` in the directory of the profile and remembers that it
+did. A Skill file that setup did not write, or that was changed since, is replaced only after
+you say yes (and `--yes` says yes): its content is discarded and no copy of it is kept. A copy that
+an earlier release placed (`sidera-adapter-hermes setup --apply`) is taken into that record when
+it is exactly what this release writes, and replaced, after you say so, when it is not. The
+copy `setup --apply` kept in the instance's `skill` state directory is no longer used.
 
-For a platform that lacks `kanban` or `skills`, `setup` prints the file to edit (the
-profile's `config.yaml`) and the toolset to add to `platform_toolsets.<platform>`, for example
-`kanban` added to the list under `platform_toolsets: feishu:`. If the file has no list for that
-platform, `setup` prints the whole list to write: the toolsets the platform has now, followed by
-the missing one (a list of `[kanban]` alone would switch the platform's other toolsets off). That
-list fixes the platform's current set, so the platform no longer follows later changes to
-Hermes's defaults. A composite name such as `hermes-<platform>` is not used, because it does not
-mean the same on every platform: on Discord it also switches on the server-management toolsets,
-and on some platforms it is not a toolset at all. A toolset named in `agent.disabled_toolsets`
-stays off whatever the list says, so remove it there. `hermes tools enable` is deliberately not
-run: it rewrites the platform's whole list, and on Hermes 0.22.2 it dropped a `no_mcp` entry
-(which turns off every MCP server on the platform) and added toolsets that nobody had chosen.
-After the edit, `hermes -p <profile> tools list --platform <platform>` shows whether the toolset
-is on.
+`sidera adapter setup hermes --check` lists what has drifted: a Skill that is out of date, was
+changed or deleted, and the toolsets and the notifier described below. A missing toolset or a
+notifier that is off makes `--check` exit 1, and nothing in setup fixes it; `sidera update` and
+`adapter remove` do not look at it. When you change the
+aliases or the board, `sidera adapter setup hermes --refresh` rewrites the Skill of the profiles that were set
+up. It asks nothing, and it neither sets up a profile that was not nor makes a Skill you deleted. `--remove` deletes the Skill setup placed (only while it is unchanged).
 
-After `setup`, **restart the gateway that serves each profile yourself**: by default the
+For a platform that lacks `kanban` or `skills`, setup says in a note under its plan (also when
+there is nothing to set up, and also for `cron`), and `--check` says as drift for the home
+profile and platform and for the profiles and platforms you set up with (`cron` only when you
+named it), which file to edit (the profile's `config.yaml`) and the
+toolset to add to `platform_toolsets.<platform>`, for example `kanban` added to the list under
+`platform_toolsets: feishu:`. If the file has no list for that platform, it says the whole list
+to write: the toolsets the platform has now, followed by the missing one (a list of `[kanban]`
+alone would switch the platform's other toolsets off). That list fixes the platform's current
+set, so the platform no longer follows later changes to Hermes's defaults. A composite name
+such as `hermes-<platform>` is not used, because it does not mean the same on every platform:
+on Discord it also switches on the server-management toolsets, and on some platforms it is not a
+toolset at all. A toolset named in `agent.disabled_toolsets` stays off whatever the list says,
+so remove it there. `hermes tools enable` is deliberately not run: it rewrites the platform's
+whole list, and on Hermes 0.22.2 it dropped a `no_mcp` entry (which turns off every MCP server
+on the platform) and added toolsets that nobody had chosen. After the edit, `hermes -p
+<profile> tools list --platform <platform>` shows whether the toolset is on.
+
+After setup, **restart the gateway that serves each profile yourself**: by default the
 one gateway that serves every profile, and any profile with its own gateway on its own.
 Hermes reads its tools and Skills when the gateway starts, and a restart interrupts the
-conversations it is serving, so Sidera never does it. `setup` never edits `config.yaml` either. Run it
-again whenever you change the aliases or the board, since the Skill lists them. The Skill
-names the board, and tells the agent to pass it on every Kanban tool call it makes for a
+conversations it is serving, so Sidera never does it. Setup never edits `config.yaml` either.
+The Skill names the board, and tells the agent to pass it on every Kanban tool call it makes for a
 Sidera card: without it Hermes puts the card on the board it has selected, where the
 adapter does not look.
 

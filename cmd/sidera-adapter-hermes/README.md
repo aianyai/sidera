@@ -7,9 +7,9 @@ the rules the adapter follows are in
 [`docs/references/adapter-hermes/`](../../docs/references/adapter-hermes/README.md).
 
 `main.go` is the program: `serve` is the adapter the daemon starts, `package` writes
-an installable package, `setup` writes the Skill for the agent, prints the steps that let
-Hermes use it (placing the Skill in a profile, on request) and says which toolsets an agent
-still lacks, and `version` prints the build. Everything else is in the packages below. The program receives messages, polls the board and runs timers, and
+an installable package, `setup` is the client setup that `sidera adapter setup` runs (the Skill
+for the agent, placed in Hermes profiles, and the advice on the toolsets an agent still lacks),
+and `version` prints the build. Everything else is in the packages below. The program receives messages, polls the board and runs timers, and
 hands them to three handler interfaces (`adapter.MessageHandler`,
 `adapter.CardHandler`, `adapter.TimerHandler`). The lane's flows (`adapter.LaneFlows`)
 implement them: they delegate cards, write replies back and close remote sessions.
@@ -28,16 +28,14 @@ become a card of their own.
 | `internal/config/` | The instance configuration and its checks; the alias allow-list. |
 | `internal/card/` | The card envelope, strict decoding, validation against the aliases, the assignee rule, the creator check. |
 | `internal/kanban/` | The client of the board: runs `hermes kanban --json`, decodes the answers, classifies failures, names the block kinds and checks the Hermes release. Described in [`kanban-cli`](../../docs/references/adapter-hermes/kanban-cli.md). |
-| `internal/setup/` | `setup`: the Skill generated from the alias table and the steps that prepare Hermes (place the Skill) and the advice on the toolsets an agent lacks. |
+| `internal/setup/` | The client setup: the Skill generated from the alias table, placed in Hermes profiles and recorded, and the advice on the toolsets an agent lacks. |
 | `internal/state/` | The state directory: records of cards, endpoints, remote sessions and processed messages, and the store that writes them. |
 | `internal/lane/` | Pure decisions over the records: endpoint keys and capacity, matching a reply to a card, queueing, recovery, failures and the Hermes block kind of each, closing remote sessions, the parent of a continuation. |
 
 ## Conventions
 
 - The adapter imports only `sdk/go`, as a third-party adapter would, and never the
-  daemon's packages. The two exceptions are `internal/release` (the version) and
-  `internal/datahome` (`setup` finds the data directory as the `sidera` command does,
-  so that the two never name different ones).
+  daemon's packages. The one exception is `internal/release` (the version).
 - `lane` and `card` do no I/O and read no clock: time is an argument. Only `state`
   touches the disk, and only through `Store`.
 - A state transition is written (`Store.Update`) before the effect it describes; the

@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/setup"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
+	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -27,10 +28,10 @@ commands:
   serve      the adapter role; the daemon starts it, a person does not
   package --goos <os> --goarch <arch> --binary <file> --out <directory>
              write an adapter package for 'sidera adapter install'
-  setup --config <file|-> [--apply] [...]
-             write the Sidera Skill for the instance's aliases and print the steps that
-             let Hermes use it; --apply runs them after asking ('setup --help')
-  version    the version, the commit and the Go version of this program
+  setup      the client setup that 'sidera adapter setup <instance>' runs, not a person:
+             it reads a request on standard input (options after --: --profile, --platform)
+  version [--json]
+             the version, the commit and the Go version of this program
 `
 
 const (
@@ -42,16 +43,12 @@ const (
 // exit code.
 func Main(args []string, env ProgramEnv) int {
 	return adapterkit.Program{
-		Name:    ProgramName,
-		Usage:   usageText,
-		Serve:   runServe,
-		Package: writePackage,
-		Build:   release.Read(),
-		Commands: map[string]adapterkit.Command{
-			"setup": func(args []string, s adapterkit.Streams) int {
-				return setup.Run(args, setup.Env{Stdin: s.Stdin, Stdout: s.Stdout, Stderr: s.Stderr, Getenv: os.Getenv})
-			},
-		},
+		Name:     ProgramName,
+		Usage:    usageText,
+		Serve:    runServe,
+		Package:  writePackage,
+		Build:    release.Read(),
+		Commands: map[string]adapterkit.Command{"setup": adaptersetup.Command(ProgramName, setup.NewHandler())},
 	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr})
 }
 

@@ -150,8 +150,9 @@ comment on the card. The reserved orphan slot is why that always works.
 
 `sidera-adapter-hermes` has four commands: `serve`, which the daemon starts,
 `package --goos --goarch --binary --out`, which writes a package for
-`sidera adapter install`, `setup`, which prepares Hermes for the lane (see
-[The Skill and setup](#the-skill-and-setup)), and `version [--json]`. Exit codes are those of the
+`sidera adapter install`, `setup`, the client setup that `sidera adapter setup` runs (a person
+does not: it reads a request on standard input; see [The Skill and setup](#the-skill-and-setup)),
+and `version [--json]`. Exit codes are those of the
 table in [the command-line reference](../command-line/README.md#conventions-of-every-program): 0 done,
 1 failed, 2 usage. The program has no command whose outcome can be unknown, so it never exits 10.
 
@@ -252,7 +253,7 @@ condition while Hermes itself fails, and a reading that fails is logged and leav
 answer. When the notifier and the toolsets are both found wanting the daemon gets two
 conditions. The profiles of `creator_profiles` and the other platforms a card may come from
 are not read: the home conversation is the one the adapter knows before a card exists, and
-`setup` reads every profile and platform the owner names. The answer is the configuration as
+setup reads every profile and platform the owner names. The answer is the configuration as
 Hermes resolves it (a saved list, or the platform's defaults, with `agent.disabled_toolsets`
 applied last); it does not show that the gateway was restarted since the file changed.
 
@@ -787,11 +788,8 @@ platforms it delegates from (they are off by default, and on cron as well as the
 platforms), and the knowledge of how to write a card. The second is a Skill, a prompt
 Hermes loads when the agent has a use for it.
 
-**The Skill** (`setup.Skill`) is generated from the board and the alias table, once per `setup` run,
-and written to `skill/SKILL.md` in the instance's state directory, owner-only (directory
-`0700`, file `0600`; a `skill` directory an earlier run left wider is narrowed): the
-daemon starts an adapter only when its whole state directory is private to its owner, so a
-wider entry would stop the instance at its next start. Its front matter is
+**The Skill** (`setup.Skill`) is generated from the board and the alias table, once per setup
+request, and written to `skills/sidera/SKILL.md` of each profile (below). Its front matter is
 `name: sidera` and a description of at most 60 characters (Hermes cuts the description
 in the list the agent chooses from, so the part that says when to use it comes first).
 The body tells the agent:
@@ -832,62 +830,105 @@ The body tells the agent:
 The Skill describes what the adapter does and so changes with it: a change to the card
 format, the modes or the inbound flow updates the text in the same commit.
 
-**`setup --config <file|-> [--home <dir>] [--instance <name>] [--profile <name>]...
-[--platform <name>]... [--apply]`** reads the instance configuration, writes the Skill and
-prints the steps. `--profile` is a Hermes profile whose agents delegate (its name follows the
-profile rule of `home_profile`) and `--platform`
-a platform they delegate from; both repeat, and default to `home_profile` and
-`home_platform`. `cron` is always added to the platforms. The one step, for each profile, is
-placing `SKILL.md` as `<profile directory>/skills/sidera/SKILL.md`.
+**Setup** is the adapter's part of the contract of [adapter setup](../adapter-setup/README.md): the
+manifest declares `setup` as the package's own program with the argument `setup`, `sidera adapter
+setup <instance> [-- --profile <name>... --platform <name>...]` runs it, and the program speaks the
+contract through `sdk/go/adaptersetup` (`setup.Handler`). The instance configuration is the one the
+daemon passes to `adapter.start`, decoded with `config.Decode`, so the checks and the defaults are
+the adapter's own and what setup uses is what runs. There is no flag for it. `--profile` is a Hermes
+profile whose agents delegate (its name follows the profile rule of `home_profile`) and `--platform`
+a platform they delegate from; both repeat and arrive as the request's `options`, and `-- --help`
+answers with the text of the options alone. They default to `home_profile` and `home_platform`.
+A refresh or a check of an instance that has a record also looks after the profiles the record
+names, so `sidera update`, which passes no options, keeps every profile that was set up. The
+platforms are not in the record, which has no place for them: an apply that records a Skill
+writes them to `setup/platforms.json` in the state directory (the platforms of the request added
+to those already there, or `home_platform` when there are none), the file goes when the last
+Skill is undone, and a check reads them again, so `--check` with no options reads the platforms
+setup advised on. A file that cannot be decoded counts as absent.
 
-For each profile and platform it also reads which toolsets are enabled (the reading
-`kanban.Toolsets`, which the gate also uses) and, for each platform where `kanban` or `skills` is
-not, prints a warning with the exact change to make by hand: the profile's `config.yaml` (named
-by `hermes -p <profile> config path`), the list `platform_toolsets.<platform>`, and the toolsets
-the list has to hold. When the file has no such list the platform uses Hermes's defaults, and a
-list holding only `kanban` would switch them off; the warning says to write the explicit list of
-the toolsets the platform has now (the enabled rows of the same `tools list` reading) followed
-by the missing ones. Hermes 0.22.2 resolves that list to exactly the platform's current set plus
-the missing toolsets, on every platform it knows, plugin platforms included. A composite name
-such as `hermes-<platform>` is not used: it does not mean the same on every platform. On
-`discord` a saved list that holds the composite also switches on `discord` and `discord_admin`
-(role and channel management), which are off for a platform with no list; the composite of
-`whatsapp_cloud` is `hermes-whatsapp`, not the name derived from the platform; and a plugin
-platform has no composite, so a list naming one resolves to the added toolsets alone. The cost
-of the explicit list is that it fixes the platform's current set, so the platform no longer
-follows later changes to Hermes's defaults. A toolset named in `agent.disabled_toolsets` stays
-off whatever the list says, so the warning asks that the list holds the toolset and that
-`agent.disabled_toolsets` does not. A platform that cannot be read is reported on standard error
-and left out; the run goes on.
+*Items.* One item per profile, `skill:<profile>`, kind `skill`, target the profile's
+`skills/sidera/SKILL.md`, always with consent: the file is in Hermes's directory. The profile's
+directory is learned from Hermes (`hermes -p <profile> config path` names `config.yaml`, which
+lies in it) rather than computed, so the layout of profiles stays Hermes's; the command runs with
+the environment of the adapter's own Hermes commands (`kanban.ChildEnv`), through
+`adaptersetup.ClientCommand` (the absolute program, no standard input, a time limit, the
+temporary directory as working directory), so that Hermes's own reason ("Profile 'x' does not
+exist") reaches the person and a Hermes that is not installed is told from one that failed. The action follows what is there: `create` when the file is not; nothing when
+it is what this version writes and the record holds that; `adopt` when it is what this version
+writes and the record does not hold it (the copy `sidera-adapter-hermes setup --apply` of 0.14
+placed, when nothing has changed in the aliases, the board or the text since), which takes it into
+the record without writing; `update` when it differs, with the summary saying whether setup wrote
+it and it is out of date, setup wrote it and it has been changed since, or setup never wrote it;
+in the last two the summary adds that the file's current content is discarded and no copy is kept
+(`--yes` accepts it, as it accepts every item).
+Why content decides and the record is not trusted for the file: the only thing worth proving
+before touching a file is that it is the one setup wrote, and a digest of the content says it; a
+copy that differs from what is written now is replaced only because the person said yes to an
+item that says so, and from then on it is recorded with the digest of what was written. A 0.14
+copy is therefore either adopted (identical) or replaced (it differs, which is what a changed
+alias table gives), and no reproduction of what 0.14 would have written is kept. The Skill is
+rendered in memory and written straight to the profile with `adaptersetup.WriteFile` (atomic, with
+the modes Hermes gives its own files; a `SKILL.md` that is a link into the owner's dotfiles stays a
+link and the file it leads to is written); the copy 0.14 kept in `skill/SKILL.md` of the state
+directory is no longer used or written, and can be deleted.
 
-*Where the configuration comes from.* The document is the one given to `sidera adapter
-enable` or `sidera adapter config` and is decoded with `config.Decode`, so the checks
-are the adapter's own. The daemon has no method that returns an instance's
-configuration and its data files are not an interface; reading them would repeat the
-daemon's file layout and strict decoding. The cost is that the file may differ from
-what is running, which is why the owner names it. The state directory is
-`<data directory>/adapter-state/<instance>`, the data directory resolved as the `sidera`
-command resolves it (`--home`, `SIDERA_HOME`, the platform default); it must exist, so
-an instance that was never enabled is refused instead of a directory made for a
-misspelled name.
+*Refresh and check.* A recorded Skill whose digest is the recorded one and that differs from what
+this version writes is stale, and a refresh rewrites it (the alias table or the board changed, or
+a release changed the text); one that has been changed or deleted is drift and is left. A refresh
+asks Hermes nothing, so `sidera update` needs no running Hermes. A check also reads what Hermes
+lacks, when there is a record that holds a Skill, and reports it as drift of the problem `broken`
+(below). The remove listing says of a recorded file that was changed since setup wrote it that it
+stays and is only forgotten.
 
-*Why the Skill is a file placed in the skills directory.* `hermes skills install` takes
-a registry identifier or an HTTP(S) URL to a `SKILL.md` and has no local path (Hermes
-0.22.2 hands a path to the registries as a name and ends with "Could not download",
-exit 1). Hermes finds a skill in any directory under a profile's `skills` directory that
-holds a `SKILL.md`, and lists one it did not install as `local`, so the file is
-placed there. The profile's directory is learned from Hermes (`hermes -p <profile>
-config path` names `config.yaml`, which lies in it) rather than computed, so the layout
-of profiles stays Hermes's. A run replaces the file of the same name.
+*Undo.* A recorded Skill is deleted only while its digest is the recorded one, and the
+`skills/sidera` directory that held it goes when it is empty. A file someone changed is left in
+place and leaves the record, because it is no longer setup's and a record that kept it would keep
+the instance from being removed. Setup restarts no gateway.
 
-*`--apply`.* Without it `setup` only prints, apart from writing the Skill into the
-state directory and asking Hermes where a profile lives and what it has enabled (with
-`HERMES_HOME` and `HERMES_KANBAN_HOME` from the configuration, the profile pin and the
-Kanban worker variables of the owner's shell removed: the environment the adapter gives
-its own Hermes commands, `kanban.ChildEnv`; and without standard input). With it each step
-is shown and asked (`y/N`; anything but yes skips it), then done: the placing of the Skill
-file. A failing step stops the run. `--config -` is refused with `--apply`, which asks on
-standard input.
+*What setup suggests and never does.* For each profile and platform it reads which toolsets are
+enabled (the reading `kanban.Toolsets`, which the gate also uses) and, for each platform where
+`kanban` or `skills` is not, says what to change by hand: the profile's `config.yaml` (named by
+`hermes -p <profile> config path`), the list `platform_toolsets.<platform>`, and the toolsets the
+list has to hold. When the file has no such list the platform uses Hermes's defaults, and a list
+holding only `kanban` would switch them off; the advice says to write the explicit list of the
+toolsets the platform has now (the enabled rows of the same `tools list` reading) followed by the
+missing ones. Hermes 0.22.2 resolves that list to exactly the platform's current set plus the
+missing toolsets, on every platform it knows, plugin platforms included. A composite name such as
+`hermes-<platform>` is not used: it does not mean the same on every platform. On `discord` a saved
+list that holds the composite also switches on `discord` and `discord_admin` (role and channel
+management), which are off for a platform with no list; the composite of `whatsapp_cloud` is
+`hermes-whatsapp`, not the name derived from the platform; and a plugin platform has no composite,
+so a list naming one resolves to the added toolsets alone. The cost of the explicit list is that
+it fixes the platform's current set, so the platform no longer follows later changes to Hermes's
+defaults. A toolset named in `agent.disabled_toolsets` stays off whatever the list says, so the
+advice asks that the list holds the toolset and that `agent.disabled_toolsets` does not.
+
+The Kanban notifier is read the same way (`kanban.notify_in_gateway`, for the profiles and the
+default profile, as the gate does: see Gateway modes) and a profile that has it off is named with
+the command that turns it on (`hermes -p <profile> config set kanban.notify_in_gateway true`).
+
+The advice travels in two ways, and a finding is in one of them, never both. A plan carries it as
+`notes` (the handler implements `adaptersetup.Noter`), for the profiles of the plan and their
+platforms, `cron` included: a note is shown even when there is nothing to plan, and a person who
+declines every item has read it. A `check` of an instance that has a record reports it as drift of
+the problem `broken` with the ids `toolsets:<profile>:<platform>` and `notifier:<profile>`, and
+carries no note. It reads the profiles of the options and the record and the platforms setup was
+run with, and always the home profile and the home platform, whose agent the availability of the
+instance watches; `cron` is read only when setup was run with `--platform cron`. A toolset or
+notifier finding is drift on purpose: a standing gap makes delegation fail without a word, and with
+the notifier off the replies Sidera writes to cards never wake an agent, which is what `--check`
+is there to find. So such a finding makes `--check` exit 1, and nothing in setup fixes it (setup
+never changes toolsets or the notifier); `sidera update`'s refresh reads no Hermes and the guard
+of `adapter remove` looks at `recorded` alone, so neither is affected. The availability of the
+instance shows the home conversation's missing toolset on its own, and points to `sidera adapter
+setup <instance>` (or, once it is set up, `--check`). A read that fails (a profile Hermes does not
+know, a platform it does not list) is such a finding too, saying that the check could not be made;
+the others are still reported. A `check` of an instance with no Skill recorded lists only what
+setup would make (`needs_setup`) and starts no Hermes: the check that `adapter remove` makes of
+every instance would otherwise run Hermes for nothing. A record that holds only the Skills the
+person declined is no record, as for every adapter: an apply that does nothing writes none, and
+a Skill that was declined is not drift and is offered again by the next plan.
 
 *Why setup does not change toolsets.* `hermes tools enable kanban --platform <platform>`
 writes the platform's whole list, not one entry. On Hermes 0.22.2 a profile whose
@@ -897,27 +938,18 @@ image_gen, kanban]` afterwards (`hermes_cli/tools_config.py`, `_save_platform_to
 was dropped, so the servers would load there, and two toolsets the owner had not chosen
 were added. For a platform with no list (`--platform cron`) it wrote the whole default list
 as an explicit one, which no longer follows the defaults of Hermes. What a hand-picked list
-means is the owner's to say, so `setup` reads the state and prints the one entry to add; it
-does not run a command that rewrites the list, and `--apply` does not either.
+means is the owner's to say, so setup reads the state and says the one entry to add; no item
+changes a toolset, and the `Hermes` interface setup reads through has no method that writes.
 
 *What it never does.* It never edits `config.yaml` and never runs a Hermes command that
-does (above). It never restarts a gateway: a restart interrupts the
-conversations the gateway is serving, which is the owner's call; the output says the
-owner must restart the gateway that serves each profile for the tools and the Skill to
-take effect: by default the one host gateway that serves every profile, and for a profile
-with its own gateway (`gateway.standalone`) that one.
-For each profile it prepares it also reads `kanban.notify_in_gateway` and, when it is
-false, prints a warning with the command that turns it on (`hermes -p <profile> config set
-kanban.notify_in_gateway true`); the command is advice and `--apply` does not run it, since
-the setting may be off on purpose. It reads the profiles it prepares and the default
-profile, as the gate does (Gateway modes), and names each one whose configuration has it
-off. A profile whose setting cannot be read is reported on
-standard error and left out, the others are still named, and the run goes on.
-To find the address behind an alias, the output points to `sidera-adapter-console
-directory --node <id>`; no directory client is built here. When the alias table changes
-the owner runs `setup` again, since the Skill lists the aliases. The output also says that
-the Skill names the board, so that the agent and the adapter use the same one; a change of
-`board` needs `setup` again too.
+does (above). It never restarts a gateway: a restart interrupts the conversations the gateway
+is serving, which is the owner's call; the outcome of an item that placed the Skill says the
+owner must restart the gateway that serves the profile for the Skill and the toolsets to take
+effect: by default the one host gateway that serves every profile, and for a profile with its own
+gateway (`gateway.standalone`) that one. When the alias table or the board changes, a
+`--refresh` (or the next `sidera update`) rewrites the Skill, since it lists them. To find the
+address behind an alias, use `sidera-adapter-console directory --node <id>`; no directory client
+is built here.
 
 ### Platforms and operating notes
 
@@ -1111,7 +1143,7 @@ or the home target.
 | The program: commands, manifest, endpoints, receiving, polling, probe, and the delegation, reply, inbound and timer flows | `cmd/sidera-adapter-hermes/main.go`, `cmd/sidera-adapter-hermes/internal/adapter` | `adapter_test.go`, `flows_test.go`, `inbound_test.go` and `notice_test.go` (the real adapter against a stub daemon and a fake `hermes`), `gate_test.go` (what the gate tells the daemon over a series of checks, and the probe's notifier dependency), `TestMissingSkillsToolsetIsReportedAndReceivingGoesOn` in `adapter_test.go` (a missing toolset of the home conversation's agent: the condition, the probe's dependency, and receiving going on), `manifest_test.go` |
 | Kanban client | `cmd/sidera-adapter-hermes/internal/kanban` (see [kanban-cli](kanban-cli.md)) | `*_test.go`, `testdata/`, `kanbantest/` |
 | Settings, aliases | `cmd/sidera-adapter-hermes/internal/config` | `config_test.go` |
-| The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `setup_test.go` |
+| The Skill and `setup` | `cmd/sidera-adapter-hermes/internal/setup` | `handler_test.go` (the handler through `adaptersetup.Handle` with a scripted Hermes: the plan by file and record, apply and adopt, refresh, check, undo, the options, the advice) |
 | Card envelope, validation, assignee, creator | `cmd/sidera-adapter-hermes/internal/card` | `card_test.go` |
 | State directory | `cmd/sidera-adapter-hermes/internal/state` | `state_test.go` |
 | Endpoint keys and capacity, matching, queueing, recovery, failures, sessions, parent | `cmd/sidera-adapter-hermes/internal/lane` | `lane_test.go` |

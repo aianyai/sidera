@@ -11,7 +11,8 @@ import (
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
-// Manifest is the manifest of the package for one platform. The adapter declares
+// Manifest is the manifest of the package for one platform. The same program serves the
+// adapter and its client setup (the Skill placed in Hermes profiles). The adapter declares
 // only direct endpoints: it starts no runtime and has no presets, since it creates
 // and drives no Hermes process. It requires the hermes program, which the probe
 // then checks in depth.
@@ -23,6 +24,7 @@ func Manifest(goos, goarch string) (manifest.Manifest, error) {
 		Protocol:        adapterproto.SupportedRange(),
 		// manifest.WritePackage adds .exe to the program of a Windows package.
 		Entry:     manifest.Entry{Program: "bin/" + ProgramName, Args: []string{"serve"}},
+		Setup:     &manifest.Entry{Program: "bin/" + ProgramName, Args: []string{"setup"}},
 		Platforms: []manifest.Platform{{OS: goos, Arch: goarch}},
 		Requires:  []manifest.Requirement{{Program: "hermes"}},
 		Config:    &manifest.Config{Instance: settings()},

@@ -540,8 +540,7 @@ means the process to interrupt is not running, and no person types that invocati
 **Global flags.** Only `sidera` has global flags: `--home <directory>`, `--json` and `-h`/`--help`,
 before or after the command (see [Commands](#commands)). The adapter programs have none. The
 client commands of the console take `--home` and `--instance` after the command name only (a known
-difference: `--home` before the command is a usage error), and `setup` of the Hermes program takes
-`--home` the same way. A flag of the adapter programs is never accepted before the command.
+difference: `--home` before the command is a usage error). A flag of the adapter programs is never accepted before the command.
 
 **`--json`.** Every command of `sidera` that prints a result takes it (`adapter setup` writes the object described in [Adapter setup](#adapter-setup)), except `setup controller`
 and `mcp`, where it has no effect, and `recv`, which writes the node's page unchanged in both
@@ -562,7 +561,7 @@ output of their commands yet).
 and exit 0. With `sidera` the flag may follow any command (`sidera send --help` prints that
 command's usage, an example included, and a command that does not exist is a usage error). In an
 adapter program `--help` after `package` or `version` prints that command's usage, and so does it
-after `setup` of the Hermes program; after a client command of the console it prints the usage of
+after `setup` of an adapter program; after a client command of the console it prints the usage of
 the program, which lists every command. `serve` is the exception: it takes no argument, `--help`
 included, because it is the role the daemon starts and has no usage of its own. Running a program
 with no argument is a usage error (2): the usage goes to standard error (`sidera` prints only
@@ -587,8 +586,7 @@ program. `sidera` writes `error: <message>`, and `error: <category>/<code>: <mes
 node refused (see [Output and errors](#output-and-errors)). An adapter program writes
 `<program>: <message>`. After a usage error what follows depends on the command: an unknown command
 prints the usage, and so does a run with no command (without a message); a flag error of a client
-command of the console points at `help`; a flag error of `setup` of the Hermes program prints the
-usage of `setup`; `serve` with an argument, and `package` and `version` with a flag error, are the
+command of the console points at `help`; `setup` of an adapter program takes no flag and reads a request, so an argument is the message alone; `serve` with an argument, and `package` and `version` with a flag error, are the
 message alone. The words of
 a flag parser's complaint differ between the programs, and the message of an error is not a stable
 identifier; the exit code is.
@@ -598,13 +596,11 @@ does: by default it shows the plan on standard error and asks one question for t
 (`Update? [y/N]`) on a terminal;
 `--yes` answers for it and is required when standard input is not a terminal (the command is then a
 usage error, 2, before it does anything); `--check` only reports, writes nothing and needs neither. `sidera adapter setup` asks the same way but one question per item, not one for the plan.
-`identity retire` does not ask and needs `--yes`. Known differences: the Hermes program's `setup`
-only prints the steps unless `--apply` is given, then asks about each step without testing for a
-terminal and has no `--yes`, and `sidera setup controller` only prints.
+`identity retire` does not ask and needs `--yes`. A known difference: `sidera setup controller` only prints.
 
 **`-` is standard input.** A file argument of `-` reads standard input: `--body-file -` (`send`,
 `reply`, `control` and the console's `new`, `send` and `reply`), `preset add --file -`,
-`adapter enable --config -`, `adapter config --config -` and the Hermes program's `setup --config -`.
+`adapter enable --config -` and `adapter config --config -`.
 `send` and `reply` of `sidera` also read standard input when no body flag is given; the console
 requires one (a known difference).
 
