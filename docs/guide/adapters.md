@@ -96,7 +96,10 @@ again offers it again. Without a terminal it needs `--yes`, like
 there is touched later: if you delete something it installed, a refresh does not put it
 back, and `--check` tells you it is gone. `--refresh` brings what setup recorded up to date
 without asking, for a program that has no person to ask. Words after `--` are passed to the
-adapter for the options it has of its own. An adapter that has no setup says so.
+adapter for the options it has of its own. An adapter that has no setup says so. An adapter may
+also have advice for you that setup does not do for you (which toolsets of the client to enable,
+say): it is shown as `note:` lines before the questions, and by `--check` as `note` lines after
+the drift; a note never makes `--check` fail.
 
 Before you remove an instance whose setup has recorded something, undo it with
 `--remove`: `sidera adapter remove` refuses otherwise, because removing the instance deletes

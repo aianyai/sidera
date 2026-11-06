@@ -224,6 +224,13 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 	return accepted, declined, nil
 }
 
+// showNotes says what the adapter advises that is not an item to ask about.
+func (d setupDialog) showNotes(notes []string) {
+	for _, n := range notes {
+		fmt.Fprintf(d.out, "note: %s\n", n)
+	}
+}
+
 // reportDeclined says what the adapter will remember of the answers.
 func (d setupDialog) reportDeclined(instance string, declined []adaptersetup.Item) {
 	for _, it := range declined {
@@ -328,8 +335,14 @@ func runSetup(ctx context.Context, s *setupSession, mode setupMode, d setupDialo
 		op, heading, undo = adaptersetup.OpRemove, "Removing the setup of "+s.instance+" would:", true
 	}
 	listing, err := s.call(ctx, op, nil, nil, false)
-	if err != nil || len(listing.Items) == 0 {
+	if err != nil {
 		return listing, false, err
+	}
+	if op == adaptersetup.OpPlan {
+		d.showNotes(listing.Notes)
+	}
+	if len(listing.Items) == 0 {
+		return listing, false, nil
 	}
 	accepted, declinedItems, err := d.choose(heading, listing.Items)
 	if err != nil {
@@ -356,6 +369,8 @@ func runSetup(ctx context.Context, s *setupSession, mode setupMode, d setupDialo
 	res, err = applyInStages(ctx, s, listing.Items, accepted, declined, undo)
 	if err == nil && mode == modeSetup {
 		d.reportDeclined(s.instance, declinedItems)
+		// The notes were shown with the plan; --json reports them with the last result.
+		res.Notes = listing.Notes
 	}
 	return res, err == nil, err
 }
@@ -396,6 +411,11 @@ func (c *command) printSetup(instance string, res adaptersetup.Result, applied b
 	}
 	for _, d := range res.Drift {
 		line("drift %s %s %s", d.ID, d.Problem, d.Summary)
+	}
+	if res.Op == adaptersetup.OpCheck { // a plan's notes were shown with its questions
+		for _, n := range res.Notes {
+			line("note %s", strings.Join(strings.Fields(n), " "))
+		}
 	}
 	_, err := io.WriteString(c.Stdout, b.String())
 	return err

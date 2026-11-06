@@ -265,8 +265,10 @@ the first `--` are the adapter's own arguments, in `options` of the request as t
 The plan and the questions go to standard error; standard output is the report, `key value`
 lines: `instance`, `status`, `recorded` (check and refresh), `nothing to do` or `nothing
 applied`, one `item <id> <status> [<message>]` per outcome and one `drift <id> <problem>
-<summary>` per difference. With `--json` it is one object: `instance` and the members of the
-program's last result (`version`, `op`, `status`, `recorded`, `items`, `outcomes`, `drift`).
+<summary>` per difference, then (check only) one `note <text>` per note of the adapter, which is
+advice and changes neither the status nor the exit; a plan's notes are shown on standard error
+as `note: <text>` before the questions, also when the plan has nothing to ask. With `--json` it is one object: `instance` and the members of the
+program's last result (`version`, `op`, `status`, `recorded`, `items`, `outcomes`, `drift`, `notes`).
 The last result is that of `apply` when items were applied and otherwise that of `plan` or
 `remove`. A setup program that exits non-zero, writes something that is not a result, or a
 result of another version, with a `status` this program does not know, or without `recorded`

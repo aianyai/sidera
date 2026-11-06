@@ -15,6 +15,7 @@ a program's commands).
 | `Request`, `Result`, `Item`, `Outcome`, `Drift` and their enumerations | The contract's JSON, versions `MinVersion` to `Version` (1) |
 | `Result.Validate(op, version)` | What the CLI relies on in a result: version, op, a known `status`, unique item ids, `requires` naming earlier items, `recorded` on check and refresh, consent on a plan's removals. A value of `action`, `problem` or an outcome status it does not know passes (`Outcome.Failed` reads an unknown status as a failure) |
 | `Handler` | What an adapter implements: `Plan`, `Apply`, `Remove`, `Undo`, `Refresh`, `Check` |
+| `Noter` | Optional on a `Handler`: advice for the person that is neither an item nor drift; `Handle` puts it in `Result.Notes` of a plan and a check, and it never changes the status |
 | `Command(program, handler)` | The `setup` command of an adapter program, for `adapterkit.Program.Commands` |
 | `ReadRequest`, `Handle` | The parts of `Command`, for a caller that has its own streams |
 | `Record`, `ReadRecord`, `WriteRecord`, `RemoveRecord`, `RecordPath` | The record under `<state_dir>/setup/`. `Record.Installed` (it holds an item setup did; what `recorded` means) and `Record.IsDeclined` are nil-safe; `Record.Declined` is kept by `Handle`, not by the adapter |

@@ -35,6 +35,8 @@ type SetupConfig struct {
 	Items []SetupItem `json:"items,omitempty"`
 	// Fail lists ids whose apply, undo or refresh fails.
 	Fail []string `json:"fail,omitempty"`
+	// Notes are what a plan and a check tell the person besides their items and drift.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // SetupItem is one file the fake setup keeps.
@@ -297,6 +299,15 @@ func (f *fakeSetup) reconcile(rec *adaptersetup.Record) (adaptersetup.Reconcilia
 		wanted[i] = adaptersetup.Wanted{ID: it.ID, Kind: kindOf(it.Consent), Target: f.path(it.ID, it.Consent), Digest: adaptersetup.Digest([]byte(it.Content))}
 	}
 	return adaptersetup.Reconcile(rec, wanted, func(r adaptersetup.RecordItem) (string, bool, error) { return digestOfFile(r.Target) })
+}
+
+// Notes implements adaptersetup.Noter with the scripted notes.
+func (SetupHandler) Notes(_ context.Context, req adaptersetup.Request) ([]string, error) {
+	f, err := load(req)
+	if err != nil {
+		return nil, err
+	}
+	return f.cfg.Notes, nil
 }
 
 // Check implements adaptersetup.Handler. With no record it still says what setup

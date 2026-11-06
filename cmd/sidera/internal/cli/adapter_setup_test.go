@@ -416,6 +416,71 @@ func TestAdapterSetupFailuresAreExitOne(t *testing.T) {
 	})
 }
 
+// Notes are advice that is neither an item nor drift. A plan shows them before it asks
+// (also when it has nothing to ask), a check after its drift lines, and they change
+// neither the status nor the exit: a check with only notes is still clean.
+func TestAdapterSetupShowsNotes(t *testing.T) {
+	const note = "enable the kanban toolset in config.yaml"
+	t.Run("a plan shows them before the questions", func(t *testing.T) {
+		r := newRig(t, clientA)
+		r.script.Notes = []string{note}
+		asked, report, err := r.run(modeSetup, "y\n", false)
+		if err != nil || strings.Index(asked, "note: "+note) < 0 || strings.Index(asked, "note: "+note) > strings.Index(asked, "write a? [y/N]") {
+			t.Errorf("err %v, questions:\n%s", err, asked)
+		}
+		if strings.Contains(report, note) {
+			t.Errorf("the report on standard output carries the plan's note:\n%s", report)
+		}
+	})
+	t.Run("a plan with no items still shows them", func(t *testing.T) {
+		r := newRig(t)
+		r.script.Notes = []string{note}
+		asked, report, err := r.run(modeSetup, "", true)
+		if err != nil || !strings.Contains(asked, "note: "+note) || !strings.Contains(report, "nothing to do") {
+			t.Errorf("err %v, questions:\n%s\nreport:\n%s", err, asked, report)
+		}
+	})
+	t.Run("a check shows them after the drift and is clean without drift", func(t *testing.T) {
+		r := newRig(t, clientA)
+		r.script.Notes = []string{note}
+		_, report, err := r.run(modeCheck, "", false)
+		var f *failure
+		if !errors.As(err, &f) || strings.Index(report, "drift a") < 0 || strings.Index(report, "note "+note) < strings.Index(report, "drift a") {
+			t.Errorf("err %v\n%s", err, report)
+		}
+		if _, _, err := r.run(modeSetup, "", true); err != nil {
+			t.Fatal(err)
+		}
+		_, report, err = r.run(modeCheck, "", false)
+		if err != nil || !strings.Contains(report, "status ok") || !strings.Contains(report, "note "+note) {
+			t.Errorf("err %v\n%s", err, report)
+		}
+	})
+	t.Run("--json carries them", func(t *testing.T) {
+		for _, mode := range []setupMode{modeCheck, modeSetup} {
+			r := newRig(t, clientA)
+			r.script.Notes = []string{note}
+			s, err := r.session()
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, applied, err := runSetup(context.Background(), s, mode, setupDialog{out: &bytes.Buffer{}, yes: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			c := &command{Config: Config{Stdout: nopWriteCloser{&out}}, json: true}
+			if err := c.printSetup("work", res, applied); err != nil {
+				t.Fatal(err)
+			}
+			var got struct{ Notes []string }
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil || !slices.Equal(got.Notes, []string{note}) {
+				t.Errorf("mode %d: notes %v, err %v in %s", mode, got.Notes, err, out.String())
+			}
+		}
+	})
+}
+
 func TestAdapterSetupJSON(t *testing.T) {
 	r := newRig(t, clientA)
 	s, err := r.session()

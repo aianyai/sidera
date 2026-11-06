@@ -97,13 +97,21 @@ order of the listing is a valid order of doing and there is no cycle.
 
 ### Results
 
-A result is `{version, op, status, recorded?, items?, outcomes?, drift?}`. An outcome
+A result is `{version, op, status, recorded?, items?, outcomes?, drift?, notes?}`. An outcome
 is `{id, kind, target, status, message?}` with the status `done`, `skipped` (not done,
 and not a failure: not asked, no longer applies, depends on an item that was not done) or
 `failed`; a status a later release adds counts as `failed`, with the adapter's message. A
 drift entry is `{id, kind, target, problem, summary}` with the problem `missing`,
 `changed`, `stale`, `broken` or `needs_setup`; the CLI shows it and acts on nothing but
-whether there is drift. `check` and `refresh` always say `recorded`: the guard of
+whether there is drift. `notes` is a list of strings that `plan` and `check` may carry: advice
+for the person that is neither an item setup would do nor drift, such as which toolsets of the
+client to enable by hand, which setup never edits. It never affects the status or the exit
+code. Why not drift: a standing piece of advice reported as drift makes `--check` exit 1 for
+good, and why not an item: a plan with no items could not show it. The CLI shows a plan's
+notes before it asks and a check's after the drift lines; an older CLI ignores the member. The
+other ops do not carry notes, and `Validate` does not refuse them there, so that a later
+release can add them to more ops without breaking a CLI that is mid-update; the CLI shows
+those of a plan and a check only. `check` and `refresh` always say `recorded`: the guard of
 `adapter remove` acts on it, so a result without it is refused.
 
 The status of the result as a whole is derived by the SDK helper from the lists, so an
@@ -286,6 +294,9 @@ error that says to enable the instance and start the daemon so that it runs once
   `RequireStateDir`, and `Record.Installed` and `Record.IsDeclined`, which an adapter uses
   where it would test the record for nil (`recorded` is `rec.Installed()`, and a refresh
   of a record that is not installed answers as for none);
+- `Noter`, the optional interface of a `Handler` that has notes: `Handle` asks it for `plan`
+  and `check` and puts the answer in `notes`, so a handler written before notes existed keeps
+  compiling and answers none;
 - `Reconcile`, the classification that a check and a refresh share: each item the adapter
   wants is probed at its recorded target and found intact, stale (a refresh rewrites it),
   changed or gone (drift, which a refresh leaves), or without a record (`needs_setup`,

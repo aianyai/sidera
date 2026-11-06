@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -499,4 +500,79 @@ func TestRequestDeclinedIsOptional(t *testing.T) {
 	if code, _, errs = runSetup(t, h, `{"version":1,"op":"apply","accepted":["a"]}`); code != adapterkit.ExitOK || len(h.got.Declined) != 0 {
 		t.Errorf("exit %d (%s), declined %v", code, errs, h.got.Declined)
 	}
+}
+
+// withNotes is a script that also has advice for the person.
+type withNotes struct {
+	*script
+	notes []string
+	err   error
+	asked []adaptersetup.Op
+}
+
+func (n *withNotes) Notes(_ context.Context, r adaptersetup.Request) ([]string, error) {
+	n.asked = append(n.asked, r.Op)
+	return n.notes, n.err
+}
+
+// Notes ride on a plan and a check, whatever else they say, and change nothing about
+// the status: a check with only notes is still clean, and one with no record is none.
+func TestCommandCarriesNotesOnAPlanAndACheckOnly(t *testing.T) {
+	notes := []string{"enable the kanban toolset in config.yaml"}
+	for _, tc := range []struct {
+		op         string
+		recorded   bool
+		wantStatus adaptersetup.Status
+		wantNotes  bool
+	}{
+		{"plan", false, adaptersetup.StatusOK, true},
+		{"check", true, adaptersetup.StatusOK, true},
+		{"check", false, adaptersetup.StatusNone, true},
+		{"remove", false, adaptersetup.StatusOK, false},
+		{"apply", false, adaptersetup.StatusOK, false},
+		{"refresh", true, adaptersetup.StatusRefreshed, false},
+	} {
+		t.Run(fmt.Sprintf("%s recorded=%t", tc.op, tc.recorded), func(t *testing.T) {
+			h := &withNotes{script: &script{check: adaptersetup.Check{Recorded: tc.recorded}, refresh: adaptersetup.Refresh{Recorded: tc.recorded}}, notes: notes}
+			state := t.TempDir()
+			if tc.recorded {
+				rec := adaptersetup.Record{}
+				rec.Set(adaptersetup.RecordItem{ID: "a"})
+				if err := adaptersetup.WriteRecord(state, rec); err != nil {
+					t.Fatal(err)
+				}
+			}
+			quoted, _ := json.Marshal(state)
+			code, out, errs := runSetup(t, h, `{"state_dir":`+string(quoted)+`,"version":1,"op":"`+tc.op+`"}`)
+			if code != adapterkit.ExitOK {
+				t.Fatalf("exit %d, stderr %q", code, errs)
+			}
+			var res adaptersetup.Result
+			if err := json.Unmarshal([]byte(out), &res); err != nil {
+				t.Fatal(err)
+			}
+			if res.Status != tc.wantStatus {
+				t.Errorf("status = %s, want %s", res.Status, tc.wantStatus)
+			}
+			if got := slices.Equal(res.Notes, notes); got != tc.wantNotes || (!tc.wantNotes && res.Notes != nil) {
+				t.Errorf("notes = %q, want them %t", res.Notes, tc.wantNotes)
+			}
+			if asked := len(h.asked) > 0; asked != tc.wantNotes {
+				t.Errorf("Notes asked for %v, want it asked %t", h.asked, tc.wantNotes)
+			}
+		})
+	}
+
+	t.Run("a handler that cannot say notes", func(t *testing.T) {
+		code, out, _ := runSetup(t, &script{}, `{"version":1,"op":"plan"}`)
+		if code != adapterkit.ExitOK || strings.Contains(out, "notes") {
+			t.Errorf("exit %d, stdout %q; want a result without notes", code, out)
+		}
+	})
+	t.Run("an error is the adapter's failure", func(t *testing.T) {
+		h := &withNotes{script: &script{}, err: errors.New("cannot tell")}
+		if code, _, errs := runSetup(t, h, `{"version":1,"op":"plan"}`); code != adapterkit.ExitFailed || !strings.Contains(errs, "cannot tell") {
+			t.Errorf("exit %d, stderr %q", code, errs)
+		}
+	})
 }

@@ -48,6 +48,15 @@ type Handler interface {
 	Check(ctx context.Context, req Request) (Check, error)
 }
 
+// Noter is what a Handler also implements when it has advice for the person that is not
+// something setup installs, so not an item of a plan and not drift of a check: which
+// toolsets of the client to enable, say. Handle asks it for OpPlan and OpCheck only,
+// after the op itself, and puts the notes in the result. The notes change nothing about
+// the status. An error is the adapter's failure to do the op at all.
+type Noter interface {
+	Notes(ctx context.Context, req Request) ([]string, error)
+}
+
 // Check is the answer of Handler.Check.
 type Check struct {
 	// Recorded says whether a record exists.
@@ -214,6 +223,13 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		case !f.Recorded:
 			res.Status = StatusNone
 		}
+	}
+	if noter, ok := h.(Noter); ok && (req.Op == OpPlan || req.Op == OpCheck) {
+		notes, err := noter.Notes(ctx, req)
+		if err != nil {
+			return Result{}, err
+		}
+		res.Notes = notes
 	}
 	if err := res.Validate(req.Op, req.Version); err != nil {
 		return Result{}, fmt.Errorf("the adapter built an invalid result: %w", err)

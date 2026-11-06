@@ -287,6 +287,14 @@ type Result struct {
 	Outcomes []Outcome `json:"outcomes,omitempty"`
 	// Drift is what OpCheck and OpRefresh found.
 	Drift []Drift `json:"drift,omitempty"`
+	// Notes are what OpPlan and OpCheck tell the person that is not drift and not an
+	// item: advice about something setup does not install, such as which toolsets of a
+	// client to enable by hand. The core CLI shows them and they never change the status
+	// or the exit code, so a standing piece of advice does not make a check fail for
+	// good. A release may let more ops carry notes, and Validate does not refuse them on
+	// any op, so an older core program mid-update is not broken by it; it shows the notes
+	// of a plan and a check only.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Validate says whether the result is one the core CLI can act on: it carries the version
