@@ -45,7 +45,7 @@ does not know).
 | `sidera_program` | The absolute path of the core program as it was launched, links kept, and never quoted; only when the launch path is not known, what the platform reports for the running executable, made absolute. It is the file `sidera update` replaces in place, so a client's configuration stays valid across an update, a package manager's link keeps pointing at the current version, and setup and a later refresh pass the same string. It goes into a client's configuration as data; a program that prints it for a shell quotes it itself |
 | `options` | The adapter's own arguments: the words after `--` on the command line, in order and untouched |
 | `accepted` | For `apply`: the ids of the items to do |
-| `declined` | For `apply` (not with `undo`), optional: the ids of the items that need consent, that the person was asked about and answered no to. Not the items left alone because an item they require was declined or did not complete (never asked), and nothing under `--yes`. See [What was declined](#what-was-declined) |
+| `declined` | For `apply` (not with `undo`), optional: the ids of the items that follow from a no: those that need consent and that the person answered no to, and those left alone because an item they require was declined (never asked, but the person decided against the chain). Not the items left alone because a required item failed or was skipped when applied, and nothing under `--yes`. See [What was declined](#what-was-declined) |
 | `undo` | For `apply`: `accepted` names items of a `remove` listing, to be undone |
 
 ## Ops
@@ -267,8 +267,13 @@ item they declined is remembered, and `refresh` and `check` do not report it. Th
   declines with it (`Handle` does so after the adapter's undo returns), so that a setup
   that is started afresh asks about everything.
 
-The CLI sends `declined` only with the `apply` of a plain setup, for the items it asked
-about, and says in its dialogue which were declined and that they are not reported again.
+The CLI sends `declined` only with the `apply` of a plain setup. It holds the items the
+person answered no to and the items left alone because an item they require was declined:
+all of them follow from a no, and the CLI decides them before anything is applied, so
+declining the source of a plugin does not leave the plugin's install reported after every
+update. An item left alone later, because a required item failed or was skipped when applied,
+is not a decision and stays undeclined. The dialogue says which were declined and that they
+are not reported again.
 When every item is declined it still sends one `apply` with no `accepted`, to hand over the
 declines.
 

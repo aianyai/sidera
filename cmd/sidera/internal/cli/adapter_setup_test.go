@@ -853,16 +853,16 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 		}
 	})
 
-	t.Run("an item left alone because its required item was declined is not a decline", func(t *testing.T) {
+	t.Run("an item left alone because its required item was declined is declined too", func(t *testing.T) {
 		r := newRig(t, clientA, clientDependent)
 		asked, _, err := r.run(modeSetup, "n\n", false)
-		if err != nil || !strings.Contains(asked, "left alone: write d") {
+		if err != nil || !strings.Contains(asked, "left alone: write d") || !strings.Contains(asked, "declined: write d") {
 			t.Fatalf("%v\n%s", err, asked)
 		}
-		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a]" {
-			t.Errorf("declined sent = %v, want only a", got)
+		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a d]" {
+			t.Errorf("declined sent = %v, want a and d", got)
 		}
-		if _, report, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(report, "drift d needs_setup") || strings.Contains(report, "drift a") {
+		if _, report, err := r.run(modeCheck, "", false); err != nil || strings.Contains(report, "drift") {
 			t.Errorf("check: %v\n%s", err, report)
 		}
 	})

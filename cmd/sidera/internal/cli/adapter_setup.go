@@ -192,8 +192,9 @@ type setupDialog struct {
 // choose shows the items and returns the ids of the ones to do: every item that
 // needs no consent, and the others as the person answers, one by one. An item whose
 // required item is not going ahead is neither asked nor done, and the listing says so.
-// It also returns the items the person answered no to: only those, not the ones left
-// alone, which were never asked, and none under --yes.
+// It also returns the items that follow from a no: the ones the person answered no to
+// and the ones left alone because an item they require was one of those. The person
+// decided against the whole chain, so none of it is reported again. None under --yes.
 func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted []string, declined []adaptersetup.Item, err error) {
 	fmt.Fprintln(d.out, heading)
 	for _, it := range items {
@@ -207,6 +208,7 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 	for _, it := range items {
 		if missing := slices.IndexFunc(it.Requires, func(id string) bool { return !slices.Contains(accepted, id) }); missing >= 0 {
 			fmt.Fprintf(d.out, "left alone: %s (it needs %s, which is not going ahead)\n", it.Summary, it.Requires[missing])
+			declined = append(declined, it)
 			continue
 		}
 		if it.Consent && !d.yes {

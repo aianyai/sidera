@@ -101,12 +101,14 @@ type Request struct {
 	// includes the items that need no consent.
 	Accepted []string `json:"accepted"`
 
-	// Declined, with OpApply, are the ids of the items the person was asked about
-	// and answered no to: the items of the plan that need consent, minus the ones
-	// that were accepted and the ones left alone because an item they require was
-	// declined or did not complete (those were never asked). Handle remembers them in
-	// the record, so that a check and a refresh stop reporting them as needing setup;
-	// a plan still lists them. An older core program never sends it, and then nothing
+	// Declined, with OpApply, are the ids of the items that follow from a no: the
+	// items of the plan that need consent that the person was asked about and answered
+	// no to, and the ones left alone because an item they require was declined (they
+	// were never asked, but the person decided against the chain). Not the items left
+	// alone because a required item failed or was skipped when it was applied: that is
+	// not a decision, and they are reported until setup is run again. Handle remembers
+	// them in the record, so that a check and a refresh stop reporting them as needing
+	// setup; a plan still lists them. An older core program never sends it, and then nothing
 	// is remembered; an adapter built before it was added ignores it.
 	Declined []string `json:"declined,omitempty"`
 
