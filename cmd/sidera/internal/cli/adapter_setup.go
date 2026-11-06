@@ -112,9 +112,11 @@ func openSetupSession(ctx context.Context, client caller, exec setupExecutor, in
 }
 
 // call runs one op of the setup and returns its result, which it has checked.
-func (s *setupSession) call(ctx context.Context, op adaptersetup.Op, accepted []string, undo bool) (adaptersetup.Result, error) {
+// declined is for an apply of a plan only: the items the person was asked about and
+// refused.
+func (s *setupSession) call(ctx context.Context, op adaptersetup.Op, accepted, declined []string, undo bool) (adaptersetup.Result, error) {
 	req := s.base
-	req.Op, req.Accepted, req.Undo = op, accepted, undo
+	req.Op, req.Accepted, req.Declined, req.Undo = op, accepted, declined, undo
 	if req.Accepted == nil {
 		req.Accepted = []string{}
 	}
@@ -190,7 +192,9 @@ type setupDialog struct {
 // choose shows the items and returns the ids of the ones to do: every item that
 // needs no consent, and the others as the person answers, one by one. An item whose
 // required item is not going ahead is neither asked nor done, and the listing says so.
-func (d setupDialog) choose(heading string, items []adaptersetup.Item) ([]string, error) {
+// It also returns the items the person answered no to: only those, not the ones left
+// alone, which were never asked, and none under --yes.
+func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted []string, declined []adaptersetup.Item, err error) {
 	fmt.Fprintln(d.out, heading)
 	for _, it := range items {
 		note := ""
@@ -199,7 +203,7 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) ([]string
 		}
 		fmt.Fprintf(d.out, "  %s %s [%s %s]%s\n", it.Action, it.Summary, it.Kind, it.Target, note)
 	}
-	accepted := []string{}
+	accepted = []string{}
 	for _, it := range items {
 		if missing := slices.IndexFunc(it.Requires, func(id string) bool { return !slices.Contains(accepted, id) }); missing >= 0 {
 			fmt.Fprintf(d.out, "left alone: %s (it needs %s, which is not going ahead)\n", it.Summary, it.Requires[missing])
@@ -208,15 +212,23 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) ([]string
 		if it.Consent && !d.yes {
 			ok, err := askYes(d.out, d.answers, it.Summary+"?")
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if !ok {
+				declined = append(declined, it)
 				continue
 			}
 		}
 		accepted = append(accepted, it.ID)
 	}
-	return accepted, nil
+	return accepted, declined, nil
+}
+
+// reportDeclined says what the adapter will remember of the answers.
+func (d setupDialog) reportDeclined(instance string, declined []adaptersetup.Item) {
+	for _, it := range declined {
+		fmt.Fprintf(d.out, "declined: %s (not reported again by update or --check; `sidera adapter setup %s` offers it again)\n", it.Summary, instance)
+	}
 }
 
 // applyInStages applies the accepted items of a listing. Items that name no required
@@ -227,7 +239,7 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) ([]string
 // Requires after the questions. The result is the first call's, with the outcomes of
 // all of them, and an error status when any item did not complete without being
 // skipped (an outcome status this program does not know counts as a failure).
-func applyInStages(ctx context.Context, s *setupSession, items []adaptersetup.Item, accepted []string, undo bool) (adaptersetup.Result, error) {
+func applyInStages(ctx context.Context, s *setupSession, items []adaptersetup.Item, accepted, declined []string, undo bool) (adaptersetup.Result, error) {
 	var pending []adaptersetup.Item
 	for _, it := range items {
 		if slices.Contains(accepted, it.ID) {
@@ -270,7 +282,7 @@ func applyInStages(ctx context.Context, s *setupSession, items []adaptersetup.It
 			for i, it := range now {
 				ids[i] = it.ID
 			}
-			res, err := s.call(ctx, adaptersetup.OpApply, ids, undo)
+			res, err := s.call(ctx, adaptersetup.OpApply, ids, declined, undo)
 			if err != nil {
 				return adaptersetup.Result{}, err
 			}
@@ -305,25 +317,46 @@ func applyInStages(ctx context.Context, s *setupSession, items []adaptersetup.It
 func runSetup(ctx context.Context, s *setupSession, mode setupMode, d setupDialog) (res adaptersetup.Result, applied bool, err error) {
 	switch mode {
 	case modeCheck:
-		res, err = s.call(ctx, adaptersetup.OpCheck, nil, false)
+		res, err = s.call(ctx, adaptersetup.OpCheck, nil, nil, false)
 		return res, false, err
 	case modeRefresh:
-		res, err = s.call(ctx, adaptersetup.OpRefresh, nil, false)
+		res, err = s.call(ctx, adaptersetup.OpRefresh, nil, nil, false)
 		return res, false, err
 	}
 	op, heading, undo := adaptersetup.OpPlan, "Setup of "+s.instance+" would:", false
 	if mode == modeRemove {
 		op, heading, undo = adaptersetup.OpRemove, "Removing the setup of "+s.instance+" would:", true
 	}
-	listing, err := s.call(ctx, op, nil, false)
+	listing, err := s.call(ctx, op, nil, nil, false)
 	if err != nil || len(listing.Items) == 0 {
 		return listing, false, err
 	}
-	accepted, err := d.choose(heading, listing.Items)
-	if err != nil || len(accepted) == 0 {
+	accepted, declinedItems, err := d.choose(heading, listing.Items)
+	if err != nil {
 		return listing, false, err
 	}
-	res, err = applyInStages(ctx, s, listing.Items, accepted, undo)
+	// In a removal a no means "keep it", which the adapter has no reason to remember.
+	var declined []string
+	if mode == modeSetup {
+		for _, it := range declinedItems {
+			declined = append(declined, it.ID)
+		}
+	}
+	if len(accepted) == 0 {
+		if len(declined) == 0 {
+			return listing, false, nil
+		}
+		// Nothing to do, but what was declined is still remembered.
+		if _, err := s.call(ctx, adaptersetup.OpApply, nil, declined, false); err != nil {
+			return listing, false, err
+		}
+		d.reportDeclined(s.instance, declinedItems)
+		return listing, false, nil
+	}
+	res, err = applyInStages(ctx, s, listing.Items, accepted, declined, undo)
+	if err == nil && mode == modeSetup {
+		d.reportDeclined(s.instance, declinedItems)
+	}
 	return res, err == nil, err
 }
 
@@ -525,7 +558,7 @@ func refuseRemoveWhileSetUp(ctx context.Context, client caller, exec setupExecut
 		}
 		return &failure{notRemoved + "it cannot be found out whether its adapter has a setup: " + err.Error() + forceHint}
 	}
-	res, err := s.call(ctx, adaptersetup.OpCheck, nil, false)
+	res, err := s.call(ctx, adaptersetup.OpCheck, nil, nil, false)
 	if err != nil {
 		return &failure{notRemoved + "it cannot be told whether its setup has recorded anything: " + err.Error() + forceHint}
 	}

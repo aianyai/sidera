@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // RecordVersion is the version of the record file. A record of a later version is
@@ -37,6 +38,11 @@ type Record struct {
 	// wrote them; a refresh that finds another one has paths to rewrite.
 	SideraProgram string       `json:"sidera_program"`
 	Items         []RecordItem `json:"items"`
+	// Declined are the ids of items the person was asked about and said no to. Handle
+	// keeps it (see Request.Declined): an adapter reads the record, changes Items and
+	// writes it back, and never edits Declined itself. An id is never both here and in
+	// Items.
+	Declined []string `json:"declined,omitempty"`
 }
 
 // RecordPath is where the record of an instance is: <stateDir>/setup/record.json.
@@ -89,6 +95,15 @@ func RemoveRecord(stateDir string) error {
 	}
 	return nil
 }
+
+// Installed says whether the record holds an item setup did. A record that holds only
+// declines (the person said no to everything they were asked) records nothing that
+// was done, and an adapter answers for it as for no record: check and refresh say
+// `recorded: false`, which is also what lets `adapter remove` go ahead. Safe on nil.
+func (r *Record) Installed() bool { return r != nil && len(r.Items) > 0 }
+
+// IsDeclined says whether the person declined the item. Safe on nil.
+func (r *Record) IsDeclined(id string) bool { return r != nil && slices.Contains(r.Declined, id) }
 
 // Find returns the recorded item with the id.
 func (r *Record) Find(id string) (RecordItem, bool) {

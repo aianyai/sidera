@@ -22,6 +22,10 @@ type Reconciliation struct {
 	// was edited (ProblemChanged), and a wanted item that no record has
 	// (ProblemNeedsSetup). A refresh leaves all of it as it is.
 	Drift []Drift
+	// Declined are the wanted items that no record holds and the person declined: not
+	// drift, so that a check and a refresh do not tell a person who said no that they
+	// must run setup. A plan still offers them, so that they can change their mind.
+	Declined []Wanted
 }
 
 // CheckDrift is the drift a check reports: Drift, and the stale items as ProblemStale.
@@ -37,7 +41,8 @@ func (r Reconciliation) CheckDrift() []Drift {
 // Reconcile classifies each wanted item against the record, in the order given. It
 // looks only at what the record holds (a nil record holds nothing): an item that is
 // recorded is probed at its recorded target and found intact, stale, changed or gone,
-// and an item that is not recorded needs setup. It changes nothing; the classification
+// and an item that is not recorded needs setup, unless the record says the person
+// declined it (Reconciliation.Declined). It changes nothing; the classification
 // is what every adapter's check and refresh share, so that a refresh can only ever
 // rewrite what a check calls stale.
 func Reconcile(rec *Record, wanted []Wanted, probe Probe) (Reconciliation, error) {
@@ -48,6 +53,10 @@ func Reconcile(rec *Record, wanted []Wanted, probe Probe) (Reconciliation, error
 		var isRecorded bool
 		if rec != nil {
 			recorded, isRecorded = rec.Find(w.ID)
+		}
+		if !isRecorded && rec.IsDeclined(w.ID) {
+			out.Declined = append(out.Declined, w)
+			continue
 		}
 		if !isRecorded {
 			drift.Problem, drift.Summary = ProblemNeedsSetup, w.ID+" has no record; run setup"

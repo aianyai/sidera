@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 )
@@ -166,6 +167,14 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
+		if req.Undo {
+			err = dropEmptyRecord(req.StateDir)
+		} else {
+			err = rememberDeclined(req)
+		}
+		if err != nil {
+			return Result{}, err
+		}
 		res.Status, res.Outcomes = StatusOK, outcomes
 		if anyFailed(outcomes) {
 			res.Status = StatusError
@@ -213,11 +222,11 @@ func Handle(ctx context.Context, h Handler, req Request) (Result, error) {
 }
 
 // checkRefresh holds a refresh to the record as it was before the refresh: with no
-// record there is nothing to report, and nothing the record does not hold is done. A
+// record (or one that holds only declines) there is nothing to report, and nothing the record does not hold is done. A
 // refresh that made an item would undo a user's deletion, which the reference promises
 // never happens; the check is here so that no adapter has to remember it.
 func checkRefresh(before *Record, f Refresh) error {
-	if before == nil {
+	if !before.Installed() {
 		if len(f.Outcomes) > 0 || len(f.Drift) > 0 {
 			return errors.New("the adapter's refresh reported outcomes or drift for an instance with no record; with no record the answer is none")
 		}
@@ -241,4 +250,47 @@ func anyFailed(outcomes []Outcome) bool {
 		}
 	}
 	return false
+}
+
+// rememberDeclined keeps in the record what the person declined in an apply, so that
+// the declines have one writer for every adapter. It runs after the adapter's Apply,
+// which has written whatever it did: the declined set is what it was, plus
+// req.Declined, minus the items accepted now (the person wants them, whether or not
+// they worked) and minus the items the record holds. A record is made for declines
+// alone, since a person who declines everything leaves no other trace; and nothing is
+// written when the set does not change.
+func rememberDeclined(req Request) error {
+	rec, err := ReadRecord(req.StateDir)
+	if err != nil {
+		return err
+	}
+	if rec == nil {
+		rec = &Record{SideraProgram: req.SideraProgram}
+	}
+	declined := slices.Clone(rec.Declined)
+	for _, id := range req.Declined {
+		if !slices.Contains(declined, id) {
+			declined = append(declined, id)
+		}
+	}
+	declined = slices.DeleteFunc(declined, func(id string) bool {
+		_, recorded := rec.Find(id)
+		return recorded || slices.Contains(req.Accepted, id)
+	})
+	if slices.Equal(declined, rec.Declined) {
+		return nil
+	}
+	rec.Declined = declined
+	return WriteRecord(req.StateDir, *rec)
+}
+
+// dropEmptyRecord removes a record that holds no item after an undo, declines
+// included: with nothing left that setup did, the setup is undone, and a later setup
+// asks about everything again.
+func dropEmptyRecord(stateDir string) error {
+	rec, err := ReadRecord(stateDir)
+	if err != nil || rec == nil || rec.Installed() {
+		return err
+	}
+	return RemoveRecord(stateDir)
 }

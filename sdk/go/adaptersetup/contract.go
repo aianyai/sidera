@@ -101,6 +101,15 @@ type Request struct {
 	// includes the items that need no consent.
 	Accepted []string `json:"accepted"`
 
+	// Declined, with OpApply, are the ids of the items the person was asked about
+	// and answered no to: the items of the plan that need consent, minus the ones
+	// that were accepted and the ones left alone because an item they require was
+	// declined or did not complete (those were never asked). Handle remembers them in
+	// the record, so that a check and a refresh stop reporting them as needing setup;
+	// a plan still lists them. An older core program never sends it, and then nothing
+	// is remembered; an adapter built before it was added ignores it.
+	Declined []string `json:"declined,omitempty"`
+
 	// Undo, with OpApply, says that Accepted are ids of an OpRemove listing and the
 	// items are to be undone. Ids of OpPlan and of OpRemove are not told apart by
 	// their spelling, so the request says which it carries.

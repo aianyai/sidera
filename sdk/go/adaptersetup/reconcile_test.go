@@ -66,3 +66,31 @@ func TestReconcile(t *testing.T) {
 		t.Errorf("probe error = %v", err)
 	}
 }
+
+// An item the person declined is not drift: a check and a refresh that kept reporting
+// it would show every update of a person who chose not to have it a "run setup" hint.
+// It is still listed in Declined, for the plan a person asks for by hand. A recorded
+// item is never treated as declined, and an item no one declined is still reported.
+func TestReconcileLeavesWhatWasDeclinedOutOfDrift(t *testing.T) {
+	d := adaptersetup.Digest([]byte("v1"))
+	rec := &adaptersetup.Record{Declined: []string{"no", "kept"}}
+	rec.Set(adaptersetup.RecordItem{ID: "kept", Kind: "file", Target: "/t/kept", Digest: d})
+	wanted := []adaptersetup.Wanted{
+		{ID: "no", Kind: "file", Target: "/t/no", Digest: d},
+		{ID: "kept", Kind: "file", Target: "/t/kept", Digest: d},
+		{ID: "new", Kind: "file", Target: "/t/new", Digest: d},
+	}
+	got, err := adaptersetup.Reconcile(rec, wanted, func(adaptersetup.RecordItem) (string, bool, error) { return d, true, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Declined) != 1 || got.Declined[0].ID != "no" {
+		t.Errorf("Declined = %+v", got.Declined)
+	}
+	if all := got.CheckDrift(); len(all) != 1 || all[0].ID != "new" || all[0].Problem != adaptersetup.ProblemNeedsSetup {
+		t.Errorf("CheckDrift = %+v, want only the item no one declined", all)
+	}
+	if !rec.IsDeclined("no") || rec.IsDeclined("new") || (*adaptersetup.Record)(nil).IsDeclined("no") {
+		t.Error("IsDeclined")
+	}
+}

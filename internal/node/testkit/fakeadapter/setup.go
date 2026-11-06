@@ -314,7 +314,7 @@ func (SetupHandler) Check(_ context.Context, req adaptersetup.Request) (adapters
 	if err != nil {
 		return adaptersetup.Check{}, err
 	}
-	return adaptersetup.Check{Recorded: rec != nil, Drift: r.CheckDrift()}, nil
+	return adaptersetup.Check{Recorded: rec.Installed(), Drift: r.CheckDrift()}, nil
 }
 
 // Refresh implements adaptersetup.Handler.
@@ -324,7 +324,7 @@ func (SetupHandler) Refresh(_ context.Context, req adaptersetup.Request) (adapte
 		return adaptersetup.Refresh{}, err
 	}
 	rec, err := adaptersetup.ReadRecord(req.StateDir)
-	if err != nil || rec == nil {
+	if err != nil || !rec.Installed() {
 		return adaptersetup.Refresh{}, err
 	}
 	r, err := f.reconcile(rec)

@@ -89,7 +89,9 @@ sidera adapter setup claude --remove # undoes what it did, asking about each ite
 ```
 
 It lists the items and asks `y/N` for every one that touches the client's own
-configuration; anything but `y` is a no. Without a terminal it needs `--yes`, like
+configuration; anything but `y` is a no. An item you decline is remembered: `--check` and
+`sidera update` do not report it as still to set up, and running `sidera adapter setup`
+again offers it again. Without a terminal it needs `--yes`, like
 `sidera update`. Setup remembers what it did, and only what it did and only while it is still
 there is touched later: if you delete something it installed, a refresh does not put it
 back, and `--check` tells you it is gone. `--refresh` brings what setup recorded up to date

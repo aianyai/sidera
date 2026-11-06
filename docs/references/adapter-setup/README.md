@@ -45,6 +45,7 @@ does not know).
 | `sidera_program` | The absolute path of the core program as it was launched, links kept, and never quoted; only when the launch path is not known, what the platform reports for the running executable, made absolute. It is the file `sidera update` replaces in place, so a client's configuration stays valid across an update, a package manager's link keeps pointing at the current version, and setup and a later refresh pass the same string. It goes into a client's configuration as data; a program that prints it for a shell quotes it itself |
 | `options` | The adapter's own arguments: the words after `--` on the command line, in order and untouched |
 | `accepted` | For `apply`: the ids of the items to do |
+| `declined` | For `apply` (not with `undo`), optional: the ids of the items that need consent, that the person was asked about and answered no to. Not the items left alone because an item they require was declined or did not complete (never asked), and nothing under `--yes`. See [What was declined](#what-was-declined) |
 | `undo` | For `apply`: `accepted` names items of a `remove` listing, to be undone |
 
 ## Ops
@@ -57,8 +58,8 @@ and the adapter then does what was accepted.
 | `plan` | Lists the items setup would do and changes nothing |
 | `apply` | Does the items of `accepted`, which came from a `plan`, and answers an outcome for each. With `undo`, the ids came from a `remove` listing and the items are undone |
 | `remove` | Lists the recorded items setup would undo (each with the action `remove`), and changes nothing. The CLI asks and then sends `apply` with `undo` |
-| `refresh` | Brings recorded items that still exist and whose content has changed up to date, at once and without asking. It never creates an item and never makes again one that is gone: those are reported as drift. With no record it answers `none` and reports nothing |
-| `check` | Says whether a record exists and lists the drift; changes nothing. It returns an error only when it cannot read the record: a client it cannot probe is drift of the problem `broken`, so that an instance whose client is gone can still be removed. With no record it still lists what setup would have to make (`needs_setup`), so that `--check` tells a person an instance has no setup yet |
+| `refresh` | Brings recorded items that still exist and whose content has changed up to date, at once and without asking. It never creates an item and never makes again one that is gone: those are reported as drift, except what the person declined. With no record it answers `none` and reports nothing |
+| `check` | Says whether a record exists (one that holds an installed item; see [the record](#the-record)) and lists the drift, leaving out what the person declined; changes nothing. It returns an error only when it cannot read the record: a client it cannot probe is drift of the problem `broken`, so that an instance whose client is gone can still be removed. With no record it still lists what setup would have to make (`needs_setup`), so that `--check` tells a person an instance has no setup yet |
 
 `apply` is told by `undo`, not by the spelling of an id, whether its ids came from
 `plan` or from `remove`: an item that setup recorded is listed by both, under the same
@@ -149,7 +150,7 @@ matters for the contract:
   state directory and the owner's values, so the CLI never reads a manifest and an old
   program can run a new package's setup.
 - **A request is built once per command** and differs between calls only in `op`,
-  `accepted` and `undo`.
+  `accepted`, `declined` and `undo`.
 
 ### Removing the instance
 
@@ -185,7 +186,10 @@ it was asked, and hands it to the adapter's code (`Request.Version`), so a relea
 to a new major version while the core programs it still has to serve speak the old one. A
 side that is given a version it does not support fails, naming both; the helper does so
 with exit 2. Both sides decode leniently, ignoring a member they do not know, so a member
-can be added without a new version.
+can be added without a new version. `declined` is such a member: an adapter that predates
+it ignores it and goes on reporting what the person declined as `needs_setup`, and a core
+program that predates it never sends it, so the adapter records no declines and reports as
+before.
 
 What is additive and what is not:
 
@@ -210,7 +214,8 @@ lists the contract with the management methods it travels with.
 An adapter's setup remembers what it did in `<state_dir>/setup/record.json`: per item
 `{id, kind, target, digest, version}` (the digest of what it wrote, so that a later
 check can tell its own work from someone else's change), the `sidera_program` the items
-name and the adapter's version. The record is **the adapter's alone**: the CLI and the
+name, the adapter's version and optionally `declined`, the ids the person declined (see
+[What was declined](#what-was-declined)). The record is **the adapter's alone**: the CLI and the
 daemon never read it, which is why a `check` or a `refresh` is an op of the adapter. It
 has the members above and no others: a member the SDK does not know is dropped when the
 record is rewritten, so an adapter that needs more keeps it in a file of its own. It is
@@ -222,6 +227,42 @@ content is out of date. It does not make again an item the user deleted (the use
 decision stands; the adapter reports it as drift), and it does not touch anything it
 never recorded. Anything outside the record changes only after the person agrees to
 that item, one by one.
+
+A record "exists", as `check` and `refresh` say it in `recorded`, when it holds an item
+setup did. A record that holds only declines (the person said no to everything) records
+nothing that was done: the adapter answers for it as for no record, and `adapter remove`
+is not refused on its account.
+
+### What was declined
+
+A person who declines an item on purpose would otherwise see drift (`needs_setup`) and a
+"run setup" hint after every `sidera update`, for something they decided against. So the
+item they declined is remembered, and `refresh` and `check` do not report it. The rules:
+
+- **Who writes it.** `Handle` merges `declined` into the record once the adapter's `apply`
+  returns, for every adapter. An adapter reads its record, changes `items` and writes it
+  back as it does today, and never edits `declined`; a record rewritten from scratch
+  would forget the earlier declines, which only brings the drift back. The declined set
+  becomes what it was plus `declined`, minus the ids in `accepted` (a person who accepts an
+  item later wants it, whether or not it worked) and minus the ids the record holds. A record
+  is made when only declines are to be kept. A request without `declined` changes
+  nothing.
+- **What reads it.** `Reconcile` leaves a wanted item that no record holds and the record
+  lists as declined out of the drift (it is returned as `Reconciliation.Declined`); an
+  item a later release wants, which nobody declined, is still `needs_setup`. An item that
+  is recorded is never treated as declined.
+- **A plan still offers it.** The person who runs `sidera adapter setup` by hand sees
+  the plan, so they can change their mind. An adapter builds its plan from what it wants
+  and what is there, and never filters it by `declined`; one that builds the plan from
+  `Reconcile` adds `Reconciliation.Declined` to the items it lists, in its own order.
+- **An undo forgets it.** An undo that leaves no item recorded removes the record, and the
+  declines with it (`Handle` does so after the adapter's undo returns), so that a setup
+  that is started afresh asks about everything.
+
+The CLI sends `declined` only with the `apply` of a plain setup, for the items it asked
+about, and says in its dialogue which were declined and that they are not reported again.
+When every item is declined it still sends one `apply` with no `accepted`, to hand over the
+declines.
 
 ### The state directory
 
@@ -242,10 +283,13 @@ error that says to enable the instance and start the daemon so that it runs once
   the request, checks the version, calls the `Handler` method of the op, derives the
   status and writes the result, mapping errors to the exit codes above;
 - the record: `ReadRecord`, `WriteRecord`, `RemoveRecord`, `RecordPath`, `Digest`,
-  `RequireStateDir`;
+  `RequireStateDir`, and `Record.Installed` and `Record.IsDeclined`, which an adapter uses
+  where it would test the record for nil (`recorded` is `rec.Installed()`, and a refresh
+  of a record that is not installed answers as for none);
 - `Reconcile`, the classification that a check and a refresh share: each item the adapter
   wants is probed at its recorded target and found intact, stale (a refresh rewrites it),
-  changed or gone (drift, which a refresh leaves), or without a record (`needs_setup`).
+  changed or gone (drift, which a refresh leaves), or without a record (`needs_setup`,
+  unless the person declined it);
   Because both ops read the same answer, a refresh can only rewrite what a check calls stale;
 - `WritePrivateFile`, the atomic write for the owner alone: a file of its own is written,
   flushed and renamed over the target, mode 0600 in directories of 0700. On Windows the

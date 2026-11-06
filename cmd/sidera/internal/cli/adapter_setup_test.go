@@ -239,7 +239,8 @@ func TestAdapterSetupAsksItemByItem(t *testing.T) {
 func TestAdapterSetupAppliesNothingWhenNothingIsAccepted(t *testing.T) {
 	r := newRig(t, clientA)
 	_, report, verdict := r.run(modeSetup, "n\n", false)
-	if verdict != nil || r.exec.ops() != "plan" || !strings.Contains(report, "nothing applied") || r.exists(filepath.Join(r.client, "a")) {
+	// Only to remember the decline: nothing is accepted, so nothing is done.
+	if verdict != nil || r.exec.ops() != "plan apply" || !strings.Contains(report, "nothing applied") || r.exists(filepath.Join(r.client, "a")) {
 		t.Errorf("verdict %v, ops %q, report %q", verdict, r.exec.ops(), report)
 	}
 	r = newRig(t) // nothing wanted at all
@@ -702,6 +703,115 @@ func TestAdapterSetupShowsWhatALaterReleaseAdds(t *testing.T) {
 		r.exec.byOp = map[adaptersetup.Op]string{"check": `{"version":1,"op":"check","status":"ok"}`}
 		if _, _, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(err.Error(), "recorded") {
 			t.Errorf("err %v", err)
+		}
+	})
+}
+
+// What the person declines is remembered, so that update (refresh) and check stop calling
+// it drift, while the plan of a setup run by hand still offers it. Only an answer of no
+// is a decline: --yes asks nothing, and an item left alone because the item it requires
+// was declined was never asked.
+func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
+	clientDependent := fakeadapter.SetupItem{ID: "d", Consent: true, Content: "D", Requires: []string{"a"}}
+	lastApply := func(r *setupRig) adaptersetup.Request {
+		for i := len(r.exec.requests) - 1; i >= 0; i-- {
+			if r.exec.requests[i].Op == adaptersetup.OpApply {
+				return r.exec.requests[i]
+			}
+		}
+		t.Fatal("no apply was sent")
+		return adaptersetup.Request{}
+	}
+	record := func(r *setupRig) *adaptersetup.Record {
+		rec, err := adaptersetup.ReadRecord(r.state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+
+	t.Run("declined, quiet afterwards, offered again, accepted", func(t *testing.T) {
+		r := newRig(t, clientA, clientB, ownO)
+		asked, _, err := r.run(modeSetup, "n\ny\n", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a]" {
+			t.Errorf("declined sent = %v, want [a]", got)
+		}
+		if !strings.Contains(asked, "declined: write a") || !strings.Contains(asked, "not reported again") {
+			t.Errorf("the dialogue does not say what was declined:\n%s", asked)
+		}
+		for _, mode := range []setupMode{modeCheck, modeRefresh} {
+			if _, report, err := r.run(mode, "", false); err != nil || strings.Contains(report, "drift") {
+				t.Errorf("mode %d reports the declined item: %v\n%s", mode, err, report)
+			}
+		}
+		// A new item that nobody declined is still reported, the declined one is not.
+		r.script.Items = append(r.script.Items, fakeadapter.SetupItem{ID: "n", Consent: true, Content: "N"})
+		if _, report, err := r.run(modeRefresh, "", false); err == nil || !strings.Contains(report, "drift n needs_setup") || strings.Contains(report, "drift a") {
+			t.Errorf("refresh with a new item: %v\n%s", err, report)
+		}
+		// The plan of a setup run by hand lists it again; accepting it records it and
+		// it is no longer declined.
+		asked, _, err = r.run(modeSetup, "y\nn\n", false)
+		if err != nil || !strings.Contains(asked, "write a? [y/N]") {
+			t.Fatalf("the plan did not offer the declined item again: %v\n%s", err, asked)
+		}
+		if rec := record(r); rec == nil || !rec.Installed() || slices.Contains(rec.Declined, "a") || !slices.Contains(rec.Declined, "n") {
+			t.Errorf("record = %+v, want a recorded and n declined", rec)
+		}
+	})
+
+	t.Run("declining everything is remembered with no item recorded", func(t *testing.T) {
+		r := newRig(t, clientA)
+		if _, _, err := r.run(modeSetup, "n\n", false); err != nil {
+			t.Fatal(err)
+		}
+		for _, mode := range []setupMode{modeCheck, modeRefresh} {
+			if _, report, err := r.run(mode, "", false); err != nil || !strings.Contains(report, "status none") || !strings.Contains(report, "recorded false") {
+				t.Errorf("mode %d: %v\n%s", mode, err, report)
+			}
+		}
+	})
+
+	t.Run("--yes declines nothing", func(t *testing.T) {
+		r := newRig(t, clientA, ownO)
+		if _, _, err := r.run(modeSetup, "", true); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastApply(r).Declined; len(got) != 0 {
+			t.Errorf("declined sent = %v", got)
+		}
+		if rec := record(r); rec == nil || len(rec.Declined) != 0 {
+			t.Errorf("record = %+v", rec)
+		}
+	})
+
+	t.Run("an item left alone because its required item was declined is not a decline", func(t *testing.T) {
+		r := newRig(t, clientA, clientDependent)
+		asked, _, err := r.run(modeSetup, "n\n", false)
+		if err != nil || !strings.Contains(asked, "left alone: write d") {
+			t.Fatalf("%v\n%s", err, asked)
+		}
+		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a]" {
+			t.Errorf("declined sent = %v, want only a", got)
+		}
+		if _, report, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(report, "drift d needs_setup") || strings.Contains(report, "drift a") {
+			t.Errorf("check: %v\n%s", err, report)
+		}
+	})
+
+	t.Run("a no in a removal is not a decline", func(t *testing.T) {
+		r := newRig(t, clientA, clientB)
+		if _, _, err := r.run(modeSetup, "", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.run(modeRemove, "n\ny\n", false); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastApply(r).Declined; len(got) != 0 {
+			t.Errorf("declined sent = %v", got)
 		}
 	})
 }

@@ -17,9 +17,9 @@ a program's commands).
 | `Handler` | What an adapter implements: `Plan`, `Apply`, `Remove`, `Undo`, `Refresh`, `Check` |
 | `Command(program, handler)` | The `setup` command of an adapter program, for `adapterkit.Program.Commands` |
 | `ReadRequest`, `Handle` | The parts of `Command`, for a caller that has its own streams |
-| `Record`, `ReadRecord`, `WriteRecord`, `RemoveRecord`, `RecordPath` | The record under `<state_dir>/setup/` |
+| `Record`, `ReadRecord`, `WriteRecord`, `RemoveRecord`, `RecordPath` | The record under `<state_dir>/setup/`. `Record.Installed` (it holds an item setup did; what `recorded` means) and `Record.IsDeclined` are nil-safe; `Record.Declined` is kept by `Handle`, not by the adapter |
 | `RequireStateDir`, `ErrNoStateDir` | The state-directory precondition; `Handle` applies it |
-| `Reconcile`, `Wanted`, `Probe`, `Reconciliation` | The classification a check and a refresh share: stale, changed, missing, needs setup |
+| `Reconcile`, `Wanted`, `Probe`, `Reconciliation` | The classification a check and a refresh share: stale, changed, missing, needs setup; what the person declined is `Reconciliation.Declined`, not drift |
 | `Digest` | The text a record keeps of a file's content |
 | `WritePrivateFile` | Atomic write for the owner alone |
 | `ClientCommand` (`Run`, `Failure`), `ClientOutput`, `NotStartedError` | One bounded run of a client's command line: the program by absolute path and without a shell, a working directory the caller names, the null device as standard input, a time limit that reports itself as a timeout, a non-zero exit returned as a result; `Failure` words a failed command with the end of its standard error |
@@ -33,6 +33,11 @@ a program's commands).
   returned, and refuses a result that does not validate (a repeated item id is the
   adapter's bug, exit 1, nothing written). It also holds a refresh to the record: no
   outcome or drift without one, and nothing `done` that the record did not hold.
+- **Declines have one writer.** After an adapter's `Apply` returns, `Handle` merges
+  `Request.Declined` into the record (minus what was accepted or is recorded), and after
+  an `Undo` it removes a record that holds no item. An adapter reads and writes `Items`
+  only, answers `Recorded: rec.Installed()` and, in `Plan`, lists declined items like any
+  other.
 - **Unknown members are ignored; an unsupported version is refused.** A request of a
   version outside `MinVersion` to `Version` is exit 2 and the handler is not called; the
   result carries the version of the request.

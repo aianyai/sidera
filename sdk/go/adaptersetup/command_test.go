@@ -371,6 +371,14 @@ func TestCommandHoldsRefreshToTheRecord(t *testing.T) {
 		}
 		return state
 	}
+	// A record that holds only what was declined records nothing setup did.
+	declinesOnly := func(t *testing.T) string {
+		state := t.TempDir()
+		if err := adaptersetup.WriteRecord(state, adaptersetup.Record{Declined: []string{"a"}}); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
 	for _, tc := range []struct {
 		name    string
 		state   func(*testing.T) string
@@ -382,6 +390,8 @@ func TestCommandHoldsRefreshToTheRecord(t *testing.T) {
 		{"no record, drift", func(t *testing.T) string { return t.TempDir() }, adaptersetup.Refresh{Drift: []adaptersetup.Drift{drift("a")}}, "no record"},
 		{"a recorded item rewritten", recorded, adaptersetup.Refresh{Recorded: true, Outcomes: []adaptersetup.Outcome{outcome("a", adaptersetup.OutcomeDone)}}, ""},
 		{"an item the record does not hold made", recorded, adaptersetup.Refresh{Recorded: true, Outcomes: []adaptersetup.Outcome{outcome("b", adaptersetup.OutcomeDone)}}, `"b"`},
+		{"declines only, outcomes", declinesOnly, adaptersetup.Refresh{Outcomes: []adaptersetup.Outcome{outcome("a", adaptersetup.OutcomeDone)}}, "no record"},
+		{"declines only, drift", declinesOnly, adaptersetup.Refresh{Drift: []adaptersetup.Drift{drift("a")}}, "no record"},
 		{"an item the record does not hold failed", recorded, adaptersetup.Refresh{Recorded: true, Outcomes: []adaptersetup.Outcome{outcome("b", adaptersetup.OutcomeFailed)}}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,5 +401,102 @@ func TestCommandHoldsRefreshToTheRecord(t *testing.T) {
 				t.Errorf("exit %d, stderr %q; want error %q", code, errs, tc.want)
 			}
 		})
+	}
+}
+
+// What the person declined in an apply is remembered in the record by Handle, once for
+// every adapter: merged with what was declined before, minus what is accepted now (an
+// accepted item is wanted, whether or not it worked) and minus what the record holds. An
+// undo remembers nothing, and an undo that leaves no item takes the declines with the
+// record.
+func TestHandleRemembersWhatWasDeclined(t *testing.T) {
+	type rec = adaptersetup.Record
+	recItem := func(id string) adaptersetup.RecordItem {
+		return adaptersetup.RecordItem{ID: id, Kind: "file", Target: "/t/" + id}
+	}
+	for _, tc := range []struct {
+		name         string
+		before       *rec
+		request      adaptersetup.Request
+		wantRecord   bool
+		wantDeclined []string
+		wantItems    int
+	}{
+		{"declines only, with no record before", nil,
+			adaptersetup.Request{Op: adaptersetup.OpApply, Declined: []string{"a", "b"}}, true, []string{"a", "b"}, 0},
+		{"merged with an earlier decline, none repeated", &rec{Declined: []string{"a"}},
+			adaptersetup.Request{Op: adaptersetup.OpApply, Declined: []string{"b", "a"}}, true, []string{"a", "b"}, 0},
+		{"the items of the record are kept", &rec{Items: []adaptersetup.RecordItem{recItem("x")}},
+			adaptersetup.Request{Op: adaptersetup.OpApply, Declined: []string{"a"}}, true, []string{"a"}, 1},
+		{"accepting an item forgets that it was declined, even if it did not work", &rec{Declined: []string{"a", "b"}},
+			adaptersetup.Request{Op: adaptersetup.OpApply, Accepted: []string{"a"}}, true, []string{"b"}, 0},
+		{"an item the record holds is not declined", &rec{Items: []adaptersetup.RecordItem{recItem("a")}, Declined: []string{"a", "b"}},
+			adaptersetup.Request{Op: adaptersetup.OpApply}, true, []string{"b"}, 1},
+		{"nothing declined and nothing to forget writes no record", nil,
+			adaptersetup.Request{Op: adaptersetup.OpApply, Accepted: []string{"a"}}, false, nil, 0},
+		{"an undo remembers nothing", nil,
+			adaptersetup.Request{Op: adaptersetup.OpApply, Undo: true, Declined: []string{"a"}}, false, nil, 0},
+		{"an undo that leaves an item keeps the declines", &rec{Items: []adaptersetup.RecordItem{recItem("x")}, Declined: []string{"a"}},
+			adaptersetup.Request{Op: adaptersetup.OpApply, Undo: true}, true, []string{"a"}, 1},
+		{"an undo that leaves no item takes the declines with the record", &rec{Declined: []string{"a"}},
+			adaptersetup.Request{Op: adaptersetup.OpApply, Undo: true}, false, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := t.TempDir()
+			if tc.before != nil {
+				if err := adaptersetup.WriteRecord(state, *tc.before); err != nil {
+					t.Fatal(err)
+				}
+			}
+			req := tc.request
+			req.Version, req.StateDir, req.SideraProgram = adaptersetup.Version, state, "/bin/sidera"
+			if _, err := adaptersetup.Handle(context.Background(), &script{}, req); err != nil {
+				t.Fatal(err)
+			}
+			got, err := adaptersetup.ReadRecord(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got != nil) != tc.wantRecord {
+				t.Fatalf("record = %+v, want one: %v", got, tc.wantRecord)
+			}
+			if got == nil {
+				return
+			}
+			if !slices.Equal(got.Declined, tc.wantDeclined) || len(got.Items) != tc.wantItems {
+				t.Errorf("declined %v, %d items; want %v, %d items", got.Declined, len(got.Items), tc.wantDeclined, tc.wantItems)
+			}
+			if tc.before == nil && got.SideraProgram != "/bin/sidera" {
+				t.Errorf("sidera_program = %q, want the request's", got.SideraProgram)
+			}
+			if got.Installed() != (tc.wantItems > 0) {
+				t.Errorf("Installed() = %v with %d items", got.Installed(), tc.wantItems)
+			}
+		})
+	}
+
+	t.Run("a failed apply remembers nothing", func(t *testing.T) {
+		state := t.TempDir()
+		req := adaptersetup.Request{Version: adaptersetup.Version, Op: adaptersetup.OpApply, StateDir: state, Declined: []string{"a"}}
+		if _, err := adaptersetup.Handle(context.Background(), &script{err: errors.New("no client")}, req); err == nil {
+			t.Fatal("no error")
+		}
+		if got, _ := adaptersetup.ReadRecord(state); got != nil {
+			t.Errorf("record = %+v", got)
+		}
+	})
+}
+
+// A record that holds only declines is not a setup that was done: the request member
+// is the CLI's word for it, and a request without it (an older core program) is read as
+// declining nothing.
+func TestRequestDeclinedIsOptional(t *testing.T) {
+	h := &script{}
+	code, _, errs := runSetup(t, h, `{"version":1,"op":"apply","accepted":["a"],"declined":["b","c"]}`)
+	if code != adapterkit.ExitOK || strings.Join(h.got.Declined, " ") != "b c" {
+		t.Errorf("exit %d (%s), declined %v", code, errs, h.got.Declined)
+	}
+	if code, _, errs = runSetup(t, h, `{"version":1,"op":"apply","accepted":["a"]}`); code != adapterkit.ExitOK || len(h.got.Declined) != 0 {
+		t.Errorf("exit %d (%s), declined %v", code, errs, h.got.Declined)
 	}
 }

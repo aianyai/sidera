@@ -15,7 +15,9 @@ protocol has a version of its own.
   about each change to the client's configuration, and remembers what it did. `--check` reports what
   has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
   up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter. The
-  adapters themselves start using it in the releases that follow.
+  adapters themselves start using it in the releases that follow. An item you decline is
+  remembered: `--check` and `sidera update` do not report it as still to set up, and running the
+  command again offers it again.
 - **`sidera update` refreshes the client setup of your adapters.** After it installs the new
   adapters, it asks the adapter of each instance to bring what `sidera adapter setup` recorded in
   your agent client up to date, without asking you, and reports one `setup` line per instance:
