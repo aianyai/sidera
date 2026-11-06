@@ -115,6 +115,11 @@ adapter cannot report one that contradicts them:
 | `check` | `drift` when there is drift; else `none` when there is no record; else `ok` |
 | `refresh` | `error` when an outcome failed; else `drift` when there is drift; else `none` when there is no record; else `refreshed` (a record exists and nothing is left to do; the outcomes say what was rewritten, which may be nothing) |
 
+A status the op cannot have (a refresh that says `ok`, a check that says `error`, a plan
+that says `drift`) makes the result invalid, whoever wrote it: the status decides the exit
+code and the report line, and a result that contradicts its op would be judged differently by
+each program that reads it.
+
 With no record, `refresh` is `none` and may carry neither outcomes nor drift, and a `refresh`
 that did (`done`) an item the record before it did not hold has created something: the
 helper refuses both as the adapter's bug (exit 1), so that no adapter has to remember the

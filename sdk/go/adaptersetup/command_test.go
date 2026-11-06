@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -229,6 +230,35 @@ func TestResultValidate(t *testing.T) {
 				t.Errorf("Validate = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// The status decides the exit code and the report line, so a result whose status the op
+// can never have is refused: two callers would otherwise read, say, a refresh that
+// answers "ok" differently. The table is the one Handle derives the status from.
+func TestResultValidateRefusesAStatusTheOpDoesNotAllow(t *testing.T) {
+	const (
+		ok, refreshed, none, drift, failed = adaptersetup.StatusOK, adaptersetup.StatusRefreshed, adaptersetup.StatusNone, adaptersetup.StatusDrift, adaptersetup.StatusError
+	)
+	allowed := map[adaptersetup.Op][]adaptersetup.Status{
+		adaptersetup.OpPlan:    {ok},
+		adaptersetup.OpRemove:  {ok},
+		adaptersetup.OpApply:   {ok, failed},
+		adaptersetup.OpCheck:   {ok, none, drift},
+		adaptersetup.OpRefresh: {refreshed, none, drift, failed},
+	}
+	for op, statuses := range allowed {
+		for _, status := range []adaptersetup.Status{ok, refreshed, none, drift, failed} {
+			t.Run(string(op)+" "+string(status), func(t *testing.T) {
+				r := adaptersetup.Result{Version: 1, Op: op, Status: status, Recorded: ptr(true)}
+				err := r.Validate(op, adaptersetup.Version)
+				if want := slices.Contains(statuses, status); want && err != nil {
+					t.Errorf("Validate = %v, want it accepted", err)
+				} else if !want && (err == nil || !strings.Contains(err.Error(), string(status))) {
+					t.Errorf("Validate = %v, want the status %q refused for %s", err, status, op)
+				}
+			})
+		}
 	}
 }
 

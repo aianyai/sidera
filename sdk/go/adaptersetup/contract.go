@@ -247,6 +247,23 @@ func (s Status) valid() bool {
 	return false
 }
 
+// allowedFor says whether an op can end in the status: the statuses Handle derives for it.
+// A refresh is never "ok" (its quiet outcome is "refreshed"), and a check never "error"
+// or "refreshed".
+func (s Status) allowedFor(op Op) bool {
+	switch op {
+	case OpPlan, OpRemove:
+		return s == StatusOK
+	case OpApply:
+		return s == StatusOK || s == StatusError
+	case OpCheck:
+		return s == StatusOK || s == StatusNone || s == StatusDrift
+	case OpRefresh:
+		return s == StatusRefreshed || s == StatusNone || s == StatusDrift || s == StatusError
+	}
+	return false
+}
+
 // Result is what the setup program writes to its standard output.
 type Result struct {
 	Version int    `json:"version"`
@@ -265,9 +282,9 @@ type Result struct {
 
 // Validate says whether the result is one the core CLI can act on: it carries the version
 // of the request it answers (version) and the op that was asked (op), the status is one of
-// this version (it decides the exit code, so a guess is not made), the ids of the items are
-// unique, an item requires only earlier ones, check and refresh say whether a record exists,
-// and a plan asks before it removes. A value of Action, Problem or an outcome's status that
+// this version and one the op can have (it decides the exit code, so a guess is not made),
+// the ids of the items are unique, an item requires only earlier ones, check and refresh say
+// whether a record exists, and a plan asks before it removes. A value of Action, Problem or an outcome's status that
 // a later release added is not an error (see Version and Outcome.Failed), and neither is a
 // member this version does not know.
 func (r Result) Validate(op Op, version int) error {
@@ -279,6 +296,9 @@ func (r Result) Validate(op Op, version int) error {
 	}
 	if !r.Status.valid() {
 		return fmt.Errorf("the status %q is not one of this version", r.Status)
+	}
+	if !r.Status.allowedFor(op) {
+		return fmt.Errorf("the status %q is not one a %s can have", r.Status, op)
 	}
 	if (op == OpCheck || op == OpRefresh) && r.Recorded == nil {
 		return fmt.Errorf("the result of %s does not say whether a record exists (recorded)", op)
