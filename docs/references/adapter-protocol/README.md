@@ -1117,7 +1117,7 @@ is authoritative.
   `internal/timing` name from here).
 - `sdk/go/adapterkit`: the serve loop of an adapter (`serve.go`: the states and the lock
   order, `conn.go`: what the adapter sends, `application.go`: what it implements, `lock_*.go`:
-  the instance lock). Tests: `TestOnlyInitializePingAndCancelAreServedBeforeInitialize`,
+  the instance lock, `program.go`: the command line every adapter program shares). Tests: `TestOnlyInitializePingAndCancelAreServedBeforeInitialize`,
   `TestInitializeWithoutACommonVersionIsRefusedAndTakesNoLock`,
   `TestInitializeAnswersInstanceLockedWhileAnotherAdapterHoldsTheLock`,
   `TestAfterShutdownOnlyPingIsServed`, `TestRequestsAndAnswersAreHeldToTheProtocol`,
