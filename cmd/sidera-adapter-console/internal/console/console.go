@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/internal/release"
+	"github.com/aianyai/sidera/sdk/go/adapterkit"
 )
 
 const (
@@ -41,9 +42,9 @@ type Env struct {
 
 // Exit codes of the client commands.
 const (
-	exitOK        = 0
-	exitFailed    = 1 // the daemon, the adapter or the target refused or failed
-	exitUsage     = 2
+	exitOK        = adapterkit.ExitOK
+	exitFailed    = adapterkit.ExitFailed // the daemon, the adapter or the target refused or failed
+	exitUsage     = adapterkit.ExitUsage
 	exitUnsettled = 3 // nothing is wrong yet, but the outcome is not known: see the message
 )
 
@@ -73,38 +74,39 @@ flags of every client command:
 exit codes: 0 done, 1 failed, 2 usage, 3 not settled yet
 `
 
+// clientCommands are the commands of the client role, which talks to the adapter's
+// socket (see client.go).
+var clientCommands = []string{"new", "recv", "reply", "send", "directory", "peers", "status", "whoami"}
+
 // Main runs the program with its arguments after the program name and returns the
 // exit code. It is the only entry the program has.
 func Main(args []string, env Env) int {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprint(env.Stderr, usageText)
-		if len(args) == 0 {
-			return exitUsage
+	commands := make(map[string]adapterkit.Command, len(clientCommands))
+	for _, name := range clientCommands {
+		commands[name] = func(rest []string, _ adapterkit.Streams) int {
+			return runClient(append([]string{name}, rest...), env)
 		}
-		return exitOK
 	}
-	switch args[0] {
-	case "serve":
-		return runServe(env)
-	case "package":
-		return runPackage(args[1:], env)
-	case "version":
-		fmt.Fprintln(env.Stdout, release.Read().Describe(ProgramName))
-		return exitOK
-	}
-	return runClient(args, env)
+	return adapterkit.Program{
+		Name:     ProgramName,
+		Usage:    usageText,
+		Serve:    runServe,
+		Package:  writePackage,
+		Build:    release.Read(),
+		Commands: commands,
+	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr})
 }
 
-func runServe(env Env) int {
-	log := slog.New(slog.NewTextHandler(env.Stderr, nil))
+func runServe(s adapterkit.Streams) int {
+	log := slog.New(slog.NewTextHandler(s.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	out, ok := env.Stdout.(io.WriteCloser)
+	out, ok := s.Stdout.(io.WriteCloser)
 	if !ok {
-		out = nopCloser{env.Stdout}
+		out = nopCloser{s.Stdout}
 	}
-	if err := serve(ctx, env.Stdin, out, log); err != nil {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-console:", err)
+	if err := serve(ctx, s.Stdin, out, log); err != nil {
+		fmt.Fprintln(s.Stderr, "sidera-adapter-console:", err)
 		return exitFailed
 	}
 	return exitOK

@@ -39,9 +39,6 @@ func TestEveryTargetGetsAManifestTheDaemonAccepts(t *testing.T) {
 			if p[0] == "windows" && !strings.HasSuffix(m.Entry.Program, ".exe") {
 				t.Errorf("the program of a Windows package is %q", m.Entry.Program)
 			}
-			if err := writePackage(p[0], p[1], bin, out); err == nil {
-				t.Error("a package was written over a directory that is not empty")
-			}
 		})
 	}
 	if _, err := Manifest("haiku", "arm64"); err == nil {

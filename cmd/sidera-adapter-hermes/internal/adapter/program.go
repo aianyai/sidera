@@ -2,8 +2,6 @@ package adapter
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +10,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-hermes/internal/setup"
 	"github.com/aianyai/sidera/internal/release"
+	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -35,46 +34,37 @@ commands:
 `
 
 const (
-	exitOK     = 0
-	exitFailed = 1
-	exitUsage  = 2
+	exitOK     = adapterkit.ExitOK
+	exitFailed = adapterkit.ExitFailed
 )
 
 // Main runs the program with its arguments after the program name and returns the
 // exit code.
 func Main(args []string, env ProgramEnv) int {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		fmt.Fprint(env.Stderr, usageText)
-		if len(args) == 0 {
-			return exitUsage
-		}
-		return exitOK
-	}
-	switch args[0] {
-	case "serve":
-		return runServe(env)
-	case "package":
-		return runPackage(args[1:], env)
-	case "setup":
-		return setup.Run(args[1:], setup.Env{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr, Getenv: os.Getenv})
-	case "version":
-		fmt.Fprintln(env.Stdout, release.Read().Describe(ProgramName))
-		return exitOK
-	}
-	fmt.Fprintf(env.Stderr, "sidera-adapter-hermes: unknown command %q\n%s", args[0], usageText)
-	return exitUsage
+	return adapterkit.Program{
+		Name:    ProgramName,
+		Usage:   usageText,
+		Serve:   runServe,
+		Package: writePackage,
+		Build:   release.Read(),
+		Commands: map[string]adapterkit.Command{
+			"setup": func(args []string, s adapterkit.Streams) int {
+				return setup.Run(args, setup.Env{Stdin: s.Stdin, Stdout: s.Stdout, Stderr: s.Stderr, Getenv: os.Getenv})
+			},
+		},
+	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr})
 }
 
-func runServe(env ProgramEnv) int {
-	log := slog.New(slog.NewTextHandler(env.Stderr, nil))
+func runServe(s adapterkit.Streams) int {
+	log := slog.New(slog.NewTextHandler(s.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	out, ok := env.Stdout.(io.WriteCloser)
+	out, ok := s.Stdout.(io.WriteCloser)
 	if !ok {
-		out = nopCloser{env.Stdout}
+		out = nopCloser{s.Stdout}
 	}
-	if err := Serve(ctx, env.Stdin, out, log, LaneFlows(NewInbound)); err != nil {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-hermes:", err)
+	if err := Serve(ctx, s.Stdin, out, log, LaneFlows(NewInbound)); err != nil {
+		fmt.Fprintln(s.Stderr, "sidera-adapter-hermes:", err)
 		return exitFailed
 	}
 	return exitOK
@@ -84,34 +74,9 @@ type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
 
-func runPackage(args []string, env ProgramEnv) int {
-	fs := flag.NewFlagSet("package", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var goos, goarch, binary, out string
-	fs.StringVar(&goos, "goos", "", "")
-	fs.StringVar(&goarch, "goarch", "", "")
-	fs.StringVar(&binary, "binary", "", "")
-	fs.StringVar(&out, "out", "", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || goos == "" || goarch == "" || binary == "" || out == "" {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-hermes: package needs --goos, --goarch, --binary and --out")
-		return exitUsage
-	}
-	if err := writePackage(goos, goarch, binary, out); err != nil {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-hermes:", err)
-		return exitFailed
-	}
-	fmt.Fprintln(env.Stdout, "package:", out)
-	return exitOK
-}
-
 func writePackage(goos, goarch, binary, out string) error {
 	m, err := Manifest(goos, goarch)
 	if err != nil {
-		return err
-	}
-	if entries, err := os.ReadDir(out); err == nil && len(entries) > 0 {
-		return fmt.Errorf("%s is not empty", out)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return manifest.WritePackage(out, m, binary)

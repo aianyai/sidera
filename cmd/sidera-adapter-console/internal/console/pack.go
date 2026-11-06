@@ -1,12 +1,6 @@
 package console
 
 import (
-	"errors"
-	"flag"
-	"fmt"
-	"io"
-	"os"
-
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -29,36 +23,11 @@ func Manifest(goos, goarch string) (manifest.Manifest, error) {
 	return m, m.Validate()
 }
 
-// runPackage is `package`: it writes the manifest and copies the binary built for
-// the platform into a new package directory, ready for `sidera adapter install`.
-func runPackage(args []string, env Env) int {
-	fs := flag.NewFlagSet("package", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var goos, goarch, binary, out string
-	fs.StringVar(&goos, "goos", "", "")
-	fs.StringVar(&goarch, "goarch", "", "")
-	fs.StringVar(&binary, "binary", "", "")
-	fs.StringVar(&out, "out", "", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || goos == "" || goarch == "" || binary == "" || out == "" {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-console: package needs --goos, --goarch, --binary and --out")
-		return exitUsage
-	}
-	if err := writePackage(goos, goarch, binary, out); err != nil {
-		fmt.Fprintln(env.Stderr, "sidera-adapter-console:", err)
-		return exitFailed
-	}
-	fmt.Fprintln(env.Stdout, "package:", out)
-	return exitOK
-}
-
+// writePackage writes the manifest and copies the binary built for the platform
+// into the package directory, ready for `sidera adapter install`.
 func writePackage(goos, goarch, binary, out string) error {
 	m, err := Manifest(goos, goarch)
 	if err != nil {
-		return err
-	}
-	if entries, err := os.ReadDir(out); err == nil && len(entries) > 0 {
-		return fmt.Errorf("%s is not empty", out)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return manifest.WritePackage(out, m, binary)

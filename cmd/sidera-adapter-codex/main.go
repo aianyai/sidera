@@ -9,7 +9,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,20 +21,20 @@ import (
 )
 
 func main() {
-	var err error
+	streams := adapterkit.Streams{Stdout: os.Stdout, Stderr: os.Stderr}
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "package":
-		err = packageCommand(os.Args[2:])
+		os.Exit(adapterkit.RunPackage(programName, os.Args[2:], declare.WritePackage, streams))
 	case len(os.Args) > 1 && os.Args[1] == "version":
-		fmt.Println(release.Read().Describe("sidera-adapter-codex"))
-	default:
-		err = serve()
+		os.Exit(adapterkit.RunVersion(programName, os.Args[2:], release.Read(), streams))
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sidera-adapter-codex:", err)
-		os.Exit(1)
+	if err := serve(); err != nil {
+		fmt.Fprintln(os.Stderr, programName+":", err)
+		os.Exit(adapterkit.ExitFailed)
 	}
 }
+
+const programName = "sidera-adapter-codex"
 
 func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -51,19 +50,4 @@ func serve() error {
 		return nil
 	}
 	return err
-}
-
-func packageCommand(args []string) error {
-	fs := flag.NewFlagSet("package", flag.ContinueOnError)
-	goos := fs.String("goos", "", "operating system the binary was built for (GOOS)")
-	goarch := fs.String("goarch", "", "architecture the binary was built for (GOARCH)")
-	binary := fs.String("binary", "", "the binary built for that platform")
-	out := fs.String("out", "", "the directory to write the package into")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *goos == "" || *goarch == "" || *binary == "" || *out == "" {
-		return errors.New("package needs --goos, --goarch, --binary and --out")
-	}
-	return declare.WritePackage(*out, *binary, *goos, *goarch)
 }

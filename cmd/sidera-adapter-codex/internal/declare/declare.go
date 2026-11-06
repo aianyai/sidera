@@ -79,7 +79,7 @@ func Manifest(goos, goarch string) manifest.Manifest {
 
 // WritePackage writes the adapter package for a platform into dir: the manifest
 // and a copy of the binary, built for that platform, at the manifest's entry.
-func WritePackage(dir, binary, goos, goarch string) error {
+func WritePackage(goos, goarch, binary, dir string) error {
 	m := Manifest(goos, goarch)
 	return manifest.WritePackage(dir, m, binary)
 }

@@ -35,6 +35,8 @@ var manifestTemplate []byte
 
 const versionToken = "@version@"
 
+const programName = "sidera-adapter-claude"
+
 // loadManifest is the manifest built into the executable, with the release version.
 func loadManifest() (manifest.Manifest, error) {
 	raw := bytes.Replace(manifestTemplate, []byte(versionToken), []byte(release.Version()), 1)
@@ -49,18 +51,16 @@ func main() {
 	// A helper process of the SDK's interrupt (Windows) is this executable started
 	// with an argument of its own; it does its work and ends here.
 	process.HandleHelperInvocation()
-	var err error
+	streams := adapterkit.Streams{Stdout: os.Stdout, Stderr: os.Stderr}
 	switch {
 	case len(os.Args) > 1 && os.Args[1] == "package":
-		err = packageCommand(os.Args[2:])
+		os.Exit(adapterkit.RunPackage(programName, os.Args[2:], writePackage, streams))
 	case len(os.Args) > 1 && os.Args[1] == "version":
-		fmt.Println(release.Read().Describe("sidera-adapter-claude"))
-	default:
-		err = run()
+		os.Exit(adapterkit.RunVersion(programName, os.Args[2:], release.Read(), streams))
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sidera-adapter-claude:", err)
-		os.Exit(1)
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, programName+":", err)
+		os.Exit(adapterkit.ExitFailed)
 	}
 }
 

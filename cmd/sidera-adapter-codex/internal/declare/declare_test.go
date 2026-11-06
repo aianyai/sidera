@@ -42,7 +42,7 @@ func TestWritePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "pkg")
-	if err := WritePackage(out, bin, "linux", "amd64"); err != nil {
+	if err := WritePackage("linux", "amd64", bin, out); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(out, "bin", "sidera-adapter-codex"))

@@ -8,6 +8,12 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **`version --json` on every adapter program.** `sidera-adapter-claude`, `-codex`, `-console`
+  and `-hermes` write the object `sidera version --json` writes (`version`, `distribution`,
+  `commit`, `modified`, `go_version`).
+
 ### Changed
 
 - **A session learns what Sidera is the first time it connects.** The `sidera` MCP server's
@@ -20,6 +26,19 @@ protocol has a version of its own.
 - **The Claude and Codex adapters give their sessions the same statement.** It was written
   twice and had drifted; it is now one text in the Go SDK (`guidance`), plus one sentence for
   each client.
+- **`package` and `version` behave the same in all four adapter programs.** A missing flag or an
+  extra argument is a usage error (exit 2), success prints `package: <directory>`, and a package
+  directory that already holds files is refused by the Claude and Codex programs too, as it already
+  was by the console and Hermes programs.
+- **`--help` of the console and Hermes programs writes the usage to standard output.** It went to
+  standard error. `package --help` and `version --help` of all four programs print their usage
+  and exit 0; they were usage errors.
+
+### Fixed
+
+- **`serve` of the console and Hermes programs takes no argument.** `sidera-adapter-console serve
+  --help` started the adapter and waited on standard input; any argument after `serve` is now a
+  usage error (exit 2).
 
 ## [0.14.0] - 2026-11-05
 

@@ -168,7 +168,9 @@ sidera adapter install <dir>
 ```
 
 writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-claude` through
-`manifest.WritePackage`, which every adapter's `package` shares. The manifest is the one
+`manifest.WritePackage`. `package` itself is `adapterkit.RunPackage`, which every adapter program
+shares: the directory must be new or empty, a missing flag or an extra argument is a usage error
+(exit 2) and success prints `package: <dir>`. The manifest is the one
 built into the executable, with `platforms` narrowed to the platform asked for, since the
 package holds one binary and the installation checks the list. A platform the manifest does
 not list (today anything but `darwin`, `linux` and `windows` on `amd64` and `arm64`) is refused and nothing is

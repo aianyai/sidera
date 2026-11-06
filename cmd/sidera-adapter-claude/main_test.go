@@ -90,7 +90,7 @@ func TestPackageIsWrittenOnlyForAListedPlatform(t *testing.T) {
 	} {
 		t.Run(p[0]+"/"+p[1], func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "pkg")
-			err := writePackage(out, bin, p[0], p[1])
+			err := writePackage(p[0], p[1], bin, out)
 			if p[1] == "386" || p[0] == "freebsd" {
 				if err == nil {
 					t.Fatal("a package was written for a platform the manifest does not list")
