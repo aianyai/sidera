@@ -172,53 +172,41 @@ directs the others. It is the **controller**. Sidera did not create it, but it c
 give it an endpoint of its own on the node: the controller then uses the same tools
 as a session Sidera started and is woken when a reply arrives.
 
-**Set it up once.** For Claude Code, `sidera adapter setup claude` does all of this and also installs
-the Sidera Skill ([Setting up an adapter's client](adapters.md#claude-code)); the rest of this
-section is the manual way, and the one for Codex. `sidera setup controller` prints what adds the `sidera` MCP server
-to Claude Code and to Codex, and what lets each of them call its tools without a person
-answering a prompt. It runs nothing and changes no configuration; you run or add what
-you need.
+**Set it up once.** Run `sidera adapter setup <instance>` for the instance of the
+adapter whose client you use (`claude` for Claude Code, `codex` for Codex). The daemon
+has to run, and the instance has to have run once. The command shows what it would do
+and asks `y/N` about each change to the client's configuration:
 
-```text
-Run these once. This command only prints them; it changes no configuration.
-
-Claude Code, for every session of your user:
-  claude mcp add --scope user sidera -- /home/me/.local/bin/sidera mcp
-
-Claude Code asks before each call of a tool of a server. To let the sidera tools run without asking, add this rule to the "permissions" "allow" list of ~/.claude/settings.json:
-  "mcp__sidera"
-
-Codex, in your user configuration:
-  codex mcp add sidera -- /home/me/.local/bin/sidera mcp
-
-Codex asks before each call of a tool that is not read-only. To let the sidera tools run without asking, add this line to the [mcp_servers.sidera] table that the command above created in ~/.codex/config.toml:
-  default_tools_approval_mode = "approve"
-
-The path of this program is stored in each configuration. If the program moves, run "claude mcp remove --scope user sidera" before adding it to Claude Code again, and add the Codex approval line again after "codex mcp add", which rewrites the table without it.
-
-With the server added and allowed, a session you opened attaches itself to this node the first time it uses a Sidera tool, and can then send and receive messages like any Sidera session, including when it is woken without a person at its prompt.
+```sh
+sidera adapter setup claude          # Claude Code
+sidera adapter setup codex           # Codex
+sidera adapter setup claude --check  # exit 0 when nothing has drifted, 1 otherwise
+sidera adapter setup claude --remove # undoes what it did, asking about each item
 ```
 
-The commands name the `sidera` program that ran `setup controller` by its absolute path
-(here `/home/me/.local/bin/sidera`; on Windows, for example
-`C:\Users\me\sidera\bin\sidera.exe`, in double quotes when the path has a space), not
-by the bare name: a client starts the server without a shell, and neither Codex on
-Windows nor a session that is not a login shell on Linux (which has no `~/.local/bin`
-on its `PATH`) finds `sidera` by name. On Windows the two files are
-`%USERPROFILE%\.claude\settings.json` and `%USERPROFILE%\.codex\config.toml`; when
-`CLAUDE_CONFIG_DIR` or `CODEX_HOME` relocates a client, the text names its file in that
-directory instead (`$CODEX_HOME/config.toml`, `%CODEX_HOME%\config.toml` on Windows). A
-node whose data directory is not the default is named in both commands, `<path of
-sidera> --home <dir> mcp`. Run from a `go run` build or any other temporary directory,
-the command also warns on standard error that the path will not last.
+- **Claude Code.** It registers the `sidera` MCP server for your user (`claude mcp add
+  --scope user`, naming the `sidera` program by its absolute path), adds the rule
+  `mcp__sidera` to `permissions.allow` in Claude Code's `settings.json`, and installs a
+  plugin whose Skill tells every session what Sidera is.
+- **Codex.** It installs a Codex plugin that carries the `sidera` MCP server, with its tools
+  approved in advance, and a Skill that tells every session what Sidera is.
 
 The permission step matters when nobody is at the prompt. A controller is woken by a
-reply and has to call `recv`, `ack` or `control` then; without the rule or the line,
-Claude Code and Codex stop at a prompt that only a person can answer, and the woken
-controller stalls. The settings file is JSON: if it has a `permissions` object, add the
-rule to its `allow` array; otherwise add
-`{"permissions": {"allow": ["mcp__sidera"]}}`. In `config.toml` the line goes
-anywhere under the `[mcp_servers.sidera]` header and before the next header.
+reply and has to call `recv`, `ack` or `control` then; without the rule (Claude Code) or
+the approval (Codex), the client stops at a prompt that only a person can answer, and the
+woken controller stalls. Setup does both for you.
+
+Setup remembers what it did. `--check` reports what has drifted since (a plugin you
+disabled, a program that moved), and `sidera update` refreshes what setup installed
+whenever the programs change, so the path of the program does not go stale in the client.
+After upgrading from a release before 0.15 run `sidera adapter setup <instance>` once:
+`sidera setup controller`, which only printed commands, is gone, and the update has
+nothing recorded to refresh until setup has run. If you added the server by hand earlier
+(`claude mcp add ...`, `codex mcp add ...`), setup adopts it in Claude Code when it is as
+wanted and replaces it otherwise, and in Codex offers to remove it, because it would hide the
+plugin's.
+What each change is, how to undo it by hand and the options of the command are in
+[Setting up an adapter's client](adapters.md#setting-up-an-adapters-client).
 
 From then on, nothing else is needed. Open a Claude Code or Codex session as you
 always do and ask it to use Sidera. Its credential comes from the node, so you do not

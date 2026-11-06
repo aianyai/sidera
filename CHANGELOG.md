@@ -15,7 +15,7 @@ protocol has a version of its own.
   about each change to the client's configuration, and remembers what it did. `--check` reports what
   has drifted (exit 1 when something has), `--remove` undoes it, `--refresh` brings what was recorded
   up to date without asking, and `--yes` accepts everything. Words after `--` go to the adapter.
-  Adapters use it in this release. An item you decline is remembered: `--check` and `sidera update` do not report it as still to set up, and running the
+  The Claude, Codex and Hermes adapters declare one in this release. An item you decline is remembered: `--check` and `sidera update` do not report it as still to set up, and running the
   command again offers it again. When `--remove` cannot finish because the client program is no
   longer installed or an item changed since setup, it ends by saying that `sidera adapter remove <instance> --force` removes the
   instance anyway, and where the guide lists what to clean up by hand.
@@ -38,8 +38,7 @@ protocol has a version of its own.
   ones.
 - **`sidera adapter setup` for Codex.** `sidera adapter setup <codex instance>` installs a Codex
   plugin that gives your own Codex sessions the `sidera` MCP server, with its tools approved in
-  advance, and a Skill that tells an agent what Sidera is; before, `sidera setup controller` only
-  printed the commands. It asks before it adds the plugin marketplace and installs the plugin, and
+  advance, and a Skill that tells an agent what Sidera is. It asks before it adds the plugin marketplace and installs the plugin, and
   offers to remove an MCP server `sidera` of your own that would hide the plugin's. `--check`
   also tells you when the plugin is disabled, when its files are gone or Codex no longer offers
   the server, and `--refresh` (what `sidera update` runs) leaves a plugin you disabled
@@ -62,10 +61,6 @@ protocol has a version of its own.
   replaces it. The Skill you placed with the old command is taken over when it is identical to
   what this release writes, and otherwise replaced after you say so. The copy of the Skill in
   the instance's `skill` state directory is no longer written.
-- **`sidera setup controller` prints the path of the program as you started it.** It used to print
-  the path the system reports for the running program, which on Linux has links resolved; it now
-  keeps them, so a link that a package manager repoints keeps leading to the current version, and
-  it is the same file `sidera update` replaces.
 - **`sidera adapter remove` refuses an instance whose adapter has recorded a client setup.**
   Removing the instance deletes its state directory, and with it the files a client installation
   (a Skill, for one) depends on. Run `sidera adapter setup <instance> --remove` first. When the
@@ -99,6 +94,17 @@ protocol has a version of its own.
   code `sidera` uses for it (`new` got no reply within its `--timeout`, or the session is not
   confirmed); 3 is `invalid_argument` there. A script that tested for 3 tests for 10 now.
   `sidera-adapter-console <command> --help` prints the usage and exits 0; it was a usage error.
+
+### Removed
+
+- **`sidera setup controller` is replaced by `sidera adapter setup <instance>`.** The old command
+  only printed commands for you to run, and what they put in Claude Code's and Codex's
+  configuration went stale without notice when the program moved. `sidera adapter setup claude`
+  and `sidera adapter setup codex` now make those changes themselves, after asking, remember
+  them, and `sidera update` keeps them current. `sidera setup` in any form is now a usage error
+  (exit 2) that names the new command. After upgrading to 0.15, run `sidera adapter setup
+  <instance>` once for the instance of each client you use as a controller; a server you added
+  by hand is adopted or replaced in Claude Code, and offered for removal in Codex, after you say so.
 
 ### Fixed
 

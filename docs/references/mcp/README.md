@@ -84,8 +84,8 @@ prevents a late request handler from starting a probe after shutdown begins.
 ## Controller mode
 
 A server started without `SIDERA_TOKEN` and `SIDERA_PROBE_TOKEN` is the `sidera` MCP
-server a person added to their own Claude Code or Codex (`sidera setup controller` prints
-the commands). A server with either variable never enters this mode. The server attaches
+server a person added to their own Claude Code or Codex (`sidera adapter setup` installs
+it). A server with either variable never enters this mode. The server attaches
 its session on the first `tools/call` that passes argument validation, not at start-up:
 a session that never uses Sidera opens no endpoint. The one thing it does at start-up
 is to look for an endpoint the session already has (below). A repeated tool call does not

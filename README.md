@@ -111,9 +111,10 @@ sidera-adapter-console recv --wait 30
 ```
 
 To direct agents from a Claude Code or Codex session you opened yourself, make it a
-controller. Run `sidera setup controller` once; it prints the commands that add the
-`sidera` MCP server to Claude Code or Codex (naming the `sidera` program by its absolute
-path) and how to let each client call its tools without asking, and changes nothing itself. From then on,
+controller. Run `sidera adapter setup claude` or `sidera adapter setup codex` once; it asks
+before it registers the `sidera` MCP server with that client (naming the `sidera` program by
+its absolute path), lets the client call its tools without asking and installs a Skill that
+tells the agent what Sidera is, and `sidera update` keeps it current. From then on,
 a session you open attaches itself the first time it uses a Sidera tool (no token to
 set), gets an endpoint of its own, uses the same tools as Sidera's own sessions, and
 is woken when a reply arrives: within about a second on Claude Code, within about 10

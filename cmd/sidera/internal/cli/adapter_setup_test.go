@@ -39,6 +39,12 @@ func TestAdapterSetupRefusesBeforeConnecting(t *testing.T) {
 		{"no terminal and no --yes", []string{"adapter", "setup", "work"}, "no terminal to ask on"},
 		{"no terminal and no --yes, removing", []string{"adapter", "setup", "work", "--remove"}, "--yes"},
 		{"an unknown flag", []string{"adapter", "setup", "work", "--apply"}, "unknown flag"},
+		// `sidera setup controller` printed commands for a person to run; every
+		// form of it now points at the command that installs them.
+		{"the removed setup", []string{"setup"}, "sidera adapter setup <instance>"},
+		{"the removed setup controller", []string{"setup", "controller"}, "sidera adapter setup <instance>"},
+		{"the removed setup controller with a flag", []string{"setup", "controller", "--yes"}, "sidera adapter setup <instance>"},
+		{"the removed setup after a global flag", []string{"--json", "setup", "controller"}, "sidera adapter setup <instance>"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, out, errs := runCLI(t, nil, tc.args...)

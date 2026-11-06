@@ -258,7 +258,7 @@ func (c *command) run(ctx context.Context, args []string) error {
 	case "version":
 		return c.version(args[1:])
 	case "setup":
-		return c.setup(args[1:])
+		return usage(`"sidera setup" is not a command; "sidera adapter setup <instance>" sets up the client of an adapter instance (Claude Code, Codex, Hermes)`)
 	case "update":
 		return c.update(ctx, args[1:])
 	case "adapter":

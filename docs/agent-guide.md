@@ -738,9 +738,9 @@ session have the `sidera` MCP tools and a credential:
 - **A session Sidera started** from a preset. It has a credential (`SIDERA_TOKEN`).
 - **A controller**: a Claude Code or Codex session your owner opened themself, in
   which the `sidera` MCP server was added once and its tools were allowed, so that no
-  prompt waits for a person (`sidera setup controller` prints the commands and the
-  permission step, naming the `sidera` program by its absolute path; your owner runs or
-  adds them, see "Ask your owner before", item 11). It attaches
+  prompt waits for a person (`sidera adapter setup <instance>` does both, naming the
+  `sidera` program by its absolute path; your owner runs it, see "Ask your owner
+  before", item 11). It attaches
   itself to the node the first time it uses a Sidera tool, so it needs no
   `SIDERA_TOKEN`, gets an endpoint of its own named `Claude controller (<directory>)`
   or `Codex controller (<directory>)`, and has the same tools and the same rules as

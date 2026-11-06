@@ -23,8 +23,8 @@ messages even with `--json`. Its wire contract and manual client check are in
 A process without `SIDERA_TOKEN` inside a session a person opened (Claude Code or Codex)
 is a controller: [`internal/controller`](internal/controller/README.md) attaches it
 through the management method `sessions.attach` for `sidera mcp` and for the agent
-commands, which then hold the returned token in memory only. `sidera setup controller`
-prints the commands that add the MCP server to the two clients and the permission each needs.
+commands, which then hold the returned token in memory only. `sidera adapter setup`
+installs the MCP server, the permission it needs and a Skill in the two clients.
 The name `siderad` (also `siderad.exe`) selects `daemon`.
 `sidera update` is the converging upgrade of an installation from a release archive:
 [`internal/update`](internal/update/README.md) does the run (and its packages the network,

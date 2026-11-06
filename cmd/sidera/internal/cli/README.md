@@ -25,6 +25,8 @@ and its bound values. A local value stays attached, including a body spelled
   (in `agent.go`) checks its arguments and builds its one call, and only then is the Agent client
   opened, so a usage error is reported before any call and a data directory or socket that cannot
   be used never hides it. `mcp` checks its arguments the same way before it opens the client.
+  `setup` is not a command group: `run` answers every form of it with a usage error that names
+  `adapter setup <instance>`, the command that replaced it, before any flag is read.
 - `agent.go`: `agentRequest`, which turns the arguments of an agent command into its method,
   parameters and the way its answer is written; the receive, acknowledge and status arguments.
 - `message.go`: message and control flags; one body source for send and reply.
@@ -56,7 +58,7 @@ and its bound values. A local value stays attached, including a body spelled
   tests use; the same session is what `update` refreshes the setups with (`managementNode.RefreshSetup` in
   `update.go` runs `runSetup` in refresh mode and puts the result in the update's words). `prompt.go` is the `[y/N]` question and the
   "no terminal, add --yes" refusal that `update` and `adapter setup` share. `program.go` is `programPath`, the path
-  of this program that `update`, `adapter setup` and `setup controller` all name. `refuseRemoveWhileSetUp` is the guard `manage` runs before
+  of this program that `update` and `adapter setup` name, and the helpers that go with it: `shellWord`, `warnIfTemporary`, `isDefaultDataDir`. `refuseRemoveWhileSetUp` is the guard `manage` runs before
   `adapters.remove`: a `check` of the instance's setup, and a refusal when it has a record.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.
@@ -73,15 +75,6 @@ and its bound values. A local value stays attached, including a body spelled
   commands use the common management path in `manage.go`.
 - `export.go`: verified online export, the precise missing-daemon offline
   fallback, and writing a new private copy through `fsx.CreatePrivateFile`.
-- `setup.go`: `setup controller`, which prints the commands that add the `sidera` MCP server to
-  Claude Code and Codex, and the permission each client needs to run its tools without a
-  prompt, and does nothing else. The server is named by the absolute path of the running
-  program (`Config.Executable`): a client starts it without a shell and may not have the
-  program's directory on its `PATH`. A data directory that is not the default is named in the
-  commands by `--home`: the client's environment for the server may not carry `SIDERA_HOME`. A
-  program in a temporary directory (a `go run` build) is warned about on standard error: its path
-  would not last. The clients' files are named under `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when the
-  environment sets them.
 - `controller.go`: the attachment of an agent command run inside a session a person
   opened (the `controller` package does the work; the command gives its Agent client the
   token and prints the wake notice on stderr only when the adapter cannot wake the

@@ -65,7 +65,7 @@ func commandPath(args []string) []string {
 		}
 		if len(path) == 1 {
 			switch a {
-			case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust", "setup":
+			case "daemon", "alerts", "preset", "adapter", "endpoint", "node", "identity", "clock", "network", "trust":
 			default:
 				return path
 			}
