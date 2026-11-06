@@ -315,9 +315,13 @@ JSON request on its standard input, one JSON result on its standard output, both
 `version` and both decoded leniently. What the old program relies on is therefore fixed by
 the contract's version, not by the release: the members of the request it sends
 (`version`, `op`, `home`, `home_is_default`, `instance`, `state_dir`, `config`,
-`sidera_program`, `options`, `accepted`, `undo`), the ops `plan`, `apply`, `refresh`,
-`check` and `remove`, the members of the result, the `status` values it acts on (`ok`,
-`refreshed`, `none`, `drift`, `error`) and the exit codes 0, 1 and 2. The new adapter
+`sidera_program`, `options`, `accepted`, `declined`, `undo`), the ops `plan`, `apply`,
+`refresh`, `check` and `remove`, the members of the result it reads (`status`; `recorded`,
+which the guard of `adapter remove` relies on; `notes`; the items' `id`, `kind`, `target`,
+`action`, `summary`, `consent` and `requires`; the outcomes' `id`, `kind`, `target`,
+`status` and `message`; the drift entries' `id`, `kind`, `target`, `problem` and
+`summary`), the `status` values it acts on (`ok`, `refreshed`, `none`, `drift`, `error`)
+and the exit codes 0, 1 and 2. The new adapter
 answers in the version it was asked and still takes it (the contract's `MinVersion`), so
 a release can raise the version while this program, which predates it, is served.
 
