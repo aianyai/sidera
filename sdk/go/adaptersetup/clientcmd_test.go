@@ -42,6 +42,9 @@ func TestHelperProcess(t *testing.T) {
 	case "orphan":
 		// A grandchild that keeps the output pipes open after this process is gone.
 		child := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "sleep")
+		// The grandchild outlives the run, and Windows will not remove a directory a
+		// process is running in, which would fail the test's temporary directory cleanup.
+		child.Dir = os.TempDir()
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {
 			os.Exit(3)
@@ -50,6 +53,9 @@ func TestHelperProcess(t *testing.T) {
 	case "orphan-exit":
 		// The same grandchild, but this process finishes at once and successfully.
 		child := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "sleep")
+		// The grandchild outlives the run, and Windows will not remove a directory a
+		// process is running in, which would fail the test's temporary directory cleanup.
+		child.Dir = os.TempDir()
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
 		if err := child.Start(); err != nil {
 			os.Exit(3)
