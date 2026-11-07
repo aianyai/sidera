@@ -64,7 +64,7 @@ var statusAnswer = `{"node":{"id":"` + testNode + `","version":"0.15.0"},
 var networkAnswer = `{"node":"` + testNode + `","peer_id":"` + testPeerID + `","version":5,
 "listen":{"configured":["/ip4/0.0.0.0/tcp/7744","/ip4/0.0.0.0/udp/7744/quic-v1"],"actual":["/ip4/0.0.0.0/tcp/7744"]},
 "contact":"` + testNode + ` ` + testContact + ` ` + testQuic + `",
-"peers":[{"node":"` + testNodeB + `","addresses":["/ip4/192.168.1.20/tcp/7744/p2p/` + testPeerID + `"],"certificate_held":true,"connected":true},
+"peers":[{"node":"` + testNodeB + `","addresses":["/ip4/192.168.1.20/tcp/7744/p2p/` + testPeerID + `"],"certificate_held":true,"connected":true,"profile":{"name":"build box","host_name":"inuc","platform":"linux/amd64","system":"Ubuntu 24.04.1 LTS","sidera_version":"0.17.0","as_of":1793000000}},
 {"node":"` + testNode + `x","addresses":[],"certificate_held":true,"connected":false}]}`
 
 var adaptersAnswer = `{"version":4,
@@ -89,6 +89,9 @@ var presetsAnswer = `{"version":2,"presets":[
 {"name":"bare","local_sources":"allow"}]}`
 
 var nodeAnswer = `{"node":"` + testNode + `","version":3,"settings":{"reply_permission":true,"node_queue_limit":10000,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":200}}}`
+
+// nodeNamedAnswer is nodeAnswer of a node whose owner gave it a name.
+var nodeNamedAnswer = strings.Replace(nodeAnswer, `"settings":{`, `"settings":{"name":"study",`, 1)
 
 // The management change commands decode the answer of the daemon too. A change's answer is
 // the envelope the daemon writes: the operation, whether it is a replay, and the result.
@@ -130,6 +133,12 @@ var changes = []struct {
 	{"node set", "node.set", map[string]any{"settings": map[string]any{"node_queue_limit": 20001, "endpoint_defaults": map[string]any{"backlog_limit": 5}}},
 		`{"settings":{"reply_permission":true,"node_queue_limit":20001,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":5}},"version":4}`,
 		[]string{"Changed the settings of the node. Delivery limit 20001 unfinished deliveries Endpoint queue time 30 min at most Endpoint backlog 5 messages at most"}},
+	{"node set name", "node.set", map[string]any{"settings": map[string]any{"name": "study"}},
+		`{"settings":{"name":"study","reply_permission":true,"node_queue_limit":10000,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":200}},"version":5}`,
+		[]string{"Changed the settings of the node. Name study"}},
+	{"node set name away", "node.set", map[string]any{"settings": map[string]any{"name": ""}},
+		`{"settings":{"reply_permission":true,"node_queue_limit":10000,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":200}},"version":6}`,
+		[]string{"Changed the settings of the node. Name not set (the node is called by its host name)"}},
 	{"endpoint set", "endpoints.set", nil, `{"endpoint":"` + testAddress + `","settings":{"max_queue_s":1800,"backlog_limit":200},"version":9}`,
 		[]string{"Changed the settings of the endpoint. Endpoint " + testAddress + " Queue time 30 min at most Backlog 200 messages at most"}},
 	{"endpoint set back to the defaults", "endpoints.set", nil, `{"endpoint":"` + testAddress + `","settings":{},"version":10}`,
@@ -246,7 +255,7 @@ var (
 // as a function of the stream they are written on.
 func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 	now := time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC)
-	trusts := answer[trustView](t, `{"trusted":[{"node":"`+testNodeB+`","credential":"cred1abc","created_at":"2026-10-24T09:00:00Z","not_after":"2027-10-24T09:00:00Z","connected":true}],
+	trusts := answer[trustView](t, `{"trusted":[{"node":"`+testNodeB+`","credential":"cred1abc","created_at":"2026-10-24T09:00:00Z","not_after":"2027-10-24T09:00:00Z","connected":true,"profile":{"name":"build box","host_name":"inuc","as_of":1793000000}},{"node":"`+testNode+`x","credential":"cred2def","created_at":"2026-10-25T09:00:00Z","connected":false}],
 "expectations":[{"node":"`+testNode+`","expires_at":"2026-10-24T10:00:00Z"}],"incoming":[],
 "outgoing":[{"pairing_id":"0123456789abcdef0123456789abcdef","node":"`+testNodeB+`","status":"withdrawn","code":"333 444","reason":"declined"}],"locally_revoked":["`+testNodeB+`x"]}`)
 	outs := map[string]func(*termout.Stream) string{
@@ -579,12 +588,15 @@ func TestManagementReadsShowTheirFacts(t *testing.T) {
 		}), []string{"Clock paused: the wall clock was set back, since 2026-11-07 01:50 UTC (10 min ago)", "Run `sidera clock clear-rollback`"}},
 		{"status with an expired certificate", status(func(v *statusView) { v.Certificate.RemainingS = -5 }), []string{"Certificate expired 2026-12-07 02:00 UTC"}},
 		{"node show", func() string { return renderNodeSettings(newStream(false, false), answer[nodeView](t, nodeAnswer)) }, []string{
-			"Unsolicited replies allowed", "Delivery limit 10000 unfinished deliveries", "Disk reserve 268.4 MB", "Archive kept for 30 days",
+			"Name not set (the node is called by its host name)", "Unsolicited replies allowed", "Delivery limit 10000 unfinished deliveries", "Disk reserve 268.4 MB", "Archive kept for 30 days",
 			"Log space 157.3 MB at most", "Endpoint queue time 30 min at most", "Endpoint backlog 200 messages at most", "Settings version 3 (for --expected-version)",
 		}},
+		{"node show of a named node", func() string {
+			return renderNodeSettings(newStream(false, false), answer[nodeView](t, nodeNamedAnswer))
+		}, []string{"Name study Unsolicited replies allowed"}},
 		{"network show", func() string { return renderNetwork(newStream(false, false), answer[networkView](t, networkAnswer)) }, []string{
 			"Listen configured /ip4/0.0.0.0/tcp/7744 /ip4/0.0.0.0/udp/7744/quic-v1", "Listening now /ip4/0.0.0.0/tcp/7744",
-			"connected held " + testNodeB + " /ip4/192.168.1.20/tcp/7744/p2p/" + testPeerID, "not connected held " + testNode + "x",
+			"connected build box (inuc) held " + testNodeB + " /ip4/192.168.1.20/tcp/7744/p2p/" + testPeerID, "not connected - held " + testNode + "x",
 		}},
 		{"adapter list", func() string { return renderAdapters(newStream(false, false), answer[adaptersView](t, adaptersAnswer)) }, []string{
 			"console console 0.15.0 enabled passed 2026-11-07 01:41 UTC", "work claude 0.15.0 enabled passed 2026-11-07 01:41 UTC runtime_auth: claude is not logged in",
@@ -643,6 +655,44 @@ func TestManagementReadsEscapeForeignText(t *testing.T) {
 		if stripped := escapeSequence.ReplaceAllString(out, ""); strings.ContainsAny(stripped, "\x1b\x07\u202e") {
 			t.Errorf("%s: foreign control characters reached the output:\n%q", name, out)
 		}
+	}
+}
+
+// The name column of the tables of trust and of the network: the name the node gave itself,
+// with its host name when that is another; a dash for a node nothing is known of. The name
+// came from another node, so it is shown as visible escapes and never as the bytes a terminal
+// acts on.
+func TestManagementTablesNameTheNodes(t *testing.T) {
+	const raw = `\u001b]0;pwned\u0007\u202etxt`
+	const shown = `\x1b]0;pwned\x07\u202etxt`
+	for _, tc := range []struct{ name, profile, want string }{
+		{"name and host name differ", `{"name":"build box","host_name":"inuc"}`, "build box (inuc)"},
+		{"name is the host name", `{"name":"inuc","host_name":"inuc"}`, "inuc"},
+		{"host name only", `{"host_name":"inuc"}`, "inuc"},
+		{"name only", `{"name":"study"}`, "study"},
+		{"no member the node gave", `{"as_of":1793000000}`, "-"},
+		{"no profile", ``, "-"},
+		{"foreign text", `{"name":"` + raw + `"}`, shown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			member := ""
+			if tc.profile != "" {
+				member = `,"profile":` + tc.profile
+			}
+			trust := renderTrust(newStream(true, true), answer[trustView](t,
+				`{"trusted":[{"node":"`+testNodeB+`","credential":"cred1abc","created_at":"2026-10-24T09:00:00Z","connected":true`+member+`}]}`))
+			network := renderNetwork(newStream(true, true), answer[networkView](t,
+				`{"node":"`+testNode+`","peer_id":"`+testPeerID+`","version":1,"listen":{"configured":[],"actual":[]},"contact":"","peers":[{"node":"`+testNodeB+`","addresses":[],"certificate_held":true,"connected":true`+member+`}]}`))
+			for what, out := range map[string]string{"trust list": trust, "network show": network} {
+				plain := escapeSequence.ReplaceAllString(out, "")
+				if !strings.Contains(squash(plain), "connected "+tc.want+" ") {
+					t.Errorf("%s: %q does not follow the connection in\n%s", what, tc.want, plain)
+				}
+				if strings.ContainsAny(plain, "\x1b\x07\u202e") {
+					t.Errorf("%s: foreign control characters reached the output:\n%q", what, out)
+				}
+			}
+		})
 	}
 }
 

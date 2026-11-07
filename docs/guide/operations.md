@@ -10,8 +10,8 @@ Run these on each node:
 
 ```sh
 sidera adapter list      # the probe result of each enabled instance, and a `!` line under it for what its adapter reports as unavailable (see the notes)
-sidera trust list        # the nodes you paired with are under `Trusted nodes`
-sidera network show      # where this node listens, the command that enters it on another machine, and the known nodes with their connection
+sidera trust list        # the nodes you paired with are under `Trusted nodes`, with the name each calls itself
+sidera network show      # where this node listens, the command that enters it on another machine, and the known nodes with their name and connection
 sidera alerts list       # normally empty
 sidera status            # reminders first, then the daemon, `Home` (the data directory), deliveries, disk and alerts
 sidera endpoint list     # console, runtime and session endpoints of this node
@@ -30,6 +30,11 @@ Notes:
   the default. Check it after a move or when two nodes share a machine.
 - `connected` in `network show` is whether a connection is up now. A healthy node can
   show `not connected` until one side sends.
+- The `Name` column of `trust list` and `network show` is how the other node is called: the
+  name its owner gave it with `sidera node set name=<name>`, or else its host name, with the
+  host name after it in parentheses when it differs. A node shows a dash until this node has
+  been connected to it since its daemon started; run the command again after it connects.
+  `sidera node show` shows the name of this node.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
   they fail with `unauthenticated/token_missing`; that is expected. They work
   inside an agent session, and inside a Claude Code or Codex session you opened

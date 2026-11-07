@@ -234,15 +234,42 @@ func endpointSummary(v statusView) string {
 	return fmt.Sprintf("%d (%s)", len(v.Endpoints), strings.Join(parts, ", "))
 }
 
+// nodeProfile is what another node says about itself, in the answer of `trust list` and
+// `network show`.
+type nodeProfile struct {
+	Name     string `json:"name"`
+	HostName string `json:"host_name"`
+}
+
+// label is the name a table shows for a node: its name, with the host name after it when that
+// is another, and empty when there is nothing to show, which the table writes as its mark for
+// a missing value. A node without a profile is a nil pointer. The words are those of another
+// node, so they are shown as visible escapes.
+func (p *nodeProfile) label() string {
+	if p == nil {
+		return ""
+	}
+	name, host := termout.SanitizeLine(p.Name), termout.SanitizeLine(p.HostName)
+	switch {
+	case name == "":
+		return host
+	case host == "" || host == name:
+		return name
+	}
+	return name + " (" + host + ")"
+}
+
 // nodeSettings are the settings of the node as the daemon writes them, in `node show` and in
 // the answer of `node set`.
 type nodeSettings struct {
-	ReplyPermission      bool  `json:"reply_permission"`
-	NodeQueueLimit       int64 `json:"node_queue_limit"`
-	DiskReserveBytes     int64 `json:"disk_reserve_bytes"`
-	NodePromptTurns      int64 `json:"node_prompt_turns"`
-	ArchiveRetentionDays int64 `json:"archive_retention_days"`
-	LogTotalBytes        int64 `json:"log_total_bytes"`
+	// Name is what the owner calls the node; absent when the node is called by its host name.
+	Name                 string `json:"name"`
+	ReplyPermission      bool   `json:"reply_permission"`
+	NodeQueueLimit       int64  `json:"node_queue_limit"`
+	DiskReserveBytes     int64  `json:"disk_reserve_bytes"`
+	NodePromptTurns      int64  `json:"node_prompt_turns"`
+	ArchiveRetentionDays int64  `json:"archive_retention_days"`
+	LogTotalBytes        int64  `json:"log_total_bytes"`
 	EndpointDefaults     struct {
 		MaxQueueS    int64 `json:"max_queue_s"`
 		BacklogLimit int64 `json:"backlog_limit"`
@@ -270,7 +297,12 @@ func (st nodeSettings) fields() []namedField {
 	if st.ReplyPermission {
 		replies = "allowed"
 	}
+	name := st.Name
+	if name == "" {
+		name = "not set (the node is called by its host name)"
+	}
 	return []namedField{
+		{"name", termout.Field{Label: "Name", Value: name}},
 		{"reply_permission", termout.Field{Label: "Unsolicited replies", Value: replies}},
 		{"node_queue_limit", termout.Field{Label: "Delivery limit", Value: plural(st.NodeQueueLimit, "unfinished delivery", "unfinished deliveries")}},
 		{"disk_reserve_bytes", termout.Field{Label: "Disk reserve", Value: termout.Bytes(st.DiskReserveBytes) + " (new work is refused when less is free)"}},
@@ -303,10 +335,11 @@ type networkView struct {
 	} `json:"listen"`
 	Contact string `json:"contact"`
 	Peers   []struct {
-		Node            string   `json:"node"`
-		Addresses       []string `json:"addresses"`
-		CertificateHeld bool     `json:"certificate_held"`
-		Connected       bool     `json:"connected"`
+		Node            string       `json:"node"`
+		Addresses       []string     `json:"addresses"`
+		CertificateHeld bool         `json:"certificate_held"`
+		Connected       bool         `json:"connected"`
+		Profile         *nodeProfile `json:"profile"`
 	} `json:"peers"`
 }
 
@@ -343,9 +376,9 @@ func renderNetwork(s *termout.Stream, v networkView) string {
 		if p.CertificateHeld {
 			certificate = "held"
 		}
-		rows[i] = []string{connection, certificate, strings.Join(append([]string{p.Node}, p.Addresses...), "\n")}
+		rows[i] = []string{connection, p.Profile.label(), certificate, strings.Join(append([]string{p.Node}, p.Addresses...), "\n")}
 	}
-	return text + "\n" + s.Bold("Known nodes") + "\n" + s.Table([]string{"Connection", "Certificate", "Node and its addresses"}, rows)
+	return text + "\n" + s.Bold("Known nodes") + "\n" + s.Table([]string{"Connection", "Name", "Certificate", "Node and its addresses"}, rows)
 }
 
 // presetsView is the answer of `preset list`.

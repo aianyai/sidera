@@ -101,9 +101,9 @@ func renderTrust(s *termout.Stream, v trustView) string {
 
 	rows := make([][]string, len(v.Trusted))
 	for i, t := range v.Trusted {
-		rows[i] = []string{connection(t.Connected), timestamp(t.CreatedAt), orNever(timestamp(t.NotAfter)), t.Credential, t.Node}
+		rows[i] = []string{connection(t.Connected), t.Profile.label(), timestamp(t.CreatedAt), orNever(timestamp(t.NotAfter)), t.Credential, t.Node}
 	}
-	section("Trusted nodes", "No node is trusted.", []string{"Connection", "Created", "Valid until", "Credential", "Node"}, rows)
+	section("Trusted nodes", "No node is trusted.", []string{"Connection", "Name", "Created", "Valid until", "Credential", "Node"}, rows)
 
 	rows = make([][]string, len(v.Expectations))
 	for i, e := range v.Expectations {

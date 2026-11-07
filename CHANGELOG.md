@@ -8,6 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **`sidera node set name=<name>` names the node for the other nodes.** Without a name the node is
+  called by its host name; `sidera node set name=` takes the name away again, and `sidera node show`
+  says which of the two applies.
+- **`sidera trust list` and `sidera network show` show each node's name.** A `Name` column gives the
+  name a node calls itself, with its host name after it when that is another, and a dash for a node
+  this node has not been connected to since its daemon started. The `--json` results carry the same
+  facts as an optional `profile` object on each node: `name`, `host_name`, `platform`, `system`,
+  `system_build` and `sidera_version` (each left out when the node did not give it) and `as_of`.
+
 ### Changed
 
 - **A Hermes instance with no `display_name` is listed in the directory as `Hermes`.** It used to be

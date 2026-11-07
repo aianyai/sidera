@@ -34,6 +34,8 @@ type trustedEntry struct {
 	CreatedAt  string `json:"created_at"`
 	NotAfter   string `json:"not_after"`
 	Connected  bool   `json:"connected"`
+	// Profile is what the node says about itself; absent when this node holds none.
+	Profile *nodeProfile `json:"profile"`
 }
 
 type outgoingEntry struct {

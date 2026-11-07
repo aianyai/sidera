@@ -55,7 +55,7 @@ arguments, purpose and one example (see Help below).
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
 | `endpoint list [--instance <name>]` / `endpoint close <addr> [--allow-attached]` | Read endpoints, including closed ones (`origin` says `created` or `attached` for a session), or close an endpoint. The human list is a table of `KIND` (a session also says `created` or `attached`), `INSTANCE`, `STATE` (`draining` is added in brackets), `QUEUED` and the whole `ADDRESS`. An attached session, which a person is using, is closed only with `--allow-attached`; without it the command fails with `refused/attached_close_not_allowed`. |
 | `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings; the human form gives the endpoint and the queue time and backlog it now has of its own (`all follow the node's defaults` when none). |
-| `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. The human form names each setting by what it is and gives its unit (`Disk reserve 268.4 MB`, `Archive kept for 30 days`) and the settings version for `--expected-version`; the names `node set` takes are in `--json`. After `node set` the human form shows only the settings the command named, worded the same way. |
+| `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. The human form names each setting by what it is and gives its unit (`Disk reserve 268.4 MB`, `Archive kept for 30 days`) and the settings version for `--expected-version`; the names `node set` takes are in `--json`. The `Name` line is what the owner called the node (`node set name=<name>`, which the other nodes see; `node set name=` takes it away), or says that the node is called by its host name. After `node set` the human form shows only the settings the command named, worded the same way. |
 | `network show` | Show where the node listens, the addresses another machine reaches it at, the command that enters them there, the addresses kept for other nodes and which of them are connected (see [Network commands](#network-commands)). |
 | `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
 | `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted (`daemon restart`). |
@@ -343,8 +343,10 @@ before.
 `network show` prints, in human form, a block of labelled lines (`Node`, `Peer ID`, `Listen
 configured` for the list in `network.json`, `Listening now` for what the listeners are open on,
 `Reachable at` and `Network version`), each address on a line of its own, and below it the
-table of the nodes in the address book (`Connection`, `Certificate`, then the node and the
-addresses entered for it). `Reachable at` is the **contact** of the node: the addresses of the
+table of the nodes in the address book (`Connection`, `Name`, `Certificate`, then the node and the
+addresses entered for it). `Name` is the name the node gave itself, with its host name after it in
+parentheses when that is another, and the table's dash for a node this node holds no profile of
+(the column is described under `trust list`). `Reachable at` is the **contact** of the node: the addresses of the
 machine that another machine can use (an unspecified `0.0.0.0` or `::` is expanded into the
 machine's interface addresses, loopback and link-local ones are left out), each ending in
 `/p2p/<peer id>`. Below the block, one line that can be copied whole and run on the other
@@ -415,12 +417,23 @@ for as long as it still holds the credential, so its owner has to remove the nod
 (`trust remove`, then `trust clear`) before the pairing can be made again.
 
 `trust list` prints five sections, each a bold title over a table, or one sentence that says it
-is empty: `Trusted nodes` (`CONNECTION`, `CREATED`, `VALID UNTIL` as `never` for a credential that
+is empty: `Trusted nodes` (`CONNECTION`, `NAME`, `CREATED`, `VALID UNTIL` as `never` for a credential that
 does not expire, `CREDENTIAL`, `NODE`), `Expectations` (`EXPIRES`, `NODE`), `Incoming requests`
 (`STATUS`, `CODE`, `EXPECTATION` as `expected` or `not expected`, `EXPIRES`, `PAIRING`, `NODE`),
 `Outgoing requests` (`STATUS`, `CODE`, `REASON`, `PAIRING`, `NODE`) and `Revoked here` (`NODE`).
 Times are UTC to the minute. The pairing identifier, which `trust reject` takes, and the node are
 written whole. `--json` has the interface's own members and times.
+
+The `Name` column of `trust list` and of `network show` comes before the node identifier, which
+stays last and whole. It shows the name the node gave itself, with its host name after it in
+parentheses when that is another, and the table's dash when there is nothing to show. It comes from
+the node's profile, which this node fetches from a node it trusts directly once a connection to it
+is up and keeps in memory only: a node that has not been connected since the daemon started shows
+the dash, whatever its owner named it. The name is a label for the person reading; nothing is
+addressed or allowed by it. The words come from another node, so the table shows control and
+text-direction characters as visible escapes. The `--json` result carries the profile of each node
+as its `profile` member, left out for a node without one (see the
+[daemon reference](../daemon/README.md#the-management-interface)).
 
 Two nodes pair by the owner of each entering an expectation for the other, so the order
 is: each side runs `trust expect <the other node>` first, then one side runs `trust

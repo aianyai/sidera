@@ -171,7 +171,7 @@ func TestTrustListIsPrintedInSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"CONNECTION CREATED VALID UNTIL CREDENTIAL NODE", "connected 2026-10-24 09:00 UTC never c1 n1",
+		"CONNECTION NAME CREATED VALID UNTIL CREDENTIAL NODE", "connected - 2026-10-24 09:00 UTC never c1 n1",
 		"EXPIRES NODE", "2026-10-24 10:00 UTC n2",
 		"STATUS CODE EXPECTATION EXPIRES PAIRING NODE", "awaiting_target 111 222 expected 2026-10-24 09:05 UTC p1 n3",
 		"STATUS CODE REASON PAIRING NODE", "withdrawn 333 444 declined p2 n4",
