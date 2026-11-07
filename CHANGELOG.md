@@ -38,6 +38,13 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Restart the agent sessions that were running when you upgrade.** A Claude Code or Codex session
+  started before the upgrade keeps the `sidera mcp` of the earlier release, and that program cannot
+  read the new members of the `peers` and `directory` results: those two tools fail with
+  `outcome_unknown` in such a session until it is restarted. Its other tools keep working, and
+  `sidera peers` and `sidera directory` from a shell, and every session started after the upgrade,
+  work at once.
+
 - **A Hermes instance with no `display_name` is listed in the directory as `Hermes`.** It used to be
   `Hermes (<host name>)`; the host is described by the node itself now, so the name only tells the
   endpoints of one node apart. The endpoint's address is unchanged, so aliases and anything that
