@@ -613,8 +613,10 @@ func TestAgentCommandsPreservePatchesAndFormatHumanResults(t *testing.T) {
 	if words := strings.Join(strings.Fields(out), " "); code != 0 || !strings.HasPrefix(words, "Address "+n.first.address+" Node "+harness.NodeID().String()+" ") || !strings.Contains(words, " Kind session ") || !strings.Contains(words, " Frontends cli (waits up to 20 s, 27000 chars per page) ") {
 		t.Fatalf("me: %d %q", code, out)
 	}
+	// The test node is built without host facts or a program version, so its own
+	// profile names nothing and the name, system and Sidera columns show "-".
 	code, out, diag = n.run(n.first, "peers")
-	if code != 0 || diag != "" || !strings.Contains(strings.Join(strings.Fields(out), " "), "self connected "+harness.NodeID().String()) {
+	if code != 0 || diag != "" || !strings.Contains(strings.Join(strings.Fields(out), " "), "self connected - - - "+harness.NodeID().String()) {
 		t.Fatalf("peers: %d %q %q", code, out, diag)
 	}
 	code, out, diag = n.run(n.first, "directory", "--limit", "1", "--json")
@@ -1648,6 +1650,9 @@ func TestRevocationExportWritesVerifiedRecords(t *testing.T) {
 }
 
 func TestRevocationExportRejectsAnInvalidBackupBeforeCreatingAFile(t *testing.T) {
+	// An answer whose statement does not verify is one this program cannot read,
+	// reported as the machine-readable error; an answer that reads but names another
+	// digest is a plain failure on standard error, in both output forms.
 	for _, mismatch := range []bool{false, true} {
 		t.Run(fmt.Sprint(mismatch), func(t *testing.T) {
 			home := privateTempDir(t, "ce-")
@@ -1696,8 +1701,12 @@ func TestRevocationExportRejectsAnInvalidBackupBeforeCreatingAFile(t *testing.T)
 			})
 			target := filepath.Join(home, "invalid.rec")
 			code, out, diag = runHome(t, home, "identity", "export-revocation", "--out", target, "--json")
-			if code != 10 || !strings.Contains(out, `"category":"outcome_unknown"`) || strings.Contains(out, `"result"`) {
-				t.Fatalf("invalid export: %d %q %q", code, out, diag)
+			if mismatch {
+				if code != 1 || out != "" || !strings.Contains(diag, "does not match its digest") {
+					t.Fatalf("digest mismatch: %d %q %q", code, out, diag)
+				}
+			} else if code != 1 || !strings.Contains(out, `"category":"internal"`) || !strings.Contains(out, `"code":"answer_unreadable"`) || strings.Contains(out, `"result"`) {
+				t.Fatalf("unreadable statement: %d %q %q", code, out, diag)
 			}
 			if _, err := os.Stat(target); !os.IsNotExist(err) {
 				t.Fatalf("invalid backup created a file: %v", err)
