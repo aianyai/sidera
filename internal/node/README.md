@@ -26,6 +26,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 2 | `txn` | `fsx` |
 | 2 | `recfile` | the standard library only: the framing of a record file (first line, checksum, file name), shared by the owners of records |
 | 2 | `logfile` | `fsx`: the restricted handle that writes and rotates the logs under `logs/`, which are not crash points; the daemon's log and the adapter hosts' go through it |
+| 2 | `hostfacts` | `fsx`, the standard library, `golang.org/x/sys`: what the machine is (host name, platform, system name and version), read with system calls, the Windows registry and `os-release`, which it reads only through the read-only part of `fsx`, for the node to publish about itself |
 | 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time; `config` also imports `go-multiaddr` and `go-libp2p/core/peer`, only to judge the addresses of `network.json` |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
