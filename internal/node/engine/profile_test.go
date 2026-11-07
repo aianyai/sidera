@@ -483,3 +483,114 @@ func TestANodeTrustedDirectlyOnAConnectionThatIsUpIsAsked(t *testing.T) {
 		t.Errorf("a node whose profile is held was asked again: %d times", got)
 	}
 }
+
+// settle advances the clock of the node by d and waits until the engine has run
+// what fell due and taken in the answers of the fetches it started.
+func (n *profileNode) settle(t *testing.T, d time.Duration) {
+	t.Helper()
+	n.r.clk.Advance(d)
+	n.waitProfilesAsked(t, 0)
+}
+
+// A fetch that fails is asked again after a short wait, because the peer resets
+// member streams until it has applied its side of the exchange and the connection,
+// once up, is not followed by another that would ask. The profile of the retry is
+// kept, and no more retries follow an answer.
+func TestAFetchThatFailedIsAskedAgainOnTheClockAndTheProfileKept(t *testing.T) {
+	n := newProfileNode(t, imac)
+	n.net.setConnected(n.peer.node, true)
+	good := n.peer.profileIssuedAt(1, t0.Add(time.Minute), "inuc")
+	calls := 0
+	n.net.servesProfile(n.peer.node, func() (record.Record, error) {
+		calls++
+		if calls == 1 {
+			return record.Record{}, transport.ErrUnreachable
+		}
+		return good, nil
+	})
+	n.e.MemberConnected(context.Background(), n.peer.node)
+	n.waitProfilesAsked(t, 1)
+	if v := n.peerView(t); v.Profile != nil {
+		t.Fatalf("a profile after a failed fetch: %+v", v.Profile)
+	}
+	n.settle(t, time.Second) // before the first wait ends
+	if got := n.net.profilesAsked(n.peer.node); got != 1 {
+		t.Fatalf("asked %d times before the wait ended", got)
+	}
+	n.settle(t, time.Second)
+	n.waitProfilesAsked(t, 2)
+	if v := n.peerView(t); v.Profile == nil || v.Profile.Name != "inuc" {
+		t.Fatalf("profile after the retry = %+v", v.Profile)
+	}
+	n.settle(t, time.Hour)
+	if got := n.net.profilesAsked(n.peer.node); got != 2 {
+		t.Errorf("asked %d times after the answer, want 2", got)
+	}
+}
+
+// The retries of a fetch that keeps failing are three, 2, 5 and 10 seconds after
+// the failure before, and then it waits for the next connection, which starts the
+// count again.
+func TestTheRetriesOfAFetchAreBoundedAndANewConnectionStartsThemAgain(t *testing.T) {
+	n := newProfileNode(t, imac)
+	n.net.setConnected(n.peer.node, true)
+	n.net.servesProfile(n.peer.node, func() (record.Record, error) { return record.Record{}, transport.ErrUnreachable })
+	n.e.MemberConnected(context.Background(), n.peer.node)
+	n.waitProfilesAsked(t, 1)
+	for i, wait := range []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second} {
+		n.settle(t, wait-time.Millisecond)
+		if got := n.net.profilesAsked(n.peer.node); got != i+1 {
+			t.Fatalf("asked %d times just before the wait of retry %d ended, want %d", got, i+1, i+1)
+		}
+		n.settle(t, time.Millisecond)
+		n.waitProfilesAsked(t, i+2)
+	}
+	n.settle(t, time.Hour)
+	if got := n.net.profilesAsked(n.peer.node); got != 4 {
+		t.Fatalf("asked %d times, want the fetch and three retries", got)
+	}
+	n.e.MemberConnected(context.Background(), n.peer.node)
+	n.waitProfilesAsked(t, 5)
+	n.settle(t, 2*time.Second)
+	n.waitProfilesAsked(t, 6)
+}
+
+// A retry is made only for a node that is still trusted directly and has a member
+// connection up, and not for a node that does not serve the protocol: its answer
+// will not change on this connection.
+func TestAFetchIsNotAskedAgainOfANodeThatIsGoneUntrustedOrDoesNotServe(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// serves is whether the peer answers the first fetch with an error, and not
+		// with "not served"; before changes what the retry looks at, after the failure.
+		serves bool
+		before func(*testing.T, *profileNode)
+	}{
+		{"the connection ended", true, func(_ *testing.T, n *profileNode) { n.net.setConnected(n.peer.node, false) }},
+		{"the node is no longer trusted", true, func(t *testing.T, n *profileNode) {
+			err := loopErr(t, n.e, func(l engine.LoopSide) error {
+				_, err := l.RevokeNodeLocally(requestKey(0xa7), fingerprintOf("remove"), "trust.remove", n.peer.node)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"the node does not serve the protocol", false, func(*testing.T, *profileNode) {}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			n := newProfileNode(t, imac)
+			n.net.setConnected(n.peer.node, true)
+			if c.serves {
+				n.net.servesProfile(n.peer.node, func() (record.Record, error) { return record.Record{}, transport.ErrUnreachable })
+			}
+			n.e.MemberConnected(context.Background(), n.peer.node)
+			n.waitProfilesAsked(t, 1)
+			c.before(t, n)
+			n.settle(t, time.Hour)
+			if got := n.net.profilesAsked(n.peer.node); got != 1 {
+				t.Errorf("asked %d times, want 1", got)
+			}
+		})
+	}
+}

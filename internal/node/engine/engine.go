@@ -989,6 +989,10 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.attachedAbsenceDue(now, id)
 		}
+	case schedProfileRetry:
+		if node, err := ident.ParseNodeID(key.id); err == nil {
+			e.retryProfile(node, now)
+		}
 	case schedPeriodic:
 		p := e.periodic[key.id]
 		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, PausedSince: e.pausedSince, SignRefusal: e.signRefusal()})

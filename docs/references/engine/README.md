@@ -170,10 +170,22 @@ decision of addressing, trust or policy reads it.
   the trust records change, every node now trusted directly that this node holds no
   profile of, asks nothing of and has a member connection up to is asked: a node
   reached by inheritance on a live connection and then paired directly would never
-  be asked otherwise. Nothing else is retried and nothing polls: a failed fetch is
-  logged, a node that does not serve the protocol (an earlier release) is logged at
-  debug level and has no profile, and is asked again on the next connection and on
-  each change of the trust records that finds it without one. A
+  be asked otherwise. A fetch that fails with an error is asked again on the
+  clock: the node told first of a new connection is the one that read the certificate
+  exchange first, and the peer resets member streams until it has applied its own
+  side, so a fetch made at once can fail on a healthy connection, and a connection
+  that stays up brings no news to ask again on. The retries are three, 2, 5 and 10
+  seconds after the failure before (`profileRetryWaits`, the short ramp of the control
+  pulls), each an entry of the schedule (`schedProfileRetry`) that asks only if the
+  node is still trusted directly and a member connection to it is up, and ends the
+  retries otherwise; one fetch per node is in flight as before. A new connection
+  (`MemberConnected`) starts the count again, an answer of any kind ends it, and trust
+  ending drops it. The first failure is logged at info level, the retries' at
+  debug level and the end of the retries at info level. A node that does not serve the
+  protocol (an earlier release) is not retried, since the answer will not change on
+  that connection: it is logged at debug level and has no profile, and is asked again
+  on the next connection and on each change of the trust records that finds it
+  without one. Nothing polls. A
   connection to a restarted or upgraded node is a new connection, which is how a new
   version, a new system version or a new name arrives.
 - *Holding.* The profiles fetched are held in memory by the loop, one per node, with
@@ -2186,6 +2198,7 @@ reproducible).
 | After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
 | The node profile is made from the owner's name or the host name, the machine and the version, is issued again only when its content changes and always strictly later, leaves out a field that breaks its rules, and is answered only to a node trusted directly | `profile.go` (`refreshProfile`, `Profile`) | `TestTheProfileStatesTheMachineTheVersionAndTheOwnersNameOrElseTheHostName`, `TestAProfileIsIssuedAgainOnlyWhenItsContentChanges`, `TestAValueTheMachineGivesThatBreaksTheRulesIsLeftOutOfTheProfile`, `TestOnlyANodeTrustedDirectlyMayAskForTheProfile` |
 | A peer's profile is fetched when a connection to it comes up, and kept only when it is the peer's own, verified against the certificate held for it, and newer; a failed fetch or a peer that does not serve the protocol leaves none; trust ending drops it; a connection that comes up during a fetch, and direct trust gained on a live connection, are asked too | `profile.go` (`fetchProfile`, `profileFetched`, `fetchMissingProfiles`, `verifyProfile`, `pruneProfiles`) | `TestTheProfileOfAPeerIsFetchedWhenAConnectionComesUpAndKeptWhenNewer`, `TestAProfileThatIsNotThePeersOwnIsNotKept`, `TestAPeerWithoutAProfileIsStillListed`, `TestTheProfileOfANodeNoLongerTrustedIsDropped`, `TestAConnectionThatComesUpDuringAFetchIsAskedWhenThatFetchEnds`, `TestANodeTrustedDirectlyOnAConnectionThatIsUpIsAsked` |
+| A fetch that failed is asked again on the clock 2, 5 and 10 seconds after each failure, only while the node is trusted directly and a member connection is up, never for a node that does not serve the protocol, and a new connection starts the count again | `profile.go` (`profileFetchFailed`, `retryProfile`, `profileRetryWaits`), `sched.go` | `TestAFetchThatFailedIsAskedAgainOnTheClockAndTheProfileKept`, `TestTheRetriesOfAFetchAreBoundedAndANewConnectionStartsThemAgain`, `TestAFetchIsNotAskedAgainOfANodeThatIsGoneUntrustedOrDoesNotServe` |
 | An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
 | A session nobody controls is one alert for the control record of its creation, however often the node starts | `alerts.go` (`raiseAlertOnce`), `create.go` (`alertUncontrolled`) | `TestAnUncontrolledCreationIsToldOnceAcrossRestarts` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |

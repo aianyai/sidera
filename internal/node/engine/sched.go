@@ -90,6 +90,9 @@ const (
 	// controller may have been gone for the endpoint's queue time; the id is the
 	// endpoint.
 	schedAttachedAbsence
+	// schedProfileRetry is the next retry of a node's profile fetch that failed; the
+	// id is the node.
+	schedProfileRetry
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

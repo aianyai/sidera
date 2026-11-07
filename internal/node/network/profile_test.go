@@ -115,3 +115,29 @@ func TestTheEngineIsNotToldOfANonMember(t *testing.T) {
 		t.Errorf("b was told of %v, a node it does not trust", got)
 	}
 }
+
+// The node that read the exchange first is told of the member connection before
+// the dialer has applied its side of it, and a profile it asks for at once is reset
+// by the dialer's gate. The failure is an unreachable node, not a refusal and not a
+// node that does not serve the protocol, so the engine can tell it is worth asking
+// again; the same fetch after the dialer has applied the exchange is answered.
+func TestFetchProfileBeforeThePeerHasAppliedTheExchange(t *testing.T) {
+	a, b := pairOver(t, false)
+	release := make(chan struct{})
+	a.node.setBlock(release) // a holds its side of the exchange open
+	a.dialRaw(b)
+	eventually(t, "b to be told of the member connection", func() bool { return len(b.node.memberConnections()) == 1 })
+	want := testRecord(t, a)
+	a.node.setProfile(func(context.Context, transport.Origin) (record.Record, error) { return want, nil })
+
+	_, served, err := b.net.FetchProfile(ctx5(t), a.id)
+	if served || !errors.Is(err, transport.ErrUnreachable) || errors.As(err, new(transport.Refused)) {
+		t.Fatalf("a fetch before the peer applied the exchange: served %v, %v; want an unreachable error", served, err)
+	}
+
+	close(release)
+	eventually(t, "a to apply the exchange", func() bool { return a.net.Connected(b.id) })
+	if got, served, err := b.net.FetchProfile(ctx5(t), a.id); err != nil || !served || !sameRecord(got, want) {
+		t.Fatalf("a fetch after the exchange: %v, served %v, %v", got, served, err)
+	}
+}

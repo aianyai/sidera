@@ -247,6 +247,16 @@ func (n *fakeNetwork) Connected(node ident.NodeID) bool {
 	return n.connected[node]
 }
 
+// setConnected says whether a member connection to the node is up.
+func (n *fakeNetwork) setConnected(node ident.NodeID, up bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.connected == nil {
+		n.connected = map[ident.NodeID]bool{}
+	}
+	n.connected[node] = up
+}
+
 func (n *fakeNetwork) snapshots() []engine.Membership {
 	n.mu.Lock()
 	defer n.mu.Unlock()

@@ -35,12 +35,40 @@ type profileState struct {
 	// way. The fetch under way may be on a connection that has since died, so one
 	// more is made when it ends.
 	again map[ident.NodeID]struct{}
+	// retried is, for each node whose fetch failed since the last connection to it
+	// came up, how many of profileRetryWaits the retries have used. A node with an
+	// entry has a retry in the schedule (schedProfileRetry) or a retry's fetch under
+	// way.
+	retried map[ident.NodeID]int
 }
 
 func newProfileState() *profileState {
 	return &profileState{
 		peers: map[ident.NodeID]heldProfile{}, fetching: map[ident.NodeID]struct{}{}, again: map[ident.NodeID]struct{}{},
+		retried: map[ident.NodeID]int{},
 	}
+}
+
+// profileRetryWaits are the waits before the retries of a fetch that failed, on the
+// injected clock, one for each retry; after the last retry fails the failure stands
+// until the next connection to the node. The failure to expect is a fetch that came
+// too soon: the node that read the certificate exchange first is told of the
+// connection first, and the peer resets member streams until it has applied its own
+// side of the exchange, which takes well under a second. Nothing else would ask
+// again, because a connection stays up while it is used and the news of it comes
+// once. The waits are the short ramp the engine uses for a reply somebody waits on
+// (Params.ControlPullRamp): the profile is what a person looks at when listing the
+// nodes, and a peer that still fails after 17 seconds in all is not about to answer.
+var profileRetryWaits = [...]time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
+
+// profileRetryKey is the entry of the schedule for the next retry of a node's fetch.
+func profileRetryKey(node ident.NodeID) schedKey { return schedKey{schedProfileRetry, node.String()} }
+
+// endProfileRetries forgets the retries of a node's fetch: the fetch has an answer,
+// a new connection starts it afresh, or the node is not to be asked any more.
+func (e *Engine) endProfileRetries(node ident.NodeID) {
+	delete(e.profiles.retried, node)
+	e.sched.remove(profileRetryKey(node))
 }
 
 // ownProfile is the profile this node issued, signed.
@@ -206,8 +234,10 @@ func (e *Engine) MemberConnected(ctx context.Context, node ident.NodeID) {
 // fetchProfile starts the fetch of a node's profile when a connection to it comes
 // up: not for a node that is not trusted directly and not without a network. While
 // a fetch from the node is under way the connection is noted, and the fetch ends
-// with one more (profileFetched).
+// with one more (profileFetched). The connection also ends the retries of an
+// earlier failed fetch, which start again if this one fails.
 func (e *Engine) fetchProfile(node ident.NodeID, now time.Time) {
+	e.endProfileRetries(node) // a new connection is asked afresh
 	if e.net == nil || e.trustOf(node, now) != trust.AllowedDirect {
 		return
 	}
@@ -255,14 +285,15 @@ func (c *cmdProfileFetched) run(e *Engine, now time.Time) {
 
 // profileFetched judges the answer of a fetch and keeps the profile when it is the
 // node's own, signed by the key this node accepts for it, and newer than the one
-// held. A failure is logged and not retried here: the next connection to the node,
-// or the next change of the trust records that finds the node without a profile,
-// fetches again.
+// held. A failed fetch is asked again (profileFetchFailed); a node that does not
+// serve the protocol is not, since the answer will not change on this connection.
 func (e *Engine) profileFetched(now time.Time, c *cmdProfileFetched) {
-	switch {
-	case c.err != nil:
-		e.log.Info("the profile of a node could not be fetched", "node", c.node.String(), "error", c.err.Error())
+	if c.err != nil {
+		e.profileFetchFailed(now, c.node, c.err)
 		return
+	}
+	e.endProfileRetries(c.node)
+	switch {
 	case !c.served:
 		e.log.Debug("a node does not serve the profile protocol", "node", c.node.String())
 		return
@@ -281,6 +312,49 @@ func (e *Engine) profileFetched(now time.Time, c *cmdProfileFetched) {
 	e.profiles.peers[c.node] = heldProfile{rec: c.rec, v: v, fetchedAt: now}
 }
 
+// profileFetchFailed logs a fetch that failed and schedules the next of
+// profileRetryWaits, as long as the node is still trusted directly and a member
+// connection to it is up. Past the last retry, or with the node gone, the failure
+// stands until the next connection to the node, or the next change of the trust
+// records that finds the node without a profile. The first failure is logged at
+// info level, the retries' at debug level, and the end of the retries at info
+// level, so that a streak is two lines and not one for each attempt.
+func (e *Engine) profileFetchFailed(now time.Time, node ident.NodeID, err error) {
+	used := e.profiles.retried[node]
+	if e.trustOf(node, now) != trust.AllowedDirect || !e.net.Connected(node) {
+		e.endProfileRetries(node)
+		e.log.Info("the profile of a node could not be fetched", "node", node.String(), "error", err.Error())
+		return
+	}
+	if used >= len(profileRetryWaits) {
+		e.endProfileRetries(node)
+		e.log.Info("the profile of a node could not be fetched after retries; the next connection asks again", "node", node.String(), "error", err.Error())
+		return
+	}
+	if used == 0 {
+		e.log.Info("the profile of a node could not be fetched; it is asked again shortly", "node", node.String(), "error", err.Error())
+	} else {
+		e.log.Debug("a retry of the profile of a node failed", "node", node.String(), "error", err.Error())
+	}
+	e.profiles.retried[node] = used + 1
+	e.sched.set(profileRetryKey(node), now.Add(profileRetryWaits[used]))
+}
+
+// retryProfile is a retry of a failed fetch falling due: it asks again if the node
+// is still trusted directly and a member connection is up, and ends the retries
+// otherwise (a connection that comes up later asks by itself).
+func (e *Engine) retryProfile(node ident.NodeID, now time.Time) {
+	_, busy := e.profiles.fetching[node]
+	switch {
+	case busy:
+		// Another fetch is under way; its outcome decides what comes next.
+	case e.net != nil && e.net.Connected(node) && e.trustOf(node, now) == trust.AllowedDirect:
+		e.startProfileFetch(node)
+	default:
+		e.endProfileRetries(node)
+	}
+}
+
 // verifyProfile verifies a profile a node signed about itself. The record names
 // its node, and that must be the node it was fetched from; the signature is then
 // checked against the network key this node accepts for that node.
@@ -296,11 +370,16 @@ func (e *Engine) verifyProfile(now time.Time, rec record.Record, node ident.Node
 }
 
 // pruneProfiles drops the profiles of the nodes this node no longer trusts
-// directly. It runs whenever the trust records change.
+// directly, and the retries of fetching them. It runs whenever the trust records change.
 func (e *Engine) pruneProfiles(now time.Time) {
 	for node := range e.profiles.peers {
 		if e.trustOf(node, now) != trust.AllowedDirect {
 			delete(e.profiles.peers, node)
+		}
+	}
+	for node := range e.profiles.retried {
+		if e.trustOf(node, now) != trust.AllowedDirect {
+			e.endProfileRetries(node)
 		}
 	}
 }
