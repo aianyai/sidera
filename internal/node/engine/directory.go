@@ -12,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -233,6 +234,7 @@ func (c *cmdQueryDirectory) run(e *Engine, now time.Time) {
 		page.Endpoints = append(page.Endpoints, transport.DirectoryEntry{
 			Address: ident.Address{Node: e.d.Node, Endpoint: id}, Kind: st.rec.Kind,
 			DisplayName: st.rec.DisplayName, Description: st.rec.Description, Accepts: signals,
+			Adapter: e.directoryAdapter(st.rec),
 		})
 	}
 	sort.Slice(page.Endpoints, func(i, j int) bool {
@@ -243,6 +245,33 @@ func (c *cmdQueryDirectory) run(e *Engine, now time.Time) {
 		page.NextCursor = e.makeDirectoryCursor(asker, page.Endpoints[req.Limit-1].Address.Endpoint)
 	}
 	c.done(page, nil)
+}
+
+// directoryAdapter says which adapter serves an endpoint, for its directory
+// entry; nil when the configuration no longer holds the endpoint's instance. The
+// adapter's identifier comes from the configuration, its version from the
+// handshake of the connection that was admitted last (empty when none has been
+// since the node started), and the runtime, for a runtime endpoint and the
+// session endpoints under it, from the last probe that passed (nil until one
+// has).
+func (e *Engine) directoryAdapter(rec store.EndpointRecord) *transport.DirectoryAdapter {
+	in, ok := e.d.Config.Instances().Items[rec.Instance]
+	if !ok {
+		return nil
+	}
+	a := &transport.DirectoryAdapter{Instance: rec.Instance, ID: in.Adapter}
+	st := e.adapters[rec.Instance]
+	if st == nil {
+		return a
+	}
+	if st.admitted {
+		a.Version = st.info.Adapter.Version
+	}
+	if rec.Kind != adapterreg.KindDirect && st.passedRuntime != nil {
+		rt := *st.passedRuntime
+		a.Runtime = &rt
+	}
+	return a
 }
 
 func normalizeDirectoryRequest(req transport.DirectoryRequest) (transport.DirectoryRequest, error) {

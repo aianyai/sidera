@@ -151,6 +151,21 @@ interrupt of a created session, which only an admission can confirm, is asked of
 adapter, so a session whose adapter has not connected is still asked to execute a
 signal it may support.
 
+An entry of an endpoint an adapter instance serves (a runtime, a session or a direct
+endpoint) carries `Adapter`, read in the loop by `directoryAdapter` and shown only
+with the entry, so the visibility rule above is also the visibility of the adapter. The
+`Instance` is the endpoint record's and the `ID` the adapter the configuration runs
+under that instance name (no `Adapter` when the configuration no longer holds the
+instance). The `Version` is the adapter's own, from the handshake of the connection admitted
+last, and is empty until an admission has happened since the engine started (an
+admission survives the connection, and the disabling of the instance ends it). The
+`Runtime` is the runtime the instance's last probe that passed found, kept in
+`adapterState.passedRuntime` by `noteProbeProgress` when a probe result or a presented
+token makes the probe pass; it is shown for a runtime endpoint and the session endpoints
+under it, never for a direct endpoint, is empty until a probe has passed, is not taken
+back while a later probe is still under way, and ends with the disabling of the
+instance.
+
 The page limit defaults to `DefaultDirectoryLimit` (100) and is at most
 `publication.MaxEndpointsPerNode` (256). Every page re-reads and authorizes the
 live view; endpoints opened, closed or hidden between pages may appear or not.

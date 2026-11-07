@@ -92,6 +92,10 @@ type adapterState struct {
 	// the instance later becomes unusable, so that the declaration does not flap,
 	// and it ends with the disabling of the instance.
 	declared bool
+	// passedRuntime is the runtime the last probe that passed found; nil until a
+	// probe has passed since the instance was enabled, or when that probe found
+	// none. It is what the directory names.
+	passedRuntime *adapterproto.RuntimeInfo
 
 	// busy holds the endpoints with a running turn and rejected those whose
 	// runtime had a request refused, both by reference: an adapter may report a
@@ -541,7 +545,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 		return err
 	}
 	st.probed, st.probe, st.probedAt = true, r, now
-	e.declareIfPassed(instance, st, now)
+	e.noteProbeProgress(instance, st, now)
 	// The probe is a call the host made to the adapter, so the connection is in
 	// service: what the node asked the instance to create before this connection is
 	// asked again now as well, in case the call made when the adapter started found

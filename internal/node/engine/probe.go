@@ -132,11 +132,22 @@ func (st *adapterState) probeView(now time.Time) ProbeView {
 	return v
 }
 
-// declareIfPassed makes the runtime endpoint of the instance part of what the
-// node declares once its probe has passed. It is not undone when the instance
-// later becomes unusable: the declaration does not flap.
-func (e *Engine) declareIfPassed(instance string, st *adapterState, now time.Time) {
-	if st.declared || !st.admitted || !st.adm.Declares(adapterreg.KindRuntime) || st.probeView(now).State != ProbePassed {
+// noteProbeProgress is what follows a probe result and a presented probe token.
+// Once the probe has passed it keeps the runtime the probe found, which the
+// directory shows until a later probe passes, and makes the runtime endpoint of the
+// instance part of what the node declares. Neither is undone when the instance
+// later becomes unusable: the declaration does not flap, and a re-probe that is
+// still under way does not take the runtime out of the directory.
+func (e *Engine) noteProbeProgress(instance string, st *adapterState, now time.Time) {
+	if !st.admitted || st.probeView(now).State != ProbePassed {
+		return
+	}
+	st.passedRuntime = nil
+	if st.probe.Runtime != nil {
+		rt := *st.probe.Runtime
+		st.passedRuntime = &rt
+	}
+	if st.declared || !st.adm.Declares(adapterreg.KindRuntime) {
 		return
 	}
 	st.declared = true
@@ -201,6 +212,6 @@ func (e *Engine) presentProbeToken(now time.Time, raw []byte, frontend adapterpr
 	}
 	held.used = true
 	e.log.Info("a probe token was presented", "instance", instance, "preset", held.preset, "frontend", string(held.frontend))
-	e.declareIfPassed(instance, st, now)
+	e.noteProbeProgress(instance, st, now)
 	return ProbeTarget{Instance: instance, Preset: held.preset, Frontend: held.frontend}, nil
 }

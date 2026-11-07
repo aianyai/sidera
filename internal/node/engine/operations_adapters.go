@@ -493,7 +493,7 @@ func (e *Engine) instanceDisabled(now time.Time, instance string) {
 	if st := e.adapters[instance]; st != nil {
 		st.goOffline(now)
 		st.admitted = false
-		st.tokens, st.probed, st.probe, st.probedAt, st.declared = nil, false, adapterproto.ProbeResult{}, time.Time{}, false
+		st.tokens, st.probed, st.probe, st.probedAt, st.declared, st.passedRuntime = nil, false, adapterproto.ProbeResult{}, time.Time{}, false, nil
 	}
 	if e.d.Adapters != nil {
 		// The instance is retired: the adapter releases what it started that
