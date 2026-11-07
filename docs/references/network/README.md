@@ -12,8 +12,9 @@ How one node asks another to take an envelope, to report on a delivery, to list 
 | `/sidera/pull/2.0.0` | one message identifier and the recipients on the target | the current signed reports, the recipients the target holds no record of, and the control reply if there is one |
 | `/sidera/directory/3.0.0` | a continuation and a page size | a page of the open endpoints the target shows the asker, each with the adapter that serves it |
 | `/sidera/dial-back/1.0.0` | nothing (the empty map) | whether the target could dial the asker back, and on which address |
+| `/sidera/profile/1.0.0` | nothing (the empty map) | the signed node profile the target issued for itself |
 
-The dial-back protocol is new and was framed from its first version, so it has no other form. A node also serves, and a client falls back to, the same three under `/sidera/{send,pull,directory}/1.0.0`, the identifiers of the nodes before 2.0.0, which differ only in how a stream is delimited (below). The messages, limits and access are those of the 2.0.0 protocol of the same name.
+The dial-back and profile protocols are new and were framed from their first version, so they have no other form. A node also serves, and a client falls back to, the same three under `/sidera/{send,pull,directory}/1.0.0`, the identifiers of the nodes before 2.0.0, which differ only in how a stream is delimited (below). The messages, limits and access are those of the 2.0.0 protocol of the same name.
 
 The directory has one more identifier between them: `/sidera/directory/2.0.0`, the protocol before an entry named its adapter. It is framed like 3.0.0 and its entries are the same without the adapter (key 6 below). A node serves all three, answers a call under the identifier the call came in, and an answer under 2.0.0 or 1.0.0 simply has no adapter in its entries. The 2.0.0 identifier stays until a later release removes it, as the 1.0.0 ones do.
 
@@ -83,6 +84,15 @@ result  = 1 reached | 2 not reached | 3 no address
 
 The request is the one byte `0xa0`. A result goes with the outcome ok and with no other, and an address with the result reached and with no other. The address is a binary multiaddr of at most 256 bytes that parses and is in the one form the library writes, without a `/p2p/` part. The one reason a dial-back is refused with is `busy`. The meaning of the results is under Dial-back below.
 
+**Profile**
+
+```
+request = { }
+answer  = { 1: outcome, 2: profile record (ok only), 3: reason (refused only) }
+```
+
+The request is the one byte `0xa0`. The profile is one signed record, in the bytes the target signed it, and goes with the outcome ok and with no other; an ok answer without one is invalid. Only the shape of the record is checked on the wire (`record.Decode`); that it is a profile of the node that was called, signed by the key the asker holds a certificate for, and that its fields satisfy the profile rules, is for the asker to verify. The answer is limited to 4 KiB: the largest profile a node can make is 2286 bytes, because the text limits are in characters and a character is up to four bytes, and the rest of the answer is under 16 bytes, so the limit leaves room for the record to grow by nearly half as much again.
+
 ### Outcomes
 
 Every answer opens with an outcome:
@@ -105,6 +115,7 @@ Each protocol has a limit on the request a server reads and on the answer a clie
 | pull | 2 KiB | the same as send |
 | directory | 512 | 256 entries of at most 6 KiB (5 KiB, + 659 bytes for the adapter), + the cursor limit, + 512 |
 | dial-back | 16 | 512 |
+| profile | 16 | 4 KiB |
 
 ## The runtime
 

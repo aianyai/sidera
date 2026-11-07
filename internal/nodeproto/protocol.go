@@ -34,6 +34,9 @@ const (
 	// addresses it holds for it. It was framed from its first version and has no
 	// legacy identifier.
 	ProtocolDialBack = "/sidera/dial-back/1.0.0"
+	// ProtocolProfile asks a member for the signed node profile it has issued for
+	// itself. It was framed from its first version and has no legacy identifier.
+	ProtocolProfile = "/sidera/profile/1.0.0"
 )
 
 // The identifiers a node before 2.0.0 speaks, kept so that nodes upgraded one
@@ -58,13 +61,14 @@ var offered = map[string][]string{
 	ProtocolPull:      {ProtocolPull, LegacyProtocolPull},
 	ProtocolDirectory: {ProtocolDirectory, PreviousProtocolDirectory, LegacyProtocolDirectory},
 	ProtocolDialBack:  {ProtocolDialBack},
+	ProtocolProfile:   {ProtocolProfile},
 }
 
 // Protocols lists every identifier a node serves, the current ones first, in a
 // stable order.
 func Protocols() []string {
 	return []string{
-		ProtocolSend, ProtocolPull, ProtocolDirectory, ProtocolDialBack,
+		ProtocolSend, ProtocolPull, ProtocolDirectory, ProtocolDialBack, ProtocolProfile,
 		PreviousProtocolDirectory,
 		LegacyProtocolSend, LegacyProtocolPull, LegacyProtocolDirectory,
 	}
@@ -128,6 +132,17 @@ const (
 	// maxDialBackAnswer holds an outcome, a result, a multiaddr of at most
 	// MaxAddressLen bytes and a reason.
 	maxDialBackAnswer = 512
+	// maxProfileRequest holds the empty map the request is.
+	maxProfileRequest = 16
+	// maxProfileAnswer holds an outcome, a reason and one profile record. The
+	// largest profile a node can make is 2286 bytes (a name, a host name and a
+	// system of 128 characters, a system build and a version of 64, each
+	// character four bytes at the most, so 2080 bytes of text, plus the payload
+	// keys, the node, the time, the record's type and one signature); the limits
+	// are in characters, so text in a script of long characters is what fills the
+	// record. The outcome and the map around it add under 16 bytes, so 4 KiB
+	// leaves room for the record to grow by nearly half as much again.
+	maxProfileAnswer = 4 << 10
 )
 
 // LimitOf returns the byte limits of a protocol, the same for its current and
@@ -148,6 +163,8 @@ func LimitOf(protocol string) (Limit, bool) {
 		return Limit{Request: maxDirectoryRequest, Answer: MaxDirectoryPage*maxDirectoryEntry + answerSlack + MaxCursorLen}, true
 	case ProtocolDialBack:
 		return Limit{Request: maxDialBackRequest, Answer: maxDialBackAnswer}, true
+	case ProtocolProfile:
+		return Limit{Request: maxProfileRequest, Answer: maxProfileAnswer}, true
 	}
 	return Limit{}, false
 }

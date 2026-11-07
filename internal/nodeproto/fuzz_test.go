@@ -59,3 +59,11 @@ func FuzzDecodeDialBackRequest(f *testing.F) {
 func FuzzDecodeDialBackAnswer(f *testing.F) {
 	fuzzDecoder(f, DecodeDialBackAnswer, goldenDialBackReached, goldenDialBackNoAddress, goldenDialBackBusy)
 }
+
+func FuzzDecodeProfileRequest(f *testing.F) {
+	fuzzDecoder(f, DecodeProfileRequest, goldenProfileRequest)
+}
+
+func FuzzDecodeProfileAnswer(f *testing.F) {
+	fuzzDecoder(f, DecodeProfileAnswer, goldenProfileAnswerOK, goldenProfileRefused)
+}

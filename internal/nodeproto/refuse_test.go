@@ -253,6 +253,35 @@ func TestDecodeDialBackAnswerRefuses(t *testing.T) {
 	})
 }
 
+func TestDecodeProfileRequestRefuses(t *testing.T) {
+	runRefusals(t, DecodeProfileRequest, []refusal{
+		{"empty input", nil, record.ErrMalformed},
+		{"input over the request limit", bytes.Repeat([]byte{0}, limit(ProtocolProfile).Request+1), record.ErrOversize},
+		{"a field, though the request carries nothing", w.mapOf(w.uint(1), w.uint(0)), record.ErrMalformed},
+		{"trailing bytes", []byte{0xa0, 0}, record.ErrMalformed},
+	})
+}
+
+func TestDecodeProfileAnswerRefuses(t *testing.T) {
+	ok := w.uint(1)
+	runRefusals(t, DecodeProfileAnswer, []refusal{
+		{"empty input", nil, record.ErrMalformed},
+		{"input over the answer limit", bytes.Repeat([]byte{0}, limit(ProtocolProfile).Answer+1), record.ErrOversize},
+		{"an outcome above failed", w.mapOf(w.uint(1), w.uint(4)), ErrInvalid},
+		{"a refusal with no reason", w.mapOf(w.uint(1), w.uint(2)), ErrInvalid},
+		{"a reason on an ok answer", w.mapOf(w.uint(1), ok, w.uint(2), recBytes, w.uint(3), w.tstr("x")), ErrInvalid},
+		{"a reason with a character outside the reason alphabet", w.mapOf(w.uint(1), w.uint(2), w.uint(3), w.tstr("Not Permitted")), ErrInvalid},
+		{"a profile on a refused answer", w.mapOf(w.uint(1), w.uint(2), w.uint(2), recBytes, w.uint(3), w.tstr("not_permitted")), ErrInvalid},
+		{"a profile on a failed answer", w.mapOf(w.uint(1), w.uint(3), w.uint(2), recBytes), ErrInvalid},
+		{"an ok answer with no profile", w.mapOf(w.uint(1), ok), ErrInvalid},
+		{"a profile that is not a record", w.mapOf(w.uint(1), ok, w.uint(2), w.bstr([]byte{0xff})), record.ErrMalformed},
+		{"an empty profile written out", w.mapOf(w.uint(1), ok, w.uint(2), w.bstr(nil)), record.ErrNotCanonical},
+		{"a profile that is not a byte string", w.mapOf(w.uint(1), ok, w.uint(2), w.tstr("x")), record.ErrMalformed},
+		{"keys out of canonical order", w.mapOf(w.uint(2), recBytes, w.uint(1), ok), record.ErrNotCanonical},
+		{"an unknown field", w.mapOf(w.uint(1), ok, w.uint(2), recBytes, w.uint(4), w.uint(0)), record.ErrMalformed},
+	})
+}
+
 // A message the package writes is a message the package reads: Encode refuses
 // what the decoder would, so a node never sends a message every peer refuses.
 func TestEncodeRefusesWhatDecodeRefuses(t *testing.T) {
@@ -273,6 +302,8 @@ func TestEncodeRefusesWhatDecodeRefuses(t *testing.T) {
 		{"a directory request with a negative limit", DirectoryRequest{Sender: ep1, Limit: -1}.Encode, ErrInvalid},
 		{"a dial-back answer reached with no address", DialBackAnswer{Outcome: OutcomeOK, Result: DialBackReached}.Encode, ErrInvalid},
 		{"a dial-back answer with an unset result", DialBackAnswer{Outcome: OutcomeOK}.Encode, ErrInvalid},
+		{"a profile answer that is ok and carries no profile", ProfileAnswer{Outcome: OutcomeOK}.Encode, ErrInvalid},
+		{"a profile answer that is refused and carries a profile", ProfileAnswer{Outcome: OutcomeRefused, Profile: &rec, Reason: "not_permitted"}.Encode, ErrInvalid},
 		{"a directory entry of an unset kind", DirectoryAnswer{Outcome: OutcomeOK, Entries: []DirectoryEntry{{Endpoint: ep1}}}.Encode, ErrInvalid},
 	} {
 		t.Run(row.rule, func(t *testing.T) {

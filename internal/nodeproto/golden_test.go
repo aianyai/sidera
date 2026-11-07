@@ -31,6 +31,9 @@ const (
 	goldenDialBackReached   = "a3010102010348047f000001061e40"
 	goldenDialBackNoAddress = "a201010203"
 	goldenDialBackBusy      = "a20102046462757379"
+	goldenProfileRequest    = "a0"
+	goldenProfileAnswerOK   = "a20101025874a30161740241010381a201a20101025820111111111111111111111111111111111111111111111111111111111111111102584022222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222"
+	goldenProfileRefused    = "a20102036d6e6f745f7065726d6974746564"
 	goldenDirectoryAnswer   = "a301010281a501500102030405060708090a0b0c0d0e0f10026664697265637403644e616d65046005826c6d6573736167652e73656e646373656503626e78"
 )
 
@@ -125,6 +128,27 @@ func TestGoldenMessages(t *testing.T) {
 			DialBackAnswer{Outcome: OutcomeRefused, Reason: ReasonDialBackBusy}.Encode,
 			func(b []byte) (any, error) { return DecodeDialBackAnswer(b) },
 			DialBackAnswer{Outcome: OutcomeRefused, Reason: ReasonDialBackBusy},
+		},
+		{
+			"profile request: {}",
+			goldenProfileRequest,
+			ProfileRequest{}.Encode,
+			func(b []byte) (any, error) { return DecodeProfileRequest(b) },
+			ProfileRequest{},
+		},
+		{
+			"profile answer ok: {1: 1, 2: profile record}",
+			goldenProfileAnswerOK,
+			ProfileAnswer{Outcome: OutcomeOK, Profile: &rec}.Encode,
+			func(b []byte) (any, error) { return DecodeProfileAnswer(b) },
+			ProfileAnswer{Outcome: OutcomeOK, Profile: &rec},
+		},
+		{
+			"profile answer refused: {1: 2, 3: reason}",
+			goldenProfileRefused,
+			ProfileAnswer{Outcome: OutcomeRefused, Reason: "not_permitted"}.Encode,
+			func(b []byte) (any, error) { return DecodeProfileAnswer(b) },
+			ProfileAnswer{Outcome: OutcomeRefused, Reason: "not_permitted"},
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {

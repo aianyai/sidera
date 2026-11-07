@@ -7,11 +7,14 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	ma "github.com/multiformats/go-multiaddr"
 
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/envelope"
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/publication"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -139,8 +142,10 @@ func TestOfferedIdentifiers(t *testing.T) {
 			}
 		}
 	}
-	if offered := Offer(ProtocolDialBack); len(offered) != 1 || offered[0] != ProtocolDialBack || IsLegacy(ProtocolDialBack) {
-		t.Errorf("%s is offered as %v", ProtocolDialBack, offered)
+	for _, only := range []string{ProtocolDialBack, ProtocolProfile} {
+		if offered := Offer(only); len(offered) != 1 || offered[0] != only || IsLegacy(only) {
+			t.Errorf("%s is offered as %v", only, offered)
+		}
 	}
 	for _, other := range []string{LegacyProtocolSend, "/sidera/pairing/1.0.0"} {
 		if Offer(other) != nil {
@@ -202,6 +207,36 @@ func TestLargestMessagesFit(t *testing.T) {
 		} else if _, err := AppendFrame(nil, b, limit(ProtocolDialBack).Answer); err != nil {
 			t.Errorf("%d bytes over the limit: %v", len(b), err)
 		}
+	})
+	t.Run("profile answer with the largest profile a node can make", func(t *testing.T) {
+		const fourByte = "\U0001F600"
+		node, err := ident.NodeIDFromKey(testSigner(t).Public())
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := publication.NodeProfile{
+			Node: node, IssuedAt: time.Unix(record.MaxUnixSeconds, 0).UTC(),
+			Name: strings.Repeat(fourByte, adapterproto.MaxDisplayName), HostName: strings.Repeat(fourByte, adapterproto.MaxDisplayName),
+			System:      strings.Repeat(fourByte, adapterproto.MaxDisplayName),
+			SystemBuild: strings.Repeat(fourByte, publication.MaxProfileLabelLen), SideraVersion: strings.Repeat(fourByte, publication.MaxProfileLabelLen),
+			Platform: strings.Repeat("a", 15) + "/" + strings.Repeat("b", 16),
+		}
+		payload, err := record.EncodePayload(publication.NodeProfileDescriptor(record.AcceptedNetworkKey{}, p.IssuedAt), p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err := record.Sign(publication.NodeProfileType, payload, testSigner(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ProfileAnswer{Outcome: OutcomeOK, Profile: &rec}.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := AppendFrame(nil, b, limit(ProtocolProfile).Answer); err != nil {
+			t.Errorf("%d bytes over the limit %d: %v", len(b), limit(ProtocolProfile).Answer, err)
+		}
+		t.Logf("largest profile answer: %d bytes of %d", len(b), limit(ProtocolProfile).Answer)
 	})
 	t.Run("send answer with a report per recipient and a control reply", func(t *testing.T) {
 		big, err := record.Sign("sidera/test/big/1", bytes.Repeat([]byte{1}, record.DefaultMaxInput-1024), testSigner(t))
