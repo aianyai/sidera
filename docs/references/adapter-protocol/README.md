@@ -11,9 +11,9 @@ requests and notifications. "D to A" below means the daemon calls the adapter an
 The SDK lives in its own Go module, `github.com/aianyai/sidera/sdk/go`, which
 is imported by the daemon and by third-party adapters alike. Its packages use the
 standard library only, except `adapterkit/process`, `adapterkit/realpath`, `termout`,
-`adapterkit` and `adaptersetup` (the last two are built on `termout`), which also use
-`golang.org/x/sys` (`termout` uses `golang.org/x/text` as well, so every package built on it
-links both). The frames are handled by
+`agentview`, `adapterkit` and `adaptersetup` (the last three are built on `termout`), which
+also use `golang.org/x/sys` (`termout` uses `golang.org/x/text` as well, so every package built
+on it links both). The frames are handled by
 `sdk/go/peer`; the messages, enums, application error codes and manifest are
 defined in the packages `adapterproto` and `manifest` and, for other languages, by
 the JSON Schema under `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
@@ -1143,6 +1143,11 @@ is authoritative.
   `TestAfterShutdownOnlyPingIsServed`, `TestRequestsAndAnswersAreHeldToTheProtocol`,
   `TestAttachMethodsNeedTheAttachCapability`, `TestStartAndProbeContextsEndBeforeTheHandshakeLimit`,
   `TestAServedAdapterAnswersAndSends`.
+- `sdk/go/agentview`: the human-readable form of an endpoint's view of the network, in one
+  place for the programs that print it (`view.go`: the delivery status and control reply of a
+  message, a directory page, the peers and the answer to a send, over `termout`; `shell.go`:
+  quoting a word in a command to copy). Tests: `TestControlReplyShowsEveryField`,
+  `TestNextPageCommandIsTheCallersOwn`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy. Nearly every
   input error names the path of the offending value, a wrong JSON type included, so a

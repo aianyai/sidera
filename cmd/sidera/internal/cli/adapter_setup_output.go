@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
@@ -64,14 +63,9 @@ func renderDeclined(s *termout.Stream, instance string, it adaptersetup.Item) st
 }
 
 // setupFixCommand is the command that settles the drift of an instance's setup, as a person
-// types it: a node whose data directory is not the default is named by --home, as the
-// command a client starts for the MCP server names it.
+// types it (see [sideraCommand]).
 func setupFixCommand(env setupEnv, instance string) string {
-	words := []string{"sidera"}
-	if !env.homeIsDefault {
-		words = append(words, "--home", shellWord(runtime.GOOS, env.home))
-	}
-	return strings.Join(append(words, "adapter", "setup", instance), " ")
+	return sideraCommand(env.home, env.homeIsDefault, "adapter", "setup", instance)
 }
 
 // renderSetupReport is the report of a mode. applied says that items were applied, so that

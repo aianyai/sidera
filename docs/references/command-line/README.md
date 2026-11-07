@@ -553,7 +553,9 @@ The human output of the agent commands (`me`, `peers`, `directory`, `declare`, `
 output](#human-output). `send`, `reply` and `control` say that the message was accepted for
 delivery, which is not that it was delivered, and name `sidera status <message-id>` as the
 way to see the delivery or, for `control`, the reply; a replayed request is said to be one.
-Scripts use `--json`. Human initialization puts the offline-backup reminder first, as a `!` line, then says that the
+A command that a result tells the reader to run (that one, and the next page of `directory`) is
+spelled for the node it acted on: when the data directory is not the default it begins `sidera
+--home <directory>`, with the directory quoted for the shell of the platform. Scripts use `--json`. Human initialization puts the offline-backup reminder first, as a `!` line, then says that the
 node was initialized with its `Node` and `Home` as a block, and ends with the command that exports
 the self-revocation; JSON init returns `node`, `home`, `self_revocation` and `backup_required:true`.
 Human node status prints outstanding reminders first, each as a `!` warning, then the
@@ -584,6 +586,9 @@ into the same table; see [Conventions of every program](#conventions-of-every-pr
 The decoration and color rules below are implemented once, by the SDK package
 [`termout`](../../../sdk/go/termout/README.md). `sidera` builds its standard output and its
 standard error as two `termout` streams, once per run, and each stream decides for itself.
+The layouts of the results that the console adapter shows as well (a message's delivery state and
+control reply, a directory page, the peers, the answer to a send) are written once, by the SDK
+package [`agentview`](../../../sdk/go/agentview/README.md), and `sidera` calls it.
 The agent commands (`me`, `peers`, `directory`, `declare`, `send`, `reply`, `control`,
 `status <message-id>` and `ack`), the management commands, whether they read or change something,
 and the operations `update`, `adapter setup`, `daemon restart`, `init`, `identity

@@ -45,22 +45,6 @@ func TestProgramPath(t *testing.T) {
 	}
 }
 
-// The quoting follows the platform whose shell the command is pasted into.
-func TestShellWord(t *testing.T) {
-	for _, tc := range []struct{ goos, in, want string }{
-		{"windows", `C:\Users\ivea\sidera\bin\sidera.exe`, `"C:\Users\ivea\sidera\bin\sidera.exe"`},
-		{"windows", `C:\Users\a b\sidera\bin\sidera.exe`, `"C:\Users\a b\sidera\bin\sidera.exe"`},
-		{"windows", `C:\Users\O'Neil (work) & co\sidera.exe`, `"C:\Users\O'Neil (work) & co\sidera.exe"`},
-		{"linux", "/home/a/.local/bin/sidera", "/home/a/.local/bin/sidera"},
-		{"linux", "/home/a b/bin/sidera", "'/home/a b/bin/sidera'"},
-		{"darwin", "/Users/a/it's/sidera", `'/Users/a/it'\''s/sidera'`},
-	} {
-		if got := shellWord(tc.goos, tc.in); got != tc.want {
-			t.Errorf("shellWord(%s, %s) = %s, want %s", tc.goos, tc.in, got, tc.want)
-		}
-	}
-}
-
 // A program that runs from a temporary directory, as the one `go run` builds does, is
 // warned about, because the path a client keeps would not outlast the command.
 func TestWarnIfTemporary(t *testing.T) {

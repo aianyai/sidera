@@ -51,7 +51,7 @@ func (c *command) showDirectory(answer any, node string) error {
 	if c.json {
 		return c.encode(answer)
 	}
-	_, err := io.WriteString(c.out, renderDirectory(c.out, answer.(agentapi.DirectoryResult), node))
+	_, err := io.WriteString(c.out, c.view().Directory(directoryPageOf(answer.(agentapi.DirectoryResult)), node))
 	return err
 }
 

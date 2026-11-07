@@ -5,9 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strings"
 
 	"github.com/aianyai/sidera/internal/datahome"
 )
@@ -62,20 +60,4 @@ func (c *command) isDefaultDataDir(home string) bool {
 		},
 	})
 	return err == nil && home == byDefault
-}
-
-var plainWord = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
-
-// shellWord quotes s for the shell a person pastes the command into on the given
-// platform: always double quotes on Windows, where they are safe in both cmd and
-// PowerShell for every character a user name may hold (', &, ( and ) among them), and
-// single quotes elsewhere unless the word is plain.
-func shellWord(goos, s string) string {
-	if goos == "windows" {
-		return `"` + s + `"`
-	}
-	if plainWord.MatchString(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -41,9 +41,15 @@ and its bound values. A local value stays attached, including a body spelled
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: `result`, which writes the answer of an agent command (JSON with `--json`, the
   layouts below otherwise) through `c.out`.
-- `agent_output.go`: the layouts of the agent commands (`me`, `declare`, `peers`, `directory`,
-  `send`/`reply`/`control`, `ack`, `status <message-id>`), each a function from the stream and the
-  result to text, so a test reads them without a process. They share one convention (see "Human
+- `agent_output.go`: the layouts of the agent commands that only `sidera` has (`me`, `declare`,
+  `ack`, `probe`), each a function from the stream and the result to text, so a test reads them
+  without a process, and the mapping of `peers` and `directory` results to the adapter-protocol
+  types that the SDK package `agentview` takes. `agentview` lays out the rest (`peers`, `directory`,
+  `send`/`reply`/`control`, `status <message-id>`), because the console adapter prints the same
+  results and one implementation keeps the two from drifting; `command.view` (in `output.go`) is
+  `sidera`'s use of it, and the commands in its hints are `sidera`'s, spelled by `sideraCommand`
+  (`output.go`), the one rule for a command the program tells a person to run: `--home <directory>` after the
+  program name when the data directory is not the default. They share one convention (see "Human
   output" in the command-line reference): a line that says what was done, blocks of labelled
   lines, tables with the identifier in the last column, protocol words written as the protocol
   names them, identifiers whole. A new field of an agent result is given its human form here when
@@ -89,7 +95,7 @@ and its bound values. A local value stays attached, including a body spelled
   tests use; the same session is what `update` refreshes the setups with (`managementNode.RefreshSetup` in
   `update.go` runs `runSetup` in refresh mode and puts the result in the update's words). `prompt.go` is the question that `update` and `adapter setup` share, one implementation with two defaults (`askDefaultNo`, `[y/N]`, for `update`; `askDefaultYes`, `[Y/n]`, for the items of `adapter setup`; the end of the input is a no for both), and the
   "no terminal, add --yes" refusal. `program.go` is `programPath`, the path
-  of this program that `update` and `adapter setup` name, and the helpers that go with it: `shellWord`, `warnIfTemporary`, `isDefaultDataDir`. `refuseRemoveWhileSetUp` is the guard `manage` runs before
+  of this program that `update` and `adapter setup` name, and the helpers that go with it: `warnIfTemporary`, `isDefaultDataDir`. `refuseRemoveWhileSetUp` is the guard `manage` runs before
   `adapters.remove`: a `check` of the instance's setup, and a refusal when it has a record.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
   explicit environment inputs, and ordinary-build defaults.

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -29,6 +28,12 @@ import (
 //     are checked where they enter, identifiers and enumerations are ASCII or fixed sets. So
 //     nothing here goes through the sanitizer; text that is not validated at its source
 //     must, when a command starts to print it.
+//
+// The results that the console adapter prints in the same way (the delivery status and
+// control reply of a message, the directory, the peers and the answer to a send) are laid
+// out by the SDK package agentview, which `sidera` calls through [command.view]; this file
+// holds the rest and the mapping of the Agent interface's results to the types that package
+// takes.
 
 // renderMe is `me`.
 func renderMe(s *termout.Stream, r agentapi.MeResult) string {
@@ -105,78 +110,6 @@ func declarationFields(d agentapi.Declaration) []termout.Field {
 	}
 }
 
-// renderPeers is `peers`. The self flag is left out: the node itself is the row whose trust
-// is "self".
-func renderPeers(s *termout.Stream, r agentapi.PeersResult) string {
-	rows := make([][]string, len(r.Nodes))
-	for i, node := range r.Nodes {
-		connection := "not connected"
-		if node.Connected {
-			connection = "connected"
-		}
-		rows[i] = []string{node.Trust, connection, node.Node}
-	}
-	text := s.Table([]string{"Trust", "Connection", "Node"}, rows)
-	if len(r.Nodes) == 1 && r.Nodes[0].Self {
-		text += "\nNo other node is trusted directly.\n"
-	}
-	return text
-}
-
-// renderDirectory is `directory`. node is the node that was asked ("" for this one): the
-// cursor belongs to it, so the command that reads the next page names it too.
-func renderDirectory(s *termout.Stream, r agentapi.DirectoryResult, node string) string {
-	var text string
-	if len(r.Endpoints) == 0 {
-		text = "No endpoints.\n"
-	} else {
-		rows := make([][]string, len(r.Endpoints))
-		for i, ep := range r.Endpoints {
-			rows[i] = []string{ep.Kind, ep.DisplayName, strings.Join(ep.Accepts, ", "), ep.Address}
-		}
-		text = s.Table([]string{"Kind", "Name", "Accepts", "Address"}, rows)
-	}
-	if r.NextCursor != "" {
-		command := "sidera directory"
-		if node != "" {
-			command += " --node " + node
-		}
-		command += " --cursor " + shellWord(runtime.GOOS, r.NextCursor)
-		text += "\nMore endpoints follow. Run " + s.Command(command) + " for the next page.\n"
-	}
-	return text
-}
-
-// sentKind is how a command that sends something words its answer.
-type sentKind struct {
-	// headline says what happened.
-	headline string
-	// next says what to run the status command for.
-	next string
-}
-
-var (
-	messageSent = sentKind{"Message accepted for delivery.", "to see whether it was delivered"}
-	replySent   = sentKind{"Reply accepted for delivery.", "to see whether it was delivered"}
-	controlSent = sentKind{"Control signal accepted for delivery.", "to read the control reply"}
-)
-
-// renderSent is the answer of `send`, `reply` and `control`: the node accepted the message,
-// which is not the same as its being delivered, so the line that says what to run next is
-// part of the answer. A replay is a request the node had already carried out under the same
-// key, which is not a new message.
-func renderSent(s *termout.Stream, kind sentKind, id adapterproto.MessageID, to []string, replayed bool) string {
-	block := s.Block([]termout.Field{
-		{Label: "Message", Value: string(id)},
-		{Label: "To", Value: strings.Join(to, "\n")},
-	})
-	text := s.OK(kind.headline+"\n"+block+"Run "+s.Command("sidera status "+string(id))+" "+kind.next+".") + "\n"
-	if replayed {
-		text += s.Warn("This request was accepted before under the same key; nothing was sent again.") + "\n"
-	}
-	return text
-}
-
 // renderAck is `ack`: one row for each part, the outcome first. An outcome that is not an
 // acknowledgement (the part was not handed out, the lease is not valid, the delivery had
 // already ended) is yellow on a colored stream, so a refusal is seen among the rows that
@@ -196,81 +129,29 @@ func renderAck(s *termout.Stream, r agentapi.AckResult) string {
 	return s.Table([]string{"Outcome", "Part", "Message"}, rows)
 }
 
-// renderStatus is `status <message-id>`: the delivery of each recipient and, once there is
-// one, the control reply. now is what the age of a status reply is counted from.
-func renderStatus(s *termout.Stream, now time.Time, r adapterproto.MessageStatusResult) string {
-	rows := make([][]string, len(r.Recipients))
-	for i, rec := range r.Recipients {
-		state := string(rec.State)
-		if rec.Reason != "" {
-			state += " (" + string(rec.Reason) + ")"
-		}
-		rows[i] = []string{state, string(rec.To)}
+// peersOf is the answer to `peers` as the adapter protocol writes it, which is what the
+// view of agent results takes.
+func peersOf(r agentapi.PeersResult) adapterproto.PeersResult {
+	nodes := make([]adapterproto.PeerNode, len(r.Nodes))
+	for i, n := range r.Nodes {
+		nodes[i] = adapterproto.PeerNode{Node: n.Node, Self: n.Self, Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected}
 	}
-	text := s.Table([]string{"State", "To"}, rows)
-	if r.ControlReply != nil {
-		fields := controlReplyFields(s, now, *r.ControlReply)
-		text += "\n" + s.Bold("Control reply: "+string(r.ControlReply.Signal)) + "\n" + termout.Indent(s.Block(fields), 2)
-	}
-	return text
+	return adapterproto.PeersResult{Nodes: nodes}
 }
 
-// controlReplyFields are the fields of the reply to the signal, whichever it was.
-func controlReplyFields(s *termout.Stream, now time.Time, reply adapterproto.ControlReply) []termout.Field {
-	switch {
-	case reply.Create != nil:
-		return []termout.Field{
-			{Label: "Outcome", Value: reply.Create.Outcome.String()},
-			{Label: "Session endpoint", Value: string(reply.Create.SessionEndpoint)},
-			{Label: "Reason", Value: reasonText(reply.Create.Reason)},
+// directoryPageOf is the answer to `directory` as the adapter protocol writes a page that
+// was given.
+func directoryPageOf(r agentapi.DirectoryResult) adapterproto.DirectoryResult {
+	endpoints := make([]adapterproto.DirectoryEntry, len(r.Endpoints))
+	for i, ep := range r.Endpoints {
+		accepts := make([]adapterproto.EndpointAction, len(ep.Accepts))
+		for j, a := range ep.Accepts {
+			accepts[j] = adapterproto.EndpointAction(a)
 		}
-	case reply.Close != nil:
-		return []termout.Field{
-			{Label: "Outcome", Value: reply.Close.Outcome.String()},
-			{Label: "Reason", Value: reasonText(reply.Close.Reason)},
-		}
-	case reply.Interrupt != nil:
-		return []termout.Field{
-			{Label: "Outcome", Value: reply.Interrupt.Outcome.String()},
-			{Label: "Reason", Value: reasonText(reply.Interrupt.Reason)},
+		endpoints[i] = adapterproto.DirectoryEntry{
+			Address: adapterproto.Address(ep.Address), Kind: adapterproto.EndpointKind(ep.Kind),
+			DisplayName: ep.DisplayName, Description: ep.Description, Accepts: accepts,
 		}
 	}
-	st := reply.Status
-	conditions := make([]string, len(st.Conditions))
-	for i, c := range st.Conditions {
-		conditions[i] = c.String()
-	}
-	if len(conditions) == 0 {
-		conditions = []string{"none"}
-	}
-	width := 0
-	for _, p := range st.Presets {
-		width = max(width, len(p.Name))
-	}
-	presets := make([]string, len(st.Presets))
-	for i, p := range st.Presets {
-		availability := "not available"
-		if p.Available {
-			availability = "available"
-		}
-		presets[i] = fmt.Sprintf("%-*s  %s", width, p.Name, availability)
-	}
-	return []termout.Field{
-		{Label: "Activity", Value: st.Activity.String()},
-		{Label: "Queued messages", Value: fmt.Sprint(st.Queued)},
-		{Label: "Conditions", Value: strings.Join(conditions, ", ")},
-		{Label: "As of", Value: s.Time(time.Unix(st.AsOf, 0), now)},
-		{Label: "Presets", Value: strings.Join(presets, "\n")},
-	}
-}
-
-// reasonText is the name of a reason, or nothing when the reply has none.
-func reasonText[R interface {
-	~uint8
-	fmt.Stringer
-}](reason R) string {
-	if reason == 0 {
-		return ""
-	}
-	return reason.String()
+	return adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: endpoints, NextCursor: r.NextCursor}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
+	"github.com/aianyai/sidera/sdk/go/agentview"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
@@ -245,11 +247,6 @@ var (
 // as a function of the stream they are written on.
 func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 	now := time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC)
-	statusReply := adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
-		Activity: adapterproto.ActivityIdle, Queued: 2, AsOf: now.Add(-3 * time.Minute).Unix(),
-		Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionRuntimeAuth},
-		Presets:    []adapterproto.PresetAvailability{{Name: "default", Available: true}, {Name: "slow", Available: false}},
-	}}
 	trusts := answer[trustView](t, `{"trusted":[{"node":"`+testNodeB+`","credential":"cred1abc","created_at":"2026-10-24T09:00:00Z","not_after":"2027-10-24T09:00:00Z","connected":true}],
 "expectations":[{"node":"`+testNode+`","expires_at":"2026-10-24T10:00:00Z"}],"incoming":[],
 "outgoing":[{"pairing_id":"0123456789abcdef0123456789abcdef","node":"`+testNodeB+`","status":"withdrawn","code":"333 444","reason":"declined"}],"locally_revoked":["`+testNodeB+`x"]}`)
@@ -266,21 +263,6 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 		},
 		"declare": func(s *termout.Stream) string {
 			return renderDeclared(s, agentapi.DeclareResult{Declaration: agentapi.Declaration{Paused: true}})
-		},
-		"peers": func(s *termout.Stream) string {
-			return renderPeers(s, agentapi.PeersResult{Nodes: []agentapi.Peer{
-				{Node: testNode, Self: true, Trust: "self", Connected: true},
-				{Node: testNodeB, Trust: "direct"},
-			}})
-		},
-		"directory": func(s *termout.Stream) string {
-			return renderDirectory(s, agentapi.DirectoryResult{Endpoints: []agentapi.DirectoryEntry{
-				{Address: testAddress, Kind: "session", Accepts: []string{"message.send", "session.close"}},
-				{Address: testRuntime, Kind: "runtime", DisplayName: "work (codex)", Accepts: []string{"session.create", "endpoint.status"}},
-			}, NextCursor: "Zm9v"}, testNodeB)
-		},
-		"send": func(s *termout.Stream) string {
-			return renderSent(s, messageSent, testMessage, []string{testAddress}, true)
 		},
 		"ack": func(s *termout.Stream) string {
 			return renderAck(s, agentapi.AckResult{Items: []adapterproto.PartAck{{MessageID: adapterproto.MessageID(testMessage), Part: 2, Ack: adapterproto.ItemCompleted}}})
@@ -334,12 +316,6 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 		"controller notice": func(s *termout.Stream) string {
 			return renderControllerNotice(s, "Sidera: this session is attached as a controller, but the node cannot wake it (runtime_auth: claude is not logged in). Collect replies with sidera recv.")
 		},
-		"status": func(s *termout.Stream) string {
-			return renderStatus(s, now, adapterproto.MessageStatusResult{
-				Recipients:   []adapterproto.RecipientStatus{{To: adapterproto.Address(testRuntime), State: adapterproto.DeliveryDelivered}},
-				ControlReply: &statusReply,
-			})
-		},
 	}
 	for _, tc := range changes {
 		outs["change: "+tc.name] = func(s *termout.Stream) string {
@@ -358,12 +334,8 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 // An identifier is never shortened, and it comes whole on every state of the stream.
 func TestIdentifiersAreComplete(t *testing.T) {
 	want := map[string][]string{
-		"me":        {testAddress, testNode, testRuntime},
-		"peers":     {testNode, testNodeB},
-		"directory": {testAddress, testRuntime, "--node " + testNodeB},
-		"send":      {testMessage, testAddress},
-		"ack":       {testMessage},
-		"status":    {testRuntime},
+		"me":  {testAddress, testNode, testRuntime},
+		"ack": {testMessage},
 		// The node of a status, the node and the peer id of a network and every address.
 		"node status":   {testNode, "/Users/me/.sidera"},
 		"network show":  {testNode, testNodeB, testPeerID, testContact, testQuic, "sidera network address set " + testNode + " " + testContact + " " + testQuic},
@@ -415,9 +387,6 @@ func TestDecorationOnlyStrengthensTheSameWords(t *testing.T) {
 			t.Errorf("%s: a stream that is not colored got an escape sequence:\n%q", name, decorated)
 		}
 		colored := render(newStream(true, true))
-		if name == "send" && !escapeSequence.MatchString(colored) {
-			t.Errorf("%s: a colored stream got no color:\n%q", name, colored)
-		}
 		// The outcome of a part that was not acknowledged is yellow, the one that was is not.
 		if name == "ack refused" {
 			if !strings.Contains(colored, "\x1b[33mrefused_lease\x1b[0m") {
@@ -441,75 +410,78 @@ func TestDecorationOnlyStrengthensTheSameWords(t *testing.T) {
 	}
 }
 
-// Every item of a control reply that an agent acts on is in the text: the endpoint of a
-// created session, why a creation or an action did not go through, and what a status says.
-func TestControlReplyShowsEveryField(t *testing.T) {
-	now := time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC)
-	runtimeNode := testNodeB
+// The results that `sidera` shares with the console adapter are laid out by the SDK package
+// agentview, whose own tests cover the layouts; what only the CLI shows is the mapping of
+// each command's result to the form that package takes, and that the commands the text tells
+// the reader to run are `sidera`'s.
+func TestSharedLayoutsAreCalledWithSideraCommands(t *testing.T) {
+	const runtimeEndpoint = "ep1zjgq8d4n0w6m2c8x4v0b6n2m8q4w0e6r2t8y4u0i6o2p8a"
 	for _, tc := range []struct {
-		name  string
-		reply adapterproto.ControlReply
-		want  []string
+		name string
+		show func(c *command) error
+		want []string
 	}{
-		{"created", adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate, Create: &adapterproto.ControlCreateReply{
-			Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: "ep1newsession",
-		}}, []string{"session.create", "created", "Session endpoint ep1newsession"}},
-		{"unconfirmed", adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate, Create: &adapterproto.ControlCreateReply{
-			Outcome: adapterproto.CreateReplyUnconfirmed, SessionEndpoint: "ep1newsession", Reason: adapterproto.CreateReasonReadyTimeout,
-		}}, []string{"unconfirmed", "Session endpoint ep1newsession", "ready_timeout"}},
-		{"failed", adapterproto.ControlReply{Signal: adapterproto.SignalSessionCreate, Create: &adapterproto.ControlCreateReply{
-			Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonPresetUnavailable,
-		}}, []string{"failed", "preset_unavailable"}},
-		{"closed", adapterproto.ControlReply{Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{
-			Outcome: adapterproto.CloseReplyClosed,
-		}}, []string{"session.close", "closed"}},
-		{"close unconfirmed", adapterproto.ControlReply{Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{
-			Outcome: adapterproto.CloseReplyUnconfirmed, Reason: adapterproto.CloseReasonTurnStillRunning,
-		}}, []string{"close_unconfirmed", "turn_still_running"}},
-		{"interrupt failed", adapterproto.ControlReply{Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{
-			Outcome: adapterproto.InterruptReplyFailed, Reason: adapterproto.InterruptReasonNativeError,
-		}}, []string{"session.interrupt", "failed", "native_error"}},
-		{"interrupt stopped", adapterproto.ControlReply{Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{
-			Outcome: adapterproto.InterruptReplyStopped,
-		}}, []string{"stopped"}},
-		{"status", adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
-			Activity: adapterproto.ActivityBusy, Queued: 4, AsOf: now.Add(-90 * time.Second).Unix(),
-			Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionRuntimeAuth},
-			Presets:    []adapterproto.PresetAvailability{{Name: "default", Available: true}, {Name: "slow", Available: false}},
-		}}, []string{"endpoint.status", "busy", "4", "2026-11-07 01:58 UTC (2 min ago)", "adapter_offline, runtime_auth", "default available", "slow not available"}},
-		{"status without presets or conditions", adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
-			Activity: adapterproto.ActivityIdle, AsOf: now.Unix(),
-		}}, []string{"idle", "none"}},
+		{"peers", func(c *command) error {
+			return c.result(agentapi.PeersResult{Nodes: []agentapi.Peer{
+				{Node: testNode, Self: true, Trust: "self", Connected: true},
+				{Node: testNodeB, Trust: "direct"},
+			}})
+		}, []string{"self connected " + testNode, "direct not connected " + testNodeB}},
+		{"directory", func(c *command) error {
+			return c.showDirectory(agentapi.DirectoryResult{Endpoints: []agentapi.DirectoryEntry{
+				{Address: testAddress, Kind: "session", Accepts: []string{"message.send", "session.close"}},
+				{Address: testRuntime, Kind: "runtime", DisplayName: "work (codex)", Accepts: []string{"session.create", "endpoint.status"}},
+			}, NextCursor: "Zm9v"}, testNodeB)
+		}, []string{"session - message.send, session.close " + testAddress, "runtime work (codex) session.create, endpoint.status " + testNodeB + "/" + runtimeEndpoint,
+			"Run `sidera directory --node " + testNodeB + " --cursor Zm9v` for the next page."}},
+		{"send", func(c *command) error {
+			return c.showSent("send")(agentapi.SendResult{MessageID: testMessage, To: []string{testAddress}, Replayed: true})
+		}, []string{"Message accepted for delivery.", "To " + testAddress, "Run `sidera status " + testMessage + "` to see whether it was delivered."}},
+		{"reply", func(c *command) error {
+			return c.showSent("reply")(agentapi.SendResult{MessageID: testMessage, To: []string{testAddress}})
+		}, []string{"Reply accepted for delivery.", "Run `sidera status " + testMessage + "` to see whether it was delivered."}},
+		{"control", func(c *command) error {
+			return c.showSent("control")(agentapi.ControlResult{MessageID: testMessage, To: testRuntime})
+		}, []string{"Control signal accepted for delivery.", "To " + testRuntime, "Run `sidera status " + testMessage + "` to read the control reply."}},
+		{"status", func(c *command) error {
+			return c.result(adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{
+				{To: adapterproto.Address(testRuntime), State: adapterproto.DeliveryDelivered}}})
+		}, []string{"delivered " + testRuntime}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, st := range streams {
-				out := renderStatus(newStream(st.decorated, st.colored), now, adapterproto.MessageStatusResult{
-					Recipients:   []adapterproto.RecipientStatus{{To: adapterproto.Address(runtimeNode + "/ep1runtime"), State: adapterproto.DeliveryDelivered}},
-					ControlReply: &tc.reply,
-				})
-				plain := squash(markerPrefix.ReplaceAllString(escapeSequence.ReplaceAllString(out, ""), "$1"))
-				for _, w := range tc.want {
-					if !strings.Contains(plain, w) {
-						t.Errorf("%s stream: %q is missing from\n%s", st.name, w, plain)
-					}
-				}
+		var out bytes.Buffer
+		c := commandOn(&out)
+		c.Getenv = func(string) string { return "" }
+		if err := tc.show(c); err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(squash(out.String()), want) {
+				t.Errorf("%s: %q is missing from\n%s", tc.name, want, out.String())
 			}
-		})
+		}
 	}
 }
 
-// A delivery that was rejected says why, and a message with several recipients has a row for each.
-func TestStatusRowsPerRecipient(t *testing.T) {
-	out := renderStatus(newStream(false, false), time.Now(), adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{
-		{To: adapterproto.Address(testAddress), State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectEndpointDeclined},
-		{To: adapterproto.Address(testRuntime), State: adapterproto.DeliveryQueued},
-	}})
-	want := "STATE                           TO\n" +
-		"rejected (endpoint_declined)    " + testAddress + "\n" +
-		"queued                          " + testRuntime + "\n"
-	// The widths follow the cells, so compare the cells and not the padding.
-	if strings.Join(strings.Fields(out), " ") != strings.Join(strings.Fields(want), " ") {
-		t.Errorf("status:\n%s", out)
+// A command the text tells the reader to run reaches the node the command that printed it
+// acted on: a data directory that is not the default is named by --home, and the default one
+// is not.
+func TestHintsNameTheDataDirectoryWhenItIsNotTheDefault(t *testing.T) {
+	home := t.TempDir()
+	for _, tc := range []struct{ name, home, want string }{
+		{"another directory", home, "`sidera --home " + agentview.ShellWord(runtime.GOOS, home) + " status " + testMessage + "`"},
+		{"the default directory", "", "`sidera status " + testMessage + "`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			c := commandOn(&out)
+			c.home, c.Getenv = tc.home, func(string) string { return "" }
+			if err := c.showSent("send")(agentapi.SendResult{MessageID: testMessage, To: []string{testAddress}}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Errorf("%q is missing from\n%s", tc.want, out.String())
+			}
+		})
 	}
 }
 
@@ -543,7 +515,6 @@ func TestDeclarationSenders(t *testing.T) {
 func TestEmptyResultsAreSentences(t *testing.T) {
 	s := newStream(false, false)
 	for name, tc := range map[string]struct{ got, want string }{
-		"directory":  {renderDirectory(s, agentapi.DirectoryResult{}, ""), "No endpoints.\n"},
 		"ack":        {renderAck(s, agentapi.AckResult{}), "No parts were acknowledged.\n"},
 		"endpoints":  {renderEndpoints(s, answer[endpointsView](t, `{"endpoints":[]}`)), "No endpoints.\n"},
 		"alerts":     {renderAlerts(s, answer[alertsView](t, `{"alerts":[]}`), false), "No open alerts.\n"},
@@ -557,8 +528,6 @@ func TestEmptyResultsAreSentences(t *testing.T) {
 		"trust":                {renderTrust(s, trustView{}), "Trusted nodes\nNo node is trusted.\n\nExpectations\nNo node is expected.\n\nIncoming requests\nNo request is waiting for this node.\n\nOutgoing requests\nThis node has made no request.\n\nRevoked here\nNo node is revoked here.\n"},
 		"setup with no items":  {renderSetupReport(s, modeSetup, "work", adaptersetup.Result{Op: adaptersetup.OpPlan, Status: adaptersetup.StatusOK}, false, ""), "Nothing to do for work.\n"},
 		"setup with no answer": {renderSetupReport(s, modeRemove, "work", adaptersetup.Result{Op: adaptersetup.OpRemove, Status: adaptersetup.StatusOK, Items: setupItems}, false, ""), "Nothing was applied for work.\n"},
-		"peers": {renderPeers(s, agentapi.PeersResult{Nodes: []agentapi.Peer{{Node: testNode, Self: true, Trust: "self", Connected: true}}}),
-			"TRUST  CONNECTION  NODE\nself   connected   " + testNode + "\n\nNo other node is trusted directly.\n"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s: got %q, want %q", name, tc.got, tc.want)
@@ -575,14 +544,6 @@ func TestManagementEmptyCellsAreDashes(t *testing.T) {
 	alerts := squash(renderAlerts(newStream(false, false), answer[alertsView](t, alertsAnswer), false))
 	if !strings.Contains(alerts, "- clock_rollback open") {
 		t.Errorf("alerts list:\n%s", alerts)
-	}
-}
-
-// A cell with nothing to show is a dash, so that the columns stay in line.
-func TestEmptyCellsAreDashes(t *testing.T) {
-	out := renderDirectory(newStream(false, false), agentapi.DirectoryResult{Endpoints: []agentapi.DirectoryEntry{{Address: testAddress, Kind: "direct"}}}, "")
-	if !strings.Contains(squash(out), "direct - - "+testAddress) {
-		t.Errorf("directory:\n%s", out)
 	}
 }
 

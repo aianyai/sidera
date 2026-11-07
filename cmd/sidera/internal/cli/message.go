@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
+	"github.com/aianyai/sidera/sdk/go/agentview"
 )
 
 type bodyFlags struct{ text, file string }
@@ -114,13 +115,13 @@ func (c *command) showSent(command string) func(any) error {
 		var text string
 		switch sent := out.(type) {
 		case agentapi.SendResult:
-			kind := messageSent
+			kind := agentview.SentMessage
 			if command == "reply" {
-				kind = replySent
+				kind = agentview.SentReply
 			}
-			text = renderSent(c.out, kind, sent.MessageID, sent.To, sent.Replayed)
+			text = c.view().Sent(kind, sent.MessageID, sent.To, sent.Replayed)
 		case agentapi.ControlResult:
-			text = renderSent(c.out, controlSent, sent.MessageID, []string{sent.To}, sent.Replayed)
+			text = c.view().Sent(agentview.SentControl, sent.MessageID, []string{sent.To}, sent.Replayed)
 		}
 		_, err := io.WriteString(c.out, text)
 		return err
