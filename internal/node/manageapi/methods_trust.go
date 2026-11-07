@@ -255,6 +255,8 @@ func trustListResult(v engine.TrustView) any {
 		CreatedAt  string `json:"created_at"`
 		NotAfter   string `json:"not_after,omitempty"`
 		Connected  bool   `json:"connected"`
+		// Profile is what the node says about itself; left out when none is known.
+		Profile *apiwire.NodeProfile `json:"profile,omitempty"`
 	}
 	type expectation struct {
 		Node      string `json:"node"`
@@ -283,7 +285,7 @@ func trustListResult(v engine.TrustView) any {
 		LocallyRevoked []string      `json:"locally_revoked"`
 	}{[]trusted{}, []expectation{}, []incoming{}, []outgoing{}, []string{}}
 	for _, t := range v.Trusted {
-		row := trusted{Node: t.Node.String(), Credential: t.Credential.String(), CreatedAt: timeText(t.CreatedAt), Connected: t.Connected}
+		row := trusted{Node: t.Node.String(), Credential: t.Credential.String(), CreatedAt: timeText(t.CreatedAt), Connected: t.Connected, Profile: apiwire.NodeProfileOf(t.Profile)}
 		if !t.NotAfter.IsZero() {
 			row.NotAfter = timeText(t.NotAfter)
 		}

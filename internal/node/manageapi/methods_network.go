@@ -60,6 +60,8 @@ var networkShow = &method{
 				Addresses       []string `json:"addresses"`
 				CertificateHeld bool     `json:"certificate_held"`
 				Connected       bool     `json:"connected"`
+				// Profile is what the node says about itself; left out when none is known.
+				Profile *apiwire.NodeProfile `json:"profile,omitempty"`
 			}
 			out := struct {
 				Node    string     `json:"node"`
@@ -75,7 +77,7 @@ var networkShow = &method{
 				Peers:   []peerJSON{},
 			}
 			for _, p := range v.Peers {
-				out.Peers = append(out.Peers, peerJSON{p.Node.String(), nonNil(p.Addresses), p.CertificateHeld, p.Connected})
+				out.Peers = append(out.Peers, peerJSON{p.Node.String(), nonNil(p.Addresses), p.CertificateHeld, p.Connected, apiwire.NodeProfileOf(p.Profile)})
 			}
 			return out, nil
 		}}, nil

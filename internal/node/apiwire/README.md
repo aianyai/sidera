@@ -24,6 +24,7 @@ not import it: the words of the wire never enter the engine.
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
 | `OutcomeUnknown(operationID)` | What a client says when it wrote a request and did not read the answer whole: category and code `outcome_unknown`, the identifier in the details. The one definition the command line, the MCP front end and the test fixture share. |
+| `NodeProfile`, `NodeProfileOf(p)` | A node's profile as an interface words it (`name`, `host_name`, `platform`, `system`, `system_build`, `sidera_version`, each left out when empty, and `as_of` in Unix seconds), made from the engine's `ProfileView`; nil for a node with none, so the member that holds it is left out. |
 | `Category`, `Categories`, `HTTPStatus`, `ExitCode`, `ExitUsage`, `ExitOutcomeUnknown` | The nine categories, the status of the answer for each, and the exit code of the command line for each, with the one exit code no category gives (2, a command used wrongly). |
 
 ## Rules

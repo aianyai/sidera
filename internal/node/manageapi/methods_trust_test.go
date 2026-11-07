@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -275,6 +276,61 @@ func TestTrustListWordsTheViewAndNamesEachRecordByItsState(t *testing.T) {
 	} {
 		if string(result[name]) != want {
 			t.Errorf("%s\n%s\nwant\n%s", name, result[name], want)
+		}
+	}
+}
+
+// A node's profile is a member of its row in trust.list and network.show, with the
+// members the node gave and the time this node got it; a node with none has no
+// member, and a member the node did not give is left out of the profile.
+func TestTheProfileOfANodeIsInItsRowOfTrustListAndNetworkShow(t *testing.T) {
+	r := newRig(t)
+	nodeOf := func(b byte) ident.NodeID {
+		node, err := ident.NodeIDFromBytes([]byte(strings.Repeat(string([]byte{b}), ident.NodeIDLen)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return node
+	}
+	known, unknown := nodeOf(5), nodeOf(6)
+	full := &engine.ProfileView{
+		Name: "build box", HostName: "inuc", Platform: "linux/amd64", System: "Ubuntu 24.04.1 LTS",
+		SystemBuild: "6.8.0-45-generic", SideraVersion: "0.17.0", IssuedAt: t0, AsOf: t0.Add(time.Minute),
+	}
+	partial := &engine.ProfileView{Name: "nameless", AsOf: t0.Add(time.Minute)}
+	asOf := strconv.FormatInt(full.AsOf.Unix(), 10)
+	fullJSON := `{"name":"build box","host_name":"inuc","platform":"linux/amd64","system":"Ubuntu 24.04.1 LTS","system_build":"6.8.0-45-generic","sidera_version":"0.17.0","as_of":` + asOf + `}`
+	partialJSON := `{"name":"nameless","as_of":` + asOf + `}`
+	for _, tc := range []struct {
+		name    string
+		profile *engine.ProfileView
+		want    string // the member of the row, or "" when the row has none
+	}{
+		{"every member given", full, `,"profile":` + fullJSON},
+		{"some members given", partial, `,"profile":` + partialJSON},
+		{"none fetched", nil, ``},
+	} {
+		node := known
+		if tc.profile == nil {
+			node = unknown
+		}
+		r.svc.trust = engine.TrustView{Trusted: []engine.TrustedNode{{Node: node, Credential: record.Digest{1}, CreatedAt: t0, Profile: tc.profile}}}
+		r.svc.network = engine.NetworkView{Peers: []engine.NetworkPeer{{Node: node, Profile: tc.profile}}}
+		wantTrusted := `[{"node":"` + node.String() + `","credential":"01` + strings.Repeat("00", 31) + `","created_at":"2026-10-24T09:00:00Z","connected":false` + tc.want + `}]`
+		wantPeers := `[{"node":"` + node.String() + `","addresses":[],"certificate_held":false,"connected":false` + tc.want + `}]`
+		for method, c := range map[string]struct{ member, want string }{
+			"trust.list": {"trusted", wantTrusted}, "network.show": {"peers", wantPeers},
+		} {
+			status, body := r.post(method, `{}`)
+			var got struct {
+				Result map[string]json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(body, &got); err != nil || status != 200 {
+				t.Fatalf("%s: %d %s %v", method, status, body, err)
+			}
+			if string(got.Result[c.member]) != c.want {
+				t.Errorf("%s, %s:\n%s\nwant\n%s", method, tc.name, got.Result[c.member], c.want)
+			}
 		}
 	}
 }
