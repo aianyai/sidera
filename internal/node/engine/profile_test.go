@@ -352,3 +352,42 @@ func TestTheProfileOfANodeNoLongerTrustedIsDropped(t *testing.T) {
 		t.Fatalf("the peer after it was trusted again = %+v", v)
 	}
 }
+
+// The owner reads the profile of a peer in the views of trust and of the network
+// as in peers: the one fetched, and none for a node nothing was fetched from.
+func TestTheOwnersViewsCarryTheProfileOfAPeer(t *testing.T) {
+	n := newProfileNode(t, imac)
+	peerProfile := func() (trusted, known *engine.ProfileView) {
+		t.Helper()
+		tv, err := n.e.TrustView(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		nv, err := n.e.NetworkView(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tv.Trusted) != 1 || tv.Trusted[0].Node != n.peer.node {
+			t.Fatalf("trusted = %+v", tv.Trusted)
+		}
+		for _, p := range nv.Peers {
+			if p.Node == n.peer.node {
+				return tv.Trusted[0].Profile, p.Profile
+			}
+		}
+		t.Fatalf("the peer is not in the network view: %+v", nv.Peers)
+		return nil, nil
+	}
+	if trusted, known := peerProfile(); trusted != nil || known != nil {
+		t.Fatalf("a profile before any fetch: %+v, %+v", trusted, known)
+	}
+	rec := n.peer.profileIssuedAt(1, t0.Add(time.Minute), "inuc")
+	n.net.servesProfile(n.peer.node, func() (record.Record, error) { return rec, nil })
+	n.fetch(t)
+	trusted, known := peerProfile()
+	for what, got := range map[string]*engine.ProfileView{"trust": trusted, "network": known} {
+		if got == nil || got.Name != "inuc" || got.System != "Ubuntu 24.04.1 LTS" || got.AsOf.IsZero() {
+			t.Errorf("profile in the %s view = %+v", what, got)
+		}
+	}
+}

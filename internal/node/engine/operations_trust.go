@@ -383,6 +383,9 @@ type TrustedNode struct {
 	NotAfter   time.Time
 	// Connected: a member connection to the node is up now.
 	Connected bool
+	// Profile is what the node says about itself; nil when this node has not
+	// fetched one since it started.
+	Profile *ProfileView
 }
 
 // ExpectedNode is an expectation that stands: a node the owner means to pair with.
@@ -440,7 +443,7 @@ func (e *Engine) trustViewAt(now time.Time) TrustView {
 		}
 		v.Trusted = append(v.Trusted, TrustedNode{
 			Node: node, Credential: digest, CreatedAt: c.CreatedAt, NotAfter: c.NotAfter,
-			Connected: e.net != nil && e.net.Connected(node),
+			Connected: e.net != nil && e.net.Connected(node), Profile: e.profileOf(node, now),
 		})
 	}
 	slices.SortFunc(v.Trusted, func(a, b TrustedNode) int {

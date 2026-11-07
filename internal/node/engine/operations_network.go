@@ -145,6 +145,9 @@ type NetworkPeer struct {
 	CertificateHeld bool
 	// Connected: a member connection to the node is up now.
 	Connected bool
+	// Profile is what the node says about itself; nil when this node has not
+	// fetched one since it started.
+	Profile *ProfileView
 }
 
 // NetworkView is network.json with the facts of the running network layer.
@@ -166,7 +169,7 @@ type NetworkView struct {
 type cmdNetworkView struct{ call[NetworkView] }
 
 func (c *cmdNetworkView) gate() gate { return gateRead }
-func (c *cmdNetworkView) run(e *Engine, _ time.Time) {
+func (c *cmdNetworkView) run(e *Engine, now time.Time) {
 	v := NetworkView{Config: e.d.Config.Network()}
 	if e.net != nil {
 		v.PeerID, v.Listening, v.Contact = e.net.PeerID(), e.net.ListenAddrs(), e.net.ContactAddrs()
@@ -182,7 +185,7 @@ func (c *cmdNetworkView) run(e *Engine, _ time.Time) {
 		_, held := e.trust.peers[node]
 		v.Peers = append(v.Peers, NetworkPeer{
 			Node: node, Addresses: v.Config.Peers[node], CertificateHeld: held,
-			Connected: e.net != nil && e.net.Connected(node),
+			Connected: e.net != nil && e.net.Connected(node), Profile: e.profileOf(node, now),
 		})
 	}
 	slices.SortFunc(v.Peers, func(a, b NetworkPeer) int { return strings.Compare(a.Node.String(), b.Node.String()) })
