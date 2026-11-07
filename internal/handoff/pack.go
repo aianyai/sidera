@@ -8,9 +8,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // ExitOK is the exit code of a recv that hands out at least one message. A
@@ -361,9 +364,13 @@ func wireOf(m Message, body string, part, parts int, feedback FeedbackMember) wi
 
 // encodePage encodes a page without HTML escaping and with non-ASCII text as
 // is, so that Chinese text and characters such as < and & are not inflated into
-// \uXXXX sequences that eat the budget. Go still escapes U+2028 and U+2029,
-// which JavaScript hosts treat as line terminators; they are rare enough not to
-// matter for the budget, which is checked against the encoded output anyway.
+// \uXXXX sequences that eat the budget. The page is read by a model and may be
+// printed in a person's terminal, and the encoder writes DEL, the C1 controls
+// and the bidirectional formatting controls as themselves, which a terminal acts
+// on or which reorder the text around them; they are written as \uXXXX like the
+// C0 controls the encoder already escapes, which changes the bytes and not the
+// strings a JSON reader decodes. They are rare, and the budget is checked against
+// the encoded output, so the longer escape costs size and not correctness.
 func encodePage(lease string, msgs []wireMessage, more int) []byte {
 	if msgs == nil {
 		msgs = []wireMessage{}
@@ -374,5 +381,50 @@ func encodePage(lease string, msgs []wireMessage, more int) []byte {
 	if err := enc.Encode(wirePage{Lease: lease, Messages: msgs, More: more}); err != nil {
 		panic(err) // the page holds only strings, ints and bools
 	}
-	return buf.Bytes()
+	return escapePersonText(buf.Bytes())
+}
+
+// escapePersonText rewrites every character that adapterproto.RefusedInPersonText
+// names, and that the JSON encoder left as itself, as a \uXXXX escape. The encoded
+// page is valid UTF-8 in which only string contents are non-ASCII, so a rune from
+// U+007F on is always inside a string; the C0 controls, which include the newline
+// that ends the page, are the encoder's own.
+func escapePersonText(page []byte) []byte {
+	var out []byte // allocated at the first character to rewrite
+	copied := 0
+	for i := 0; i < len(page); {
+		r, size := rune(page[i]), 1
+		if r >= utf8.RuneSelf {
+			r, size = utf8.DecodeRune(page[i:])
+		}
+		if r >= 0x7f && adapterproto.RefusedInPersonText(r) {
+			out = append(out, page[copied:i]...)
+			out = appendJSONEscape(out, r)
+			copied = i + size
+		}
+		i += size
+	}
+	if out == nil {
+		return page
+	}
+	return append(out, page[copied:]...)
+}
+
+// appendJSONEscape appends r as the JSON escape \uXXXX in lowercase hex, or as a
+// pair of them for a character beyond U+FFFF, which JSON writes as a UTF-16
+// surrogate pair. A single escape for such a character would read back as a
+// different one. The digits are written by hand: a page of nothing but escapes is
+// the worst case of the budget, and fmt is twice as slow there.
+func appendJSONEscape(out []byte, r rune) []byte {
+	if r > 0xffff {
+		hi, lo := utf16.EncodeRune(r)
+		return appendUnit(appendUnit(out, hi), lo)
+	}
+	return appendUnit(out, r)
+}
+
+// appendUnit appends one UTF-16 code unit as \uXXXX.
+func appendUnit(out []byte, u rune) []byte {
+	const digits = "0123456789abcdef"
+	return append(out, '\\', 'u', digits[u>>12], digits[u>>8&0xf], digits[u>>4&0xf], digits[u&0xf])
 }

@@ -127,7 +127,10 @@ Delivery blocked:
   that always carry it, so a message is cut in the same parts whether or not a page
   writes it.
   It is encoded with `SetEscapeHTML(false)`: non-ASCII text is emitted as is,
-  except U+2028 and U+2029, which Go always escapes.
+  except the characters of `adapterproto.RefusedInPersonText` (the C0 and C1
+  controls, DEL, U+2028 and U+2029, and the bidirectional formatting controls),
+  which are written as `\uXXXX` so a terminal that shows the page never acts on
+  them. Only the bytes change; a JSON reader decodes the same strings.
 - The budget is checked against the encoded output, in the unit of the budget.
 - Messages are taken in queue order while they fit; the first that does not
   fit ends the page. An oversized first message is handed out alone as

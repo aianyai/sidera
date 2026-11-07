@@ -12,6 +12,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // testLease stands in for the lease ID the delivery side generates.
@@ -355,6 +356,116 @@ func TestPackEncoding(t *testing.T) {
 			}
 			if strings.Contains(string(p.Output), `\u`) {
 				t.Fatalf("output contains an escape sequence: %q", p.Output)
+			}
+		})
+	}
+}
+
+// A body is written by the sender and the page may be printed by a person in a
+// terminal, so a character a terminal acts on or that reorders text must not
+// reach the page as itself. encoding/json escapes the C0 controls; the page also
+// escapes DEL, the C1 controls and the bidirectional formatting controls, and
+// still reads back as the same string.
+func TestPackEscapesWhatATerminalActsOn(t *testing.T) {
+	rows := []struct {
+		rule string
+		body string
+		want string // the escape that must appear in the output
+	}{
+		{"an escape sequence (CSI)", "a\x1b[2Jb", `\u001b[2J`},
+		{"an operating system command ended by BEL", "a\x1b]0;t\x07b", `\u001b]0;t\u0007`},
+		{"DEL", "a\x7fb", `\u007f`},
+		{"the first C1 control", "a\u0080b", `\u0080`},
+		{"the C1 next line", "a\u0085b", `\u0085`},
+		{"the C1 control sequence introducer", "a\u009bb", `\u009b`},
+		{"the last C1 control", "a\u009fb", `\u009f`},
+		{"the Arabic letter mark", "a\u061cb", `\u061c`},
+		{"the left-to-right mark", "a\u200eb", `\u200e`},
+		{"the right-to-left mark", "a\u200fb", `\u200f`},
+		{"the line separator", "a\u2028b", `\u2028`},
+		{"the first embedding control", "a\u202ab", `\u202a`},
+		{"the right-to-left override", "a\u202eb", `\u202e`},
+		{"the first isolate", "a\u2066b", `\u2066`},
+		{"the last isolate", "a\u2069b", `\u2069`},
+		{"a line feed", "a\nb", `\n`},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			p, err := Pack([]Message{msg(t, "m1", r.body)}, testLease, DefaultBudget(), WriteFeedbackMember)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := strings.TrimSuffix(string(p.Output), "\n")
+			if !strings.Contains(body, r.want) {
+				t.Errorf("the page lacks %s: %q", r.want, p.Output)
+			}
+			for _, c := range body {
+				if adapterproto.RefusedInPersonText(c) {
+					t.Errorf("the page holds U+%04X as itself: %q", c, p.Output)
+				}
+			}
+			if got := decode(t, p).Messages[0].Body; got != r.body {
+				t.Errorf("the page reads back as %q, want %q", got, r.body)
+			}
+		})
+	}
+
+	t.Run("text next to the escaped ranges stays as it is", func(t *testing.T) {
+		// Each of U+00A0, U+061B, U+2010, U+2060 and U+206A lies right beside a
+		// refused range and is not refused.
+		body := "\u00a0 \u061b \u2010 \u2060 \u206a 你好 😀 <&>"
+		p, err := Pack([]Message{msg(t, "m1", body)}, testLease, DefaultBudget(), WriteFeedbackMember)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(p.Output), body) {
+			t.Errorf("the page changed text that is not refused: %q", p.Output)
+		}
+	})
+
+	t.Run("the escapes also apply outside the body", func(t *testing.T) {
+		// A part page and a page of an empty queue are built by the same encoder.
+		m := msg(t, "m\u0085", "x")
+		p, err := Part(m, 1, testLease, DefaultBudget(), WriteFeedbackMember)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.ContainsRune(string(p.Output), '\u0085') {
+			t.Errorf("the id of a message was written with a C1 control: %q", p.Output)
+		}
+		if got := decode(t, p).Messages[0].ID; got != m.ID {
+			t.Errorf("the id reads back as %q, want %q", got, m.ID)
+		}
+	})
+}
+
+// The class of refused characters may grow beyond the basic plane (tag characters
+// are the likely addition), and JSON writes such a character as a pair of
+// escapes: one escape of five hex digits is not JSON, and one of four would read
+// back as another character.
+func TestAppendJSONEscape(t *testing.T) {
+	rows := []struct {
+		rule string
+		r    rune
+		want string
+	}{
+		{"DEL", 0x7f, `\u007f`},
+		{"a C1 control", 0x9b, `\u009b`},
+		{"lowercase hex", 0x202e, `\u202e`},
+		{"the last basic-plane character", 0xffff, `\uffff`},
+		{"the first character beyond it", 0x10000, `\ud800\udc00`},
+		{"a tag character", 0xe0001, `\udb40\udc01`},
+		{"the last character", 0x10ffff, `\udbff\udfff`},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			got := appendJSONEscape([]byte("x"), r.r)
+			if string(got) != "x"+r.want {
+				t.Errorf("appendJSONEscape(U+%04X) = %q, want %q", r.r, got, "x"+r.want)
+			}
+			var back string
+			if err := json.Unmarshal([]byte(`"`+string(got[1:])+`"`), &back); err != nil || back != string(r.r) {
+				t.Errorf("the escape reads back as %q (%v), want %q", back, err, string(r.r))
 			}
 		})
 	}

@@ -53,7 +53,9 @@ func TestUTF16Len(t *testing.T) {
 	}
 }
 
-// randomText mixes ASCII, punctuation, CJK, accented and emoji runes.
+// randomText mixes ASCII, punctuation, CJK, accented and emoji runes, and
+// characters that the page writes as six-byte escapes (DEL, C1 and
+// bidirectional controls), so a page made of them must fit its budget too.
 func randomText(rng *rand.Rand, runes int) string {
 	pools := []string{
 		"abcdefghijklmnopqrstuvwxyz ABCXYZ0123456789",
@@ -61,6 +63,7 @@ func randomText(rng *rand.Rand, runes int) string {
 		"你好世界这是一条消息中文日本語",
 		"éüñßø",
 		"😀🚀🎉",
+		"\u0085\u009b\u202e\u2066\x7f",
 	}
 	var b strings.Builder
 	for i := 0; i < runes; i++ {

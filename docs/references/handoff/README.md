@@ -144,7 +144,20 @@ checks that the model saw it before acknowledging for the agent.
   (`id`, `from`) are separate fields from `body`; a part handed out before
   carries `possibly_duplicate`, and a message from the system endpoint carries
   `feedback` when the page is asked to write it. Encoded with HTML escaping off and
-  non-ASCII text as is; Go always escapes U+2028 and U+2029.
+  non-ASCII text as is, except that every character a terminal acts on or that
+  reorders text is written as a JSON escape: `\uXXXX` in lowercase hex, or the
+  short form Go uses for `\n`, `\r`, `\t`, `\b` and `\f`. The class is the C0
+  controls and U+2028 and U+2029, which Go's encoder escapes, and also DEL (U+007F),
+  the C1 controls (U+0080 to U+009F) and the bidirectional formatting controls
+  (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069). It is
+  `adapterproto.RefusedInPersonText`, the same definition that decides what a
+  display name or a description may hold, so the page and those fields never
+  disagree about which characters are dangerous. A character beyond U+FFFF, should
+  the class ever hold one, is written as the pair of escapes of its UTF-16
+  surrogates, which is how JSON spells it. Only the bytes of the page change: any
+  JSON reader decodes the same strings, and the page is printed as it is, so a
+  person who runs `recv` in a terminal sees `\u009b` and not a control sequence.
+  Chinese text and emoji stay as they are.
 - `feedback: true` marks a message whose sender is the system endpoint, the
   node's own channel feedback; no request can send as that endpoint, so the member
   is as reliable as `from`. It is derived from the sender where the wire form of a
@@ -349,7 +362,12 @@ The delivery side that these rules call into is described in
   flagged). The cut therefore reserves room for the widest of each rather than
   the actual one. Cutting with the actual flag was rejected: parts fetched with
   different flags would overlap or leave gaps, and the model would read a body
-  with text missing.
+  with text missing. The same holds across an upgrade: a release that changes
+  the encoding of the page (which characters are escaped, for one) can shift
+  where a body in the middle of a parted handout is cut, which is the hazard a
+  change of budget has. If the number of parts changes, the message is closed as
+  unknown, which is visible; if it stays the same, a few characters can overlap
+  or be skipped.
 - **A plain `recv` resumes a chunked message.** Otherwise every `recv` would hand
   out part 1 again, and a model that simply calls `recv` would never get past
   it. The delivery side knows which parts were acknowledged and passes the next
@@ -386,11 +404,17 @@ The delivery side that these rules call into is described in
   adapter declares nothing, so it must be safe on every path measured: the
   smallest limit, less the margin. Limits in characters and in tokens compare
   because the estimate is never below the character count.
-- **JSON without escaping.** Escaping Chinese text as `\uXXXX` multiplies its
-  encoded size by two or more and HTML escaping inflates `<`, `>` and `&`, both
-  silently eating the budget. Go's encoder still escapes U+2028 and U+2029,
-  which are rare; the budget is checked against the encoded output, so they cost
-  size, not correctness.
+- **JSON without escaping, except for what a terminal acts on.** Escaping Chinese
+  text as `\uXXXX` multiplies its encoded size by two or more and HTML escaping
+  inflates `<`, `>` and `&`, both silently eating the budget. The characters of
+  the refused class (see above) are the exception: a message body is written by
+  a sender who may not be trusted and the page may be printed in a terminal, where
+  the C1 controls, DEL and the bidirectional controls act as themselves or reorder
+  the text around them. They are rare in honest text, and every budget is checked
+  against the encoded page (the cut points of a message, each page and each part
+  are measured on the bytes that will be printed), so an escape that costs six
+  bytes where the character cost two or three makes a body split into more parts
+  and never makes a page too large.
 - **Exit code 0.** A runtime may show far less of the output of a command that
   fails (about 10,000 characters on one measured path), so a delivery must never
   exit non-zero.

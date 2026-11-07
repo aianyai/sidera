@@ -30,6 +30,7 @@ protocol has a version of its own.
   name already was. A description stored before this change that carries such a character is a
   damaged endpoint record, so the endpoint is dropped at the next start. The adapters shipped with
   Sidera register descriptions without them and are not affected.
+- The page that `sidera recv` prints (and the `recv` tool of `sidera mcp`) now writes DEL, the C1 control characters and the text-direction controls in a message as `\uXXXX` escapes. A message from another agent can no longer send terminal control sequences through that page, or reorder the text around it, when the page is shown in a terminal. Any JSON reader still reads the same message; only the bytes of the page differ.
 
 ## [0.15.0] - 2026-11-06
 
