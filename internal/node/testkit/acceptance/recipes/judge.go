@@ -167,7 +167,7 @@ func (d *DeliveryEvidence) RecvAndAck(e scenario.Env, a fakeagent.Agent) error {
 			return fmt.Errorf("ack returned %d outcomes for %d visible parts", len(ack.Items), len(items))
 		}
 		for i, got := range ack.Items {
-			if got.MessageID != items[i].MessageID || got.Part != items[i].Part || (got.Ack != adapterproto.ItemRecorded && got.Ack != adapterproto.ItemCompleted && got.Ack != adapterproto.ItemDuplicate) {
+			if got.MessageID != items[i].MessageID || got.Part != items[i].Part || !got.Ack.Acknowledged() {
 				return fmt.Errorf("ack of visible part %+v returned %+v", items[i], got)
 			}
 		}

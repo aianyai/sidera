@@ -10,6 +10,11 @@ protocol has a version of its own.
 
 ### Added
 
+- **Go SDK: `adapterproto.ItemAck.Acknowledged()` says which acknowledgement outcomes count as the part
+  being acknowledged.** `recorded`, `completed` and `duplicate` do; `refused_no_handout`,
+  `refused_lease` and `too_late` are refusals. An adapter that reports a part the node did not
+  acknowledge asks the method instead of listing the outcomes itself; `sidera ack` and the console
+  and Hermes adapters now do.
 - **Go SDK: `termout`, the terminal output of a program that prints for people.** A new package for
   adapter programs that want their output to look and behave like Sidera's. A `Stream` knows whether
   its output is decorated (markers) and colored, from the output being a terminal and from a color

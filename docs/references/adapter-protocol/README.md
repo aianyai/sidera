@@ -1323,7 +1323,7 @@ except the observations that are plain calls (marked "call"):
 | `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
 | `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
 | `recv.observed` verdict and reason | call: `handoff.CheckBeforeAck` over the observed text and the stored page output; allowed settles every part through `delivery.Record.Ack`. The reasons and the item acknowledgements are named by `AckReason` and `ItemAck` |
-| item acknowledgement | `recorded`, `completed`, `duplicate`, `refused_no_handout`, `refused_lease`, `too_late`: the names of the `delivery` verdicts (a refused token cannot occur: the connection owns its endpoints). A part the endpoint was never given is `refused_no_handout` whatever the reason: a part number beyond the message (`delivery.Record.Ack`), and a message the daemon holds nothing of for the endpoint. |
+| item acknowledgement | `recorded`, `completed`, `duplicate`, `refused_no_handout`, `refused_lease`, `too_late`: the names of the `delivery` verdicts (a refused token cannot occur: the connection owns its endpoints). A part the endpoint was never given is `refused_no_handout` whatever the reason: a part number beyond the message (`delivery.Record.Ack`), and a message the daemon holds nothing of for the endpoint. The first three acknowledge the part and the other three refuse it; `ItemAck.Acknowledged()` is that rule, and a program that tells the two apart calls it. |
 
 ### Why
 

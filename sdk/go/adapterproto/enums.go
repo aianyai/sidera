@@ -470,6 +470,17 @@ var itemAcks = []ItemAck{ItemRecorded, ItemCompleted, ItemDuplicate, ItemRefused
 // Valid reports whether a is a known outcome.
 func (a ItemAck) Valid() bool { return slices.Contains(itemAcks, a) }
 
+// Acknowledged reports whether the part counts as acknowledged: the node recorded the
+// acknowledgement, completed the message with it, or had already recorded it. Any other outcome is
+// a refusal: this call did not acknowledge the part.
+func (a ItemAck) Acknowledged() bool {
+	switch a {
+	case ItemRecorded, ItemCompleted, ItemDuplicate:
+		return true
+	}
+	return false
+}
+
 // Disposition is how an adapter handled a request the native runtime sent it.
 type Disposition string
 

@@ -36,6 +36,7 @@ for what each message means and why the protocol is shaped this way.
 | `TrueOnly` | A flag that is sent as `true` or omitted; its decoder refuses an explicit `false` |
 | `WakeInfo`, `MaxWakeEntries` | What an adapter needs to deliver a prompt to an attached session: at most 16 entries keyed like environment variables, opaque to the daemon, never written down or logged; carried by `SessionAttachParams` and by an attached `SessionAttach` entry |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
+| `ItemAck`, `ItemAck.Acknowledged()` | The outcome of acknowledging one part. `Acknowledged()` is the one rule for which outcomes count as the part being acknowledged (`recorded`, `completed`, `duplicate`); every program that reports or acts on an outcome asks it instead of naming the outcomes |
 | `MaxAckItems` | The existing limit of 1024 entries in an acknowledgement, shared with other readers of the same protocol values |
 
 ## Rules

@@ -173,9 +173,7 @@ func (c *client) show(ctx context.Context, page adapterproto.RecvPage) int {
 		return c.errorf(fmt.Errorf("acknowledging what was printed: %w", err))
 	}
 	for _, it := range acked.Ack.Items {
-		switch it.Ack {
-		case adapterproto.ItemRecorded, adapterproto.ItemCompleted, adapterproto.ItemDuplicate:
-		default:
+		if !it.Ack.Acknowledged() {
 			fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: message %s part %d was not acknowledged (%s)\n", it.MessageID, it.Part, it.Ack)
 		}
 	}

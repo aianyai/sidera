@@ -179,9 +179,7 @@ func renderAck(s *termout.Stream, r agentapi.AckResult) string {
 	rows := make([][]string, len(r.Items))
 	for i, item := range r.Items {
 		outcome := string(item.Ack)
-		switch item.Ack {
-		case adapterproto.ItemRecorded, adapterproto.ItemCompleted, adapterproto.ItemDuplicate:
-		default:
+		if !item.Ack.Acknowledged() {
 			outcome = s.Yellow(outcome)
 		}
 		rows[i] = []string{outcome, fmt.Sprint(item.Part), string(item.MessageID)}

@@ -151,8 +151,7 @@ func (l *ackedLog) handedOut(who ident.EndpointID, page adapterproto.RecvPage) {
 func (l *ackedLog) acknowledged(who ident.EndpointID, items []adapterproto.PartAck) {
 	var fs []fact
 	for _, it := range items {
-		switch it.Ack {
-		case adapterproto.ItemRecorded, adapterproto.ItemCompleted, adapterproto.ItemDuplicate:
+		if it.Ack.Acknowledged() {
 			fs = append(fs, fact{kind: factAcked, who: who, msg: delivery.MessageID(it.MessageID), part: it.Part})
 		}
 	}

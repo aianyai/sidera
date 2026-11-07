@@ -234,9 +234,7 @@ func (r *receiver) acknowledge(ctx context.Context, ep Endpoint, parts []heldPar
 			return
 		}
 		for _, it := range res.Items {
-			switch it.Ack {
-			case adapterproto.ItemRecorded, adapterproto.ItemCompleted, adapterproto.ItemDuplicate:
-			default:
+			if !it.Ack.Acknowledged() {
 				r.log.Warn("a message part was not acknowledged", "message", it.MessageID, "part", it.Part, "ack", it.Ack)
 			}
 		}
