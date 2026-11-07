@@ -258,10 +258,10 @@ func (c *client) view(inv *invocation) agentview.View {
 func (inv *invocation) command(args ...string) string {
 	words := []string{ProgramName, args[0]}
 	if inv.homeGiven {
-		words = append(words, "--home", agentview.ShellWord(runtime.GOOS, inv.home))
+		words = append(words, "--home", termout.ShellWord(runtime.GOOS, inv.home))
 	}
 	if inv.instance != AdapterID {
-		words = append(words, "--instance", agentview.ShellWord(runtime.GOOS, inv.instance))
+		words = append(words, "--instance", termout.ShellWord(runtime.GOOS, inv.instance))
 	}
 	return strings.Join(append(words, args[1:]...), " ")
 }

@@ -22,6 +22,7 @@ width).
 | `Wrap`, `Stream.TextWidth` | Prose |
 | `SanitizeLine`, `SanitizeText` | Text from outside the program |
 | `Stream.Time`, `Timestamp`, `Duration`, `Bytes` | Written forms of values |
+| `ShellWord(goos, word)` | A word of a command the program tells the reader to run, quoted for the shell of the given platform: single quotes unless the word is plain, always double quotes on Windows (single quotes are part of the word in `cmd`) |
 
 ## Rules
 

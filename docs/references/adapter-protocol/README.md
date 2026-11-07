@@ -1145,8 +1145,7 @@ is authoritative.
   `TestAServedAdapterAnswersAndSends`.
 - `sdk/go/agentview`: the human-readable form of an endpoint's view of the network, in one
   place for the programs that print it (`view.go`: the delivery status and control reply of a
-  message, a directory page, the peers and the answer to a send, over `termout`; `shell.go`:
-  quoting a word in a command to copy). Tests: `TestControlReplyShowsEveryField`,
+  message, a directory page, the peers and the answer to a send, over `termout`). Tests: `TestControlReplyShowsEveryField`,
   `TestNextPageCommandIsTheCallersOwn`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy. Nearly every

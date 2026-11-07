@@ -1,7 +1,7 @@
 // Package agentview writes the results that every program showing an endpoint's view of the
 // network prints for people: the delivery state of a message and the control reply to it, a
-// page of the directory, the list of peer nodes, the answer to a send, and the quoting of a
-// word in a command to copy. `sidera` and the console adapter print the same results; one
+// page of the directory, the list of peer nodes and the answer to a send. `sidera` and the
+// console adapter print the same results; one
 // implementation keeps them from drifting, and a third-party adapter with a command line of
 // its own gets the same words and layout by calling it.
 //
@@ -33,7 +33,7 @@ type View struct {
 	Out *termout.Stream
 	// Command spells a command of the calling program as a person types it, from the words
 	// after the program's name: the command, then its arguments, those that can hold any
-	// text already quoted for the shell with [ShellWord]. It adds what the program was run
+	// text already quoted for the shell with [termout.ShellWord]. It adds what the program was run
 	// with that selects the node and the instance it acts on (a data directory, an instance
 	// name), so that the hint reaches the same one as the command that printed it. The
 	// hints that tell the reader what to run next rely on the program having the commands
@@ -83,7 +83,7 @@ func (v View) Directory(r adapterproto.DirectoryResult, node string) string {
 		if node != "" {
 			args = append(args, "--node", node)
 		}
-		args = append(args, "--cursor", ShellWord(runtime.GOOS, r.NextCursor))
+		args = append(args, "--cursor", termout.ShellWord(runtime.GOOS, r.NextCursor))
 		text += "\nMore endpoints follow. Run " + v.Out.Command(v.Command(args...)) + " for the next page.\n"
 	}
 	return text

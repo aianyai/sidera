@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ func (c *client) create(ctx context.Context, inv *invocation) int {
 			return exitFailed
 		}
 		if !time.Now().Add(inv.pollEvery).Before(deadline) {
-			fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: no reply within %s; ask again with: %s\n", inv.timeout, inv.command("status", quote(string(id))))
+			fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: no reply within %s; ask again with: %s\n", inv.timeout, inv.command("status", termout.ShellWord(runtime.GOOS, string(id))))
 			return exitUnsettled
 		}
 		select {

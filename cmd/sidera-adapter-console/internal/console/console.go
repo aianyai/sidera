@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
@@ -133,5 +132,3 @@ func runServe(s adapterkit.Streams) int {
 type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
-
-func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

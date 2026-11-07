@@ -37,8 +37,9 @@ for `sidera adapter install` (see the reference for the three commands).
   SDK package `sidera` uses for the same results; the console passes `invocation.command`, which
   spells the commands the hints name for the node and instance the command acted on (`--home` when
   it was given, `--instance` when it is not `console`, both after the command name), and keeps in `sessionAddress` the completion of a session endpoint that
-  only `new` needs. `quote` stays for the timeout hint of `new`: it always uses single quotes, even for a plain
-  word and on Windows, where `agentview.ShellWord` leaves a plain word bare and uses double quotes.
+  only `new` needs. The `status` command that `new` prints after a timeout is spelled the same way, and its
+  words are quoted with `termout.ShellWord`, the one quoting rule of the programs (the console used to have a
+  `quote` that always used single quotes, which `cmd` on Windows passes on as part of the word).
 - The client's output goes through one `termout` stream built from `Env` when the client is made
   (`newClient`); the adapter programs have no `--color` flag, so the environment variables alone decide
   the decoration. Error lines (`sidera-adapter-console: <message>`) are written as they are.

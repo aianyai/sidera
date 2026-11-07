@@ -14,7 +14,9 @@
 //   - paragraph wrapping ([Wrap]) and indenting ([Indent]);
 //   - sanitizing of text the program did not write itself ([SanitizeLine],
 //     [SanitizeText]);
-//   - the written form of times, byte counts and durations.
+//   - the written form of times, byte counts and durations;
+//   - the quoting of a word in a command the program tells the reader to run
+//     ([ShellWord]).
 //
 // Decorated means a person is looking at a terminal, or asked to see the
 // decorations anyway: lines get markers. Colored means escape sequences are written:

@@ -425,7 +425,7 @@ func TestManagementNodeRefreshSetup(t *testing.T) {
 // quoting of the shell are known, and is given whenever there is drift to put right.
 func TestManagementNodeRefreshSetupFix(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the quoting differs on Windows; agentview.ShellWord has its own test")
+		t.Skip("the quoting differs on Windows; termout.ShellWord has its own test")
 	}
 	driftOf := func(t *testing.T, env setupEnv, raw string) update.SetupReport {
 		r := newRig(t, clientA)

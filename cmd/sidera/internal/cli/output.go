@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/agentview"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 // view is the layout of the agent results that `sidera` shares with the console adapter,
@@ -33,7 +34,7 @@ func (c *command) hint(args ...string) string {
 func sideraCommand(home string, homeIsDefault bool, args ...string) string {
 	words := []string{"sidera"}
 	if !homeIsDefault {
-		words = append(words, "--home", agentview.ShellWord(runtime.GOOS, home))
+		words = append(words, "--home", termout.ShellWord(runtime.GOOS, home))
 	}
 	return strings.Join(append(words, args...), " ")
 }

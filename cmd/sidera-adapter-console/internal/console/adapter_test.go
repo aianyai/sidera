@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
-	"github.com/aianyai/sidera/sdk/go/agentview"
 	"github.com/aianyai/sidera/sdk/go/peer"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 const (
@@ -312,10 +312,12 @@ func TestNewThatGetsNoReplyIsUnsettled(t *testing.T) {
 	h := newHarness(t, &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult {
 		return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryAccepted}}}
 	}})
-	code := h.run("new", "node-2/rt", "--preset", "dev", "--timeout", "1")
-	// 10 is the code of `sidera` for an unknown outcome.
-	if code != 10 || !strings.Contains(h.errOut.String(), "status 'msg-out-1'") {
-		t.Errorf("exit %d, stderr %q, want exit 10 pointing at status", code, h.errOut.String())
+	code := h.run("new", "node-2/rt", "--preset", "dev", "--timeout", "1", "--instance", "work")
+	// 10 is the code of `sidera` for an unknown outcome. The command to ask again is spelled
+	// like the hints of the other commands: the instance it was given, the id quoted for the shell.
+	want := "ask again with: sidera-adapter-console status --instance " + termout.ShellWord(runtime.GOOS, "work") + " " + termout.ShellWord(runtime.GOOS, "msg-out-1") + "\n"
+	if code != 10 || !strings.Contains(h.errOut.String(), want) {
+		t.Errorf("exit %d, stderr %q, want exit 10 and %q", code, h.errOut.String(), want)
 	}
 }
 
@@ -553,7 +555,7 @@ func TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem(t *testing.T) {
 // program takes its flags, and a directory given by SIDERA_HOME is not repeated.
 func TestHintsKeepTheHomeAndInstanceTheCommandWasGiven(t *testing.T) {
 	home := t.TempDir()
-	selected := "--home " + agentview.ShellWord(runtime.GOOS, home) + " --instance " + agentview.ShellWord(runtime.GOOS, "work")
+	selected := "--home " + termout.ShellWord(runtime.GOOS, home) + " --instance " + termout.ShellWord(runtime.GOOS, "work")
 	d := &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, NextCursor: "c-2",
 		Endpoints: []adapterproto.DirectoryEntry{}}}
 	h := newHarness(t, d)
@@ -567,7 +569,7 @@ func TestHintsKeepTheHomeAndInstanceTheCommandWasGiven(t *testing.T) {
 		{"directory", []string{"directory", "--node", "node-2", "--home", home, "--instance", "work"},
 			"Run `sidera-adapter-console directory " + selected + " --node node-2 --cursor c-2` for the next page."},
 		{"the environment names the directory", []string{"directory", "--instance", "work"},
-			"Run `sidera-adapter-console directory --instance " + agentview.ShellWord(runtime.GOOS, "work") + " --cursor c-2` for the next page."},
+			"Run `sidera-adapter-console directory --instance " + termout.ShellWord(runtime.GOOS, "work") + " --cursor c-2` for the next page."},
 		{"the default instance", []string{"send", "--to", "node-3/agent", "--body", "b"},
 			"Run `sidera-adapter-console status msg-out-"},
 	} {

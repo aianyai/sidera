@@ -2,8 +2,8 @@
 
 The human-readable form of the results that every program showing an endpoint's view of the
 network prints: the delivery state of a message and the control reply to it, a page of the
-directory, the list of peer nodes, the answer to a send, a reply or a control signal, and the
-quoting of a word in a command to copy. `sidera` and the console adapter show the same results;
+directory, the list of peer nodes and the answer to a send, a reply or a control signal.
+`sidera` and the console adapter show the same results;
 one implementation keeps them from drifting, and a third-party adapter with a command line of its
 own gets the same words and layout by calling it. The package comment is the overview; this file
 gives the rules a change has to keep. Imports: the standard library, `adapterproto` and
@@ -18,7 +18,6 @@ gives the rules a change has to keep. Imports: the standard library, `adapterpro
 | `View.Directory(page, node)` | A page of endpoints, the sentence for an empty one, and the command for the next page |
 | `View.Peers(result)` | The nodes the endpoint can address |
 | `View.Sent(kind, id, to, replayed)` | The answer to a send, a reply (`SentReply`) or a control signal (`SentControl`) |
-| `ShellWord(goos, word)` | A word quoted for the shell of the given platform |
 
 The methods take the results as the adapter protocol names them (`adapterproto.MessageStatusResult`,
 `DirectoryResult`, `PeersResult`), so an adapter passes what the daemon returned; a program whose
@@ -34,11 +33,11 @@ own interface has other types, as the Agent interface of `sidera` has, maps them
   directory and perhaps an instance, and the command it tells the reader to run next goes to
   the default of both unless it says otherwise. So the hints are never assembled here from a
   bare program name: `Command` adds the flags that select them, where the program's own flags
-  go. The words that can hold any text (a cursor) arrive quoted with `ShellWord`; a program
-  quotes the values it adds in the same way.
+  go. The words that can hold any text (a cursor) arrive quoted with `termout.ShellWord`; a
+  program quotes the values it adds in the same way.
 - **A directory page is a page that was given.** `Directory` does not look at the outcome; a
   directory that gave no page is a failure with a reason, which the caller reports. The cursor is
-  quoted for the platform the program runs on, and the command names the node that was asked,
+  quoted for the platform the program runs on (`termout.ShellWord`), and the command names the node that was asked,
   because a cursor belongs to it.
 - **Peers carry no `Self` column.** The node itself is the row whose trust is `self`; when it
   is the only row, a sentence says that no other node is trusted directly.
@@ -58,4 +57,4 @@ own interface has other types, as the Agent interface of `sidera` has, maps them
 
 Tests are black-box tables over the three states of a stream: identifiers whole, the text under
 the decoration the same in all three, every field of every control reply, the empty sentences, the
-command a program names, and the quoting of each platform.
+command a program names.

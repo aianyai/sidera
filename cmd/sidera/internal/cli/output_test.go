@@ -13,7 +13,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
-	"github.com/aianyai/sidera/sdk/go/agentview"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
@@ -468,7 +467,7 @@ func TestSharedLayoutsAreCalledWithSideraCommands(t *testing.T) {
 func TestHintsNameTheDataDirectoryWhenItIsNotTheDefault(t *testing.T) {
 	home := t.TempDir()
 	for _, tc := range []struct{ name, home, want string }{
-		{"another directory", home, "`sidera --home " + agentview.ShellWord(runtime.GOOS, home) + " status " + testMessage + "`"},
+		{"another directory", home, "`sidera --home " + termout.ShellWord(runtime.GOOS, home) + " status " + testMessage + "`"},
 		{"the default directory", "", "`sidera status " + testMessage + "`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
