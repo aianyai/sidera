@@ -8,71 +8,207 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-07
+
+The human output of every command changed in 0.16: `sidera` and `sidera-adapter-console` now
+print labelled lines and aligned tables for reading instead of `key value` lines, and the help
+of all four adapter programs is laid out anew. A script or an agent that reads the output of
+`sidera` should use `--json`, whose shapes did not change; `sidera-adapter-console` has no JSON
+output, so a script that parses its text has to be rewritten. The two empty-state lines of
+`sidera-adapter-console` (`No messages waiting.` for `recv`, `No endpoints.` for `directory`)
+moved from standard error to standard output. The Go SDK changes are incompatible for code that
+uses either of two APIs: `adapterproto.DisplayNamePattern` is removed (use
+`adapterproto.PersonTextPattern()`) and `adapterkit.Program.Usage` is replaced by
+`Program.Help`. The checks that endpoint descriptions and setup results go through are
+stricter; see Security below.
+
 ### Added
 
-- **Go SDK: `adapterproto.ItemAck.Acknowledged()` says which acknowledgement outcomes count as the part
-  being acknowledged.** `recorded`, `completed` and `duplicate` do; `refused_no_handout`,
+- **Go SDK: `adapterproto.ItemAck.Acknowledged()` says which acknowledgement outcomes count as the
+  part being acknowledged.** `recorded`, `completed` and `duplicate` do; `refused_no_handout`,
   `refused_lease` and `too_late` are refusals. An adapter that reports a part the node did not
   acknowledge asks the method instead of listing the outcomes itself; `sidera ack` and the console
   and Hermes adapters now do.
 - **Go SDK: `termout`, the terminal output of a program that prints for people.** A new package for
   adapter programs that want their output to look and behave like Sidera's. A `Stream` knows whether
   its output is decorated (markers) and colored, from the output being a terminal and from a color
-  mode, `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; the package
-  gives styles and marker lines, key/value blocks, tables and two-column lists that line up by the
-  columns text takes on a terminal, wrapping, `SanitizeLine` and `SanitizeText` for text that came from
-  outside, the written form of times, sizes and durations, `ShellWord` (a word of a command to copy, quoted for the shell of the platform) and `IsTerminal`. It is built for macOS,
-  Linux and Windows, and gives plain output elsewhere. The SDK module now requires
-  `golang.org/x/text`.
-- `sidera --color auto|always|never` (default `auto`; before or after the command) chooses whether the
-  program colors its output for people. `auto` colors a terminal and nothing else, and follows
+  mode, `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; the package gives
+  styles and marker lines, key/value blocks, tables and two-column lists that line up by the columns
+  text takes on a terminal, wrapping, `SanitizeLine` and `SanitizeText` for text that came from
+  outside, the written form of times, sizes and durations, `ShellWord` (a word of a command to copy,
+  quoted for the shell of the platform) and `IsTerminal`. It is built for macOS, Linux and Windows,
+  and gives plain output elsewhere. The SDK module now requires `golang.org/x/text`.
+- `sidera --color auto|always|never` (default `auto`; before or after the command) chooses whether
+  the program colors its output for people. `auto` colors a terminal and nothing else, and follows
   `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; standard output and
-  standard error are decided separately. Every command that prints for people follows it; `version`, the log of the foreground daemon, `--json` and the page of `recv` carry no styles, and the word `error:` of an error line is red when standard error is colored.
-- **Go SDK: `agentview`, the layout of an endpoint's view of the network.** A new package for programs that
-  show a message's delivery state and the control reply to it, a page of the directory, the list of
-  peer nodes and the answer to a send in the way `sidera` does. It takes the adapter protocol's result
-  types (`MessageStatusResult`, `DirectoryResult`, `PeersResult`), lays them out over a `termout`
-  stream with the commands in the hints that say what to run next spelled by a function of the calling
-  program (`View.Command`), so that they keep the data directory and the instance the command ran on.
-  `sidera` and the console adapter use it.
+  standard error are decided separately. Every command that prints for people follows it; `version`,
+  the log of the foreground daemon, `--json` and the page of `recv` carry no styles, and the word
+  `error:` of an error line is red when standard error is colored.
+- **Go SDK: `agentview`, the layout of an endpoint's view of the network.** A new package for
+  programs that show a message's delivery state and the control reply to it, a page of the
+  directory, the list of peer nodes and the answer to a send in the way `sidera` does. It takes the
+  adapter protocol's result types (`MessageStatusResult`, `DirectoryResult`, `PeersResult`), lays
+  them out over a `termout` stream with the commands in the hints that say what to run next spelled
+  by a function of the calling program (`View.Command`), so that they keep the data directory and
+  the instance the command ran on. `sidera` and the console adapter use it.
 
 ### Changed
 
-- **`sidera --help` is a grouped list, and flag errors say what is wrong.** `sidera --help` now lists the commands under headings (messages, node, endpoints and presets, network, trust, identity and clock, adapters, update and maintenance), each with a one-line summary that wraps at 80 columns on a pipe and at the terminal's width (up to 100) on a terminal, with names in cyan when colored; the full explanation of a command is in `sidera <command> --help`, now wrapped too (its example is a command to copy and is never wrapped). A flag that is wrong is reported as `error: --wait needs a duration such as 2m, not "x"; run `sidera daemon restart --help` for its flags` in place of `invalid value "x" for flag -wait: parse error`, and an unknown flag or a missing value gets the same treatment; exit code 2 is unchanged. The word `error:` is red when standard error is colored. The error line is otherwise as before.
-- **The commands an agent runs in a shell print for reading.** `sidera me`, `peers`, `directory`, `declare`, `send`, `reply`, `control`, `status <message-id>` and `ack` (without `--json`) now print labelled lines and aligned tables with every identifier whole, in place of `key value` lines. `send`, `reply` and `control` say `Message accepted for delivery.` (which is not that it was delivered), print the message id and recipient, and name the `sidera status` command that shows the delivery or the control reply; `status` shows the delivery as a table and a control reply field by field, including the endpoint of a created session and the availability of each preset, where it used to print the reply as JSON; `directory` lists the endpoint's action names (`message.send`, `session.create`) in `ACCEPTS` and puts the address last, and tells you the command for the next page, which begins `sidera --home <directory>` when the data directory is not the default; `me` and `declare` write the declaration in words (`paused`, `accepting`, `listed`, `hidden`, who may send); `peers` and `directory` say so in a sentence when there is nothing more to list. On a terminal or with `--color=always` the lines carry markers and colors, and a pipe gets the same words without them; `ack` shows a refused outcome in yellow. `--json`, `recv`, exit codes and what goes to standard error are unchanged.
-- **The commands that read the node print for reading.** `sidera status`, `node show`, `network show`, `preset list`, `adapter list`, `endpoint list` and `alerts list` (without `--json`) now print labelled lines and aligned tables with every identifier whole, in place of sorted `key value` lines and columns that held JSON. `status` starts with what you have to do (the unconfirmed self-revocation backup is a `!` warning) and then the node, daemon, home directory, certificate, clock, deliveries, disk, endpoints and alerts, with sizes, times and spans written out; `node show` names each setting by what it is and gives its unit; `network show` lists the listen addresses and each address that reaches this node on a line of its own, and prints one line, `sidera network address set <node> <address>...`, that you copy and run on the other machine in place of the long contact line; `adapter list` shows the probe result with its time and, under an instance, a `!` line for a package that cannot run and for each condition its adapter reports as unavailable; the lists say `No endpoints.`, `No open alerts.` and the like when empty, and the collection's version is labelled as the value for `--expected-version`. The detail an adapter reports, an alert's subject and detail, a preset's description and the names of its settings are shown with control characters escaped. A preset's settings are listed by name, and their values, the start identifier of the daemon and the address of each endpoint in `status` are in `--json`. `--json`, exit codes and what goes to standard error are unchanged.
-- **The commands that change something print for reading.** `adapter install`, `enable`, `disable`, `config` and `remove`, `preset add` and `remove`, `node set`, `endpoint set` and `close`, `alerts ack`, `network address set` and `remove`, `network listen set`, `trust expect`, `forget`, `reject`, `remove` and `clear`, `identity confirm-backup` and `retire`, `clock clear-rollback`, `daemon stop` and `probe` (without `--json`) now open with one sentence that says what was done, such as `Enabled instance console.` or `Daemon is stopping.`, and under it give only what you need: the settings `node set` changed, with their units, the addresses a network change now holds, whether a closing endpoint is still being released, and the command to run next (``Run `sidera adapter list` to see the probe result.``, ``Restart the daemon (`sidera daemon restart`) for the new listen addresses to take effect.``). They no longer print the operation identifier and the replay flag, which `--json` still carries; a request that had been carried out already under the same operation says so in a `!` line and changed nothing this time. The warning of `adapter remove --force` is a `!` line on standard error. `--json`, exit codes and what goes to standard output and standard error are unchanged.
-- **The operations print for reading.** `sidera update`, `adapter setup`, `daemon restart`, `init`, `identity export-revocation`, `trust list` and `trust request` (without `--json`) now print labelled lines, tables and a first line that says what happened, in place of `key value` lines, with every identifier whole; the plan, the questions and the progress stay on standard error and the report on standard output. `update` shows its plan as a title over a block (the programs, the daemon, the adapters and the setup it will touch), asks `Update? [y/N]` as before, and reports `Updated to <version>.` over `Programs`, `Daemon`, `Adapters` and `Setup`; `update --check` says plainly whether an update is available and whether this program may apply it, and if not why. `adapter setup` lists each item by its summary alone (the action was written twice before, and the path again in brackets), with the place under it when the summary does not name it, and reports the outcomes and differences as tables with one line that names the command that settles drift. `daemon restart` says that the daemon restarted and which version runs, and no longer prints the operation identifier or the replay flag (a replayed request is said in a `!` line). `init` puts the backup reminder first as a `!` line. `identity export-revocation` styles only its instruction on standard error; the armor and the digest on standard output are exactly as before. `trust list` shows its five sections as titled tables, or a sentence when a section is empty, with times in UTC; `trust request` shows `Verification code: <code>` first, in bold, as before in form, then the pairing and, once trust is complete, `Paired with <node>.`. The notice of a session attached as a controller that the node cannot wake is a `!` line. `--json`, exit codes, the text of the questions and which lines go to which stream are unchanged.
-- **Go SDK: `adaptersetup.Result.Validate` holds the ids and words it passes through to single words.** The id of an item, an outcome and a drift entry, the status of an outcome and the problem of a drift entry must be letters, digits and `.` `_` `:` `-`, starting with a letter or a digit (`adaptersetup.IsWord`); every id and status the Claude, Codex and Hermes setup programs write already is. A status or a problem of a later release still passes as long as it is a word. A result with anything else is an error of the setup program, which `Handle` refuses with exit 1 and `sidera adapter setup` and `sidera update` report as a result they cannot use. A setup program that built its ids from text it does not control (a name from a client's configuration) has to normalize them.
-- **Go SDK, incompatible: `adapterkit.Program.Usage` is replaced by `Program.Help`.** The help of an adapter
-  program is now a description (`Help`, `HelpGroup`, `HelpEntry`: the groups of the program's own commands
-  with a purpose and the arguments of each) that the kit lays out, instead of a text the program prints as it
-  is, and the kit adds the group of the commands it runs (`serve`, `package`, `version`) so that no program
-  writes them down. `Streams` gains `Getenv`, the environment the output decides its decoration and color from
-  (pass `os.Getenv`; nil leaves the output plain unless it goes to a terminal), and `Out` and `Err`, its two
-  outputs as `termout` streams. `adapterkit` now imports `termout`, so an adapter built on it links
-  `golang.org/x/sys` and `golang.org/x/text`.
-- **The help and `package` of the adapter programs print for reading.** `help`, `--help` and `package --help`
-  of `sidera-adapter-console`, `-claude`, `-codex` and `-hermes` list the commands in titled groups, with the
-  purpose of each wrapped under its name and its arguments below, and `package` says `Wrote the adapter
-  package.` with the platform and the directory in place of `package: <directory>`. The programs have no
-  `--color` flag: `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR` and whether the output is a terminal decide, as
-  for `sidera`. `version`, `version --json`, the error lines and the exit codes are unchanged.
-- **`sidera-adapter-console whoami`, `new` and `recv` print for reading.** `whoami` prints the block `Address  <address>`. `new` says at once that the session request was accepted, with the message id and the runtime it went to, and then `Session created.` with the session's address (`Session created, but not confirmed ready.` with exit 10 for an unconfirmed one). `recv` prints each message as a block of `From`, `Message` and, when they apply, `Part` (`1 of 2`), `Notice` (the node's own channel notice) and `Repeat` (possibly shown before), then the body with every line indented two columns, so that a body that looks like a header cannot pass for the start of another message. With nothing waiting, `recv` now says `No messages waiting.` on standard output; it used to print `no messages` on standard error.
-- **`sidera-adapter-console send`, `reply`, `status`, `directory` and `peers` print for reading.** They print the way `sidera` prints the same results, from one implementation. `send` and `reply` say `Message accepted for delivery.` or `Reply accepted for delivery.` (which is not that it was delivered), with the message id, the recipients, and the command that shows whether it was delivered, in place of `message: <id>`. `status` shows each recipient's delivery in a table and a control reply as labelled fields (`Outcome`, `Session endpoint`, `Reason`, or the `Activity`, queue, conditions and presets of an `endpoint.status` reply), in place of one line per recipient and the reply as JSON; the session endpoint is printed as the reply carries it, without its node (`new` still prints the full address). `directory` is a table of `KIND`, `NAME`, `ACCEPTS` (the action names, comma and space between them) and the whole `ADDRESS`, ends with the command for the next page in place of `next cursor: <c>` (that command, the `status` command after a send and the one `new` prints after a timeout carry the `--home` and `--instance` the command was given, after the command name; the message id in the last one is quoted only when the shell needs it, with double quotes on Windows, where it used to be single-quoted always), and an empty page says `No endpoints.` on standard output, where it used to print `no endpoints` on standard error. `peers` is a table of `TRUST`, `CONNECTION` and `NODE`, without the `this node` marker (the node whose trust is `self` is this node), and says when no other node is trusted directly. Error lines and exit codes are unchanged.
-- **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a display
-  name is now built from the one table of characters a text shown to a person never holds, so it is a
-  function: use `adapterproto.PersonTextPattern()` where you used the constant. A description gets
-  the same rule with line feed and tab allowed. `adapterproto` gains `RefusedInPersonText` and
-  `RefusedInDescription` (one code point each), `ValidatePersonText`, `PersonTextPattern`,
-  `DescriptionPattern`, `ValidateDescription` and `ValidateOptionalDescription`. Code that validates
-  a display name with `ValidateDisplayName` or `ValidateOptionalDisplayName` is not affected.
-- `sidera adapter setup` (and `--remove`) now asks `[Y/n]` for each item: pressing Enter accepts it, since you ran setup to be asked about exactly these changes. `n`, any other text and the end of the input (a script, a closed pipe, a dropped terminal) still decline, so nothing changes a client's configuration unasked. `sidera update` still asks `Update? [y/N]`.
+- **`sidera --help` is a grouped list, and flag errors say what is wrong.** `sidera --help` now
+  lists the commands under headings (messages, node, endpoints and presets, network, trust, identity
+  and clock, adapters, update and maintenance), each with a one-line summary that wraps at 80
+  columns on a pipe and at the terminal's width (up to 100) on a terminal, with names in cyan when
+  colored; the full explanation of a command is in `sidera <command> --help`, now wrapped too (its
+  example is a command to copy and is never wrapped). A flag that is wrong is reported as `error:
+  --wait needs a duration such as 2m, not "x"; run `sidera daemon restart --help` for its flags` in
+  place of `invalid value "x" for flag -wait: parse error`, and an unknown flag or a missing value
+  gets the same treatment; exit code 2 is unchanged. The word `error:` is red when standard error is
+  colored. The error line is otherwise as before.
+- **The commands an agent runs in a shell print for reading.** `sidera me`, `peers`, `directory`,
+  `declare`, `send`, `reply`, `control`, `status <message-id>` and `ack` (without `--json`) now
+  print labelled lines and aligned tables with every identifier whole, in place of `key value`
+  lines. `send`, `reply` and `control` say `Message accepted for delivery.` (which is not that it
+  was delivered), print the message id and recipient, and name the `sidera status` command that
+  shows the delivery or the control reply; `status` shows the delivery as a table and a control
+  reply field by field, including the endpoint of a created session and the availability of each
+  preset, where it used to print the reply as JSON; `directory` lists the endpoint's action names
+  (`message.send`, `session.create`) in `ACCEPTS` and puts the address last, and tells you the
+  command for the next page, which begins `sidera --home <directory>` when the data directory is not
+  the default; `me` and `declare` write the declaration in words (`paused`, `accepting`, `listed`,
+  `hidden`, who may send); `peers` and `directory` say so in a sentence when there is nothing more
+  to list. On a terminal or with `--color=always` the lines carry markers and colors, and a pipe
+  gets the same words without them; `ack` shows a refused outcome in yellow. `--json`, `recv`, exit
+  codes and what goes to standard error are unchanged.
+- **The commands that read the node print for reading.** `sidera status`, `node show`, `network
+  show`, `preset list`, `adapter list`, `endpoint list` and `alerts list` (without `--json`) now
+  print labelled lines and aligned tables with every identifier whole, in place of sorted `key
+  value` lines and columns that held JSON. `status` starts with what you have to do (the unconfirmed
+  self-revocation backup is a `!` warning) and then the node, daemon, home directory, certificate,
+  clock, deliveries, disk, endpoints and alerts, with sizes, times and spans written out; `node
+  show` names each setting by what it is and gives its unit; `network show` lists the listen
+  addresses and each address that reaches this node on a line of its own, and prints one line,
+  `sidera network address set <node> <address>...`, that you copy and run on the other machine in
+  place of the long contact line; `adapter list` shows the probe result with its time and, under an
+  instance, a `!` line for a package that cannot run and for each condition its adapter reports as
+  unavailable; the lists say `No endpoints.`, `No open alerts.` and the like when empty, and the
+  collection's version is labelled as the value for `--expected-version`. The detail an adapter
+  reports, an alert's subject and detail, a preset's description and the names of its settings are
+  shown with control characters escaped. A preset's settings are listed by name, and their values,
+  the start identifier of the daemon and the address of each endpoint in `status` are in `--json`.
+  `--json`, exit codes and what goes to standard error are unchanged.
+- **The commands that change something print for reading.** `adapter install`, `enable`, `disable`,
+  `config` and `remove`, `preset add` and `remove`, `node set`, `endpoint set` and `close`, `alerts
+  ack`, `network address set` and `remove`, `network listen set`, `trust expect`, `forget`,
+  `reject`, `remove` and `clear`, `identity confirm-backup` and `retire`, `clock clear-rollback`,
+  `daemon stop` and `probe` (without `--json`) now open with one sentence that says what was done,
+  such as `Enabled instance console.` or `Daemon is stopping.`, and under it give only what you
+  need: the settings `node set` changed, with their units, the addresses a network change now holds,
+  whether a closing endpoint is still being released, and the command to run next (``Run `sidera
+  adapter list` to see the probe result.``, ``Restart the daemon (`sidera daemon restart`) for the
+  new listen addresses to take effect.``). They no longer print the operation identifier and the
+  replay flag, which `--json` still carries; a request that had been carried out already under the
+  same operation says so in a `!` line and changed nothing this time. The warning of `adapter remove
+  --force` is a `!` line on standard error. `--json`, exit codes and what goes to standard output
+  and standard error are unchanged.
+- **The operations print for reading.** `sidera update`, `adapter setup`, `daemon restart`, `init`,
+  `identity export-revocation`, `trust list` and `trust request` (without `--json`) now print
+  labelled lines, tables and a first line that says what happened, in place of `key value` lines,
+  with every identifier whole; the plan, the questions and the progress stay on standard error and
+  the report on standard output. `update` shows its plan as a title over a block (the programs, the
+  daemon, the adapters and the setup it will touch), asks `Update? [y/N]` as before, and reports
+  `Updated to <version>.` over `Programs`, `Daemon`, `Adapters` and `Setup`; `update --check` says
+  plainly whether an update is available and whether this program may apply it, and if not why.
+  `adapter setup` lists each item by its summary alone (the action was written twice before, and the
+  path again in brackets), with the place under it when the summary does not name it, and reports
+  the outcomes and differences as tables with one line that names the command that settles drift.
+  `daemon restart` says that the daemon restarted and which version runs, and no longer prints the
+  operation identifier or the replay flag (a replayed request is said in a `!` line). `init` puts
+  the backup reminder first as a `!` line. `identity export-revocation` styles only its instruction
+  on standard error; the armor and the digest on standard output are exactly as before. `trust list`
+  shows its five sections as titled tables, or a sentence when a section is empty, with times in
+  UTC; `trust request` shows `Verification code: <code>` first, in bold, as before in form, then the
+  pairing and, once trust is complete, `Paired with <node>.`. The notice of a session attached as a
+  controller that the node cannot wake is a `!` line. `--json`, exit codes, the text of the
+  questions and which lines go to which stream are unchanged.
+- **The help and `package` of the adapter programs print for reading.** `help`, `--help` and
+  `package --help` of `sidera-adapter-console`, `-claude`, `-codex` and `-hermes` list the commands
+  in titled groups, with the purpose of each wrapped under its name and its arguments below, and
+  `package` says `Wrote the adapter package.` with the platform and the directory in place of
+  `package: <directory>`. The programs have no `--color` flag: `NO_COLOR`, `CLICOLOR_FORCE`,
+  `FORCE_COLOR` and whether the output is a terminal decide, as for `sidera`. `version`, `version
+  --json`, the error lines and the exit codes are unchanged.
+- **`sidera-adapter-console whoami`, `new` and `recv` print for reading.** `whoami` prints the block
+  `Address <address>`. `new` says at once that the session request was accepted, with the message id
+  and the runtime it went to, and then `Session created.` with the session's address (`Session
+  created, but not confirmed ready.` with exit 10 for an unconfirmed one). `recv` prints each
+  message as a block of `From`, `Message` and, when they apply, `Part` (`1 of 2`), `Notice` (the
+  node's own channel notice) and `Repeat` (possibly shown before), then the body with every line
+  indented two columns, so that a body that looks like a header cannot pass for the start of another
+  message. With nothing waiting, `recv` now says `No messages waiting.` on standard output; it used
+  to print `no messages` on standard error.
+- **`sidera-adapter-console send`, `reply`, `status`, `directory` and `peers` print for reading.**
+  They print the way `sidera` prints the same results, from one implementation. `send` and `reply`
+  say `Message accepted for delivery.` or `Reply accepted for delivery.` (which is not that it was
+  delivered), with the message id, the recipients, and the command that shows whether it was
+  delivered, in place of `message: <id>`. `status` shows each recipient's delivery in a table and a
+  control reply as labelled fields (`Outcome`, `Session endpoint`, `Reason`, or the `Activity`,
+  queue, conditions and presets of an `endpoint.status` reply), in place of one line per recipient
+  and the reply as JSON; the session endpoint is printed as the reply carries it, without its node
+  (`new` still prints the full address). `directory` is a table of `KIND`, `NAME`, `ACCEPTS` (the
+  action names, comma and space between them) and the whole `ADDRESS`, ends with the command for the
+  next page in place of `next cursor: <c>` (that command, the `status` command after a send and the
+  one `new` prints after a timeout carry the `--home` and `--instance` the command was given, after
+  the command name; the message id in the last one is quoted only when the shell needs it, with
+  double quotes on Windows, where it used to be single-quoted always), and an empty page says `No
+  endpoints.` on standard output, where it used to print `no endpoints` on standard error. `peers`
+  is a table of `TRUST`, `CONNECTION` and `NODE`, without the `this node` marker (the node whose
+  trust is `self` is this node), and says when no other node is trusted directly. Error lines and
+  exit codes are unchanged.
+- `sidera adapter setup` (and `--remove`) now asks `[Y/n]` for each item: pressing Enter accepts it,
+  since you ran setup to be asked about exactly these changes. `n`, any other text and the end of
+  the input (a script, a closed pipe, a dropped terminal) still decline, so nothing changes a
+  client's configuration unasked. `sidera update` still asks `Update? [y/N]`.
+- **Go SDK: `adaptersetup.Result.Validate` holds the ids and words it passes through to single
+  words.** The id of an item, an outcome and a drift entry, the status of an outcome and the problem
+  of a drift entry must be letters, digits and `.` `_` `:` `-`, starting with a letter or a digit
+  (`adaptersetup.IsWord`); every id and status the Claude, Codex and Hermes setup programs write
+  already is. A status or a problem of a later release still passes as long as it is a word. A
+  result with anything else is an error of the setup program, which `Handle` refuses with exit 1 and
+  `sidera adapter setup` and `sidera update` report as a result they cannot use. A setup program
+  that built its ids from text it does not control (a name from a client's configuration) has to
+  normalize them.
+- **Go SDK, incompatible: `adapterkit.Program.Usage` is replaced by `Program.Help`.** The help of an
+  adapter program is now a description (`Help`, `HelpGroup`, `HelpEntry`: the groups of the
+  program's own commands with a purpose and the arguments of each) that the kit lays out, instead of
+  a text the program prints as it is, and the kit adds the group of the commands it runs (`serve`,
+  `package`, `version`) so that no program writes them down. `Streams` gains `Getenv`, the
+  environment the output decides its decoration and color from (pass `os.Getenv`; nil leaves the
+  output plain unless it goes to a terminal), and `Out` and `Err`, its two outputs as `termout`
+  streams. `adapterkit` now imports `termout`, so an adapter built on it links `golang.org/x/sys`
+  and `golang.org/x/text`.
+- **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a
+  display name is now built from the one table of characters a text shown to a person never holds,
+  so it is a function: use `adapterproto.PersonTextPattern()` where you used the constant. A
+  description gets the same rule with line feed and tab allowed. `adapterproto` gains
+  `RefusedInPersonText` and `RefusedInDescription` (one code point each), `ValidatePersonText`,
+  `PersonTextPattern`, `DescriptionPattern`, `ValidateDescription` and
+  `ValidateOptionalDescription`. Code that validates a display name with `ValidateDisplayName` or
+  `ValidateOptionalDisplayName` is not affected.
 
 ### Security
 
-- `sidera adapter setup`, `sidera update` and the notice of a controller session now show the words of an adapter's setup program (the summary and place of an item, messages, notes and the summaries of differences), the end of the standard error of a failed setup program or client, and the cause the node gives for not being able to wake a session, with control characters and text-direction controls escaped. A setup program or a client tool could write terminal control sequences that clear the screen, rewrite earlier lines or change the window title, and they reached your terminal as they came.
-- The ids and status words of an adapter's setup result are held to single words (letters, digits and `.` `_` `:` `-`), where only their being non-empty was checked. An id with a line break made `sidera adapter setup` panic when it laid out the report, and one with an escape sequence reached the terminal as it came; both are now refused as a result the program cannot use. A setup program or a Go SDK adapter is affected only if it wrote such an id.
+- `sidera adapter setup`, `sidera update` and the notice of a controller session now show the words
+  of an adapter's setup program (the summary and place of an item, messages, notes and the summaries
+  of differences), the end of the standard error of a failed setup program or client, and the cause
+  the node gives for not being able to wake a session, with control characters and text-direction
+  controls escaped. A setup program or a client tool could write terminal control sequences that
+  clear the screen, rewrite earlier lines or change the window title, and they reached your terminal
+  as they came.
+- The ids and status words of an adapter's setup result are held to single words (letters, digits
+  and `.` `_` `:` `-`), where only their being non-empty was checked. An id with a line break made
+  `sidera adapter setup` panic when it laid out the report, and one with an escape sequence reached
+  the terminal as it came; both are now refused as a result the program cannot use. A setup program
+  or a Go SDK adapter is affected only if it wrote such an id.
 - The description of an endpoint is now held to the characters of its display name, except that it
   may still span lines and be indented, so line feed and tab stay allowed. A description with any
   other control character (an escape sequence, a carriage return, DEL, a control in the range U+0080
@@ -82,13 +218,18 @@ protocol has a version of its own.
   name already was. A description stored before this change that carries such a character is a
   damaged endpoint record, so the endpoint is dropped at the next start. The adapters shipped with
   Sidera register descriptions without them and are not affected.
-- The page that `sidera recv` prints (and the `recv` tool of `sidera mcp`) now writes DEL, the C1 control characters and the text-direction controls in a message as `\uXXXX` escapes. A message from another agent can no longer send terminal control sequences through that page, or reorder the text around it, when the page is shown in a terminal. Any JSON reader still reads the same message; only the bytes of the page differ.
-- `sidera-adapter-console recv` no longer writes the body of a received message to your terminal as it came.
-  A peer you trust, or an agent on that peer that was misled by a prompt injection, could send terminal
-  control sequences that clear your screen, rewrite lines you already read, change the window title or write
-  to your clipboard. Control characters, the characters that reorder text, invisible characters that can hide
-  text (such as tag characters and the zero-width space) and bytes that are not UTF-8 now appear as visible
-  escapes such as `\x1b`; line breaks and tabs are kept. Upgrade the console client.
+- The page that `sidera recv` prints (and the `recv` tool of `sidera mcp`) now writes DEL, the C1
+  control characters and the text-direction controls in a message as `\uXXXX` escapes. A message
+  from another agent can no longer send terminal control sequences through that page, or reorder the
+  text around it, when the page is shown in a terminal. Any JSON reader still reads the same
+  message; only the bytes of the page differ.
+- `sidera-adapter-console recv` no longer writes the body of a received message to your terminal as
+  it came. A peer you trust, or an agent on that peer that was misled by a prompt injection, could
+  send terminal control sequences that clear your screen, rewrite lines you already read, change the
+  window title or write to your clipboard. Control characters, the characters that reorder text,
+  invisible characters that can hide text (such as tag characters and the zero-width space) and
+  bytes that are not UTF-8 now appear as visible escapes such as `\x1b`; line breaks and tabs are
+  kept. Upgrade the console client.
 
 ## [0.15.0] - 2026-11-06
 
@@ -995,7 +1136,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/aianyai/sidera/releases/tag/v0.16.0
 [0.15.0]: https://github.com/aianyai/sidera/releases/tag/v0.15.0
 [0.14.0]: https://github.com/aianyai/sidera/releases/tag/v0.14.0
 [0.13.0]: https://github.com/aianyai/sidera/releases/tag/v0.13.0
