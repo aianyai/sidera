@@ -42,11 +42,11 @@ func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.En
 	if err != nil {
 		return transport.Receipt{}, fmt.Errorf("network: send request: %w", err)
 	}
-	raw, err := n.call(ctx, target, nodeproto.ProtocolSend, req)
+	answer, err := n.call(ctx, target, nodeproto.ProtocolSend, req)
 	if err != nil {
 		return transport.Receipt{}, err
 	}
-	ans, err := nodeproto.DecodeSendAnswer(raw)
+	ans, err := nodeproto.DecodeSendAnswer(answer.Data)
 	if err != nil {
 		return transport.Receipt{}, invalidAnswer(err)
 	}
@@ -65,11 +65,11 @@ func (n *Network) Pull(ctx context.Context, target ident.NodeID, req transport.P
 	if err != nil {
 		return transport.PullAnswer{}, fmt.Errorf("network: pull request: %w", err)
 	}
-	raw, err = n.call(ctx, target, nodeproto.ProtocolPull, raw)
+	answer, err := n.call(ctx, target, nodeproto.ProtocolPull, raw)
 	if err != nil {
 		return transport.PullAnswer{}, err
 	}
-	ans, err := nodeproto.DecodePullAnswer(raw)
+	ans, err := nodeproto.DecodePullAnswer(answer.Data)
 	if err != nil {
 		return transport.PullAnswer{}, invalidAnswer(err)
 	}
@@ -87,11 +87,11 @@ func (n *Network) QueryDirectory(ctx context.Context, target ident.NodeID, sende
 	if err != nil {
 		return transport.DirectoryPage{}, fmt.Errorf("network: directory request: %w", err)
 	}
-	raw, err = n.call(ctx, target, nodeproto.ProtocolDirectory, raw)
+	answer, err := n.call(ctx, target, nodeproto.ProtocolDirectory, raw)
 	if err != nil {
 		return transport.DirectoryPage{}, err
 	}
-	ans, err := nodeproto.DecodeDirectoryAnswer(raw)
+	ans, err := nodeproto.DecodeDirectoryAnswerFor(answer.Protocol, answer.Data)
 	if err != nil {
 		return transport.DirectoryPage{}, invalidAnswer(err)
 	}
@@ -106,9 +106,24 @@ func (n *Network) QueryDirectory(ctx context.Context, target ident.NodeID, sende
 			DisplayName: e.DisplayName,
 			Description: e.Description,
 			Accepts:     e.Actions,
+			Adapter:     adapterFromProto(e.Adapter),
 		})
 	}
 	return page, nil
+}
+
+func adapterFromProto(a *nodeproto.DirectoryAdapter) *transport.DirectoryAdapter {
+	if a == nil {
+		return nil
+	}
+	return &transport.DirectoryAdapter{Instance: a.Instance, ID: a.ID, Version: a.Version, Runtime: a.Runtime}
+}
+
+func adapterToProto(a *transport.DirectoryAdapter) *nodeproto.DirectoryAdapter {
+	if a == nil {
+		return nil
+	}
+	return &nodeproto.DirectoryAdapter{Instance: a.Instance, ID: a.ID, Version: a.Version, Runtime: a.Runtime}
 }
 
 // invalidAnswer is an answer that does not decode. The target may have handled
@@ -129,9 +144,17 @@ func outcomeError(o nodeproto.Outcome, reason string) error {
 	}
 }
 
-// call makes one request to the target node and returns the bytes of its
-// answer. The protocol is proposed under its current identifier first and its
-// legacy one second, and the call takes the form of the identifier the target
+// memberAnswer is the answer to a member call and the identifier it was made
+// under: the first of the identifiers proposed that the target serves. A protocol
+// whose newer identifiers carry more reads the answer by it.
+type memberAnswer struct {
+	Protocol string
+	Data     []byte
+}
+
+// call makes one request to the target node and returns its answer. The protocol
+// is proposed under its current identifier first and its older ones after it,
+// newest first, and the call takes the form of the first identifier the target
 // serves. It maps what goes wrong to the transport's two kinds of "no answer":
 //
 //   - nothing the target could have seen was sent (no connection within the
@@ -140,14 +163,14 @@ func outcomeError(o nodeproto.Outcome, reason string) error {
 //   - the request began to go out and no complete answer came back in time, or
 //     the stream broke: ErrTimeout;
 //   - the caller's own context ended: its error, as it is.
-func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, req []byte) ([]byte, error) {
+func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, req []byte) (memberAnswer, error) {
 	r, err := newMemberRequest(proto, req)
 	if err != nil {
-		return nil, err
+		return memberAnswer{}, err
 	}
 	e, err := n.connect(ctx, target)
 	if err != nil {
-		return nil, err
+		return memberAnswer{}, err
 	}
 	return n.callOn(ctx, e, target, r)
 }
@@ -177,9 +200,9 @@ func newMemberRequest(proto string, req []byte) (memberRequest, error) {
 // callOn is call on a connection already chosen: the one this side judged a
 // member's connection to the target. A call that needs a connection that is up
 // already, and does not dial one, is made with it.
-func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID, r memberRequest) ([]byte, error) {
+func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID, r memberRequest) (memberAnswer, error) {
 	if !n.acquire(e) {
-		return nil, fmt.Errorf("%w: the connection ended", transport.ErrUnreachable)
+		return memberAnswer{}, fmt.Errorf("%w: the connection ended", transport.ErrUnreachable)
 	}
 	defer n.release(e)
 
@@ -188,14 +211,14 @@ func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID,
 	s, err := n.openStream(cctx, e, nodeproto.Offer(r.proto)...)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return memberAnswer{}, ctx.Err()
 		}
 		if connectionFault(cctx, err) {
 			n.dropConn(e, target)
 		}
 		// The cause stays in the chain: a caller may need to tell a peer that does
 		// not serve the protocol (msmux.ErrNotSupported) from one that is gone.
-		return nil, fmt.Errorf("%w: %w", transport.ErrUnreachable, err)
+		return memberAnswer{}, fmt.Errorf("%w: %w", transport.ErrUnreachable, err)
 	}
 	stop := context.AfterFunc(cctx, func() { s.Reset() })
 	defer stop()
@@ -224,10 +247,10 @@ func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID,
 		answer, err = nodeproto.ReadFrame(bufio.NewReader(s), r.limit.Answer)
 	}
 	if err != nil {
-		return nil, failed(err)
+		return memberAnswer{}, failed(err)
 	}
 	s.Close()
-	return answer, nil
+	return memberAnswer{Protocol: string(s.Protocol()), Data: answer}, nil
 }
 
 // connectionFault reports whether a failed call says the connection is at fault:
@@ -273,7 +296,7 @@ func noAnswer(ctx context.Context, s lnet.Stream, err error) error {
 
 // runSend handles a send request: it hands the envelope to the engine and
 // answers with the receipt.
-func runSend(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
+func runSend(ctx context.Context, node Node, _ *connEntry, _ string, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodeSendRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -288,7 +311,7 @@ func runSend(ctx context.Context, node Node, _ *connEntry, from transport.Origin
 }
 
 // runPull handles a pull request and answers with the reports and the no-record endpoints.
-func runPull(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
+func runPull(ctx context.Context, node Node, _ *connEntry, _ string, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodePullRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -303,7 +326,7 @@ func runPull(ctx context.Context, node Node, _ *connEntry, from transport.Origin
 }
 
 // runDirectory handles a directory request and answers with a page.
-func runDirectory(ctx context.Context, node Node, _ *connEntry, from transport.Origin, raw []byte) ([]byte, error) {
+func runDirectory(ctx context.Context, node Node, _ *connEntry, proto string, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodeDirectoryRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
@@ -322,9 +345,10 @@ func runDirectory(ctx context.Context, node Node, _ *connEntry, from transport.O
 			DisplayName: ep.DisplayName,
 			Description: ep.Description,
 			Actions:     ep.Accepts,
+			Adapter:     adapterToProto(ep.Adapter),
 		})
 	}
-	return ans.Encode()
+	return ans.EncodeFor(proto)
 }
 
 // errInvalidRequest is a request that does not decode; the stream is reset.
@@ -345,12 +369,14 @@ func answerFor(node Node, err error, encode func(nodeproto.Outcome, string) ([]b
 // callFunc is what a server of a member protocol does with a decoded-by-nobody
 // request: it decodes it, runs it as a request from the node that was called
 // and encodes the answer. It is given the connection the request came over, for
-// a protocol whose answer depends on the connection and not only on the node.
-// A request that does not decode is an errInvalidRequest.
-type callFunc func(ctx context.Context, node Node, e *connEntry, from transport.Origin, request []byte) ([]byte, error)
+// a protocol whose answer depends on the connection and not only on the node,
+// and the identifier the stream was opened under, for a protocol whose answer
+// differs between its identifiers. A request that does not decode is an
+// errInvalidRequest.
+type callFunc func(ctx context.Context, node Node, e *connEntry, proto string, from transport.Origin, request []byte) ([]byte, error)
 
 // handleCall registers the server of a member protocol under every identifier
-// it is spoken under, the current one and the legacy one if it has one. All the
+// it is spoken under, the current one and the older ones it has. All the
 // servers are served by serveCall, so what a stream is held for is decided once.
 func (n *Network) handleCall(current string, run callFunc) {
 	for _, proto := range nodeproto.Offer(current) {
@@ -407,7 +433,7 @@ func (n *Network) serveCall(ctx context.Context, s lnet.Stream, e *connEntry, pr
 	n.mu.Lock()
 	from := e.node
 	n.mu.Unlock()
-	answer, err := run(ctx, node, e, transport.RemoteOrigin(from), raw)
+	answer, err := run(ctx, node, e, proto, transport.RemoteOrigin(from), raw)
 	if err != nil {
 		var invalid errInvalidRequest
 		if errors.As(err, &invalid) {

@@ -67,22 +67,52 @@ func checkCursor(c string) error {
 }
 
 // DirectoryEntry is one open endpoint the target shows. It carries the
-// endpoint's identifier and not its node: the asker knows the node it called
-// and fills it in, and never takes one from the answer.
+// endpoint's identifier and not its node: the asker knows the node it called and
+// fills it in, and never takes one from the answer.
 type DirectoryEntry struct {
 	Endpoint    ident.EndpointID
 	Kind        adapterreg.EndpointKind
 	DisplayName string
 	Description string
 	Actions     []authz.Action
+	// Adapter says which adapter serves the endpoint; nil when the target does not
+	// say. It exists only under ProtocolDirectory.
+	Adapter *DirectoryAdapter
+}
+
+// DirectoryAdapter is the adapter instance behind a directory entry: the
+// instance that serves the endpoint on its node, the adapter it runs and,
+// when the target knows them, the adapter's version and the runtime it drives.
+// An instance and an adapter id follow the syntax of an adapter identifier, a
+// version is a Semantic Versioning 2.0.0 version, and the runtime follows the
+// rules of the probe that reports it and, as a text shown to a person, those of
+// a display name.
+type DirectoryAdapter struct {
+	Instance string
+	ID       string
+	Version  string
+	Runtime  *adapterproto.RuntimeInfo
 }
 
 type directoryEntryWire struct {
-	Endpoint    []byte   `cbor:"1,keyasint"`
-	Kind        string   `cbor:"2,keyasint"`
-	DisplayName string   `cbor:"3,keyasint"`
-	Description string   `cbor:"4,keyasint"`
-	Actions     []string `cbor:"5,keyasint"`
+	Endpoint    []byte                `cbor:"1,keyasint"`
+	Kind        string                `cbor:"2,keyasint"`
+	DisplayName string                `cbor:"3,keyasint"`
+	Description string                `cbor:"4,keyasint"`
+	Actions     []string              `cbor:"5,keyasint"`
+	Adapter     *directoryAdapterWire `cbor:"6,keyasint,omitempty"`
+}
+
+type directoryAdapterWire struct {
+	Instance string                `cbor:"1,keyasint"`
+	ID       string                `cbor:"2,keyasint"`
+	Version  string                `cbor:"3,keyasint,omitempty"`
+	Runtime  *directoryRuntimeWire `cbor:"4,keyasint,omitempty"`
+}
+
+type directoryRuntimeWire struct {
+	Name    string `cbor:"1,keyasint"`
+	Version string `cbor:"2,keyasint"`
 }
 
 // DirectoryAnswer is the target's answer to a directory request. With the outcome
@@ -102,9 +132,31 @@ type directoryAnswerWire struct {
 	Reason     string               `cbor:"4,keyasint,omitempty"`
 }
 
-// Encode returns the canonical bytes of the answer. It refuses what
-// DecodeDirectoryAnswer would.
-func (a DirectoryAnswer) Encode() ([]byte, error) {
+// carriesAdapter reports whether the entries of a directory protocol name their
+// adapter, and refuses an identifier that is no directory protocol.
+func carriesAdapter(protocol string) (bool, error) {
+	switch protocol {
+	case ProtocolDirectory:
+		return true, nil
+	case PreviousProtocolDirectory, LegacyProtocolDirectory:
+		return false, nil
+	}
+	return false, invalid("%q is no directory protocol", protocol)
+}
+
+// Encode returns the canonical bytes of the answer under ProtocolDirectory. It
+// refuses what DecodeDirectoryAnswer would.
+func (a DirectoryAnswer) Encode() ([]byte, error) { return a.EncodeFor(ProtocolDirectory) }
+
+// EncodeFor returns the canonical bytes of the answer as the directory protocol
+// of that identifier carries it. The older protocols have no adapter in an entry,
+// so the adapters of the entries are left out. It refuses what
+// DecodeDirectoryAnswerFor would.
+func (a DirectoryAnswer) EncodeFor(protocol string) ([]byte, error) {
+	withAdapter, err := carriesAdapter(protocol)
+	if err != nil {
+		return nil, err
+	}
 	entries := make([]directoryEntryWire, len(a.Entries))
 	for i, e := range a.Entries {
 		actions := make([]string, len(e.Actions))
@@ -115,20 +167,45 @@ func (a DirectoryAnswer) Encode() ([]byte, error) {
 			Endpoint: e.Endpoint.Bytes(), Kind: e.Kind.String(),
 			DisplayName: e.DisplayName, Description: e.Description, Actions: actions,
 		}
+		if withAdapter && e.Adapter != nil {
+			entries[i].Adapter = e.Adapter.toWire()
+		}
 	}
-	return encodeChecked(directoryAnswerWire{Outcome: uint64(a.Outcome), Entries: entries, NextCursor: a.NextCursor, Reason: a.Reason}, DecodeDirectoryAnswer)
+	return encodeChecked(directoryAnswerWire{Outcome: uint64(a.Outcome), Entries: entries, NextCursor: a.NextCursor, Reason: a.Reason},
+		func(b []byte) (DirectoryAnswer, error) { return DecodeDirectoryAnswerFor(protocol, b) })
 }
 
-// DecodeDirectoryAnswer parses a directory answer strictly, within the answer
-// limit of the protocol. An entry names a kind and actions by their names, a
-// display name of at most adapterproto.MaxDisplayName characters holding none of
-// the characters adapterproto.RefusedInPersonText names, and a description of at
-// most adapterproto.MaxDescription holding none that
-// adapterproto.RefusedInDescription names (an entry that does makes the whole
-// answer invalid); the text is valid UTF-8, which the decoder guarantees.
+func (d DirectoryAdapter) toWire() *directoryAdapterWire {
+	w := &directoryAdapterWire{Instance: d.Instance, ID: d.ID, Version: d.Version}
+	if d.Runtime != nil {
+		w.Runtime = &directoryRuntimeWire{Name: d.Runtime.Name, Version: d.Runtime.Version}
+	}
+	return w
+}
+
+// DecodeDirectoryAnswer parses a directory answer of ProtocolDirectory.
 func DecodeDirectoryAnswer(data []byte) (DirectoryAnswer, error) {
+	return DecodeDirectoryAnswerFor(ProtocolDirectory, data)
+}
+
+// DecodeDirectoryAnswerFor parses a directory answer strictly, within the answer
+// limit of the protocol, as the directory protocol of that identifier carries it:
+// an entry of an older protocol has no adapter, and an answer that has one is
+// invalid, as it is to a node that speaks only that protocol. An entry names a
+// kind and actions by their names, a display name of at most
+// adapterproto.MaxDisplayName characters holding none of the characters
+// adapterproto.RefusedInPersonText names, a description of at most
+// adapterproto.MaxDescription holding none that adapterproto.RefusedInDescription
+// names, and, under ProtocolDirectory, an adapter that follows the rules of
+// DirectoryAdapter. An entry that breaks a rule makes the whole answer invalid;
+// the text is valid UTF-8, which the decoder guarantees.
+func DecodeDirectoryAnswerFor(protocol string, data []byte) (DirectoryAnswer, error) {
+	withAdapter, err := carriesAdapter(protocol)
+	if err != nil {
+		return DirectoryAnswer{}, err
+	}
 	var w directoryAnswerWire
-	if err := record.UnmarshalStrict(data, &w, limit(ProtocolDirectory).Answer); err != nil {
+	if err := record.UnmarshalStrict(data, &w, limit(protocol).Answer); err != nil {
 		return DirectoryAnswer{}, err
 	}
 	o, err := checkOutcome(w.Outcome, w.Reason)
@@ -146,6 +223,9 @@ func DecodeDirectoryAnswer(data []byte) (DirectoryAnswer, error) {
 	}
 	entries := make([]DirectoryEntry, len(w.Entries))
 	for i, we := range w.Entries {
+		if we.Adapter != nil && !withAdapter {
+			return DirectoryAnswer{}, invalid("entry %d: an adapter in %s", i, protocol)
+		}
 		e, err := entryFromWire(we)
 		if err != nil {
 			return DirectoryAnswer{}, invalid("entry %d: %v", i, err)
@@ -183,7 +263,44 @@ func entryFromWire(w directoryEntryWire) (DirectoryEntry, error) {
 		seen[a] = struct{}{}
 		actions[i] = a
 	}
-	return DirectoryEntry{Endpoint: id, Kind: kind, DisplayName: w.DisplayName, Description: w.Description, Actions: actions}, nil
+	adapter, err := adapterFromWire(w.Adapter)
+	if err != nil {
+		return DirectoryEntry{}, invalid("adapter: %v", err)
+	}
+	return DirectoryEntry{Endpoint: id, Kind: kind, DisplayName: w.DisplayName, Description: w.Description, Actions: actions, Adapter: adapter}, nil
+}
+
+// adapterFromWire reads the adapter of an entry, if it has one. The instance is
+// named as the configuration names it, with the syntax of an adapter identifier.
+func adapterFromWire(w *directoryAdapterWire) (*DirectoryAdapter, error) {
+	if w == nil {
+		return nil, nil
+	}
+	if err := adapterproto.ValidateAdapterID(w.Instance); err != nil {
+		return nil, invalid("instance: %v", err)
+	}
+	if err := adapterproto.ValidateAdapterID(w.ID); err != nil {
+		return nil, invalid("id: %v", err)
+	}
+	if w.Version != "" {
+		if err := adapterproto.ValidateSemVer(w.Version); err != nil {
+			return nil, invalid("version: %v", err)
+		}
+	}
+	a := &DirectoryAdapter{Instance: w.Instance, ID: w.ID, Version: w.Version}
+	if w.Runtime != nil {
+		rt := adapterproto.RuntimeInfo{Name: w.Runtime.Name, Version: w.Runtime.Version}
+		if err := rt.Validate(); err != nil {
+			return nil, invalid("runtime: %v", err)
+		}
+		// The probe bounds the length of both; both are shown to a person, so they
+		// are held to the character rule of a display name as well.
+		if err := adapterproto.ValidatePersonText(rt.Name + rt.Version); err != nil {
+			return nil, invalid("runtime: %v", err)
+		}
+		a.Runtime = &rt
+	}
+	return a, nil
 }
 
 func kindByName(name string) (adapterreg.EndpointKind, bool) {

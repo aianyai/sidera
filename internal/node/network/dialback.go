@@ -63,7 +63,7 @@ func (s *dialBackSlots) release(asker peer.ID) {
 // the connection the request came over, which the secure handshake
 // authenticated: dialing that peer identifier and no other is what makes a
 // connection that succeeds proof that the asker's key is behind the address.
-func (n *Network) runDialBack(ctx context.Context, _ Node, e *connEntry, _ transport.Origin, raw []byte) ([]byte, error) {
+func (n *Network) runDialBack(ctx context.Context, _ Node, e *connEntry, _ string, _ transport.Origin, raw []byte) ([]byte, error) {
 	if _, err := nodeproto.DecodeDialBackRequest(raw); err != nil {
 		return nil, errInvalidRequest{err}
 	}
@@ -174,7 +174,7 @@ func (n *Network) askDialBack(ctx context.Context, node ident.NodeID) (dialBackR
 	if err != nil {
 		return dialBackReply{}, err
 	}
-	raw, err := n.callOn(ctx, e, node, req)
+	answer, err := n.callOn(ctx, e, node, req)
 	var unsupported msmux.ErrNotSupported[protocol.ID]
 	if errors.As(err, &unsupported) {
 		return dialBackReply{Outcome: dialBackCannotAsk}, nil
@@ -182,7 +182,7 @@ func (n *Network) askDialBack(ctx context.Context, node ident.NodeID) (dialBackR
 	if err != nil {
 		return dialBackReply{}, err
 	}
-	ans, err := nodeproto.DecodeDialBackAnswer(raw)
+	ans, err := nodeproto.DecodeDialBackAnswer(answer.Data)
 	if err != nil {
 		return dialBackReply{}, invalidAnswer(err)
 	}

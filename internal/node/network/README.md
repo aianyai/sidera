@@ -68,10 +68,13 @@ clock), touches no file and draws randomness only from the reader it is given (f
   answered.
 - **A member protocol is registered under every identifier it has, by `handleCall`.** All
   the servers go through `serveCall`, which takes the form from the identifier the
-  stream negotiated; the client proposes the current identifier and then the legacy
-  one if there is one (`nodeproto.Offer`) and takes the form of the one the stream got.
-  A server is given the connection the request came over, for an answer that depends on
-  the connection and not only on the node.
+  stream negotiated; the client proposes the identifiers newest first, the legacy one
+  last (`nodeproto.Offer`), and takes the form of the one the stream got (`call`
+  returns it with the answer). A server is given the connection the request came over,
+  for an answer that depends on the connection and not only on the node, and the
+  identifier the stream got, for an answer that differs between identifiers: the
+  directory leaves the adapters out of an entry under the two older ones, and a client
+  reads the answer by the identifier it got.
 - **A dial-back is made only by the dial-back dialer, and only on the address book's
   addresses.** The host's own swarm would return the connection the asker already made
   or leave from the listening port, and either makes the answer "reached" whatever a

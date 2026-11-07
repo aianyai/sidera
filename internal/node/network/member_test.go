@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/aianyai/sidera/internal/nodeproto"
 	"github.com/aianyai/sidera/internal/preauth"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // memberCall is one member call made from a to b, and what it must have got back.
@@ -169,12 +171,15 @@ func TestMemberAnswerSurvivesTheRenewal(t *testing.T) {
 }
 
 // withoutCurrentProtocols makes the node one that speaks only the legacy
-// identifiers, as a node before 2.0.0 does: the handlers of the current ones are
-// removed, so a stream proposing one is answered "not supported" by the
-// negotiation, before any handler.
+// identifiers, as a node before 2.0.0 does: the handlers of every other
+// identifier of these protocols are removed, so a stream proposing one is
+// answered "not supported" by the negotiation, before any handler.
 func withoutCurrentProtocols(b *peerNode) {
-	for _, proto := range []string{nodeproto.ProtocolSend, nodeproto.ProtocolPull, nodeproto.ProtocolDirectory} {
-		b.net.lib.host.RemoveStreamHandler(protocol.ID(proto))
+	for _, current := range []string{nodeproto.ProtocolSend, nodeproto.ProtocolPull, nodeproto.ProtocolDirectory} {
+		offered := nodeproto.Offer(current)
+		for _, proto := range offered[:len(offered)-1] {
+			b.net.lib.host.RemoveStreamHandler(protocol.ID(proto))
+		}
 	}
 }
 
@@ -318,4 +323,91 @@ func TestRequestThatCannotBeSentDoesNotDial(t *testing.T) {
 	if a.connCount() != 0 || b.connCount() != 0 {
 		t.Errorf("connections after the call: a %d, b %d, want none", a.connCount(), b.connCount())
 	}
+}
+
+// adaptedPage is the page a node answers a directory request with: one runtime
+// endpoint served by an adapter.
+func adaptedPage(b *peerNode) transport.DirectoryPage {
+	return transport.DirectoryPage{Endpoints: []transport.DirectoryEntry{{
+		Address: ident.Address{Node: b.id, Endpoint: endpointOf(0x21)}, Kind: adapterreg.KindRuntime,
+		DisplayName: "work (codex)", Accepts: []authz.Action{authz.ActionSee},
+		Adapter: &transport.DirectoryAdapter{
+			Instance: "work", ID: "codex", Version: "0.17.0",
+			Runtime: &adapterproto.RuntimeInfo{Name: "Codex CLI", Version: "0.163.0"},
+		},
+	}}}
+}
+
+// TestDirectoryAdapterAcrossVersions: the adapter of an entry travels under the
+// newest directory identifier only. An asker takes it from a node that serves
+// that identifier and gets entries without it from one that serves only the
+// previous identifier; a node that speaks only the previous identifier, asking,
+// gets an answer it can read.
+func TestDirectoryAdapterAcrossVersions(t *testing.T) {
+	sender := endpointOf(1)
+	serve := func(b *peerNode) {
+		b.node.dir = func(context.Context, transport.Origin, ident.EndpointID, transport.DirectoryRequest) (transport.DirectoryPage, error) {
+			return adaptedPage(b), nil
+		}
+	}
+	t.Run("a node that serves the newest identifier", func(t *testing.T) {
+		a, b := pairOver(t, false)
+		serve(b)
+		page, err := a.net.QueryDirectory(ctx5(t), b.id, sender, transport.DirectoryRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := adaptedPage(b); !reflect.DeepEqual(page, want) {
+			t.Errorf("page %+v, want %+v", page, want)
+		}
+	})
+	t.Run("a node that serves only the previous identifier", func(t *testing.T) {
+		a, b := pairOver(t, false)
+		serve(b)
+		b.net.lib.host.RemoveStreamHandler(protocol.ID(nodeproto.ProtocolDirectory))
+		page, err := a.net.QueryDirectory(ctx5(t), b.id, sender, transport.DirectoryRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := adaptedPage(b)
+		want.Endpoints[0].Adapter = nil
+		if !reflect.DeepEqual(page, want) {
+			t.Errorf("page %+v, want the entry without its adapter %+v", page, want)
+		}
+		if a.net.memberConn(b.id) == nil {
+			t.Error("the connection was dropped")
+		}
+	})
+	t.Run("an asker that speaks only the previous identifier", func(t *testing.T) {
+		a, b := pairOver(t, false)
+		serve(b)
+		req, err := nodeproto.DirectoryRequest{Sender: sender}.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := a.dialRaw(b)
+		eventually(t, "the exchange to complete", func() bool { return b.stateOf(a) == preauth.StateMember && a.net.Connected(b.id) })
+		s, err := openRaw(ctx5(t), e.conn, nodeproto.PreviousProtocolDirectory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Reset()
+		framed, err := nodeproto.AppendFrame(nil, req, 1<<16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Write(framed); err != nil {
+			t.Fatal(err)
+		}
+		answer, err := nodeproto.ReadFrame(bufio.NewReader(s), 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The previous decoder refuses an unknown key, so this is what a node of
+		// the previous version reads.
+		ans, err := nodeproto.DecodeDirectoryAnswerFor(nodeproto.PreviousProtocolDirectory, answer)
+		if err != nil || len(ans.Entries) != 1 || ans.Entries[0].Adapter != nil || ans.Entries[0].DisplayName != "work (codex)" {
+			t.Errorf("answer %+v, %v; want the entry without its adapter", ans, err)
+		}
+	})
 }

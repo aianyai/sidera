@@ -3,6 +3,7 @@ package nodeproto
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/publication"
@@ -21,8 +22,14 @@ const (
 	ProtocolSend = "/sidera/send/2.0.0"
 	// ProtocolPull asks for the current reports of the deliveries of one message.
 	ProtocolPull = "/sidera/pull/2.0.0"
-	// ProtocolDirectory asks for a page of the endpoints a node shows the asker.
-	ProtocolDirectory = "/sidera/directory/2.0.0"
+	// ProtocolDirectory asks for a page of the endpoints a node shows the asker,
+	// each with the adapter that serves it.
+	ProtocolDirectory = "/sidera/directory/3.0.0"
+	// PreviousProtocolDirectory is the directory protocol before entries named
+	// their adapter. It is framed as the current one is; its entries are the same
+	// without the adapter. A node serves it so that a node that has not been
+	// upgraded can still ask, and asks it of a node that serves no newer one.
+	PreviousProtocolDirectory = "/sidera/directory/2.0.0"
 	// ProtocolDialBack asks a member whether it can dial the asker back on the
 	// addresses it holds for it. It was framed from its first version and has no
 	// legacy identifier.
@@ -43,11 +50,14 @@ const (
 	LegacyProtocolDirectory = "/sidera/directory/1.0.0"
 )
 
-// legacyOf maps each current identifier to the legacy one of the same protocol.
-var legacyOf = map[string]string{
-	ProtocolSend:      LegacyProtocolSend,
-	ProtocolPull:      LegacyProtocolPull,
-	ProtocolDirectory: LegacyProtocolDirectory,
+// offered maps each current identifier to the identifiers a client proposes for
+// the protocol, newest first. The last of a list is the legacy one of the
+// protocol, if it has one.
+var offered = map[string][]string{
+	ProtocolSend:      {ProtocolSend, LegacyProtocolSend},
+	ProtocolPull:      {ProtocolPull, LegacyProtocolPull},
+	ProtocolDirectory: {ProtocolDirectory, PreviousProtocolDirectory, LegacyProtocolDirectory},
+	ProtocolDialBack:  {ProtocolDialBack},
 }
 
 // Protocols lists every identifier a node serves, the current ones first, in a
@@ -55,32 +65,22 @@ var legacyOf = map[string]string{
 func Protocols() []string {
 	return []string{
 		ProtocolSend, ProtocolPull, ProtocolDirectory, ProtocolDialBack,
+		PreviousProtocolDirectory,
 		LegacyProtocolSend, LegacyProtocolPull, LegacyProtocolDirectory,
 	}
 }
 
 // Offer returns the identifiers a client proposes for a call to a protocol, in
-// the order of preference: the current identifier, then the legacy one if the
-// protocol has one. It is nil for an identifier that is not a current one.
+// the order of preference: the current identifier, then the older ones the
+// protocol has. It is nil for an identifier that is not a current one.
 func Offer(protocol string) []string {
-	if legacy, ok := legacyOf[protocol]; ok {
-		return []string{protocol, legacy}
-	}
-	if protocol == ProtocolDialBack {
-		return []string{protocol}
-	}
-	return nil
+	return slices.Clone(offered[protocol])
 }
 
 // IsLegacy reports whether the identifier is one of the legacy ones, whose
 // streams are not framed.
 func IsLegacy(protocol string) bool {
-	for _, legacy := range legacyOf {
-		if protocol == legacy {
-			return true
-		}
-	}
-	return false
+	return protocol == LegacyProtocolSend || protocol == LegacyProtocolPull || protocol == LegacyProtocolDirectory
 }
 
 // Limit is the byte limit of the two messages of one protocol: the longest
@@ -110,10 +110,14 @@ const (
 	// reports on: the bound of the envelope.
 	MaxRecipients = envelope.MaxRecipients
 
-	// maxDirectoryEntry bounds the encoding of one directory entry: an endpoint
-	// identifier, a kind and up to eight action names, a display name of 128
-	// characters and a description of 1024, four bytes each at the most.
-	maxDirectoryEntry = 5 << 10
+	// maxDirectoryEntry bounds the encoding of one directory entry. Without its
+	// adapter it is an endpoint identifier, a kind and up to eight action names, a
+	// display name of 128 characters and a description of 1024, four bytes each at
+	// the most: 5 KiB. The adapter adds at most 659 bytes: the key, the map head, an
+	// instance and an adapter id of 32 bytes each, a version of 64 bytes and a
+	// runtime whose name and version are 64 characters of four bytes each (1 + 1 +
+	// 2*(1+2+32) + (1+2+64) + (1+1+2*(1+2+256))), so 6 KiB holds an entry.
+	maxDirectoryEntry = 6 << 10
 	// maxDirectoryRequest holds a sender endpoint, a cursor and a page size.
 	maxDirectoryRequest = 512
 	// maxPullRequest holds a message identifier and a list of endpoint
@@ -127,7 +131,7 @@ const (
 )
 
 // LimitOf returns the byte limits of a protocol, the same for its current and
-// its legacy identifier (if it has one), and false for an identifier that is not one of this
+// its older identifiers, and false for an identifier that is not one of this
 // package's. On a framed stream the limit bounds the payload of the frame.
 //
 // A send request holds one envelope. A send or pull answer holds a report per
@@ -140,7 +144,7 @@ func LimitOf(protocol string) (Limit, bool) {
 		return Limit{Request: envelope.MaxEncoded() + requestSlack, Answer: records + answerSlack}, true
 	case ProtocolPull, LegacyProtocolPull:
 		return Limit{Request: maxPullRequest, Answer: records + answerSlack}, true
-	case ProtocolDirectory, LegacyProtocolDirectory:
+	case ProtocolDirectory, PreviousProtocolDirectory, LegacyProtocolDirectory:
 		return Limit{Request: maxDirectoryRequest, Answer: MaxDirectoryPage*maxDirectoryEntry + answerSlack + MaxCursorLen}, true
 	case ProtocolDialBack:
 		return Limit{Request: maxDialBackRequest, Answer: maxDialBackAnswer}, true

@@ -9,6 +9,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Handler is the engine's side of every transport: what an implementation calls
@@ -52,6 +53,27 @@ type DirectoryEntry struct {
 	DisplayName string
 	Description string
 	Accepts     []authz.Action
+	// Adapter says which adapter serves the endpoint; nil when the endpoint is
+	// served by none or the target did not say (a target that speaks only an
+	// older directory protocol never does).
+	Adapter *DirectoryAdapter
+}
+
+// DirectoryAdapter is the adapter instance behind a directory entry: the
+// instance that serves the endpoint, the adapter it runs and, when they are
+// known, the adapter's version and the native runtime it drives.
+type DirectoryAdapter struct {
+	// Instance is the name of the adapter instance on the target node.
+	Instance string
+	// ID is the identifier of the adapter the instance runs.
+	ID string
+	// Version is the adapter's version as it announced itself when it last
+	// connected; empty while it has not connected since the target started.
+	Version string
+	// Runtime is the native runtime the adapter found when its probe last
+	// passed. It is nil for an endpoint that is no runtime or session endpoint,
+	// and while no probe has passed.
+	Runtime *adapterproto.RuntimeInfo
 }
 
 // DirectoryPage is a live page. NextCursor is empty when nothing follows it.

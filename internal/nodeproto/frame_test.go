@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 func TestReadMessage(t *testing.T) {
@@ -123,16 +124,19 @@ func TestLimits(t *testing.T) {
 }
 
 // TestOfferedIdentifiers: a call proposes the current identifier of a protocol
-// first and its legacy one second, and both are held to the same limits, which
-// bound the payload of a frame as they bound the message of a legacy stream.
+// first and its legacy one last, and every identifier is held to the same limits,
+// which bound the payload of a frame as they bound the message of a legacy
+// stream. The directory has one between, TestDirectoryProtocolVersions.
 func TestOfferedIdentifiers(t *testing.T) {
 	for _, current := range []string{ProtocolSend, ProtocolPull, ProtocolDirectory} {
 		offered := Offer(current)
-		if len(offered) != 2 || offered[0] != current || IsLegacy(current) || !IsLegacy(offered[1]) {
+		if len(offered) < 2 || offered[0] != current || IsLegacy(current) || !IsLegacy(offered[len(offered)-1]) {
 			t.Fatalf("%s is offered as %v", current, offered)
 		}
-		if a, b := limit(offered[0]), limit(offered[1]); a != b {
-			t.Errorf("%s: limits %+v and %+v differ", current, a, b)
+		for _, o := range offered {
+			if a, b := limit(offered[0]), limit(o); a != b {
+				t.Errorf("%s: limits %+v and %+v differ", current, a, b)
+			}
 		}
 	}
 	if offered := Offer(ProtocolDialBack); len(offered) != 1 || offered[0] != ProtocolDialBack || IsLegacy(ProtocolDialBack) {
@@ -163,6 +167,10 @@ func TestLargestMessagesFit(t *testing.T) {
 			Endpoint: ep1, Kind: 3, DisplayName: strings.Repeat("\U0001F600", 128), Description: strings.Repeat("\U0001F600", 1024),
 		}
 		entry.Actions = authz.Actions
+		entry.Adapter = &DirectoryAdapter{
+			Instance: strings.Repeat("a", 32), ID: strings.Repeat("a", 32), Version: "1.0.0-" + strings.Repeat("a", 58),
+			Runtime: &adapterproto.RuntimeInfo{Name: strings.Repeat("\U0001F600", 64), Version: strings.Repeat("\U0001F600", 64)},
+		}
 		entries := make([]DirectoryEntry, MaxDirectoryPage)
 		for i := range entries {
 			entries[i] = entry
