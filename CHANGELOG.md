@@ -50,6 +50,13 @@ protocol has a version of its own.
   endpoints of one node apart. The endpoint's address is unchanged, so aliases and anything that
   addresses it by address keep working. Set `display_name` to keep a custom name.
 
+### Fixed
+
+- **`sidera daemon restart` and `sidera update` no longer report a false internal error when the old daemon
+  closes its connection during the restart.** The command could fail with `internal/internal` and exit
+  code 1 although the restart had succeeded; a connection lost before a request is written now counts like
+  any other unknown outcome, which the wait goes through and a change is sent again after.
+
 ### Security
 
 - The name and version of the runtime that an adapter reports in its probe result are now held to

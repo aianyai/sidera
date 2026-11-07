@@ -24,7 +24,7 @@ not import it: the words of the wire never enter the engine.
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
-| `OutcomeUnknown(operationID)` | What a client says when it wrote a request and did not read the answer whole: category and code `outcome_unknown`, the identifier in the details. The one definition the command line, the MCP front end and the test fixture share. |
+| `OutcomeUnknown(operationID)` | What a client says when it read no complete answer to a request (it wrote the request and the answer was cut off or invalid, or the connection was lost): category and code `outcome_unknown`, the identifier in the details. The one definition the command line, the MCP front end and the test fixture share. |
 | `Category`, `Categories`, `HTTPStatus`, `ExitCode`, `ExitUsage`, `ExitOutcomeUnknown` | The nine categories, the status of the answer for each, and the exit code of the command line for each, with the one exit code no category gives (2, a command used wrongly). |
 
 ## Rules

@@ -284,7 +284,9 @@ keys. Ordinary calls have a 60-second deadline; receives have
 `min(requested wait_s, manifest.MaxRecvWaitSeconds) + 30` seconds, bounded also by
 the caller's context. The protocol's maximum is 120 seconds. A written request
 without a complete, valid answer is `outcome_unknown`; the caller cannot assume
-it had no effect. If the request was not written, an ended caller context maps
+it had no effect. A connection lost before the request was written, such as a
+kept-alive one that the daemon closed while shutting down, is `outcome_unknown`
+too, not `internal`. If the request was not written, an ended caller context maps
 to `unavailable/request_canceled` or `unavailable/request_timeout` through
 `apiwire`, with fixed messages describing only the ended context. Existing typed
 errors take precedence over that mapping. No operation identifier means no

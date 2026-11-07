@@ -599,7 +599,9 @@ Errors are `{"error":{"category","code","message","details"?}}` in the words of
 decoder say. Ended request contexts are `unavailable/request_canceled` and
 `unavailable/request_timeout`, with fixed messages describing only the context;
 typed errors take precedence. A written request with an incomplete answer remains
-`outcome_unknown`. Categories are `invalid_argument` 400, `unauthenticated` 401,
+`outcome_unknown`, and so is a connection lost before the request was written (the
+daemon closed a kept-alive connection while it shut down), which the restart wait and
+the resend of a change treat as "not yet". Categories are `invalid_argument` 400, `unauthenticated` 401,
 `not_found` 404,
 `conflict` 409, `refused` 422, `backpressure` 429, `unavailable` 503, `internal`
 500, and the exit codes of the command line 3 to 9 in that order, 1 for internal, 2

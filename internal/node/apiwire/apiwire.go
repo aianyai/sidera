@@ -170,14 +170,15 @@ func OperationUnknown() *Error {
 	return New(CategoryNotFound, CodeOperationUnknown, "there is no stored result for this operation identifier")
 }
 
-// OutcomeUnknown is what a client says when it wrote a request and did not read the
-// answer whole, so it cannot tell whether the request took effect. The operation
+// OutcomeUnknown is what a client says when it read no complete answer to a request
+// (it wrote the request and the answer was cut off or invalid, or the connection was
+// lost), so it cannot tell whether the request took effect. The operation
 // identifier, when the request had one, is in the details: it is the one to send the
 // request again with, which returns the stored result if the request did run and
 // runs it if it did not. This is the one definition the command line, the MCP front
 // end and the test fixture share.
 func OutcomeUnknown(operationID string) *Error {
-	message := "the request was sent and no complete answer was read; whether it took effect is not known"
+	message := "no complete answer to the request was read; whether it took effect is not known"
 	if operationID != "" {
 		message += ": send it again with the same operation identifier"
 	}

@@ -67,8 +67,10 @@ those bytes and pass the raw document to `Call`; it must not encode unchecked
 objects first or repeat the text-safety rules itself.
 
 Calls use the supplied timeout, also bounded by the caller's context. A failure
-before writing is mapped through `apiwire`; a written request without a complete
-answer has `outcome_unknown`. Complete non-200 answers decode as `apiwire.Body`;
+before writing is mapped through `apiwire`, except that a transport failure `apiwire` has
+no words for (a connection lost, such as a kept-alive one the daemon closed while shutting
+down) is `outcome_unknown` like a written request without a complete answer, so that the
+callers that wait or send again act on it instead of reporting an internal error. Complete non-200 answers decode as `apiwire.Body`;
 malformed error answers have unknown outcomes. Success returns the original
 response bytes for the facade to validate, without a response size limit or
 re-encoding. `Close` releases idle connections; contexts own in-flight calls.

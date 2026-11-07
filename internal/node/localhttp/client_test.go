@@ -1,9 +1,11 @@
 package localhttp_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -150,6 +152,76 @@ func FuzzClientRequestDocuments(f *testing.F) {
 			if e == nil || e.Code != want {
 				t.Fatalf("Call: %v; want %s", err, want)
 			}
+		}
+	})
+}
+
+// A connection that is lost is not an internal error of the client. Whether the
+// request was written or not, the caller is told the outcome is not known, which is
+// what every caller that waits or sends again already acts on; a daemon that is not
+// there and a context that ended keep their own words.
+func TestClientReportsALostConnectionAsAnUnknownOutcome(t *testing.T) {
+	listen := func(t *testing.T, home string, serve func(net.Conn)) {
+		t.Helper()
+		addr, err := ipc.Locate(home, ipc.KindManage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := ipc.Listen(addr, held{}, ipc.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { l.Close() })
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				go serve(conn)
+			}
+		}()
+	}
+	call := func(ctx context.Context, c *localhttp.Client) *apiwire.Error {
+		_, err := c.Call(ctx, localhttp.Request{Method: "known", Body: struct{}{}, Timeout: 10 * time.Second})
+		return apiwire.FromError(err)
+	}
+
+	t.Run("closed before the request is read", func(t *testing.T) {
+		// Whether the client has written the request by the time it finds the
+		// connection closed is a race, and the answer must be the same either way, so
+		// the call is made often enough for both to happen.
+		home := socketHome(t)
+		listen(t, home, func(conn net.Conn) { conn.Close() })
+		c := localClient(t, home)
+		for i := range 300 {
+			if e := call(context.Background(), c); e.Category != apiwire.CategoryOutcomeUnknown || e.Code != apiwire.CodeOutcomeUnknown {
+				t.Fatalf("call %d: %v; want %s/%s", i, e, apiwire.CategoryOutcomeUnknown, apiwire.CodeOutcomeUnknown)
+			}
+		}
+	})
+	t.Run("closed after the request is read", func(t *testing.T) {
+		home := socketHome(t)
+		listen(t, home, func(conn net.Conn) {
+			http.ReadRequest(bufio.NewReader(conn))
+			conn.Close()
+		})
+		if e := call(context.Background(), localClient(t, home)); e.Category != apiwire.CategoryOutcomeUnknown {
+			t.Fatalf("call: %v; want %s", e, apiwire.CategoryOutcomeUnknown)
+		}
+	})
+	t.Run("no daemon", func(t *testing.T) {
+		if e := call(context.Background(), localClient(t, socketHome(t))); e.Code != "daemon_not_running" {
+			t.Fatalf("call: %v; want daemon_not_running", e)
+		}
+	})
+	t.Run("a context that ended", func(t *testing.T) {
+		home := socketHome(t)
+		listen(t, home, func(conn net.Conn) { conn.Close() })
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if e := call(ctx, localClient(t, home)); e.Code != "request_canceled" {
+			t.Fatalf("call: %v; want request_canceled", e)
 		}
 	})
 }

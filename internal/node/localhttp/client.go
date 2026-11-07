@@ -94,7 +94,14 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 		if wrote.Load() {
 			return nil, apiwire.OutcomeUnknown("")
 		}
-		return nil, apiwire.FromError(err)
+		// Before the write, apiwire knows the failures to reach the daemon (ipc) and
+		// an ended context. Anything else is a connection that was lost, most often a
+		// kept-alive one that the daemon closed while it shut down; the caller must
+		// wait or send again, not be told that the client is broken.
+		if mapped := apiwire.FromError(err); mapped.Category != apiwire.CategoryInternal {
+			return nil, mapped
+		}
+		return nil, apiwire.OutcomeUnknown("")
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)

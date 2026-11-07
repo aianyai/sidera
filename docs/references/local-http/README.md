@@ -85,8 +85,15 @@ encoding. `Call` applies the same document check to a supplied raw message.
 
 A call's context lasts through response-body reading and is bounded by the
 supplied timeout and caller context. `httptrace.WroteRequest` records send
-progress: a transport failure before writing uses `apiwire.FromError`; after
-writing it is `outcome_unknown`. An incomplete response body or malformed error
+progress: after writing, a transport failure is `outcome_unknown`. Before
+writing, `apiwire.FromError` words the failures it knows (the daemon not running,
+a refused peer, an ended context); any other transport failure is a lost
+connection and is `outcome_unknown` as well, never `internal`. The usual one is a
+kept-alive connection that the daemon closed while it shut down: the standard
+transport retries only requests it may replay, and a POST without an idempotency
+header is not, so the failure reaches the caller. The category is the one that
+callers already wait on or send again with the same operation identifier (the
+restart wait, the resend of a management change). An incomplete response body or malformed error
 answer also has an unknown outcome. A complete non-200 response is decoded as
 `apiwire.Body`. A 200 response returns the exact bytes for domain validation.
 The request-body limit does not limit responses: clients read the complete
