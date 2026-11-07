@@ -662,12 +662,8 @@ func TestManagementReadsEscapeForeignText(t *testing.T) {
 }
 
 // The name column of the tables of trust and of the network: the name the node gave itself,
-// with its host name when that is another; a dash for a node nothing is known of. The name
-// came from another node, so it is shown as visible escapes and never as the bytes a terminal
-// acts on.
+// with its host name when that is another; a dash for a node nothing is known of.
 func TestManagementTablesNameTheNodes(t *testing.T) {
-	const raw = `\u001b]0;pwned\u0007\u202etxt`
-	const shown = `\x1b]0;pwned\x07\u202etxt`
 	for _, tc := range []struct{ name, profile, want string }{
 		{"name and host name differ", `{"name":"build box","host_name":"inuc"}`, "build box (inuc)"},
 		{"name is the host name", `{"name":"inuc","host_name":"inuc"}`, "inuc"},
@@ -675,7 +671,6 @@ func TestManagementTablesNameTheNodes(t *testing.T) {
 		{"name only", `{"name":"study"}`, "study"},
 		{"no member the node gave", `{"as_of":1793000000}`, "-"},
 		{"no profile", ``, "-"},
-		{"foreign text", `{"name":"` + raw + `"}`, shown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			member := ""
@@ -690,9 +685,6 @@ func TestManagementTablesNameTheNodes(t *testing.T) {
 				plain := escapeSequence.ReplaceAllString(out, "")
 				if !strings.Contains(squash(plain), "connected "+tc.want+" ") {
 					t.Errorf("%s: %q does not follow the connection in\n%s", what, tc.want, plain)
-				}
-				if strings.ContainsAny(plain, "\x1b\x07\u202e") {
-					t.Errorf("%s: foreign control characters reached the output:\n%q", what, out)
 				}
 			}
 		})

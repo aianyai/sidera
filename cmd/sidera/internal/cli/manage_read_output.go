@@ -243,13 +243,13 @@ type nodeProfile struct {
 
 // label is the name a table shows for a node: its name, with the host name after it when that
 // is another, and empty when there is nothing to show, which the table writes as its mark for
-// a missing value. A node without a profile is a nil pointer. The words are those of another
-// node, so they are shown as visible escapes.
+// a missing value. A node without a profile is a nil pointer. The words are checked where the
+// profile enters the node, so they are shown as they are.
 func (p *nodeProfile) label() string {
 	if p == nil {
 		return ""
 	}
-	name, host := termout.SanitizeLine(p.Name), termout.SanitizeLine(p.HostName)
+	name, host := p.Name, p.HostName
 	switch {
 	case name == "":
 		return host

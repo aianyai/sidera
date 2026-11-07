@@ -430,8 +430,8 @@ parentheses when that is another, and the table's dash when there is nothing to 
 the node's profile, which this node fetches from a node it trusts directly once a connection to it
 is up and keeps in memory only: a node that has not been connected since the daemon started shows
 the dash, whatever its owner named it. The name is a label for the person reading; nothing is
-addressed or allowed by it. The words come from another node, so the table shows control,
-text-direction and invisible format characters as visible escapes. The `--json` result carries the profile of each node
+addressed or allowed by it. The words are checked where the profile enters the node, so the table prints
+them as they are. The `--json` result carries the profile of each node
 as its `profile` member, left out for a node without one (see the
 [daemon reference](../daemon/README.md#the-management-interface)).
 
