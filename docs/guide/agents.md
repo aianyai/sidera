@@ -59,7 +59,8 @@ same thing; the tool names below are those of the `sidera` MCP server.
 | Change what you accept | `sidera declare ...` | `declare` |
 
 `sidera whoami` does not exist. `me` shows your address, your declaration and the
-limits of each front end, including `recv_wait_max_s`. The console's `whoami` is
+limits of each front end, including how long a `recv` may wait (`waits up to` under
+`Frontends`; `recv_wait_max_s` in `--json` and in MCP). The console's `whoami` is
 a different command: it prints the owner endpoint's address.
 
 Addresses look like `<node-id>/<endpoint-id>`. A `send` takes exactly one
@@ -88,7 +89,7 @@ Three rules matter more than the rest.
    accepted ones. On the command line the flag is `--wait`. An empty page after a
    wait of 60 should take about a minute; if it returns at once, the arguments
    are wrong.
-3. **Wait in a loop.** Each runtime caps the wait (see `recv_wait_max_s` in `me`;
+3. **Wait in a loop.** Each runtime caps the wait (see `waits up to` in `me`, `recv_wait_max_s` in MCP;
    at most about 100 seconds through MCP and 8 seconds on the Codex command
    line), so one `recv` may return early. Call it again, passing the lease of the
    previous page, until the answer you wait for arrives.
@@ -125,7 +126,7 @@ resend of identical content a no-op instead of a duplicate.
 
 A successful `send` means the node accepted the message and will keep trying; it
 is not proof that it arrived. Check with `sidera status <message-id>`, which
-shows each recipient's delivery state. If a message cannot be delivered, the
+shows each recipient's delivery state and, for a control signal, its reply. If a message cannot be delivered, the
 sender is told.
 
 ## Starting a session on another machine
@@ -136,7 +137,8 @@ that starts sessions), not a console and not an existing session.
 
 1. Find it. `sidera directory --node <node-id>` lists the node's endpoints. Take
    the address of the one whose `kind` is `runtime` and whose `accepts` list has
-   `session.create`. Its `display_name` names the adapter, such as `codex`.
+   `session.create`. Its name (the `NAME` column; `display_name` in JSON and MCP)
+   names the adapter, such as `codex`.
 2. Create the session with a preset that exists on that node, and put the task in
    the first message:
 
@@ -147,11 +149,12 @@ that starts sessions), not a console and not an existing session.
    `session.create` delivers the first message into the new session at once.
    There is no need to `send` it again.
 3. Wait for the answer with `recv`, as above. `sidera control` returns as soon as
-   the request is accepted, and its result holds only the message id, the target and
-   `replayed`: **it does not carry the new session's address.** Read the address with
-   `sidera status <message-id>`, where the control reply appears within seconds, as
-   soon as the first message is in the new session (long before the task is done), or
-   take it from `from` in the new session's first message to you. The answer to your task is a
+   the request is accepted, and its output holds only the message id and the target:
+   **it does not carry the new session's address.** `sidera status <message-id>`
+   shows the control reply within seconds, as soon as the first message is in the new
+   session (long before the task is done); it names the session's endpoint, on the node
+   you sent `control` to, so the address is that node, `/`, and the endpoint. The
+   `from` of the new session's first message to you is the address too. The answer to your task is a
    message, not the control reply: wait for it with `recv`.
 
 The new session answers to the sender of its first message, with an ordinary

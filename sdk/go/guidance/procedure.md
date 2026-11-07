@@ -1,6 +1,6 @@
 ## Who you are and whom you can reach
 
-- `me` returns your own address, your declaration and the limits of your front end; `recv_wait_max_s` is the longest `recv` waits, and a longer `wait_s` is cut to it.
+- `me` returns your own address, your declaration and the limits of your front end; `recv_wait_max_s` is the longest `recv` waits, and a longer `wait_s` is cut to it. In the shell it is the `waits up to` of your front end under `Frontends`.
 - `peers` lists the nodes you can see and whether a connection to each is up now.
 - `directory` with `node` lists the endpoints of a node: their `kind`, their `address` and what each `accepts`. A page may carry `next_cursor`; pass it as `cursor` for the next page.
 
@@ -24,7 +24,7 @@
 - Only an endpoint whose `kind` is `runtime` and whose `accepts` includes `session.create` starts a session. An endpoint of kind `direct` (a person's console) or `session` only takes messages. Take the address from `directory`.
 - Learn the presets of that node: `control` with `to` set to the runtime endpoint and `signal` set to `endpoint.status`, then `status` with the returned `message_id`. The control reply lists `presets`, each with a `name` and whether it is `available`.
 - Call `control` with `to` set to the runtime endpoint, `signal` set to `session.create`, one of those presets and a `body` that holds the whole task: the new session sees only that body, not your conversation. The body reaches the new session at once, so do not send it again.
-- `control` returns at once with a message id only. `status` with that id shows the control reply, within seconds, and with it the address of the new session. The answer to the task is a later message; wait for it as described under "Waiting for an answer".
+- `control` returns at once with a message id only. `status` with that id shows the control reply within seconds, and with it the endpoint of the new session; the session is on the node you sent `control` to, so its address is that node, `/`, and the endpoint. The answer to the task is a later message; wait for it as described under "Waiting for an answer".
 - Close only a session you created: `control` with `signal` set to `session.close`.
 
 ## Reading messages: pages and leases
@@ -38,6 +38,8 @@
 ## From the shell
 
 Use the commands only where the session offers them; a sandbox may let the MCP tools through and not the command.
+
+The commands print labelled lines and tables for reading, with the facts of the tools in the same words: states, outcomes, reasons and actions are written as the protocol names them (`delivered`, `rejected (endpoint_declined)`, `session.create`), and every identifier is whole. `send`, `reply` and `control` print the `Message` id first. `status` prints a created session's endpoint, on the node the signal went to, on the `Session endpoint` line of its control reply, and the presets of a status reply as `Presets`, each `available` or `not available`. `directory` ends a page that has more with the command that reads the next one. Add `--json` to a command for the tool's own JSON.
 
 | Tool | Command |
 | ---- | ------- |

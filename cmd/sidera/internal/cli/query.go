@@ -2,7 +2,10 @@ package cli
 
 import (
 	"flag"
+	"io"
 	"strings"
+
+	"github.com/aianyai/sidera/internal/node/agentapi"
 )
 
 // queryRequest checks the arguments of an identity, declaration, directory, peers
@@ -36,7 +39,20 @@ func (c *command) queryRequest(args []string) (agentRequest, error) {
 	case "probe":
 		in["frontend"] = "cli"
 	}
-	return agentRequest{method: args[0], params: in, show: c.result}, nil
+	show := c.result
+	if args[0] == "directory" {
+		show = func(answer any) error { return c.showDirectory(answer, q.node) }
+	}
+	return agentRequest{method: args[0], params: in, show: show}, nil
+}
+
+// showDirectory writes a directory page; node is the one that was asked, "" for this node.
+func (c *command) showDirectory(answer any, node string) error {
+	if c.json {
+		return c.encode(answer)
+	}
+	_, err := io.WriteString(c.out, renderDirectory(c.out, answer.(agentapi.DirectoryResult), node))
+	return err
 }
 
 type queryFlags struct {

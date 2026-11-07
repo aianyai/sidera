@@ -2,7 +2,6 @@ package cli
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -103,22 +102,29 @@ func (c *command) messageRequest(args []string) (agentRequest, error) {
 		in["to"], in["signal"] = p[0], p[1]
 		addPresent(f, in, "preset", "preset", m.preset)
 	}
-	return agentRequest{method: args[0], params: in, show: c.showSent}, nil
+	return agentRequest{method: args[0], params: in, show: c.showSent(args[0])}, nil
 }
 
 // showSent writes the answer of a send, reply or control.
-func (c *command) showSent(out any) error {
-	if c.json {
-		return c.encode(out)
+func (c *command) showSent(command string) func(any) error {
+	return func(out any) error {
+		if c.json {
+			return c.encode(out)
+		}
+		var text string
+		switch sent := out.(type) {
+		case agentapi.SendResult:
+			kind := messageSent
+			if command == "reply" {
+				kind = replySent
+			}
+			text = renderSent(c.out, kind, sent.MessageID, sent.To, sent.Replayed)
+		case agentapi.ControlResult:
+			text = renderSent(c.out, controlSent, sent.MessageID, []string{sent.To}, sent.Replayed)
+		}
+		_, err := io.WriteString(c.out, text)
+		return err
 	}
-	var err error
-	switch sent := out.(type) {
-	case agentapi.SendResult:
-		_, err = fmt.Fprintf(c.Stdout, "sent %s to %s\n", sent.MessageID, strings.Join(sent.To, ","))
-	case agentapi.ControlResult:
-		_, err = fmt.Fprintf(c.Stdout, "sent %s to %s\n", sent.MessageID, sent.To)
-	}
-	return err
 }
 
 type messageFlags struct {

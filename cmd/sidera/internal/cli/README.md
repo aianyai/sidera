@@ -18,7 +18,7 @@ Global flags (`--home`, `--json`, `--color`, `--help`) are removed before dispat
 sets `command.color`, and `readGlobals` builds the `out` and `errOut` `termout.Stream`s from it and the
 environment, once per run and even when a flag is wrong, since the error is reported through them. They
 are what a command's human output is written through (`Stdout` and `Stderr` stay the raw writers); the
-commands move onto them as their output is restyled. Command discovery registers the local
+agent commands write through them and the others move over as their output is restyled. Command discovery registers the local
 flags once; global scanning reads their arity through `FlagSet.Lookup` and the
 standard-library `IsBoolFlag` convention, then local parsing uses that same set
 and its bound values. A local value stays attached, including a body spelled
@@ -35,7 +35,17 @@ and its bound values. A local value stays attached, including a body spelled
   parameters and the way its answer is written; the receive, acknowledge and status arguments.
 - `message.go`: message and control flags; one body source for send and reply.
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
-- `output.go`: human results; structured results use the shared JSON encoder.
+- `output.go`: `result`, which writes the answer of an agent command (JSON with `--json`, the
+  layouts below otherwise) through `c.out`; `jsonText` for the management tables.
+- `agent_output.go`: the layouts of the agent commands (`me`, `declare`, `peers`, `directory`,
+  `send`/`reply`/`control`, `ack`, `status <message-id>`), each a function from the stream and the
+  result to text, so a test reads them without a process. They share one convention (see "Human
+  output" in the command-line reference): a line that says what was done, blocks of labelled
+  lines, tables with the identifier in the last column, protocol words written as the protocol
+  names them, identifiers whole. A new field of an agent result is given its human form here when
+  it is added. Text from outside that no source validates goes through `termout.SanitizeLine`
+  before it is printed; the fields printed today are identifiers, enumerations and names checked
+  where they enter the node.
 - `local.go`: initialization (with its `--port` flag, judged by
   `config.ValidatePort`) and foreground daemon composition, including the daemon's
   `Relauncher`: it refuses a restart when `LaunchErr` is set or `launch.Restartable`

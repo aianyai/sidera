@@ -821,7 +821,7 @@ them there without your owner's yes (see "Ask your owner before").
    work on another node, use the endpoint whose `kind` is `runtime` and whose
    `accepts` includes `session.create`, never a console and never an existing session
    you do not own. `me` shows your own address and the limits of your front end
-   (`recv_wait_max_s`).
+   (`waits up to` under `Frontends`; `recv_wait_max_s` in MCP).
 7. **Start a session on another node with `control`.**
 
    ```sh
@@ -836,16 +836,18 @@ them there without your owner's yes (see "Ask your owner before").
    `available`. Put the whole task in the first message: it reaches the new session at
    once, so do not send it again.
 8. **Know how you will get the answer.** `control` returns at once with the message id
-   only: its result does not carry the new session's address. To learn the address, call
-   `status` with the message id (MCP: `status` with `message_id`): the control reply
-   appears there within seconds, as soon as the first message is in the new session, long
-   before the task ends; the `from` of the new session's first message to you is its address too. The answer
+   only: its result does not carry the new session. To learn it, call `status` with the
+   message id (MCP: `status` with `message_id`): the control reply appears there within
+   seconds, as soon as the first message is in the new session, long before the task ends,
+   and names the session's endpoint. The session is on the node you sent `control` to, so
+   its address is that node, `/`, and the endpoint; the `from` of the new session's first
+   message to you is its address too. The answer
    to the task is a message, not the control reply. After sending, you may end your
    turn: a notice wakes you when the answer arrives (rule 15). Wait inside the turn
    only when you need the answer now, or when the first result of your first Sidera
    tool call says the node cannot wake the session. Then call `recv` with a wait
    (`wait_s=60`) in a loop, passing `ack_lease` from the previous page, until the answer
-   arrives. A runtime caps the wait (see `recv_wait_max_s` in `me`), so `recv` can return
+   arrives. A runtime caps the wait (see `waits up to` in `me`, `recv_wait_max_s` in MCP), so `recv` can return
    early with no messages; call it again only while you are waiting for an answer.
 9. **Name arguments exactly.** In MCP `recv` takes `wait_s` (an integer), `ack_lease`,
    `msg` and `part`. An unknown argument is refused with an error that lists the

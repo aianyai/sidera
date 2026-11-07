@@ -336,9 +336,7 @@ func TestSendBodySourcesAndStableHumanOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("send: %v", err)
 			}
-			prefix := "sent "
-			suffix := " to " + n.h.Addr("creator") + "\n"
-			if !strings.HasPrefix(string(out), prefix) || !strings.HasSuffix(string(out), suffix) {
+			if !strings.HasPrefix(string(out), "Message accepted for delivery.\n") || !strings.Contains(strings.Join(strings.Fields(string(out)), " "), " To "+n.h.Addr("creator")+" ") {
 				t.Fatalf("send output %q", out)
 			}
 			if err := n.h.Quiesce(); err != nil {
@@ -611,11 +609,11 @@ func TestAgentCommandsPreservePatchesAndFormatHumanResults(t *testing.T) {
 		t.Fatalf("patch lost omitted fields: %d %q %q %v", code, out, diag, err)
 	}
 	code, out, _ = n.run(n.first, "me")
-	if code != 0 || !strings.HasPrefix(out, "address "+n.first.address+"\nnode "+harness.NodeID().String()+"\nkind session\n") || !strings.Contains(out, "frontend cli wait_max_s=20 budget=27000 chars\n") {
+	if words := strings.Join(strings.Fields(out), " "); code != 0 || !strings.HasPrefix(words, "Address "+n.first.address+" Node "+harness.NodeID().String()+" ") || !strings.Contains(words, " Kind session ") || !strings.Contains(words, " Frontends cli (waits up to 20 s, 27000 chars per page) ") {
 		t.Fatalf("me: %d %q", code, out)
 	}
 	code, out, diag = n.run(n.first, "peers")
-	if code != 0 || diag != "" || !strings.Contains(out, harness.NodeID().String()+"  true  self   true") {
+	if code != 0 || diag != "" || !strings.Contains(strings.Join(strings.Fields(out), " "), "self connected "+harness.NodeID().String()) {
 		t.Fatalf("peers: %d %q %q", code, out, diag)
 	}
 	code, out, diag = n.run(n.first, "directory", "--limit", "1", "--json")

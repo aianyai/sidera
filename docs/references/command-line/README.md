@@ -29,15 +29,15 @@ arguments, purpose and one example.
 | --- | --- |
 | `init [--port <n>]` | Create the private data directory, keys and default configuration through `daemon.Init`; `--port` (default 7744, 1 to 65535; 0 and anything else is a usage error before anything is made) is the port `config/network.json` makes the node listen on, for TCP and QUIC; print the node, home and a reminder to export and back up the self-revocation outside the device. |
 | `daemon` | Run the composition root in the foreground with the executable adapter launcher; the daemon owns signal handling and orderly shutdown. |
-| `me` | Read the authenticated session's address, declaration and front-end limits. |
+| `me` | Read the authenticated session's address, node, name, kind, declaration and front-end limits. |
 | `declare [--paused=<bool>] [--refuse-multi-recipient=<bool>] [--restrict-senders=<bool>] [--accept-from <addr>,...] [--hidden=<bool>]` | Send only the fields explicitly supplied; `--accept-from=` clears the list. |
-| `peers` | List the node itself and the nodes it trusts directly: `NODE`, `SELF`, `TRUST` (`self` or `direct`) and `CONNECTED` per line. |
-| `directory [--node <id>] [--limit <n>] [--cursor <cursor>]` | Read one directory page. |
+| `peers` | List the node itself and the nodes it trusts directly, one row each: `TRUST` (`self` or `direct`), `CONNECTION` and `NODE`. |
+| `directory [--node <id>] [--limit <n>] [--cursor <cursor>]` | Read one directory page: `KIND`, `NAME`, `ACCEPTS` (the action names, such as `message.send` and `session.create`, which `control` takes) and `ADDRESS` per endpoint; a page that has more ends with the command that reads the next one. |
 | `send --to <addr> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--accept-before <seconds>] [--key <key>]` | Send a message to exactly one recipient; a comma-separated list is passed on and refused by the Agent boundary with `invalid_argument/single_recipient_only` (exit 3). |
 | `reply <message-id> [--body <text> \| --body-file <file>] [--content-type <type>] [--thread <id>] [--key <key>]` | Reply to a received message. |
 | `recv [--wait <seconds>] [--msg <id> --part <k>] [--ack <lease>]` | Receive a page with front end `cli`; `next.msg` and `next.part` in a page become `--msg` and `--part`. |
-| `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed. |
-| `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply. Node status carries one field the daemon does not send: `home`, the data directory this command resolved and reached, so the owner can confirm which node a command talks to. |
+| `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed; one row per part: `OUTCOME`, `PART`, `MESSAGE`; an outcome that is not an acknowledgement (`refused_no_handout`, `refused_lease`, `too_late`) is yellow on a colored stream. |
+| `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply (see [Human output](#human-output) for how a reply reads). Node status carries one field the daemon does not send: `home`, the data directory this command resolved and reached, so the owner can confirm which node a command talks to. |
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
@@ -484,10 +484,12 @@ is written unchanged, including the node's existing newline, without a wrapper
 or re-encoding. Receiving never acknowledges the new page. `--ack` asks the node
 to acknowledge a previous lease before the receive.
 
-Human output is intentionally small: send and reply print
-`sent <message-id> to <address>`; message status prints one recipient per line;
-me prints identity, declaration and limits; lists use aligned columns. Scripts
-use `--json`. Initialization puts the offline-backup reminder first; JSON init
+The human output of the agent commands (`me`, `peers`, `directory`, `declare`, `send`,
+`reply`, `control`, `status <message-id>` and `ack`) follows the layout rules of [Human
+output](#human-output). `send`, `reply` and `control` say that the message was accepted for
+delivery, which is not that it was delivered, and name `sidera status <message-id>` as the
+way to see the delivery or, for `control`, the reply; a replayed request is said to be one.
+Scripts use `--json`. Initialization puts the offline-backup reminder first; JSON init
 returns `node`, `home`, `self_revocation` and `backup_required:true`.
 Human node status prints outstanding reminders before the ordinary facts, and its
 listing includes the line `home <directory>`. With `--json` the management response is
@@ -509,8 +511,9 @@ into the same table; see [Conventions of every program](#conventions-of-every-pr
 The decoration and color rules below are implemented once, by the SDK package
 [`termout`](../../../sdk/go/termout/README.md). `sidera` builds its standard output and its
 standard error as two `termout` streams, once per run, and each stream decides for itself.
-No command writes through them yet; the commands move over as their output is restyled, and
-each such change describes its layout here.
+The agent commands (`me`, `peers`, `directory`, `declare`, `send`, `reply`, `control`,
+`status <message-id>` and `ack`) write through them and follow the layout below. The other
+commands still use their own forms and move over as their output is restyled.
 
 **Decorated** means that lines may carry markers (`✓` done, `!` attention, `✗` failure). A stream
 is decorated when it is a terminal, or when it is colored. It is not decorated when it is a pipe
@@ -545,6 +548,55 @@ usage error. A Git-Bash or mintty window on Windows presents its terminal to the
 and so gets output that is not decorated; `--color always` asks for the decorations there. On
 Windows a colored console has virtual terminal processing switched on first; a console that
 refuses leaves the stream decorated and not colored.
+
+**Layout.** These are the rules every command's human output is to follow; the agent commands follow them today and the management commands do not yet. The same words and shapes in all three states of a stream:
+
+- A command that changes something opens with a line that says what was done (`Message
+  accepted for delivery.`, `Declaration updated.`), preceded by `✓` on a decorated stream; a
+  command that reads opens with what it read. A replayed `send`, `reply` or `control` adds
+  `This request was accepted before under the same key; nothing was sent again.` (marked `!`).
+  The line that names a next command (``Run `sidera status <message-id>` to see whether it
+  was delivered.``) closes the block it belongs to, with the command name in cyan on a colored
+  stream. Text under a marker line is indented by two columns on every stream.
+- What describes one thing is a block of labelled lines: capitalized labels, left-aligned, two
+  spaces, then the value (`me`, `declare`, the answer of a send, a control reply). A value that
+  has several lines (the front ends, the sender list, the presets) continues under the first. A
+  label is left out when it has no value. A boolean is written as a word: `accepting` or
+  `paused`, `listed` or `hidden`, `connected` or `not connected`, `available` or `not
+  available`.
+- What lists many things is a table: an upper-case header (bold on a colored stream), two spaces
+  between columns, an empty cell as `-`, the columns that say something first and the
+  identifier last. A header is written on a pipe too. An empty list is one sentence on standard
+  output (`No endpoints.`, `No parts were acknowledged.`); a list whose only row is the node
+  itself adds `No other node is trusted directly.`
+- Identifiers (node, endpoint, address, message, lease) are written whole, never shortened and
+  never wrapped. An address is `<node>/<endpoint>`.
+- Words that belong to the protocol are written as it names them, because an agent looks them
+  up and passes some back to a command: delivery states (`delivered`, `expired_unconfirmed`), a
+  rejection written after its state as `rejected (endpoint_declined)`, control outcomes,
+  reasons and conditions, and actions such as `message.send` and `session.create`. The
+  `ACCEPTS` column of `directory` lists the action names of the endpoint, comma and space
+  between them.
+- A time is UTC with how far it is from now (`2026-11-07 01:40 UTC (3 min ago)`), a span is
+  `20 s`; the relative part is dimmed on a colored stream and written on every stream.
+- `me` and `declare` write the declaration as `Receiving` (`accepting` or `paused`), `Senders`
+  (`anyone`, `only the senders on the list`, `nobody`, or `anyone (the sender list is saved and
+  not in use)` for a list set without the restriction), `Sender list` (one address per line),
+  `Shared messages` (`accepted` or `refused`) and `Directory` (`listed` or `hidden`). `me`
+  adds `Address`, `Node`, `Name`, `Kind` and `Frontends`, one line per front end: `cli (waits
+  up to 20 s, 27000 chars per page)`.
+- `status <message-id>` is a table of `STATE` and `TO`, a rejected delivery as
+  `rejected (<reason>)`. A control reply follows under the title `Control reply: <signal>` and
+  holds every field of the reply: `Outcome` and `Reason` of a creation, a close and an
+  interrupt; `Session endpoint` for a created or unconfirmed creation, written as the reply carries it
+  (and as `--json` and the tool give it): the endpoint of the new session, on the node the
+  signal was sent to; and for `endpoint.status` `Activity`, `Queued
+  messages`, `Conditions` (or `none`), `As of` and, for a runtime endpoint, `Presets`, each with
+  its availability.
+- `probe` keeps its one-line form. The management commands keep theirs until they are moved over.
+- None of these commands sanitizes what it prints: the names and descriptions it can show are
+  checked where they enter the node, and the rest are identifiers and members of fixed sets.
+  A command that prints text which no source checks passes it through `SanitizeLine` first.
 
 **Text the program did not write itself** has to be sanitized before it is shown, because escape
 sequences in it can clear the screen, rewrite lines, set the window title or write to the

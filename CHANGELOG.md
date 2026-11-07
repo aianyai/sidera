@@ -22,10 +22,11 @@ protocol has a version of its own.
 - `sidera --color auto|always|never` (default `auto`; before or after the command) chooses whether the
   program colors its output for people. `auto` colors a terminal and nothing else, and follows
   `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; standard output and
-  standard error are decided separately. Nothing a command prints changes yet.
+  standard error are decided separately. The commands named under Changed are the first to follow it; the others print as before.
 
 ### Changed
 
+- **The commands an agent runs in a shell print for reading.** `sidera me`, `peers`, `directory`, `declare`, `send`, `reply`, `control`, `status <message-id>` and `ack` (without `--json`) now print labelled lines and aligned tables with every identifier whole, in place of `key value` lines. `send`, `reply` and `control` say `Message accepted for delivery.` (which is not that it was delivered), print the message id and recipient, and name the `sidera status` command that shows the delivery or the control reply; `status` shows the delivery as a table and a control reply field by field, including the endpoint of a created session and the availability of each preset, where it used to print the reply as JSON; `directory` lists the endpoint's action names (`message.send`, `session.create`) in `ACCEPTS` and puts the address last, and tells you the command for the next page; `me` and `declare` write the declaration in words (`paused`, `accepting`, `listed`, `hidden`, who may send); `peers` and `directory` say so in a sentence when there is nothing more to list. On a terminal or with `--color=always` the lines carry markers and colors, and a pipe gets the same words without them; `ack` shows a refused outcome in yellow. `--json`, `recv`, exit codes and what goes to standard error are unchanged.
 - **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a display
   name is now built from the one table of characters a text shown to a person never holds, so it is a
   function: use `adapterproto.PersonTextPattern()` where you used the constant. A description gets
