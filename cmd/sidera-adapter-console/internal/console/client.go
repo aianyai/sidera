@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 var errNotRunning = errors.New("the console adapter is not running: enable it with `sidera adapter enable console` and run the daemon (--home and --instance say which node and instance)")
@@ -51,7 +52,7 @@ func runClient(args []string, env Env) int {
 		fmt.Fprintln(env.Stderr, "run `sidera-adapter-console help` for the commands")
 		return exitUsage
 	}
-	c := &client{env: env, dir: stateDir(inv.home, inv.instance), dial: dialLocal}
+	c := newClient(env, stateDir(inv.home, inv.instance), dialLocal)
 	ctx, stop := signalContext()
 	defer stop()
 	return c.execute(ctx, inv)
@@ -222,9 +223,18 @@ func addresses(list string) []adapterproto.Address {
 // client is the client role: it sends requests to the adapter of one instance and
 // writes what comes back.
 type client struct {
-	env  Env
+	env Env
+	// out is what the commands print, in the form their output has on env.Stdout. The
+	// error lines go to env.Stderr as they are: a line of the form `<program>: <message>`
+	// is the same on every stream.
+	out  *termout.Stream
 	dir  string
 	dial func(ctx context.Context, stateDir string) (net.Conn, error)
+}
+
+// newClient opens the streams of env once; see [termout.Open].
+func newClient(env Env, dir string, dial func(ctx context.Context, stateDir string) (net.Conn, error)) *client {
+	return &client{env: env, out: env.streams().Out(), dir: dir, dial: dial}
 }
 
 // call makes one request on a connection of its own. A failure the adapter or the
@@ -307,7 +317,7 @@ func (c *client) execute(ctx context.Context, inv *invocation) int {
 		if err != nil {
 			return c.errorf(err)
 		}
-		fmt.Fprintln(c.env.Stdout, address(resp.Node, resp.Endpoint))
+		fmt.Fprint(c.out, c.out.Block([]termout.Field{{Label: "Address", Value: address(resp.Node, resp.Endpoint)}}))
 	case "send", "reply":
 		resp, err := c.call(ctx, inv.req)
 		if err != nil {

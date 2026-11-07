@@ -432,25 +432,31 @@ sidera-adapter-console new <node-id-b>/<runtime-endpoint-id> --preset light --bo
 ```
 
 `new` sends a `session.create` request with your text as the first message. It
-prints the message id, then, as soon as the first message is in the new session,
-its address:
+says at once that the request was accepted, with the message id, then, as soon as the
+first message is in the new session, the session's address:
 
 ```
-message: <message-id>
-session: <node-id-b>/<session-endpoint-id>
+✓ Session request accepted for delivery.
+  Message  <message-id>
+  To       <node-id-b>/<runtime-endpoint-id>
+
+✓ Session created.
+  Session  <node-id-b>/<session-endpoint-id>
 ```
+
+(On a pipe, or with `NO_COLOR` set, the same lines come without the `✓`.)
 
 This takes a few seconds: the answer to a session creation comes back as soon as
-the first message is in the new session, not after its first turn. The `session:`
+the first message is in the new session, not after its first turn. The `Session`
 line is the address to use for every follow-up. Then read the reply:
 
 ```sh
 sidera-adapter-console recv --wait 30
 ```
 
-`recv` prints each message with its sender and id, and acknowledges what it
-printed. Without a message it prints `no messages` on standard error and nothing
-on standard output. `--wait` accepts at most 30 seconds; for a longer wait, run `recv`
+`recv` prints each message as a block of `From` and `Message` lines (and a `Part` for
+a message cut into parts) followed by its body, indented, and acknowledges what it
+printed. Without a message it prints `No messages waiting.` `--wait` accepts at most 30 seconds; for a longer wait, run `recv`
 again.
 
 To keep talking to that session:

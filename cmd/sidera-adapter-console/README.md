@@ -31,7 +31,11 @@ for `sidera adapter install` (see the reference for the three commands).
 - `recv` prints a message with the page's `feedback` member as a channel notice
   (`printMessage`); the console decides nothing from it, and the member reaches it only
   because the kit declares the direct capability `feedback`. The body is the one field it
-  prints that a peer writes freely, so `printMessage` prints it through `termout.SanitizeText`.
+  prints that a peer writes freely, so `printMessage` prints it through `termout.SanitizeText` and indents every line of it, so
+  that a body shaped like a header cannot pass for the start of another message.
+- The client's output goes through one `termout` stream built from `Env` when the client is made
+  (`newClient`); the adapter programs have no `--color` flag, so the environment variables alone decide
+  the decoration. Error lines (`sidera-adapter-console: <message>`) are written as they are.
 - The program's help is `help` in `console.go` (an `adapterkit.Help`); the kit adds the commands it runs.
 - `internal/console` holds the adapter's identity (`AdapterID`, and the release
   version from `internal/release`) once; the manifest and `initialize` both read it.

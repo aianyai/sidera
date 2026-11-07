@@ -51,6 +51,7 @@ protocol has a version of its own.
   package.` with the platform and the directory in place of `package: <directory>`. The programs have no
   `--color` flag: `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR` and whether the output is a terminal decide, as
   for `sidera`. `version`, `version --json`, the error lines and the exit codes are unchanged.
+- **`sidera-adapter-console whoami`, `new` and `recv` print for reading.** `whoami` prints the block `Address  <address>`. `new` says at once that the session request was accepted, with the message id and the runtime it went to, and then `Session created.` with the session's address (`Session created, but not confirmed ready.` with exit 10 for an unconfirmed one). `recv` prints each message as a block of `From`, `Message` and, when they apply, `Part` (`1 of 2`), `Notice` (the node's own channel notice) and `Repeat` (possibly shown before), then the body with every line indented two columns, so that a body that looks like a header cannot pass for the start of another message. With nothing waiting, `recv` now says `No messages waiting.` on standard output; it used to print `no messages` on standard error. The other commands of the console are unchanged for now.
 - **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a display
   name is now built from the one table of characters a text shown to a person never holds, so it is a
   function: use `adapterproto.PersonTextPattern()` where you used the constant. A description gets

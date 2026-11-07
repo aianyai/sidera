@@ -21,7 +21,14 @@ func (c *client) create(ctx context.Context, inv *invocation) int {
 		return c.errorf(err)
 	}
 	id := sent.Send.MessageID
-	fmt.Fprintln(c.env.Stdout, "message:", id)
+	to := make([]string, len(inv.req.Send.To))
+	for i, a := range inv.req.Send.To {
+		to[i] = string(a)
+	}
+	fmt.Fprint(c.out, c.out.OK("Session request accepted for delivery.\n"+c.out.Block([]termout.Field{
+		{Label: "Message", Value: string(id)},
+		{Label: "To", Value: strings.Join(to, "\n")},
+	})))
 	statusReq := request{Op: opStatus, Status: &adapterproto.MessageStatusParams{MessageID: id}}
 	deadline := time.Now().Add(inv.timeout)
 	for {
@@ -63,12 +70,13 @@ func refused(recipients []adapterproto.RecipientStatus) (string, bool) {
 }
 
 func (c *client) printCreateReply(recipients []adapterproto.RecipientStatus, r *adapterproto.ControlCreateReply) int {
+	session := c.out.Block([]termout.Field{{Label: "Session", Value: sessionAddress(recipients, r.SessionEndpoint)}})
 	switch r.Outcome {
 	case adapterproto.CreateReplyCreated:
-		fmt.Fprintln(c.env.Stdout, "session:", sessionAddress(recipients, r.SessionEndpoint))
+		fmt.Fprint(c.out, "\n"+c.out.OK("Session created.\n"+session))
 		return exitOK
 	case adapterproto.CreateReplyUnconfirmed:
-		fmt.Fprintln(c.env.Stdout, "session:", sessionAddress(recipients, r.SessionEndpoint))
+		fmt.Fprint(c.out, "\n"+c.out.Warn("Session created, but not confirmed ready.\n"+session))
 		fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: the session may exist but is not confirmed ready (%s)\n", r.Reason)
 		return exitUnsettled
 	}
@@ -119,7 +127,7 @@ func (c *client) receive(ctx context.Context, inv *invocation) int {
 		page := resp.Recv.Page
 		if len(page.Messages) == 0 {
 			if first {
-				fmt.Fprintln(c.env.Stderr, "no messages")
+				fmt.Fprintln(c.out, "No messages waiting.")
 			}
 			return exitOK
 		}
@@ -180,21 +188,30 @@ func (c *client) show(ctx context.Context, page adapterproto.RecvPage) int {
 	return exitOK
 }
 
+// printMessage writes the header of a message, a block of what the channel vouches
+// for, and then its body. The body is the one field a peer writes freely: it is shown
+// through termout.SanitizeText, so that it cannot act in the owner's terminal, and
+// indented, so that a body shaped like a header ("From  node/agent") cannot pass for
+// one, since a real header starts in the first column.
 func (c *client) printMessage(m adapterproto.PageMessage) {
-	w := c.env.Stdout
-	fmt.Fprintf(w, "from %s  id %s", m.From, m.ID)
+	fields := []termout.Field{
+		{Label: "From", Value: string(m.From)},
+		{Label: "Message", Value: string(m.ID)},
+	}
 	if m.Part != nil {
-		fmt.Fprintf(w, "  %s", m.Part.Label)
+		fields = append(fields, termout.Field{Label: "Part", Value: fmt.Sprintf("%d of %d", m.Part.Index, m.Part.Total)})
 	}
 	if m.Feedback {
-		fmt.Fprint(w, "  (channel notice)")
+		fields = append(fields, termout.Field{Label: "Notice", Value: "channel notice, from the node"})
 	}
 	if m.PossiblyDuplicate {
-		fmt.Fprint(w, "  (possibly shown before)")
+		fields = append(fields, termout.Field{Label: "Repeat", Value: "possibly shown before"})
 	}
-	// The body is the one field a peer writes freely; shown as it came, it could act in
-	// the owner's terminal. Everything else on the line is checked where it enters.
-	fmt.Fprintf(w, "\n%s\n\n", termout.SanitizeText(m.Body))
+	body := termout.Indent(termout.SanitizeText(m.Body), 2)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	fmt.Fprint(c.out, c.out.Block(fields)+"\n"+body+"\n")
 }
 
 // directory is `directory`: it prints one page of the endpoints a node shows to

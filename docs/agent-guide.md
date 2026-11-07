@@ -704,11 +704,17 @@ warning about the unconfirmed backup on every call.
    Expected, after 10 to 30 seconds:
 
    ```
-   message: <message-id>
-   session: <node-id>/<session-endpoint-id>
+   ✓ Session request accepted for delivery.
+     Message  <message-id>
+     To       <node-id>/<endpoint-id>
+
+   ✓ Session created.
+     Session  <node-id>/<session-endpoint-id>
    ```
 
-   The `session:` line is the address to use for follow-ups, for example
+   (Run through a pipe, as an agent's shell does, the lines come without the `✓`.)
+
+   The `Session` line is the address to use for follow-ups, for example
    `sidera-adapter-console send --to <that address> --body '...'` (`--to` also takes
    a comma-separated list of addresses).
 
@@ -719,8 +725,7 @@ warning about the unconfirmed backup on every call.
    ```
 
    Expected: a message from the new session with its answer. The console's `recv`
-   acknowledges what it printed. Run it again if you get `no messages` on standard
-   error; give it up to a minute. `--wait` accepts at most 30 seconds, so call it
+   acknowledges what it printed. Run it again if you get `No messages waiting.`; give it up to a minute. `--wait` accepts at most 30 seconds, so call it
    again for a longer wait.
 
 4. Close the test session when you are done, on the node that hosts it (the

@@ -589,8 +589,10 @@ The agent commands (`me`, `peers`, `directory`, `declare`, `send`, `reply`, `con
 and the operations `update`, `adapter setup`, `daemon restart`, `init`, `identity
 export-revocation` (its instruction on standard error), `trust list`, `trust request` and the
 notice of a controller session write through them and follow the layout below, and so do the
-adapter programs' help and `package` (see
-[Conventions of every program](#conventions-of-every-program)).
+adapter programs' help, `package`, and the console's `whoami`, `new` and `recv` (see
+[Conventions of every program](#conventions-of-every-program)). The console's other client
+commands (`send`, `reply`, `status`, `directory` and `peers`) still use their own forms and move over
+as their output is restyled.
 
 **Decorated** means that lines may carry markers (`✓` done, `!` attention, `✗` failure). A stream
 is decorated when it is a terminal, or when it is colored. It is not decorated when it is a pipe
@@ -631,7 +633,7 @@ so `error:` is red when that stream is colored and the line is otherwise the sam
 `error: <category>/<code>: <message>`, `error: <message>` and the `operation_id` line that follows when
 an outcome is unknown.
 
-**Layout.** These are the rules every command's human output follows; the agent commands, the management commands and the operations all follow them. The same words and shapes in all three states of a stream:
+**Layout.** These are the rules every command's human output is to follow; the commands named above follow them. The same words and shapes in all three states of a stream:
 
 - A command that changes something opens with a line that says what was done (`Message
   accepted for delivery.`, `Declaration updated.`), preceded by `✓` on a decorated stream; a
@@ -808,7 +810,8 @@ and `version --help` list their flags the same way.
 **Output of the adapter programs.** They write through `termout` like `sidera`, with one difference:
 they have no `--color` flag, so what the environment says (`NO_COLOR`, `CLICOLOR_FORCE`,
 `FORCE_COLOR`, `CLICOLOR=0`, `TERM=dumb`) and whether the stream is a terminal decide, each stream
-separately. The words and the layout are the same in every state of a stream. Error lines keep
+separately. The words and the layout are the same in every state of a stream. An empty result is a
+sentence on standard output (`No messages waiting.`), not a line on standard error. Error lines keep
 the form `<program>: <message>`, and `version`, `version --json`, the exit codes and `serve` (whose
 standard output is the protocol) are unchanged.
 

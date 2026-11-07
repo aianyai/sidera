@@ -34,9 +34,9 @@ apply to what arrives.
 
 | Command | Does |
 | ------- | ---- |
-| `whoami` | Prints the address of the owner endpoint, `<node>/<endpoint>`. |
-| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>, default 120]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `message: <id>`, then asks `endpoint.message_status` once a second until the control reply is there and prints `session: <address>`, the address of the session on the node of the runtime. |
-| `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message with its sender and id, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. |
+| `whoami` | Prints the address of the owner endpoint, `<node>/<endpoint>`, as the block `Address  <address>`. |
+| `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>, default 120]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `Session request accepted for delivery.` with the `Message` id and the `To` address at once, so that a long wait shows that something was sent, then asks `endpoint.message_status` once a second until the control reply is there and prints `Session created.` with the `Session` address, the address of the session on the node of the runtime (`Session created, but not confirmed ready.` and exit 10 for an unconfirmed one). |
+| `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. A message is a header block (`From`, `Message`, and when they apply `Part` as `1 of 2`, `Notice` and `Repeat`) and its body, every line of it indented by two columns. With nothing waiting it prints `No messages waiting.` on standard output. |
 | `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. |
 | `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
 | `directory [--node <id>] [--limit <n>] [--cursor <c>]` | Calls `endpoint.directory`: one page of the endpoints a node shows to the owner endpoint, this node without `--node`. One line per entry, `<address>  <kind>  <display name>  <accepted actions>`, with `-` for an absent name or an empty list, then `next cursor: <c>` when more follow, to give back with `--cursor` (and the same `--node`). `--limit` is 1 to 100. An outcome other than `ok` is printed with its reason and exits 1. |
@@ -64,6 +64,15 @@ within `--timeout` (the message id and the `status` command are printed), or the
 `unconfirmed` (its address is printed, it may exist). `--timeout` defaults to 120 seconds. These are
 codes of the table in [the command-line reference](../command-line/README.md#conventions-of-every-program).
 
+Output is written through [`termout`](../../../sdk/go/termout/README.md) as the layout rules of
+[the command-line reference](../command-line/README.md#human-output) have it, one stream for
+standard output decided when the client starts. The adapter programs have no `--color`
+flag, so `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb` and whether the
+stream is a terminal decide; a pipe gets the same words and layout without markers and colors.
+Error lines (`sidera-adapter-console: <message>`) and their exit codes are written as they are.
+An empty result is one sentence on standard output (`No messages waiting.` for `recv`); it used to be a
+line on standard error.
+
 ### How replies arrive
 
 The session `new` creates replies to the sender of its initial message, the owner
@@ -83,14 +92,18 @@ escapes such as `\x1b` and `\u202e`; line breaks and tabs stay. Nothing else `re
 the sender, the id and the part label are checked where the node reads them, and a
 display name is checked at every entry.
 
+The body is indented so that a body shaped like a header (`From     node-9/boss`) cannot pass for
+the start of another message: a real header starts in the first column and nothing of a body does.
+
 `recv` shows a message once: the page is acknowledged after it was printed, never
 before. A client that dies between the print and the acknowledgement leaves the
 page unacknowledged and the next `recv` hands it out again, marked as possibly shown
 before.
 
 A message that is the node's own channel feedback (the notice that a message the owner sent
-was refused, expired or went unanswered) is printed with `(channel notice)` on its first
-line, after the id: its sender is the node, not an agent, and there is nobody to reply to.
+was refused, expired or went unanswered) is printed with the header line `Notice   channel notice,
+from the node`, and a part handed out before and not acknowledged with `Repeat   possibly shown
+before`: its sender is the node, not an agent, and there is nobody to reply to.
 The marker is the page's `feedback` member, which the daemon sends because the kit the
 console is built on declares that it decodes it.
 
@@ -215,7 +228,7 @@ sidera adapter enable console
   `TestDirectoryThatGaveNoPageFailsWithItsReason`, `TestPeersPrintsOneLinePerNode`,
   `TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
-  `TestPrintMessageSanitizesTheBody`,
+  `TestPrintMessageSanitizesAndIndentsTheBody`,
   `TestReplyGoesToTheSenderSeenInRecv` (the adapter over pipes against a stand-in
   for the daemon), `TestTokenTransportServesOnlyAClientThatPresentsTheToken`,
   `TestListenTakesOverAStaleSocketAndLeavesOtherFilesAlone`,

@@ -182,7 +182,7 @@ func newHarness(t *testing.T, d *daemon) *harness {
 		Sessions: []adapterproto.SessionAttach{}, DirectEndpoints: []adapterproto.DirectAttach{},
 	}, &adapterproto.StartResult{})
 
-	h.client = &client{env: Env{Stdout: h.out, Stderr: h.errOut, Stdin: strings.NewReader("")}, dir: dir, dial: dialLocal}
+	h.client = newClient(Env{Stdout: h.out, Stderr: h.errOut, Stdin: strings.NewReader("")}, dir, dialLocal)
 	if d.registerGate == nil {
 		h.waitRegistered()
 	}
@@ -222,7 +222,7 @@ func TestStartRegistersTheOwnerEndpointAndWhoamiNamesIt(t *testing.T) {
 	if len(d.register) != 1 || d.register[0].Key != "owner" || d.register[0].DisplayName == "" {
 		t.Fatalf("register calls %+v, want one with key owner", d.register)
 	}
-	if code := h.run("whoami"); code != exitOK || strings.TrimSpace(h.out.String()) != nodeName+"/"+ownerEndpoint {
+	if code := h.run("whoami"); code != exitOK || h.out.String() != "Address  "+nodeName+"/"+ownerEndpoint+"\n" {
 		t.Fatalf("whoami: exit %d, output %q, stderr %q", code, h.out.String(), h.errOut.String())
 	}
 }
@@ -238,7 +238,7 @@ func TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered(t *testing.T) {
 	}
 	close(d.registerGate)
 	h.waitRegistered()
-	if got := strings.TrimSpace(h.out.String()); got != nodeName+"/"+ownerEndpoint {
+	if got := h.out.String(); got != "Address  "+nodeName+"/"+ownerEndpoint+"\n" {
 		t.Errorf("whoami after registration: %q", got)
 	}
 }
@@ -259,7 +259,9 @@ func TestNewSendsTheControlSignalAndPollsForTheReply(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("new: exit %d, stderr %q", code, h.errOut.String())
 	}
-	if got := h.out.String(); got != "message: msg-out-1\nsession: node-2/ep-session\n" {
+	want := "Session request accepted for delivery.\n  Message  msg-out-1\n  To       node-2/rt\n" +
+		"\nSession created.\n  Session  node-2/ep-session\n"
+	if got := h.out.String(); got != want {
 		t.Errorf("output %q", got)
 	}
 	s := d.sends[0]
@@ -332,7 +334,11 @@ func TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages(t *testing.T) {
 		t.Fatalf("recv: exit %d, stderr %q", code, h.errOut.String())
 	}
 	out := h.out.String()
-	for _, want := range []string{"from node-3/agent  id m-1\nhello owner\n", "id m-2  part 1/2\nfirst half ", "id m-2  part 2/2\nsecond half"} {
+	for _, want := range []string{
+		"From     node-3/agent\nMessage  m-1\n\n  hello owner\n\n",
+		"Message  m-2\nPart     1 of 2\n\n  first half \n",
+		"Message  m-2\nPart     2 of 2\n\n  second half\n",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q lacks %q", out, want)
 		}
@@ -369,9 +375,9 @@ func TestRecvMarksTheNodesOwnNotices(t *testing.T) {
 	}
 	out := h.out.String()
 	for _, want := range []string{
-		"from node-3/system  id m-1  (channel notice)\nrefused\n",
-		"from node-3/agent  id m-2\nhello\n",
-		"from node-3/system  id m-3  (channel notice)  (possibly shown before)\nexpired\n",
+		"From     node-3/system\nMessage  m-1\nNotice   channel notice, from the node\n\n  refused\n",
+		"From     node-3/agent\nMessage  m-2\n\n  hello\n",
+		"From     node-3/system\nMessage  m-3\nNotice   channel notice, from the node\nRepeat   possibly shown before\n\n  expired\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q lacks %q", out, want)
@@ -382,7 +388,7 @@ func TestRecvMarksTheNodesOwnNotices(t *testing.T) {
 func TestRecvWithNothingWaitingSaysSoAndAcknowledgesNothing(t *testing.T) {
 	d := &daemon{}
 	h := newHarness(t, d)
-	if code := h.run("recv"); code != exitOK || h.out.Len() != 0 || !strings.Contains(h.errOut.String(), "no messages") || len(d.acks) != 0 {
+	if code := h.run("recv"); code != exitOK || h.out.String() != "No messages waiting.\n" || h.errOut.Len() != 0 || len(d.acks) != 0 {
 		t.Errorf("exit %d, stdout %q, stderr %q, acks %v", code, h.out.String(), h.errOut.String(), d.acks)
 	}
 }
