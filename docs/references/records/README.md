@@ -444,14 +444,15 @@ an oracle), `fuzz_test.go`.
 
 ### Publication records
 
-Package `internal/publication`. Three record types that a node publishes about
-itself. A declaration and a reachability record are signed by the node's network
-key, bound to the node through `NetworkKeyOf`; the proof is signed by the node's
-identity key.
+Package `internal/publication`. Four record types that a node publishes about
+itself. A declaration, a reachability record and a profile are signed by the
+node's network key, bound to the node through `NetworkKeyOf`; the proof is
+signed by the node's identity key.
 
 | Type | Payload | Signed by |
 | ---- | ------- | --------- |
 | `sidera/node-declaration/1` | `{1: node, 2: counter, 3: boot nonce (16 bytes), 4: accepts inheritance, 5: offers relay, 6: longest queue time (s), 7: lease renewal time (s), 8: endpoints}`; an endpoint is `{1: ID, 2: kind (1 session, 2 runtime), 3?: name, 4?: reception flags}` | the node's network key |
+| `sidera/node-profile/1` | `{1: node, 2: issued_at, 3?: name, 4?: host_name, 5?: platform, 6?: system, 7?: system_build, 8?: sidera_version}` | the node's network key |
 | `sidera/reachability-record/1` | `{1: counter, 2: expires_at, 3: network-key certificate (a record), 4: addresses, 5: relays}` | the node's network key |
 | `sidera/reachability-proof/1` | `{1: person, 2: node, 3: not_after}` | the node's identity key |
 
@@ -479,7 +480,40 @@ identity key.
   refuses, and every verifier must reach the same verdict. The expiry is the one
   time window judged by this package: expired at `expires_at` and after, without
   tolerance.
-- **Highest counter, per certificate serial.** Both records carry a monotonic
+- **Node profile.** A description of the node for people and agents to tell
+  nodes apart. `issued_at` is a required time in whole Unix seconds, converted
+  like every wire time (`record.TimeToWire`). Keys 3 to 8 are strings, each left
+  out when empty: an empty string written out is a second spelling of absent and
+  the record is refused as not canonical. The rules of a text field have one
+  home, a table in `profile.go`, read by decoding and by `NewNodeProfile`:
+  - `name`, `host_name` and `system` follow the display-name rule of the adapter
+    protocol (`adapterproto.ValidateDisplayName`: 1 to 128 characters, none of
+    the control, line-separator and bidirectional-control characters of the
+    person-text class);
+  - `system_build` and `sidera_version` follow the same rule and are at most 64
+    characters;
+  - `platform` is `<goos>/<goarch>`, each part one or more of `[a-z0-9]`, at most
+    32 bytes.
+
+  A profile with any field invalid is refused whole. The largest profile (every
+  string at its limit, all four-byte characters) encodes to 2286 bytes, so a
+  protocol that carries it needs a cap above 2 KiB; it stays far under the
+  record input limit. Text from a node can reach a terminal or an agent, which
+  is why it is checked where the record is decoded and not where it is printed.
+  The profile is a record of its own and not part of the declaration because it
+  is descriptive, changes rarely and no policy decision reads it, whereas the
+  declaration carries the switches other nodes act on. Of two profiles of one
+  node the one with the strictly later `issued_at` is current
+  (`ProfileReplaces`); the same time keeps what is stored, whatever the other
+  record holds, so arrival order never swaps two profiles issued in one second,
+  and the issuer should make a changed profile later than the one before. The
+  profile has no counter and does not touch the monotonic counters of rollback
+  detection: it is cosmetic, and a clock set back can only delay a rename.
+  `NewNodeProfile` turns values read from the machine into a profile: a text
+  field that is empty or invalid is left out and its name is returned for the
+  caller to log, so one odd value does not stop the node from publishing the
+  rest.
+- **Highest counter, per certificate serial.** The declaration and the reachability record carry a monotonic
   counter from 1 and a peer keeps only the highest, compared as (serial of the
   network-key certificate the record was verified under, counter), serial first.
   The decision is accept for a higher serial whatever the counter, or the same
@@ -519,10 +553,10 @@ publish the node's contact graph for endpoints; the counter state outlives the
 record because the bar that stops an old record returning must not fall when the
 record is removed.
 
-Where: `internal/publication` (`declaration.go`, `reachability.go`, `proof.go`,
+Where: `internal/publication` (`declaration.go`, `profile.go`, `reachability.go`, `proof.go`,
 `decide.go`). Tests: `golden_test.go` (vectors computed with an independent
 implementation), `declaration_test.go` (rules, protocol limits, signer binding),
-`reachability_test.go`, `proof_test.go` (through `admin`), `decide_test.go`
+`profile_test.go` (field rules for each refused character class, strict encoding, signer, newer-wins, the builder, the largest size), `reachability_test.go`, `proof_test.go` (through `admin`), `decide_test.go`
 (`TestDecideDeclaration` and `TestDecideReachability` with the leaked-key rows;
 decisions against an oracle under random arrival orders and certificate
 serials; a declaration through `trust`), `fuzz_test.go` (every bit protected, every decoder).

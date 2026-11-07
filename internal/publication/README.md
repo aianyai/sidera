@@ -1,7 +1,8 @@
 # publication
 
 The signed records a node publishes about itself: its declaration, its
-reachability record and the reachability proofs it gives to administrators. Each
+profile, its reachability record and the reachability proofs it gives to
+administrators. Each
 is a record type of [`record`](../record/README.md); this package supplies the
 payloads, the descriptors, the "keep only the highest counter" decisions and the
 facts that [`trust`](../trust/README.md) and [`admin`](../admin/README.md) read.
@@ -18,6 +19,8 @@ package follows, and
 | `DeclarationNode(r) (ident.NodeID, error)`                           | The node a declaration claims to be about, read with `record.Peek` before verification to choose the context. Untrusted until `record.Verify` accepts the record. |
 | `Declaration.DeclaredInheritance()`                                  | The entry of `trust.View.DeclaredAcceptsInheritance` this declaration stands for.                                   |
 | `DeclarationSeen`, `DeclarationSeenOf(v, certSerial)`, `DecideDeclaration(seen, v, certSerial)` | The highest (certificate serial, counter) declaration seen for a node, and the accept / stale / conflict decision for a new one. |
+| `NodeProfile`, `NodeProfileDescriptor(accepted, now)`, `NodeProfileNode(r)` | The profile payload (name, host name, platform, system, system build, Sidera version) and its record type, signed by the node's network key. `NodeProfileNode` reads the claimed node before verification, like `DeclarationNode`. |
+| `NewNodeProfile(raw) (NodeProfile, dropped, error)`, `ProfileReplaces(stored, incoming)` | Makes a publishable profile from values read from the machine, leaving out (and naming) any text field that is empty or invalid; whether an incoming profile replaces the stored one (strictly later `issued_at`). |
 | `ReachabilityRecord`, `NewReachabilityRecord`, `ReachabilityDescriptor(accepted, now)` | The reachability record: addresses, reserved relays, the embedded network-key certificate, counter, expiry. |
 | `EmbeddedNetworkKeyCertificate(r)`, `ReachabilityRecord.Certificate()` | Reads the embedded certificate of a record whose own signature has not been checked yet (through `record.Peek`; untrusted); the accessor of the derived certificate. |
 | `ReachabilityRecord.ExpiredAt(now)`, `ReachabilitySeen`, `ReachabilitySeenOf(v)`, `DecideReachability(seen, v, now)` | Expiry, and the decision for a reachability record: accept, stale, conflict or expired. |
@@ -35,6 +38,15 @@ package follows, and
   verification with `DeclarationNode` and `EmbeddedNetworkKeyCertificate`, which
   go through `record.Peek`; what they return is a claim, untrusted until
   `record.Verify` accepts the record.
+- **Profile.** Descriptive text about the node, signed by the network key. Every
+  text field follows the display-name rule of `adapterproto`
+  (`system_build` and `sidera_version` also at most 64 characters, `platform`
+  is `<goos>/<goarch>`); one table in `profile.go` holds the rules for decoding
+  and for `NewNodeProfile`, and a profile with any field invalid does not
+  decode. The profile has no counter: `ProfileReplaces` compares `issued_at`
+  only and keeps the stored profile on a tie, so it never touches the state of
+  `DecideDeclaration` or `DecideReachability`. The largest encoded profile is
+  2286 bytes.
 - **A reachability record is signed by the embedded certificate's key.** The
   signer slot requires the signing key to equal the network key of the
   certificate the record embeds, in addition to `NetworkKeyOf`. Without it a
@@ -122,5 +134,5 @@ package follows, and
 
 ## Dependencies
 
-The standard library, `ident`, `record`, `delivery` (its protocol limits) and
-`admin`. No libp2p.
+The standard library, `ident`, `record`, `delivery` (its protocol limits),
+`admin` and `sdk/go/adapterproto` (the display-name rule). No libp2p.

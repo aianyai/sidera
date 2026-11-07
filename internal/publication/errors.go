@@ -27,4 +27,8 @@ var (
 	// ErrCertificate reports an embedded network-key certificate that is not a
 	// well-formed, correctly signed certificate record.
 	ErrCertificate = errors.New("invalid embedded network-key certificate")
+	// ErrProfile reports a node profile with an invalid text field: a character
+	// the display-name rule refuses, a text that is too long, or a platform that
+	// is not <goos>/<goarch>.
+	ErrProfile = errors.New("invalid node profile field")
 )
