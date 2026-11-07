@@ -87,8 +87,10 @@ A call's context lasts through response-body reading and is bounded by the
 supplied timeout and caller context. `httptrace.WroteRequest` records send
 progress: after writing, a transport failure is `outcome_unknown`. Before
 writing, `apiwire.FromError` words the failures it knows (the daemon not running,
-a refused peer, an ended context); any other transport failure is a lost
-connection and is `outcome_unknown` as well, never `internal`. The usual one is a
+a refused peer, an ended context); any other transport failure after a
+connection was obtained (`httptrace.GotConn`) is a lost connection and is `outcome_unknown` as
+well, never `internal`; a failure to obtain one (a dial that found no descriptor free) lost
+nothing and keeps the mapping of `apiwire`. The usual one is a
 kept-alive connection that the daemon closed while it shut down: the standard
 transport retries only requests it may replay, and a POST without an idempotency
 header is not, so the failure reaches the caller. The category is the one that

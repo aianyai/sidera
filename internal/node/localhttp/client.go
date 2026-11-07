@@ -69,7 +69,8 @@ func NewClient(c ClientConfig) (*Client, error) {
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
 
 // Call posts one JSON request and reads its complete answer without re-encoding
-// it. A missing or incomplete answer after writing has an unknown outcome.
+// it. A missing or incomplete answer after writing, or a connection lost after it
+// was obtained, has an unknown outcome.
 func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 	body, err := EncodeRequest(in.Body)
 	if err != nil {
@@ -77,8 +78,9 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
-	var wrote atomic.Bool
+	var connected, wrote atomic.Bool
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn:      func(httptrace.GotConnInfo) { connected.Store(true) },
 		WroteRequest: func(httptrace.WroteRequestInfo) { wrote.Store(true) },
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://sidera"+c.pathPrefix+in.Method, bytes.NewReader(body))
@@ -95,10 +97,14 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 			return nil, apiwire.OutcomeUnknown("")
 		}
 		// Before the write, apiwire knows the failures to reach the daemon (ipc) and
-		// an ended context. Anything else is a connection that was lost, most often a
-		// kept-alive one that the daemon closed while it shut down; the caller must
-		// wait or send again, not be told that the client is broken.
-		if mapped := apiwire.FromError(err); mapped.Category != apiwire.CategoryInternal {
+		// an ended context. Anything else after a connection was obtained is that
+		// connection lost, most often a kept-alive one that the daemon closed while it
+		// shut down; the caller must wait or send again, not be told that the client
+		// is broken. With no connection obtained (a dial that failed for want of a
+		// descriptor, say) nothing was lost and nothing could have been sent: the
+		// failure keeps the words apiwire has for it.
+		mapped := apiwire.FromError(err)
+		if mapped.Category != apiwire.CategoryInternal || !connected.Load() {
 			return nil, mapped
 		}
 		return nil, apiwire.OutcomeUnknown("")

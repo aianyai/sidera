@@ -68,9 +68,10 @@ objects first or repeat the text-safety rules itself.
 
 Calls use the supplied timeout, also bounded by the caller's context. A failure
 before writing is mapped through `apiwire`, except that a transport failure `apiwire` has
-no words for (a connection lost, such as a kept-alive one the daemon closed while shutting
-down) is `outcome_unknown` like a written request without a complete answer, so that the
-callers that wait or send again act on it instead of reporting an internal error. Complete non-200 answers decode as `apiwire.Body` with
+no words for, when a connection had been obtained (a connection lost, such as a kept-alive
+one the daemon closed while shutting down), is `outcome_unknown` like a written request without
+a complete answer, so that the callers that wait or send again act on it instead of reporting an
+internal error. A failure to obtain a connection at all keeps the mapping of `apiwire`. Complete non-200 answers decode as `apiwire.Body` with
 `strictjson.DecodeTolerant`, so an error a later daemon extended is still read;
 an error answer that cannot be read has an unknown outcome, because the daemon did
 not say success and nothing tells whether the request took effect. Success returns the original

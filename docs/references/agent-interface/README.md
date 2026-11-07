@@ -292,7 +292,7 @@ keys. Ordinary calls have a 60-second deadline; receives have
 the caller's context. The protocol's maximum is 120 seconds. A written request
 without a complete answer is `outcome_unknown`; the caller cannot assume
 it had no effect. A complete answer of success that the client cannot read is
-`internal/answer_unreadable`: the node said what happened. A connection lost before the request was written, such as a
+`internal/answer_unreadable`: the node said what happened. A connection lost before the request was written, once it was obtained, such as a
 kept-alive one that the daemon closed while shutting down, is `outcome_unknown`
 too, not `internal`. If the request was not written, an ended caller context maps
 to `unavailable/request_canceled` or `unavailable/request_timeout` through
@@ -373,7 +373,7 @@ HTTP over the checked local listener reuses `net/http` for framing, request
 contexts, size limits and graceful shutdown, and `ipc` for platform-specific
 identity checks. A separate web framework or retry library adds no needed
 capability. The client's `Transport.DialContext` uses that same IPC boundary;
-`httptrace.WroteRequest` distinguishes a failed connection from a response lost
+`httptrace.GotConn` and `httptrace.WroteRequest` tell a connection never made from a connection lost and from a response lost
 after writing. POST requests carry no HTTP idempotency header, so the transport
 cannot treat an Agent call as an idempotent request to retry. See the
 [standard-library transport documentation](https://pkg.go.dev/net/http#Transport)
