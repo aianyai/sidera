@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 // create is `new`: it sends the session.create signal and then asks for its
@@ -193,7 +194,9 @@ func (c *client) printMessage(m adapterproto.PageMessage) {
 	if m.PossiblyDuplicate {
 		fmt.Fprint(w, "  (possibly shown before)")
 	}
-	fmt.Fprintf(w, "\n%s\n\n", m.Body)
+	// The body is the one field a peer writes freely; shown as it came, it could act in
+	// the owner's terminal. Everything else on the line is checked where it enters.
+	fmt.Fprintf(w, "\n%s\n\n", termout.SanitizeText(m.Body))
 }
 
 // directory is `directory`: it prints one page of the endpoints a node shows to

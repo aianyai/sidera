@@ -73,6 +73,16 @@ it with `recv`. A reply from an agent on another node comes the same way, over t
 node's transport. The owner can also be written to by any agent that knows the
 address (`whoami`).
 
+A message body is written by the sender, and a sender may be a peer or an agent a
+peer's prompt injection controls, so `recv` prints it through `termout.SanitizeText`: control
+characters (an escape sequence that clears the screen, sets the window title or writes the
+clipboard, a carriage return that rewrites a line, DEL, U+0080 to U+009F), the
+bidirectional formatting characters, the invisible format characters that can carry hidden
+text (tag characters, zero-width space) and bytes that are not UTF-8 appear as visible
+escapes such as `\x1b` and `\u202e`; line breaks and tabs stay. Nothing else `recv` prints needs it:
+the sender, the id and the part label are checked where the node reads them, and a
+display name is checked at every entry.
+
 `recv` shows a message once: the page is acknowledged after it was printed, never
 before. A client that dies between the print and the acknowledgement leaves the
 page unacknowledged and the next `recv` hands it out again, marked as possibly shown
@@ -205,6 +215,7 @@ sidera adapter enable console
   `TestDirectoryThatGaveNoPageFailsWithItsReason`, `TestPeersPrintsOneLinePerNode`,
   `TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
+  `TestPrintMessageSanitizesTheBody`,
   `TestReplyGoesToTheSenderSeenInRecv` (the adapter over pipes against a stand-in
   for the daemon), `TestTokenTransportServesOnlyAClientThatPresentsTheToken`,
   `TestListenTakesOverAStaleSocketAndLeavesOtherFilesAlone`,

@@ -47,6 +47,12 @@ protocol has a version of its own.
   damaged endpoint record, so the endpoint is dropped at the next start. The adapters shipped with
   Sidera register descriptions without them and are not affected.
 - The page that `sidera recv` prints (and the `recv` tool of `sidera mcp`) now writes DEL, the C1 control characters and the text-direction controls in a message as `\uXXXX` escapes. A message from another agent can no longer send terminal control sequences through that page, or reorder the text around it, when the page is shown in a terminal. Any JSON reader still reads the same message; only the bytes of the page differ.
+- `sidera-adapter-console recv` no longer writes the body of a received message to your terminal as it came.
+  A peer you trust, or an agent on that peer that was misled by a prompt injection, could send terminal
+  control sequences that clear your screen, rewrite lines you already read, change the window title or write
+  to your clipboard. Control characters, the characters that reorder text, invisible characters that can hide
+  text (such as tag characters and the zero-width space) and bytes that are not UTF-8 now appear as visible
+  escapes such as `\x1b`; line breaks and tabs are kept. Upgrade the console client.
 
 ## [0.15.0] - 2026-11-06
 
