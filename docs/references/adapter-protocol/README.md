@@ -383,7 +383,7 @@ only says the request was not understood or not allowed.
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type?` (present exactly when `body` is not empty), `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
 | `endpoint.directory` | A to D | request | `endpoint`, `node?`, `cursor?`, `limit?` (1 to 100), sent only when the daemon declared `direct_endpoint_access` | `outcome` (`ok`, `unavailable` or `refused`), `reason?`, `endpoints`, `next_cursor?` |
-| `endpoint.peers` | A to D | request | `endpoint`, sent only when the daemon declared `direct_endpoint_access` | `nodes` (`node`, `self`, `trust`, `connected`) |
+| `endpoint.peers` | A to D | request | `endpoint`, sent only when the daemon declared `direct_endpoint_access` | `nodes` (`node`, `self`, `trust`, `connected`, `profile?`) |
 | `endpoint.declare` | A to D | request | `endpoint` and a patch of `paused`, `refuse_multi_recipient`, `restrict_senders`, `accept_from`, `hidden_from_directory`, sent only when the daemon declared `direct_endpoint_access` | `declaration`, the five members after the patch |
 
 **The intent of `shutdown`.** The daemon ends an adapter for three reasons, and the
@@ -554,7 +554,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Nine
+reader of an earlier shape is deployed that the change could break. Ten
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -596,7 +596,16 @@ have sent to a new version:
   capability alone would need no new version, but a new member of the page message would.
   The daemon sends the member only to an adapter that declared the capability, so an adapter
   that decodes a page strictly never meets it, and an older daemon never sees a declaration it
-  would act on.
+  would act on;
+- the member `profile` of a node in the `endpoint.peers` result, what the node says about
+  itself, and the member `adapter` of an entry in the `endpoint.directory` result, the adapter
+  instance and the runtime that serve the endpoint. Both are new members of objects that an
+  adapter decodes strictly, and the daemon sends them to every adapter that calls these
+  methods. An adapter built before them refuses the result that has them, so its `peers` and
+  `directory` calls fail until it is replaced; only direct endpoints call the methods, and the
+  only adapter that does is the console adapter of this repository, which `sidera update`
+  replaces with the daemon. The record is kept because rule 3 would otherwise have sent them
+  to a new version.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -934,9 +943,20 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
   `endpoint.peers` returned and is opaque to the adapter) for a page of the endpoints it
   shows to the asking endpoint, in endpoint order, and `next_cursor` continues the listing.
   An entry has `address`, `kind` (`runtime`, `session` or `direct`), `display_name` and
-  `description` (each left out when the endpoint has none) and `accepts`, the actions the
+  `description` (each left out when the endpoint has none), `accepts`, the actions the
   endpoint takes (`message.send`, `session.create`, `session.close`, `session.interrupt`,
-  `endpoint.status`). A cursor is good for the endpoint and the daemon process it was made
+  `endpoint.status`), and `adapter`, which names the adapter that serves the endpoint:
+  `instance` (the name of the adapter instance on that node) and `id` (the adapter it
+  runs), both with the syntax of an adapter identifier, `version` (the adapter's
+  version as it announced itself when it last connected; left out while it has not connected since the
+  node started) and `runtime` with `name` and `version` (what the adapter's probe found when it
+  last passed, for a runtime endpoint and the session endpoints under it; left out while no
+  probe has passed). The member is left out for an endpoint no adapter serves and for a node
+  that did not say, as a node that predates it does not. A reader picks a runtime by `adapter.id`
+  and then asks `endpoint.status` of the endpoint whether it can be used now: the directory
+  says what the endpoint is, never whether it works. The `runtime` text is held to the
+  display-name rule as the `runtime` of an `adapter.probe` result is, and the node that
+  asked refuses the whole page that has a value breaking it. A cursor is good for the endpoint and the daemon process it was made
   for and grants nothing: every page is read and judged anew, so entries may appear or
   disappear between pages. `limit` is 1 to 100 and 100 when absent, below the 256 a
   node page can hold because a page of 256 entries of up to 5 KiB each can be over
@@ -970,7 +990,14 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
 - `endpoint.peers` lists this node first (`self` true, `trust` `self`), then every node it
   trusts directly (`trust` `direct`), in the order of their names. `connected` is whether a
   connection to the node is up now; it is read without waiting and says nothing about
-  whether a send would succeed.
+  whether a send would succeed. `profile` is what the node says about itself:
+  `name`, `host_name`, `platform`, `system`, `system_build` and `sidera_version` (each left
+  out when the node does not say it) and `as_of`, in Unix seconds, when this daemon issued the
+  profile of its own node or fetched that of another. The texts follow the display-name rule,
+  because they are shown to people; the form of `platform` (`<goos>/<goarch>`, for
+  example `linux/amd64`) is the node's own, and a reader does not check it. A profile
+  is held in memory only, so `profile` is left out for a node the daemon has not been
+  connected to since it started.
 - `endpoint.declare` is a patch with the members of the declaration directly in the
   parameters, as the Agent interface has it: a member left out stays as it is, `accept_from`
   replaces the whole list and an explicit empty list clears it. The result is the whole

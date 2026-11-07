@@ -47,6 +47,22 @@ func TestDirectoryEntryRules(t *testing.T) {
 		{"display name of 129 characters", func(e *adapterproto.DirectoryEntry) { e.DisplayName = repeat("n", 129) }, "display_name", false},
 		{"description of 1024 characters", func(e *adapterproto.DirectoryEntry) { e.Description = repeat("d", 1024) }, "", false},
 		{"description of 1025 characters", func(e *adapterproto.DirectoryEntry) { e.Description = repeat("d", 1025) }, "description", false},
+		{"adapter is optional", func(e *adapterproto.DirectoryEntry) { e.Adapter = nil }, "", false},
+		{"adapter with every member", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter() }, "", false},
+		{"adapter with only its instance and id", func(e *adapterproto.DirectoryEntry) {
+			e.Adapter = &adapterproto.DirectoryAdapter{Instance: "work", ID: "codex"}
+		}, "", false},
+		{"adapter without a runtime", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.Runtime = nil }, "", false},
+		{"adapter instance required", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.Instance = "" }, "adapter.instance", false},
+		{"adapter instance is an adapter identifier", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.Instance = "Work" }, "adapter.instance", false},
+		{"adapter id required", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.ID = "" }, "adapter.id", false},
+		{"adapter id is an adapter identifier", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.ID = "co dex" }, "adapter.id", false},
+		{"adapter version is a semantic version", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.Version = "v1" }, "adapter.version", false},
+		{"adapter runtime is validated", func(e *adapterproto.DirectoryEntry) { e.Adapter = fullAdapter(); e.Adapter.Runtime.Name = "" }, "adapter.runtime.name", false},
+		{"adapter runtime version keeps the display-name rule", func(e *adapterproto.DirectoryEntry) {
+			e.Adapter = fullAdapter()
+			e.Adapter.Runtime.Version = "1\u202e"
+		}, "adapter.runtime.version", false},
 		{"accepts required", func(e *adapterproto.DirectoryEntry) { e.Accepts = nil }, "accepts", false},
 		{"accepts may be empty", func(e *adapterproto.DirectoryEntry) { e.Accepts = []adapterproto.EndpointAction{} }, "", false},
 		{"every action", func(e *adapterproto.DirectoryEntry) {
@@ -57,6 +73,11 @@ func TestDirectoryEntryRules(t *testing.T) {
 			e.Accepts = []adapterproto.EndpointAction{"message.send", "message.send"}
 		}, "accepts", false},
 	})
+}
+
+func fullAdapter() *adapterproto.DirectoryAdapter {
+	return &adapterproto.DirectoryAdapter{Instance: "work", ID: "codex", Version: "0.17.0",
+		Runtime: &adapterproto.RuntimeInfo{Name: "Codex CLI", Version: "0.163.0"}}
 }
 
 func manyEntries(n int) []adapterproto.DirectoryEntry {
@@ -115,6 +136,8 @@ func TestDirectoryPageFitsALine(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := adapterproto.DirectoryEntry{Address: adapterproto.Address(repeat("a", 128)), Kind: adapterproto.EndpointSession,
 				DisplayName: repeat(c.char, 128), Description: repeat(c.char, adapterproto.MaxDescription),
+				Adapter: &adapterproto.DirectoryAdapter{Instance: repeat("a", 32), ID: repeat("a", 32), Version: "1." + repeat("2", 8) + "." + repeat("3", 8) + "-" + repeat("p", 40),
+					Runtime: &adapterproto.RuntimeInfo{Name: repeat(c.char, 64), Version: repeat(c.char, 64)}},
 				Accepts: []adapterproto.EndpointAction{"message.send", "session.create", "session.close", "session.interrupt", "endpoint.status"}}
 			r := adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: make([]adapterproto.DirectoryEntry, adapterproto.MaxDirectoryLimit), NextCursor: repeat("c", adapterproto.MaxCursorLen)}
 			for i := range r.Endpoints {
@@ -149,8 +172,25 @@ func TestPeersRules(t *testing.T) {
 		{"trust required", func(r *adapterproto.PeersResult) { r.Nodes[1].Trust = "" }, "nodes[1].trust", false},
 		{"trust unknown", func(r *adapterproto.PeersResult) { r.Nodes[1].Trust = "relayed" }, "nodes[1].trust", false},
 		{"self goes with trust self", func(r *adapterproto.PeersResult) { r.Nodes[1].Self = true }, "nodes[1].trust", false},
+		{"profile is optional", func(r *adapterproto.PeersResult) { r.Nodes[0].Profile = nil }, "", false},
+		{"profile with every member", func(r *adapterproto.PeersResult) { r.Nodes[0].Profile = fullProfile() }, "", false},
+		{"profile with only the time", func(r *adapterproto.PeersResult) { r.Nodes[1].Profile = &adapterproto.PeerProfile{AsOf: 1792713595} }, "", false},
+		{"profile as_of required", func(r *adapterproto.PeersResult) { r.Nodes[1].Profile = fullProfile(); r.Nodes[1].Profile.AsOf = 0 }, "nodes[1].profile.as_of", false},
+		{"profile as_of beyond the year 9999", func(r *adapterproto.PeersResult) {
+			r.Nodes[1].Profile = fullProfile()
+			r.Nodes[1].Profile.AsOf = adapterproto.MaxTimestampS + 1
+		}, "nodes[1].profile.as_of", false},
+		{"profile name of 129 characters", func(r *adapterproto.PeersResult) {
+			r.Nodes[1].Profile = fullProfile()
+			r.Nodes[1].Profile.Name = repeat("n", 129)
+		}, "nodes[1].profile.name", false},
 		{"trust self goes with self", func(r *adapterproto.PeersResult) { r.Nodes[0].Self = false }, "nodes[0].trust", false},
 	})
+}
+
+func fullProfile() *adapterproto.PeerProfile {
+	return &adapterproto.PeerProfile{Name: "imac", HostName: "imac-1", Platform: "darwin/arm64", System: "macOS 27.0.1",
+		SystemBuild: "25A354", SideraVersion: "0.17.0", AsOf: 1792713595}
 }
 
 func TestDeclareRules(t *testing.T) {

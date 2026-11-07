@@ -1,0 +1,40 @@
+{
+  "jsonrpc": "2.0",
+  "id": 172,
+  "result": {
+    "nodes": [
+      {
+        "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "self": true,
+        "trust": "self",
+        "connected": true,
+        "profile": {
+          "name": "imac",
+          "host_name": "imac-1",
+          "platform": "darwin/arm64",
+          "system": "macOS 27.0.1",
+          "system_build": "25A354",
+          "sidera_version": "0.17.0",
+          "as_of": 1792713595
+        }
+      },
+      {
+        "node": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "self": false,
+        "trust": "direct",
+        "connected": true,
+        "profile": {
+          "name": "build-box",
+          "platform": "linux/amd64",
+          "as_of": 1792713601
+        }
+      },
+      {
+        "node": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "self": false,
+        "trust": "direct",
+        "connected": false
+      }
+    ]
+  }
+}

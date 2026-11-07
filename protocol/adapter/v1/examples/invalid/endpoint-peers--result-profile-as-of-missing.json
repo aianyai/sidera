@@ -1,0 +1,24 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.peers",
+  "note": "profile without the time it was got",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "nodes": [
+        {
+          "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "self": true,
+          "trust": "self",
+          "connected": true,
+          "profile": {
+            "name": "imac",
+            "platform": "darwin/arm64"
+          }
+        }
+      ]
+    }
+  }
+}

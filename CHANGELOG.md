@@ -18,6 +18,13 @@ protocol has a version of its own.
   this node has not been connected to since its daemon started. The `--json` results carry the same
   facts as an optional `profile` object on each node: `name`, `host_name`, `platform`, `system`,
   `system_build` and `sidera_version` (each left out when the node did not give it) and `as_of`.
+- **Adapter protocol: `endpoint.peers` and `endpoint.directory` say more.** A node in the `endpoint.peers`
+  result may carry `profile` (its name, host name, platform, system, system build and Sidera version,
+  each left out when unknown, and `as_of`, the Unix time the profile was issued or fetched), and an
+  entry in the `endpoint.directory` result may carry `adapter` (the adapter `instance`, `id` and
+  `version` that serve the endpoint, and for a runtime or session endpoint the `runtime` name and
+  version found by the last passing probe). Both are new members of version 1, added in place; an
+  adapter that decodes these two results strictly has to be rebuilt with the new SDK to read them.
 
 ### Changed
 

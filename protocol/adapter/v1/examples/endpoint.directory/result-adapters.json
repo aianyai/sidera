@@ -1,0 +1,65 @@
+{
+  "jsonrpc": "2.0",
+  "id": 161,
+  "result": {
+    "outcome": "ok",
+    "endpoints": [
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+        "kind": "runtime",
+        "display_name": "work (codex)",
+        "accepts": [
+          "session.create",
+          "endpoint.status"
+        ],
+        "adapter": {
+          "instance": "work",
+          "id": "codex",
+          "version": "0.17.0",
+          "runtime": {
+            "name": "Codex CLI",
+            "version": "0.163.0"
+          }
+        }
+      },
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+        "kind": "session",
+        "accepts": [
+          "message.send",
+          "session.close",
+          "endpoint.status"
+        ],
+        "adapter": {
+          "instance": "work",
+          "id": "codex",
+          "version": "0.17.0",
+          "runtime": {
+            "name": "Codex CLI",
+            "version": "0.163.0"
+          }
+        }
+      },
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/33333333333333333333333333333333",
+        "kind": "direct",
+        "display_name": "Owner console",
+        "accepts": [
+          "message.send",
+          "endpoint.status"
+        ],
+        "adapter": {
+          "instance": "console",
+          "id": "console"
+        }
+      },
+      {
+        "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/44444444444444444444444444444444",
+        "kind": "session",
+        "accepts": [
+          "message.send"
+        ]
+      }
+    ]
+  }
+}

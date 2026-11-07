@@ -179,8 +179,30 @@
       "description": "An opaque position in a directory listing, made by the node asked. It is good only for the endpoint and the daemon process it was made for, and grants nothing.",
       "type": "string", "minLength": 1, "maxLength": 256
     },
+    "RuntimeInfo": {
+      "description": "What a probe found out about the native runtime: its name and version, each 1 to 64 characters under the character rule of a display name, because both reach other nodes and their terminals in the directory.",
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/DisplayName", "maxLength": 64 },
+        "version": { "$ref": "#/$defs/DisplayName", "maxLength": 64 }
+      }
+    },
+    "DirectoryAdapter": {
+      "description": "The adapter instance behind a directory entry. instance and id follow the syntax of an adapter identifier. version is omitted while the adapter has not connected since the node started, and runtime for an endpoint that is no runtime or session endpoint and while no probe has passed.",
+      "type": "object",
+      "required": ["instance", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "instance": { "$ref": "#/$defs/AdapterID" },
+        "id": { "$ref": "#/$defs/AdapterID" },
+        "version": { "$ref": "#/$defs/SemVer" },
+        "runtime": { "$ref": "#/$defs/RuntimeInfo" }
+      }
+    },
     "DirectoryEntry": {
-      "description": "One endpoint a node shows. display_name and description are omitted when the endpoint has none.",
+      "description": "One endpoint a node shows. display_name and description are omitted when the endpoint has none, and adapter when no adapter serves the endpoint or the node did not say.",
       "type": "object",
       "required": ["address", "kind", "accepts"],
       "additionalProperties": false,
@@ -189,11 +211,27 @@
         "kind": { "$ref": "#/$defs/EndpointKind" },
         "display_name": { "$ref": "#/$defs/DisplayName" },
         "description": { "$ref": "#/$defs/Description" },
-        "accepts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/EndpointAction" } }
+        "accepts": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/EndpointAction" } },
+        "adapter": { "$ref": "#/$defs/DirectoryAdapter" }
+      }
+    },
+    "PeerProfile": {
+      "description": "What a node says about itself. Every text is omitted when the node does not say it and is shown to a person, so each is under the character rule of a display name. platform is written <goos>/<goarch> by the node, which a reader does not rely on. as_of is when the daemon's node got the profile, in Unix seconds: for the node itself, when it issued it; for another node, when it fetched it.",
+      "type": "object",
+      "required": ["as_of"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/DisplayName" },
+        "host_name": { "$ref": "#/$defs/DisplayName" },
+        "platform": { "$ref": "#/$defs/DisplayName" },
+        "system": { "$ref": "#/$defs/DisplayName" },
+        "system_build": { "$ref": "#/$defs/DisplayName" },
+        "sidera_version": { "$ref": "#/$defs/DisplayName" },
+        "as_of": { "type": "integer", "minimum": 1, "maximum": 253402300799 }
       }
     },
     "PeerNode": {
-      "description": "A node the daemon's node can address. self goes with trust self, and only with it.",
+      "description": "A node the daemon's node can address. self goes with trust self, and only with it. profile is omitted while the daemon has none for the node.",
       "type": "object",
       "required": ["node", "self", "trust", "connected"],
       "additionalProperties": false,
@@ -201,7 +239,8 @@
         "node": { "type": "string", "minLength": 1, "maxLength": 128 },
         "self": { "type": "boolean" },
         "trust": { "$ref": "#/$defs/PeerTrust" },
-        "connected": { "type": "boolean" }
+        "connected": { "type": "boolean" },
+        "profile": { "$ref": "#/$defs/PeerProfile" }
       },
       "oneOf": [
         { "properties": { "self": { "const": true }, "trust": { "const": "self" } } },

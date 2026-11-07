@@ -206,16 +206,7 @@
       "required": ["auth", "dependencies", "presets", "tool_probes"],
       "additionalProperties": false,
       "properties": {
-        "runtime": {
-          "type": "object",
-          "description": "What the adapter found: the runtime's name and version, each 1 to 64 characters under the character rule of a display name, because both reach other nodes and their terminals in the directory.",
-          "required": ["name", "version"],
-          "additionalProperties": false,
-          "properties": {
-            "name": { "$ref": "types.schema.json#/$defs/DisplayName", "maxLength": 64 },
-            "version": { "$ref": "types.schema.json#/$defs/DisplayName", "maxLength": 64 }
-          }
-        },
+        "runtime": { "$ref": "types.schema.json#/$defs/RuntimeInfo" },
         "auth": { "$ref": "types.schema.json#/$defs/AuthState" },
         "dependencies": {
           "type": "array",

@@ -1,0 +1,32 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "entry adapter runtime name holding an escape sequence",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "ok",
+      "endpoints": [
+        {
+          "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+          "kind": "runtime",
+          "display_name": "work (codex)",
+          "accepts": [
+            "session.create"
+          ],
+          "adapter": {
+            "instance": "work",
+            "id": "codex",
+            "version": "0.17.0",
+            "runtime": {
+              "name": "Codex\u001b[2J",
+              "version": "1"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

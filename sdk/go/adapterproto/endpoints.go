@@ -374,6 +374,42 @@ type DirectoryEntry struct {
 	// Accepts are the actions the endpoint accepts. A required list that may be
 	// empty.
 	Accepts []EndpointAction `json:"accepts"`
+	// Adapter says which adapter serves the endpoint; absent for an endpoint no
+	// adapter serves, and when the node that showed the entry did not say.
+	Adapter *DirectoryAdapter `json:"adapter,omitempty"`
+}
+
+// DirectoryAdapter is the adapter instance behind a directory entry: the instance
+// that serves the endpoint on its node, the adapter it runs and, when the node
+// knows them, the adapter's version and the native runtime it drives. An agent
+// that wants a given runtime picks the entry by ID.
+type DirectoryAdapter struct {
+	// Instance is the name of the adapter instance on the node that shows the
+	// entry, which follows the syntax of an adapter identifier.
+	Instance string `json:"instance"`
+	// ID is the identifier of the adapter the instance runs.
+	ID string `json:"id"`
+	// Version is the adapter's version as it announced itself when it last
+	// connected; absent while it has not connected since the node started.
+	Version string `json:"version,omitempty"`
+	// Runtime is the native runtime the adapter found when its probe last passed;
+	// absent for an endpoint that is no runtime or session endpoint, and while no
+	// probe has passed.
+	Runtime *RuntimeInfo `json:"runtime,omitempty"`
+}
+
+// Validate checks the identifiers, the version and the runtime.
+func (a DirectoryAdapter) Validate() error {
+	var c checker
+	c.field("instance", ValidateAdapterID(a.Instance))
+	c.field("id", ValidateAdapterID(a.ID))
+	if a.Version != "" {
+		c.field("version", ValidateSemVer(a.Version))
+	}
+	if a.Runtime != nil {
+		c.field("runtime", a.Runtime.Validate())
+	}
+	return c.err
 }
 
 // Validate checks the entry.
@@ -388,6 +424,9 @@ func (e DirectoryEntry) Validate() error {
 		c.field("accepts"+index(i), enumOK(a, endpointActions))
 	}
 	c.field("accepts", unique(e.Accepts))
+	if e.Adapter != nil {
+		c.field("adapter", e.Adapter.Validate())
+	}
 	return c.err
 }
 
@@ -448,15 +487,62 @@ type PeerNode struct {
 	// Connected says whether a connection to the node is up now. It is read
 	// without waiting and says nothing about whether a send would succeed.
 	Connected bool `json:"connected"`
+	// Profile is what the node says about itself; absent while the daemon has
+	// none, which it does not for a node it has not been connected to since it
+	// started.
+	Profile *PeerProfile `json:"profile,omitempty"`
 }
 
-// Validate checks the node and that self and trust agree.
+// PeerProfile is what a node says about itself, so that people and agents can
+// tell nodes apart: its name and the machine and the version of Sidera it runs.
+// Every text is optional, and absent when the node does not say it. The texts are
+// shown to a person, so each follows the rule of a display name; the form the
+// node gives a platform ("<goos>/<goarch>") is its own and is not required of a
+// reader.
+type PeerProfile struct {
+	// Name is what people call the node: the name its owner gave it, or its host
+	// name.
+	Name string `json:"name,omitempty"`
+	// HostName is the first label of the machine's host name.
+	HostName string `json:"host_name,omitempty"`
+	// Platform is the machine's operating system and architecture, written
+	// "<goos>/<goarch>", for example "linux/amd64".
+	Platform string `json:"platform,omitempty"`
+	// System is the operating system and its release, for example "Ubuntu 24.04.1
+	// LTS".
+	System string `json:"system,omitempty"`
+	// SystemBuild is the build or kernel version of the system.
+	SystemBuild string `json:"system_build,omitempty"`
+	// SideraVersion is the version of Sidera the node runs.
+	SideraVersion string `json:"sidera_version,omitempty"`
+	// AsOf is when the daemon's node got the profile, in Unix seconds: for the
+	// node itself, when it issued it; for another node, when it fetched it.
+	AsOf int64 `json:"as_of"`
+}
+
+// Validate checks the texts and the time.
+func (p PeerProfile) Validate() error {
+	var c checker
+	c.field("name", ValidateOptionalDisplayName(p.Name))
+	c.field("host_name", ValidateOptionalDisplayName(p.HostName))
+	c.field("platform", ValidateOptionalDisplayName(p.Platform))
+	c.field("system", ValidateOptionalDisplayName(p.System))
+	c.field("system_build", ValidateOptionalDisplayName(p.SystemBuild))
+	c.field("sidera_version", ValidateOptionalDisplayName(p.SideraVersion))
+	c.field("as_of", intRange(p.AsOf, 1, MaxTimestampS))
+	return c.err
+}
+
+// Validate checks the node, that self and trust agree, and the profile.
 func (n PeerNode) Validate() error {
 	var c checker
 	c.field("node", strLen(n.Node, 1, MaxIdentLen))
 	c.field("trust", enumOK(n.Trust, peerTrusts))
 	if c.err == nil {
 		c.ok(n.Self == (n.Trust == PeerSelf), "trust: %s does not go with self=%v", n.Trust, n.Self)
+	}
+	if n.Profile != nil {
+		c.field("profile", n.Profile.Validate())
 	}
 	return c.err
 }

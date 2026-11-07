@@ -1,0 +1,26 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.peers",
+  "note": "profile host name of 129 characters",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "nodes": [
+        {
+          "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "self": true,
+          "trust": "self",
+          "connected": true,
+          "profile": {
+            "name": "imac",
+            "platform": "darwin/arm64",
+            "as_of": 1792713595,
+            "host_name": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+          }
+        }
+      ]
+    }
+  }
+}

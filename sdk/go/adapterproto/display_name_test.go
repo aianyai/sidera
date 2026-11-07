@@ -101,6 +101,23 @@ func TestDisplayNameRule(t *testing.T) {
 			if err := (adapterproto.RuntimeInfo{Name: "n", Version: c.in}).Validate(); (err == nil) != c.ok {
 				t.Errorf("RuntimeInfo.Validate(version %q) = %v, accepted should be %v", c.in, err, c.ok)
 			}
+			// The text a node says about itself reaches the terminals of the nodes that
+			// trust it the same way, field by field.
+			for field, set := range map[string]func(*adapterproto.PeerProfile){
+				"name":           func(p *adapterproto.PeerProfile) { p.Name = c.in },
+				"host_name":      func(p *adapterproto.PeerProfile) { p.HostName = c.in },
+				"platform":       func(p *adapterproto.PeerProfile) { p.Platform = c.in },
+				"system":         func(p *adapterproto.PeerProfile) { p.System = c.in },
+				"system_build":   func(p *adapterproto.PeerProfile) { p.SystemBuild = c.in },
+				"sidera_version": func(p *adapterproto.PeerProfile) { p.SideraVersion = c.in },
+			} {
+				profile := adapterproto.PeerProfile{AsOf: 1}
+				set(&profile)
+				// An empty field is an absent one, which the optional form accepts.
+				if err := profile.Validate(); (err == nil) != (c.ok || c.in == "") {
+					t.Errorf("PeerProfile.Validate(%s %q) = %v", field, c.in, err)
+				}
+			}
 			// A description is only present when it is at least one character.
 			if err := adapterproto.ValidateDescription(c.in); (err == nil) != c.descOK {
 				t.Errorf("ValidateDescription(%q) = %v, accepted should be %v", c.in, err, c.descOK)

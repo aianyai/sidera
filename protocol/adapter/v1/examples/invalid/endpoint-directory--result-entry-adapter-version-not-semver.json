@@ -1,0 +1,32 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.directory",
+  "note": "entry adapter version that is not a semantic version",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "ok",
+      "endpoints": [
+        {
+          "address": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+          "kind": "runtime",
+          "display_name": "work (codex)",
+          "accepts": [
+            "session.create"
+          ],
+          "adapter": {
+            "instance": "work",
+            "id": "codex",
+            "version": "v1",
+            "runtime": {
+              "name": "Codex CLI",
+              "version": "0.163.0"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

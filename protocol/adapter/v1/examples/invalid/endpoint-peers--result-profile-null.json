@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.peers",
+  "note": "profile sent as null",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "nodes": [
+        {
+          "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "self": true,
+          "trust": "self",
+          "connected": true,
+          "profile": null
+        }
+      ]
+    }
+  }
+}
