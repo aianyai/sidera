@@ -78,6 +78,11 @@ type EndpointOverride struct {
 
 // NodeSettings are the settings of the node.
 type NodeSettings struct {
+	// Name is what the owner calls the node, shown to people and agents beside
+	// the node's identifier; empty means the node has no name of its own and is
+	// called by its host name. It is a label: nothing is addressed, trusted or
+	// allowed by it.
+	Name string
 	// ReplyPermission is whether a reply with evidence may reach an endpoint
 	// that did not ask for it.
 	ReplyPermission bool

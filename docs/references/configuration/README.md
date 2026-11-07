@@ -98,13 +98,14 @@ edit would change the address of an endpoint.
 }
 ```
 
-Every setting is required. A request changes settings with a patch, a JSON
+Every setting is required except `name`, which is absent when the node has no name of its own. A request changes settings with a patch, a JSON
 object with the settings it names (`{"node_queue_limit": 20000,
 "endpoint_defaults": {"backlog_limit": 99}}`); what it does not name stays. The
 patch is merged into the current settings and the result is validated whole.
 
 | Setting | Meaning | Default (from) | Valid when |
 | ------- | ------- | -------------- | ---------- |
+| `name` | what the owner calls the node, shown beside its identifier; empty means the node is called by its host name | none: the setting is absent | `adapterproto.ValidateDisplayName` accepts it (1 to 128 characters, none of the control, line-separator and bidirectional-control characters); a patch with `""` takes the name away |
 | `reply_permission` | whether a reply with evidence may reach an endpoint that did not ask for it | on | a boolean; it is written explicitly because the zero value of the rule it feeds is "off" |
 | `node_queue_limit` | unfinished deliveries the node holds before new sends are refused | 10,000 (`config`) | at least 1, and the reserve rule below |
 | `disk_reserve_bytes` | free space below which new work is refused | 256 MiB (`config`) | at least 1, and the reserve rule below |
@@ -137,6 +138,8 @@ small files are not counted. No margin term is added, because the quantities
 that would need one are already counted at their maximum: logs at their cap,
 the archive by the bytes appended to it, and one feedback notice merges many
 deliveries instead of adding one each. With the defaults the reserve leaves about 66 MiB over the sum.
+
+**An optional setting needs no new `format`.** `name` is read with the strictness of any optional member (see Rules every file follows): a `node.json` written before it existed has no `name` and reads as a node without one, a node without one writes none, and a program that does not know the setting still reads the file until the owner sets a name. An explicit empty `name` in the file is refused as a second spelling of absent; in a patch `""` is the way to take the name away, because a patch value is a value. The name is a label for people and agents: nothing is addressed, trusted or allowed by it, and another node learns it only through the node's profile.
 
 A setting that another package limits is validated by that package, and the
 error the owner gets is that package's error: the rule has one home.

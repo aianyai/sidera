@@ -1,9 +1,11 @@
 package config_test
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,4 +321,85 @@ func TestPatchDecoders(t *testing.T) {
 			t.Errorf("DecodeEndpointPatch(%s) accepted it", bad)
 		}
 	}
+}
+
+// nodeJSON is a node.json whose settings are the defaults, with the extra
+// members given spliced in.
+func nodeJSON(extra string) []byte {
+	return []byte(`{"format": 1, "version": 1, "settings": {` + extra + `"reply_permission": true, "node_queue_limit": 10000,
+		"disk_reserve_bytes": 268435456, "node_prompt_turns": 8, "archive_retention_days": 30, "log_total_bytes": 157286400,
+		"endpoint_defaults": {"max_queue_s": 1800, "backlog_limit": 200}}}`)
+}
+
+// The name is optional: a node.json written before it existed is read as the
+// node having no name of its own, and a node without one writes none, so that
+// the file still reads on a program that does not know the setting.
+func TestNodeNameIsOptionalInTheFile(t *testing.T) {
+	n, err := config.DecodeNode(nodeJSON(""))
+	if err != nil || n.Settings.Name != "" {
+		t.Fatalf("a file without a name: %+v, %v", n.Settings, err)
+	}
+	n, err = config.DecodeNode(nodeJSON(`"name": "build box", `))
+	if err != nil || n.Settings.Name != "build box" {
+		t.Fatalf("a file with a name: %+v, %v", n.Settings, err)
+	}
+	// Absence is the only way to say "not set": an explicit empty name is a
+	// second spelling of it.
+	if _, err := config.DecodeNode(nodeJSON(`"name": "", `)); err == nil {
+		t.Error("an empty name written out was accepted")
+	}
+	unnamed := config.DefaultNodeSettings()
+	wire, err := unnamed.WireJSON()
+	if err != nil || strings.Contains(string(wire), `"name"`) {
+		t.Errorf("settings with no name show %s, %v", wire, err)
+	}
+	named := config.DefaultNodeSettings()
+	named.Name = "build box"
+	wire, err = named.WireJSON()
+	if err != nil || !strings.Contains(string(wire), `"name":"build box"`) {
+		t.Errorf("settings with a name show %s, %v", wire, err)
+	}
+}
+
+// The name follows the display-name rule of the adapter protocol, which has
+// one home; a patch that names it is judged by it, and an empty name in a
+// patch takes the name away.
+func TestNodeNamePatch(t *testing.T) {
+	t.Run("a name is set, replaced and taken away", func(t *testing.T) {
+		_, c := loaded(t)
+		var seen []config.Node
+		for i, row := range []struct{ patch, want string }{
+			{`{"name": "build box"}`, "build box"},
+			{`{"name": "naïve nøde"}`, "naïve nøde"},
+			{`{"name": ""}`, ""},
+		} {
+			n, err := c.SetNodeSettings(request(1, admin.Version(3+i)), []byte(row.patch), result(&seen, `{}`))
+			if err != nil || n.Settings.Name != row.want {
+				t.Fatalf("%s: name %q, %v", row.patch, n.Settings.Name, err)
+			}
+		}
+	})
+	t.Run("a name that breaks the rule is refused and changes nothing", func(t *testing.T) {
+		rows := []struct{ name, value string }{
+			{"too long", strings.Repeat("a", 129)},
+			{"an escape sequence", "n\x1b[2J"},
+			{"a line feed", "two\nlines"},
+			{"a right-to-left override", "n‮txt"},
+		}
+		for _, r := range rows {
+			t.Run(r.name, func(t *testing.T) {
+				rg, c := loaded(t)
+				before := snapshot(t, rg.mem)
+				patch, _ := json.Marshal(map[string]string{"name": r.value})
+				var seen []config.Node
+				_, err := c.SetNodeSettings(request(1, 3), patch, result(&seen, `{}`))
+				if ce := changeReason(t, err); ce.Reason != config.ChangeInvalid || ce.Field != "name" {
+					t.Errorf("error = %+v", ce)
+				}
+				if !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
+					t.Error("a refused patch changed something")
+				}
+			})
+		}
+	})
 }

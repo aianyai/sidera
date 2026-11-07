@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The settings that no other package decides. Each has its reason in the
@@ -115,6 +116,11 @@ func outOfRange(field string, v any) error {
 // it, the others by the ranges the README gives, and the disk reserve against
 // what the queue and the logs can fill.
 func (s NodeSettings) Validate() error {
+	if s.Name != "" {
+		if err := adapterproto.ValidateDisplayName(s.Name); err != nil {
+			return invalid("name", err)
+		}
+	}
 	if s.NodeQueueLimit < 1 {
 		return outOfRange("node_queue_limit", s.NodeQueueLimit)
 	}
@@ -166,6 +172,7 @@ type nodeWire struct {
 }
 
 type nodeSettingsWire struct {
+	Name                 string               `json:"name,omitempty"`
 	ReplyPermission      bool                 `json:"reply_permission"`
 	NodeQueueLimit       int                  `json:"node_queue_limit"`
 	DiskReserveBytes     int64                `json:"disk_reserve_bytes"`
@@ -191,6 +198,7 @@ func decodeNode(data []byte) (Node, error) {
 	n := Node{
 		Version: versionOf(w.Version),
 		Settings: NodeSettings{
+			Name:                 w.Settings.Name,
 			ReplyPermission:      w.Settings.ReplyPermission,
 			NodeQueueLimit:       w.Settings.NodeQueueLimit,
 			DiskReserveBytes:     w.Settings.DiskReserveBytes,
@@ -232,6 +240,7 @@ func (s NodeSettings) wire() (nodeSettingsWire, error) {
 		return nodeSettingsWire{}, err
 	}
 	return nodeSettingsWire{
+		Name:                 s.Name,
 		ReplyPermission:      s.ReplyPermission,
 		NodeQueueLimit:       s.NodeQueueLimit,
 		DiskReserveBytes:     s.DiskReserveBytes,
@@ -285,6 +294,8 @@ type EndpointPatch struct {
 // NodePatch names the node settings a request changes; a nil field is not
 // named.
 type NodePatch struct {
+	// Name is the new name; a pointer to the empty string takes the name away.
+	Name                 *string
 	ReplyPermission      *bool
 	NodeQueueLimit       *int
 	DiskReserveBytes     *int64
@@ -300,6 +311,7 @@ type endpointPatchWire struct {
 }
 
 type nodePatchWire struct {
+	Name                 *string            `json:"name,omitempty"`
 	ReplyPermission      *bool              `json:"reply_permission,omitempty"`
 	NodeQueueLimit       *int               `json:"node_queue_limit,omitempty"`
 	DiskReserveBytes     *int64             `json:"disk_reserve_bytes,omitempty"`
@@ -326,6 +338,7 @@ func DecodeNodePatch(data []byte) (NodePatch, error) {
 		return NodePatch{}, err
 	}
 	p := NodePatch{
+		Name:                 w.Name,
 		ReplyPermission:      w.ReplyPermission,
 		NodeQueueLimit:       w.NodeQueueLimit,
 		DiskReserveBytes:     w.DiskReserveBytes,
@@ -354,7 +367,7 @@ func (p EndpointPatch) isEmpty() bool { return p.MaxQueue == nil && p.BacklogLim
 
 // isEmpty reports whether the patch names no setting.
 func (p NodePatch) isEmpty() bool {
-	return p.ReplyPermission == nil && p.NodeQueueLimit == nil && p.DiskReserveBytes == nil &&
+	return p.Name == nil && p.ReplyPermission == nil && p.NodeQueueLimit == nil && p.DiskReserveBytes == nil &&
 		p.NodePromptTurns == nil && p.ArchiveRetentionDays == nil && p.LogTotalBytes == nil &&
 		(p.EndpointDefaults == nil || p.EndpointDefaults.isEmpty())
 }
@@ -377,6 +390,9 @@ func (p EndpointPatch) validate() error {
 
 // apply returns the settings with the patch's values in place of theirs.
 func (p NodePatch) apply(s NodeSettings) NodeSettings {
+	if p.Name != nil {
+		s.Name = *p.Name
+	}
 	if p.ReplyPermission != nil {
 		s.ReplyPermission = *p.ReplyPermission
 	}
