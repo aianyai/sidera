@@ -184,6 +184,18 @@ func TestCallReportsAnUnreadableSuccessfulAnswer(t *testing.T) {
 	}
 }
 
+// A recv that carries ack_lease acknowledges the page before, which is a change: an
+// answer it cannot read says the acknowledgement was accepted, and a recv without one
+// (above) does not.
+func TestCallReportsAnUnreadableRecvThatAcknowledgesAPage(t *testing.T) {
+	c := responseClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"lease":"11111111111111111111111111111111","more":0}`) })
+	_, err := c.Call(context.Background(), "recv", json.RawMessage(`{"ack_lease":"22222222222222222222222222222222"}`))
+	e := apiwire.FromError(err)
+	if e == nil || e.Code != apiwire.CodeAnswerUnreadable || !strings.Contains(e.Message, "the change was accepted") {
+		t.Fatalf("Call: %v; want answer_unreadable that says the change was accepted", err)
+	}
+}
+
 func TestCallPreservesExplicitEmptyFieldsForTheServer(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	c := endpointClient(t, h, token)

@@ -94,8 +94,9 @@ as a request; `recv` returns its original bytes after that check. A result added
 by a later daemon is therefore still read; what a caller must understand is never added
 to an existing result but made a new method. A written request with no complete
 answer is `outcome_unknown`; a complete answer of success that cannot be read is
-`internal/answer_unreadable`, which for `send`, `reply`, `ack`, `declare` and
-`control` (the table in `call`) also says the change was accepted. Requests stay strict.
+`internal/answer_unreadable`, which for `send`, `reply`, `ack`, `declare`,
+`control` and a `recv` that carries `ack_lease` (it acknowledges the page before; the
+table in `call`) also says the change was accepted. Requests stay strict.
 
 | Method | Concrete result |
 | --- | --- |

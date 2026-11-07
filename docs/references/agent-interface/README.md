@@ -259,7 +259,8 @@ retains `outcome_unknown/storage_fatal`.
 success and the client could not read the answer, most likely because the node is
 newer than the program. It is not `outcome_unknown`, since the node said what
 happened; it advises no resend, and for a change (send, reply, ack, declare,
-control) it adds that the change was accepted and can be seen with `status` or the
+control, and recv when it carries `ack_lease`, which acknowledges the page before) it
+adds that the change was accepted and can be seen with `status` or the
 matching read.
 
 An emitted stable code is never renamed, removed or reused for another meaning.
@@ -306,7 +307,8 @@ or ordinary structs, string-key maps, slices, pointers, interfaces and JSON
 scalars through the shared safe encoder; arbitrary custom marshalers are
 unsupported. Raw documents receive document-level checks, without decoding and
 re-encoding through method request types. For receive deadlines, the client
-reads the original object's exact `wait_s` as int64 after safe encoding. Missing
+reads the original object's exact `wait_s` as int64 after safe encoding, and whether
+`ack_lease` is present, which makes a `recv` a change for the error of an unreadable answer. Missing
 or unreadable values use zero for the budget; server validation remains
 authoritative. Unknown method names return `not_found/method_unknown` locally,
 before building a URL. `Call` and typed methods share credential selection,

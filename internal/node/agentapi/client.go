@@ -95,7 +95,9 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 	timeout := 60 * time.Second
 	var decode func([]byte) (any, error)
 	// changes is set for the methods that change state, so that an answer that
-	// cannot be read says the change was accepted.
+	// cannot be read says the change was accepted. A recv changes state when it
+	// acknowledges the page before (ack_lease), which is known once the request is
+	// encoded.
 	changes := false
 	switch method {
 	case "probe":
@@ -142,6 +144,7 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 		var members map[string]json.RawMessage
 		var seconds int64
 		if json.Unmarshal(body, &members) == nil {
+			_, changes = members["ack_lease"]
 			if err := json.Unmarshal(members["wait_s"], &seconds); err != nil {
 				seconds = 0
 			}
