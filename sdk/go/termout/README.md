@@ -46,12 +46,12 @@ width).
   continuation lines, a table's last cell) skips empty lines and the final line break.
   A block that goes under a marker or a title is indented with `Indent`.
 - **Foreign text is sanitized by its caller, once, at the point of output.** The class of
-  characters (`isUnsafe`) is the person-text rule of `adapterproto`
-  (`RefusedInPersonText`, called, not copied), plus invisible format characters (tag
-  characters, zero-width space, word joiner and the like) that a person cannot see and an
-  agent reading the same text can. The first part is whatever the protocol refuses in a
-  display name; the second is a display rule only. U+200D stays, to keep emoji sequences
-  whole.
+  characters is the person-text rule of `adapterproto` (`RefusedInPersonText`, called, not
+  copied), which covers the controls, the separators, the characters that reorder text and the
+  invisible format characters (tag characters, zero-width space, word joiner and the like) that a
+  person cannot see and an agent reading the same text can. There is no second list here, so
+  what a source refuses and what this package escapes cannot drift. U+200D stays, to keep emoji
+  sequences whole.
 - **Windows.** A colored console stream first has `ENABLE_VIRTUAL_TERMINAL_PROCESSING`
   switched on; when the console refuses, the stream is decorated and not colored. Git-Bash
   and mintty are pipes to Windows and count as not a terminal.
