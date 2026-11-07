@@ -18,6 +18,7 @@ for how the protocol layers use it.
 | ---- | -------------- |
 | `Decode(data, &v)` | Decode one JSON value into a struct, slice or map under the rules below |
 | `DecodeOpen(data, &v)` | `Decode` for one object whose unknown members are ignored; for the `UnmarshalJSON` of a type that a newer sender may extend |
+| `DecodeTolerant(data, &v)` | `Decode` that ignores the members it has no field for, in every object at any depth; for reading an answer from a peer that may be newer than the reader, never a request or a record |
 | `NoDuplicateTopLevelKeys(data)` | Reject a repeated key in the outer object only, for a caller that reads just that object and leaves the rest to `Decode` |
 | `Error` | A failure in the input, with the JSON path of the offending value |
 
@@ -34,7 +35,7 @@ for how the protocol layers use it.
   after decoding it could not be told from absence. A pointer field accepts any
   value of its type, and `false` is always accepted for a bool.
 - **One document.** The input is one valid UTF-8 JSON value with nothing after it.
-  Unknown fields are errors, except in the object given to `DecodeOpen`.
+  Unknown fields are errors, except in the object given to `DecodeOpen` and, in tolerant mode, in every object.
 - **Unicode strings.** A UTF-16 surrogate escape must belong to a valid pair,
   including in object keys, opaque positions and ignored members of an open
   object. `encoding/json` replaces unpaired surrogates with U+FFFD, which would
@@ -79,6 +80,29 @@ for how the protocol layers use it.
   changes what is accepted. A map with a key type that `encoding/json` cannot
   decode into (a bool or float key, say) is left to `encoding/json`, which refuses
   it.
+
+## Tolerant mode
+
+`DecodeTolerant` exists for one reader: a program that reads the answer of a
+peer that may be newer than itself, such as a long-running client of a daemon
+that was upgraded under it. Every rule above holds, except that an object member
+with no field to receive it is skipped, in every object at any depth, where
+`DecodeOpen` opens only the one object it is given.
+
+- A key still matches a field name byte for byte. A member that differs from a
+  field only in case is an unknown member: it is skipped and never fills the
+  field.
+- A repeated key, a bad escape, invalid UTF-8, a wrong type or `null` for a member
+  that has a field, a missing required member and data after the value are
+  refused exactly as in `Decode`; the skipped members are still checked for
+  repeated keys and for the document-level encoding rules.
+- A value at an opaque position is kept as written, and a type that decodes
+  itself keeps its own rules for the value it is given.
+- It is never used for a request, a stored record or a message that another party
+  acts on. A reader that skips a member it does not understand acts on a
+  document it only partly understood, which is acceptable for an answer only
+  because what an answer must be understood for is never added to an existing
+  answer: it becomes a new method, which an older reader does not call.
 
 ## What the caller must guarantee
 

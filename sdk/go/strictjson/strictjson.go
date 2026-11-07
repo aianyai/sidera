@@ -16,7 +16,8 @@
 //     pointer field accepts any value of its type, including zero, and false is
 //     always accepted for a bool.
 //   - The input is one valid UTF-8 JSON value with nothing after it, and unknown
-//     fields are errors, except in a value decoded with DecodeOpen.
+//     fields are errors, except in the one object decoded with DecodeOpen and in
+//     every object decoded with DecodeTolerant.
 //   - String escapes encode Unicode scalar values: a UTF-16 surrogate must
 //     belong to a valid pair, including in keys and opaque positions.
 //   - No object has the same key twice, at any depth. Parsers disagree about
@@ -100,7 +101,27 @@ func (e *Error) Error() string {
 
 // Decode decodes data, which must hold exactly one JSON value, into v, a non-nil
 // pointer, under the rules in the package comment.
-func Decode(data []byte, v any) error {
+func Decode(data []byte, v any) error { return decode(data, v, false) }
+
+// DecodeTolerant is Decode for a document that a newer sender may have extended:
+// an object member that has no field to receive it is ignored, in every object
+// at any depth, not only in the outermost one as with DecodeOpen. Nothing else
+// is relaxed. The members that do have a field are decoded under every rule of
+// Decode, a key still matches a field name byte for byte, so a member that
+// differs from a field only in case is an ignored member and never fills that
+// field, and a key that occurs twice anywhere in data is an error, ignored
+// members included.
+//
+// It is for reading an answer from a peer that may be newer than the reader,
+// never for a request, a stored record or a message another party acts on:
+// those are read with Decode, because accepting a member the reader does not
+// understand would let it act on a document it only partly understood. What an
+// answer must be understood for is therefore never added to an existing answer.
+// A value at an opaque position is kept as written, and a type that decodes
+// itself keeps its own rules for the value it is given.
+func DecodeTolerant(data []byte, v any) error { return decode(data, v, true) }
+
+func decode(data []byte, v any, tolerant bool) error {
 	rt := reflect.TypeOf(v)
 	if rt == nil || rt.Kind() != reflect.Pointer || reflect.ValueOf(v).IsNil() {
 		return errors.New("strictjson: Decode needs a non-nil pointer")
@@ -115,8 +136,16 @@ func Decode(data []byte, v any) error {
 	if err != nil {
 		return err
 	}
-	if err := check(tree, rt.Elem(), "", false); err != nil {
+	if err := check(tree, rt.Elem(), "", false, tolerant); err != nil {
 		return err
+	}
+	if tolerant {
+		// encoding/json matches keys case-insensitively and would fill a field
+		// from an unknown member that differs from it only in case, so the
+		// members to ignore are removed before it sees the document.
+		if data, err = encodeTree(prune(tree, rt.Elem())); err != nil {
+			return err
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -127,7 +156,7 @@ func Decode(data []byte, v any) error {
 	// What check lets through can still fail where a type decodes itself. The
 	// standard library does not say where, so the positions of such types are
 	// tried one by one to find the one that refuses its value.
-	if located := check(tree, rt.Elem(), "", true); located != nil {
+	if located := check(tree, rt.Elem(), "", true, tolerant); located != nil {
 		return located
 	}
 	return &Error{Msg: err.Error()}
@@ -341,7 +370,10 @@ func opaque(t reflect.Type) bool {
 // Decode sets it only after decoding has failed, to find where; the offer is made
 // on a copy of the value, so it can only name a position, never change what is
 // accepted.
-func check(tree any, t reflect.Type, path string, probe bool) error {
+//
+// With tolerant set, a struct member without a field is not an error here (see
+// DecodeTolerant).
+func check(tree any, t reflect.Type, path string, probe, tolerant bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -363,14 +395,14 @@ func check(tree any, t reflect.Type, path string, probe bool) error {
 		if !ok {
 			return &Error{Path: path, Msg: "expected an object"}
 		}
-		return checkStruct(obj, t, path, probe)
+		return checkStruct(obj, t, path, probe, tolerant)
 	case reflect.Slice, reflect.Array:
 		arr, ok := tree.([]any)
 		if !ok {
 			return &Error{Path: path, Msg: "expected an array"}
 		}
 		for i, e := range arr {
-			if err := check(e, t.Elem(), fmt.Sprintf("%s[%d]", path, i), probe); err != nil {
+			if err := check(e, t.Elem(), fmt.Sprintf("%s[%d]", path, i), probe, tolerant); err != nil {
 				return err
 			}
 		}
@@ -384,7 +416,7 @@ func check(tree any, t reflect.Type, path string, probe bool) error {
 			if msg := keyProblem(k, t.Key()); msg != "" {
 				return &Error{Path: join(path, k), Msg: msg}
 			}
-			if err := check(e, t.Elem(), join(path, k), probe); err != nil {
+			if err := check(e, t.Elem(), join(path, k), probe, tolerant); err != nil {
 				return err
 			}
 		}
@@ -531,14 +563,14 @@ func fields(t reflect.Type) []field {
 	return out
 }
 
-func checkStruct(obj map[string]any, t reflect.Type, path string, probe bool) error {
+func checkStruct(obj map[string]any, t reflect.Type, path string, probe, tolerant bool) error {
 	fs := fields(t)
 	known := make(map[string]bool, len(fs))
 	for _, f := range fs {
 		known[f.name] = true
 	}
 	for _, k := range sortedKeys(obj) {
-		if !known[k] {
+		if !known[k] && !tolerant {
 			return &Error{Path: join(path, k), Msg: "unknown field"}
 		}
 	}
@@ -563,7 +595,7 @@ func checkStruct(obj map[string]any, t reflect.Type, path string, probe bool) er
 			}
 			continue
 		}
-		if err := check(val, ft, p, probe); err != nil {
+		if err := check(val, ft, p, probe, tolerant); err != nil {
 			return err
 		}
 	}
@@ -628,4 +660,52 @@ func below(path, rel string) string {
 		return path + rel
 	}
 	return path + "." + rel
+}
+
+// prune returns tree without the object members that have no field in the struct
+// that receives them, at every depth below t. Values at opaque positions are
+// kept whole. tree has already passed check, so it has the shape t expects.
+func prune(tree any, t reflect.Type) any {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if opaque(t) || tree == nil {
+		return tree
+	}
+	switch v := tree.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		switch t.Kind() {
+		case reflect.Struct:
+			for _, f := range fields(t) {
+				if val, ok := v[f.name]; ok {
+					out[f.name] = prune(val, t.Field(f.index).Type)
+				}
+			}
+		case reflect.Map:
+			for k, val := range v {
+				out[k] = prune(val, t.Elem())
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = prune(e, t.Elem())
+		}
+		return out
+	}
+	return tree
+}
+
+// encodeTree writes a parsed document back out. Numbers keep their spelling
+// because parseTree reads them as json.Number.
+func encodeTree(tree any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(tree); err != nil {
+		return nil, &Error{Msg: err.Error()}
+	}
+	return b.Bytes(), nil
 }
