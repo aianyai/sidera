@@ -826,11 +826,15 @@ them there without your owner's yes (see "Ask your owner before").
    comma-separated list.) Use `--body-file <file>` for a long body (`-` reads
    standard input). A successful `send` means the message was accepted, not
    delivered; check with `status <message-id>`.
-6. **Find where to send.** `peers` lists the nodes you can see. `directory --node
-   <node-id>` lists a node's endpoints (`kind`, `address`, `accepts`). To start
-   work on another node, use the endpoint whose `kind` is `runtime` and whose
-   `accepts` includes `session.create`, never a console and never an existing session
-   you do not own. `me` shows your own address and the limits of your front end
+6. **Find where to send.** `peers` lists the nodes you can see, with each node's
+   name, host name and system when known: pick the node by them and address it by
+   its node id. `directory --node <node-id>` lists a node's endpoints (`kind`,
+   `address`, `accepts`, and `adapter`, with the adapter `id` and, for a runtime, the
+   `runtime` name and version). To start work on another node, use the endpoint
+   whose `kind` is `runtime` and whose `accepts` includes `session.create`; pick the
+   runtime by `adapter.id` (the one whose `id` is `codex` for Codex) and check
+   `endpoint.status` of it before `session.create`. Never use a console or an
+   existing session you do not own. `me` shows your own address and the limits of your front end
    (`waits up to` under `Frontends`; `recv_wait_max_s` in MCP).
 7. **Start a session on another node with `control`.**
 

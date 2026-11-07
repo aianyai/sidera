@@ -192,6 +192,8 @@ type PeerNode struct {
 	Self      bool
 	Trust     string
 	Connected bool
+	// Profile is what the node says about itself; nil when the endpoint is told none.
+	Profile *adapterproto.PeerProfile
 }
 
 // DirectoryInput asks for a page of the directory. A zero Limit takes the default.
@@ -218,6 +220,9 @@ type DirectoryEndpoint struct {
 	Description string
 	// Accepts are the control signals and messages the endpoint's declaration accepts.
 	Accepts []string
+	// Adapter names the adapter that serves the endpoint; nil when none does or the
+	// node did not say.
+	Adapter *adapterproto.DirectoryAdapter
 }
 
 // ProbeInput names the front end whose tools are probed; it must be the one the

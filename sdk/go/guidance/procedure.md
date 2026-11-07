@@ -1,8 +1,8 @@
 ## Who you are and whom you can reach
 
 - `me` returns your own address, your declaration and the limits of your front end; `recv_wait_max_s` is the longest `recv` waits, and a longer `wait_s` is cut to it. In the shell it is the `waits up to` of your front end under `Frontends`.
-- `peers` lists the nodes you can see and whether a connection to each is up now.
-- `directory` with `node` lists the endpoints of a node: their `kind`, their `address` and what each `accepts`. A page may carry `next_cursor`; pass it as `cursor` for the next page.
+- `peers` lists the nodes you can see, with each node's name, host name and system when known; pick the node by them and address it by its node id. `connected` says whether a connection to each is up now.
+- `directory` with `node` lists the endpoints of a node: their `kind`, their `address` and what each `accepts`; an entry that an adapter serves has `adapter`, with its `id` and, for a runtime, the `runtime` name and version. A page may carry `next_cursor`; pass it as `cursor` for the next page.
 
 ## Sending and checking
 
@@ -21,7 +21,7 @@
 
 ## Starting a session on another node
 
-- Only an endpoint whose `kind` is `runtime` and whose `accepts` includes `session.create` starts a session. An endpoint of kind `direct` (a person's console) or `session` only takes messages. Take the address from `directory`.
+- Only an endpoint whose `kind` is `runtime` and whose `accepts` includes `session.create` starts a session. An endpoint of kind `direct` (a person's console) or `session` only takes messages. Take the address from `directory`: pick the runtime by `adapter.id` (the one whose `adapter.id` is `codex` when you want Codex), and check `endpoint.status` of it before `session.create` to see whether it can be used now.
 - Learn the presets of that node: `control` with `to` set to the runtime endpoint and `signal` set to `endpoint.status`, then `status` with the returned `message_id`. The control reply lists `presets`, each with a `name` and whether it is `available`.
 - Call `control` with `to` set to the runtime endpoint, `signal` set to `session.create`, one of those presets and a `body` that holds the whole task: the new session sees only that body, not your conversation. The body reaches the new session at once, so do not send it again.
 - `control` returns at once with a message id only. `status` with that id shows the control reply within seconds, and with it the endpoint of the new session; the session is on the node you sent `control` to, so its address is that node, `/`, and the endpoint. The answer to the task is a later message; wait for it as described under "Waiting for an answer".

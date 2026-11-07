@@ -353,7 +353,10 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantPeers := []fakeagent.PeerNode{{Node: a.id, Self: true, Trust: "self", Connected: true}, {Node: b.id, Trust: "direct", Connected: true}}
-	if !slices.Equal(peers.Nodes, wantPeers) {
+	if len(peers.Nodes) > 0 && peers.Nodes[0].Profile == nil {
+		t.Errorf("the node itself has no profile: %+v", peers.Nodes[0])
+	}
+	if !slices.Equal(withoutProfiles(peers.Nodes), wantPeers) {
 		t.Errorf("peers = %+v, want %+v", peers.Nodes, wantPeers)
 	}
 	directory, err := session.Directory(ctx, fakeagent.DirectoryInput{Node: b.id})
@@ -372,7 +375,7 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	a.cli(&removed, "trust", "remove", b.id, "--json")
 	lost := send(a, b, "hello again bob")
 	a.awaitUnreachableNotice(lost)
-	if peers, err := session.Peers(ctx); err != nil || !slices.Equal(peers.Nodes, wantPeers[:1]) {
+	if peers, err := session.Peers(ctx); err != nil || !slices.Equal(withoutProfiles(peers.Nodes), wantPeers[:1]) {
 		t.Errorf("peers after the removal = %+v, %v, want only the node itself", peers.Nodes, err)
 	}
 	var refused *fakeagent.Error
@@ -385,4 +388,15 @@ func TestTwoNodesOfOneMachineExchangeMessagesOverTheNetwork(t *testing.T) {
 	for _, n := range []*netNode{a, b} {
 		n.stop()
 	}
+}
+
+// withoutProfiles is the nodes with what they say about themselves left out: it is
+// a fact of the clock and of the machine a test runs on, and a node shows it only once
+// its profile has been fetched.
+func withoutProfiles(nodes []fakeagent.PeerNode) []fakeagent.PeerNode {
+	out := slices.Clone(nodes)
+	for i := range out {
+		out[i].Profile = nil
+	}
+	return out
 }

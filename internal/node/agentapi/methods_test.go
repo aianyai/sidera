@@ -343,6 +343,10 @@ func TestDirectoryReturnsLivePagesWithActionNames(t *testing.T) {
 				Address string   `json:"address"`
 				Kind    string   `json:"kind"`
 				Accepts []string `json:"accepts"`
+				Adapter *struct {
+					Instance string `json:"instance"`
+					ID       string `json:"id"`
+				} `json:"adapter"`
 			} `json:"endpoints"`
 			NextCursor string `json:"next_cursor"`
 		}
@@ -356,6 +360,9 @@ func TestDirectoryReturnsLivePagesWithActionNames(t *testing.T) {
 			found = true
 			if got.Endpoints[0].Kind != "session" || got.Endpoints[0].Accepts[0] != "message.send" {
 				t.Fatalf("session entry: %s", w.Body)
+			}
+			if a := got.Endpoints[0].Adapter; a == nil || a.Instance != harness.Instance {
+				t.Fatalf("session entry adapter: %s", w.Body)
 			}
 		}
 		cursor = got.NextCursor
@@ -373,9 +380,14 @@ func TestPeersIdentifiesThisNode(t *testing.T) {
 	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
 	s.EnableMethods()
 	w := request(s, token, "peers", `{}`)
-	want := `{"nodes":[{"node":"` + harness.NodeID().String() + `","self":true,"trust":"self","connected":true}]}` + "\n"
-	if w.Code != 200 || w.Body.String() != want {
-		t.Fatalf("HTTP %d, %s; want %s", w.Code, w.Body, want)
+	// This node always has a profile; the harness's machine tells nothing, so it holds the time alone.
+	var got agentapi.PeersResult
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || len(got.Nodes) != 1 || got.Nodes[0].Node != harness.NodeID().String() || !got.Nodes[0].Self ||
+		got.Nodes[0].Trust != "self" || !got.Nodes[0].Connected || got.Nodes[0].Profile == nil || got.Nodes[0].Profile.AsOf <= 0 {
+		t.Fatalf("HTTP %d, %s", w.Code, w.Body)
 	}
 }
 

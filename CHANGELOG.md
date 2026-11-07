@@ -10,6 +10,15 @@ protocol has a version of its own.
 
 ### Added
 
+- **`peers` shows what each node says about itself, and `directory` shows which adapter and runtime serve
+  each endpoint.** In the MCP tools, `sidera peers`, the local HTTP interface and the adapter protocol,
+  each node carries its name, host name, platform, system and Sidera version when known, so an agent
+  can pick a machine by what it is and not by its node id; `sidera peers` and `sidera-adapter-console peers`
+  print them as the `NAME`, `SYSTEM` and `SIDERA` columns. A node this one has not been connected to since
+  its daemon started has none yet. Each directory entry names the adapter instance, adapter and version
+  that serve it and, for a runtime or session endpoint, the runtime's name and version, so an agent can
+  pick `codex` or `claude` without parsing a display name; `directory` prints it as the `ADAPTER` column.
+  The agent guidance tells agents to pick the node and the runtime this way.
 - **`sidera node set name=<name>` names the node for the other nodes.** Without a name the node is
   called by its host name; `sidera node set name=` takes the name away again, and `sidera node show`
   says which of the two applies.

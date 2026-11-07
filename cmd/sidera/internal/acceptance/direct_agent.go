@@ -46,7 +46,7 @@ func (a *directAgent) Peers(ctx context.Context) (fakeagent.PeersResult, error) 
 	}
 	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, len(res.Nodes))}
 	for i, n := range res.Nodes {
-		out.Nodes[i] = fakeagent.PeerNode{Node: n.Node, Self: n.Self, Trust: string(n.Trust), Connected: n.Connected}
+		out.Nodes[i] = fakeagent.PeerNode{Node: n.Node, Self: n.Self, Trust: string(n.Trust), Connected: n.Connected, Profile: n.Profile}
 	}
 	return out, nil
 }
@@ -75,7 +75,7 @@ func (a *directAgent) Directory(ctx context.Context, in fakeagent.DirectoryInput
 		for j, act := range e.Accepts {
 			accepts[j] = string(act)
 		}
-		out.Endpoints[i] = fakeagent.DirectoryEndpoint{Address: string(e.Address), Kind: string(e.Kind), DisplayName: e.DisplayName, Description: e.Description, Accepts: accepts}
+		out.Endpoints[i] = fakeagent.DirectoryEndpoint{Address: string(e.Address), Kind: string(e.Kind), DisplayName: e.DisplayName, Description: e.Description, Accepts: accepts, Adapter: e.Adapter}
 	}
 	return out, nil
 }

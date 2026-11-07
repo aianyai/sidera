@@ -217,11 +217,68 @@ func TestEmptyResultsAreSentences(t *testing.T) {
 	for name, tc := range map[string]struct{ got, want string }{
 		"directory": {v.Directory(adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK}, ""), "No endpoints.\n"},
 		"peers": {v.Peers(adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{{Node: testNode, Self: true, Trust: adapterproto.PeerSelf, Connected: true}}}),
-			"TRUST  CONNECTION  NODE\nself   connected   " + testNode + "\n\nNo other node is trusted directly.\n"},
+			"TRUST  CONNECTION  NAME  SYSTEM  SIDERA  NODE\nself   connected   -     -       -       " + testNode + "\n\nNo other node is trusted directly.\n"},
 	} {
 		if tc.got != tc.want {
 			t.Errorf("%s: got %q, want %q", name, tc.got, tc.want)
 		}
+	}
+}
+
+// The node a person asks about is told apart by what it says about itself. The name is shown
+// with the host name when they differ, the system with the architecture of the platform, and a
+// node with no profile, or with a profile that leaves a member out, has dashes where the
+// member would be.
+func TestPeersShowWhatTheNodesSayAboutThemselves(t *testing.T) {
+	const testNodeC = "node1q7w3e9r5t1y7u3i9o5p1a7s3d9f5g1h7j3k9l5z1x7c3v9b5n1mgpd"
+	profile := func(p adapterproto.PeerProfile) *adapterproto.PeerProfile { p.AsOf = 1; return &p }
+	out := view(false, false).Peers(adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{
+		{Node: testNode, Self: true, Trust: adapterproto.PeerSelf, Connected: true, Profile: profile(adapterproto.PeerProfile{
+			Name: "imac", HostName: "imac-1", Platform: "darwin/arm64", System: "macOS 27.0.1", SystemBuild: "25A354", SideraVersion: "0.17.0"})},
+		{Node: testNodeB, Trust: adapterproto.PeerDirect, Connected: true, Profile: profile(adapterproto.PeerProfile{
+			Name: "build-box", HostName: "build-box", Platform: "linux/amd64", System: "Ubuntu 24.04.1 LTS", SideraVersion: "0.16.0"})},
+		{Node: testNodeC, Trust: adapterproto.PeerDirect},
+		{Node: testNodeC + "-2", Trust: adapterproto.PeerDirect, Profile: profile(adapterproto.PeerProfile{HostName: "vmwin11", Platform: "windows/arm64"})},
+		{Node: testNodeC + "-3", Trust: adapterproto.PeerDirect, Profile: profile(adapterproto.PeerProfile{Name: "lab", Platform: "plan9"})},
+	}})
+	want := "TRUST CONNECTION NAME SYSTEM SIDERA NODE\n" +
+		"self connected imac (imac-1) macOS 27.0.1 · arm64 0.17.0 " + testNode + "\n" +
+		"direct connected build-box Ubuntu 24.04.1 LTS · amd64 0.16.0 " + testNodeB + "\n" +
+		"direct not connected - - - " + testNodeC + "\n" +
+		"direct not connected vmwin11 arm64 - " + testNodeC + "-2\n" +
+		"direct not connected lab plan9 - " + testNodeC + "-3\n"
+	if squash(out) != squash(want) {
+		t.Errorf("peers:\n%s\nwant, up to the spacing:\n%s", out, want)
+	}
+	if !strings.Contains(out, "NAME") || strings.HasSuffix(strings.Split(out, "\n")[0], " ") {
+		t.Errorf("header: %q", strings.Split(out, "\n")[0])
+	}
+}
+
+// The adapter column says which adapter serves an entry, and the runtime behind it when the
+// node knows it; an entry no adapter serves has a dash.
+func TestDirectoryShowsTheAdapterOfAnEntry(t *testing.T) {
+	out := view(false, false).Directory(adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: []adapterproto.DirectoryEntry{
+		{Address: adapterproto.Address(testRuntime), Kind: adapterproto.EndpointRuntime, DisplayName: "work (codex)",
+			Accepts: []adapterproto.EndpointAction{adapterproto.ActionSessionCreate},
+			Adapter: &adapterproto.DirectoryAdapter{Instance: "work", ID: "codex", Version: "0.17.0",
+				Runtime: &adapterproto.RuntimeInfo{Name: "Codex CLI", Version: "0.163.0"}}},
+		{Address: adapterproto.Address(testAddress), Kind: adapterproto.EndpointDirect, DisplayName: "Owner console",
+			Accepts: []adapterproto.EndpointAction{adapterproto.ActionMessageSend},
+			Adapter: &adapterproto.DirectoryAdapter{Instance: "console", ID: "console", Version: "0.17.0"}},
+		{Address: adapterproto.Address(testAddress + "-2"), Kind: adapterproto.EndpointDirect, DisplayName: "Fresh",
+			Accepts: []adapterproto.EndpointAction{adapterproto.ActionMessageSend},
+			Adapter: &adapterproto.DirectoryAdapter{Instance: "fresh", ID: "claude"}},
+		{Address: adapterproto.Address(testAddress + "-3"), Kind: adapterproto.EndpointSession,
+			Accepts: []adapterproto.EndpointAction{adapterproto.ActionMessageSend}},
+	}}, "")
+	want := "KIND NAME ACCEPTS ADAPTER ADDRESS\n" +
+		"runtime work (codex) session.create codex 0.17.0 · Codex CLI 0.163.0 " + testRuntime + "\n" +
+		"direct Owner console message.send console 0.17.0 " + testAddress + "\n" +
+		"direct Fresh message.send claude " + testAddress + "-2\n" +
+		"session - message.send - " + testAddress + "-3\n"
+	if squash(out) != squash(want) {
+		t.Errorf("directory:\n%s\nwant, up to the spacing:\n%s", out, want)
 	}
 }
 
@@ -230,7 +287,7 @@ func TestEmptyCellsAreDashes(t *testing.T) {
 	out := view(false, false).Directory(adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: []adapterproto.DirectoryEntry{
 		{Address: adapterproto.Address(testAddress), Kind: adapterproto.EndpointDirect},
 	}}, "")
-	if !strings.Contains(squash(out), "direct - - "+testAddress) {
+	if !strings.Contains(squash(out), "direct - - - "+testAddress) {
 		t.Errorf("directory:\n%s", out)
 	}
 }

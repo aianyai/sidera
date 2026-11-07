@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/agentapi"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
@@ -134,7 +135,7 @@ func renderAck(s *termout.Stream, r agentapi.AckResult) string {
 func peersOf(r agentapi.PeersResult) adapterproto.PeersResult {
 	nodes := make([]adapterproto.PeerNode, len(r.Nodes))
 	for i, n := range r.Nodes {
-		nodes[i] = adapterproto.PeerNode{Node: n.Node, Self: n.Self, Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected}
+		nodes[i] = adapterproto.PeerNode{Node: n.Node, Self: n.Self, Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected, Profile: apiwire.PeerProfileOf(n.Profile)}
 	}
 	return adapterproto.PeersResult{Nodes: nodes}
 }
@@ -150,7 +151,7 @@ func directoryPageOf(r agentapi.DirectoryResult) adapterproto.DirectoryResult {
 		}
 		endpoints[i] = adapterproto.DirectoryEntry{
 			Address: adapterproto.Address(ep.Address), Kind: adapterproto.EndpointKind(ep.Kind),
-			DisplayName: ep.DisplayName, Description: ep.Description, Accepts: accepts,
+			DisplayName: ep.DisplayName, Description: ep.Description, Accepts: accepts, Adapter: ep.Adapter,
 		}
 	}
 	return adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: endpoints, NextCursor: r.NextCursor}

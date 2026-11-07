@@ -42,7 +42,9 @@ type View struct {
 }
 
 // Peers is the list of nodes the endpoint can address. The self flag is left out: the node
-// itself is the row whose trust is "self".
+// itself is the row whose trust is "self". What a node says about itself is in the columns
+// between the connection and the node identifier; a node with no profile, or whose profile
+// leaves a member out, has a dash there.
 func (v View) Peers(r adapterproto.PeersResult) string {
 	rows := make([][]string, len(r.Nodes))
 	for i, node := range r.Nodes {
@@ -50,13 +52,65 @@ func (v View) Peers(r adapterproto.PeersResult) string {
 		if node.Connected {
 			connection = "connected"
 		}
-		rows[i] = []string{string(node.Trust), connection, node.Node}
+		var name, system, version string
+		if p := node.Profile; p != nil {
+			name, system, version = nameCell(*p), systemCell(*p), p.SideraVersion
+		}
+		rows[i] = []string{string(node.Trust), connection, name, system, version, node.Node}
 	}
-	text := v.Out.Table([]string{"Trust", "Connection", "Node"}, rows)
+	text := v.Out.Table([]string{"Trust", "Connection", "Name", "System", "Sidera", "Node"}, rows)
 	if len(r.Nodes) == 1 && r.Nodes[0].Self {
 		text += "\nNo other node is trusted directly.\n"
 	}
 	return text
+}
+
+// nameCell is the name of a node, with its host name after it when they differ; the host
+// name alone when the node has no other name.
+func nameCell(p adapterproto.PeerProfile) string {
+	switch {
+	case p.Name == "":
+		return p.HostName
+	case p.HostName == "" || p.HostName == p.Name:
+		return p.Name
+	}
+	return p.Name + " (" + p.HostName + ")"
+}
+
+// systemCell is the operating system of a node followed by the architecture of its platform,
+// the part of "<goos>/<goarch>" after the slash. The operating system is in the system
+// already, so the first part of the platform is not repeated; a platform with no slash is
+// shown whole.
+func systemCell(p adapterproto.PeerProfile) string {
+	_, arch, ok := strings.Cut(p.Platform, "/")
+	if !ok {
+		arch = p.Platform
+	}
+	return joinPresent(" · ", p.System, arch)
+}
+
+// joinPresent joins the parts that are not empty.
+func joinPresent(sep string, parts ...string) string {
+	var kept []string
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, sep)
+}
+
+// adapterCell is the adapter that serves an entry, `<id> <version>`, followed by the runtime
+// it drives when the node knows it; nothing for an entry no adapter serves.
+func adapterCell(a *adapterproto.DirectoryAdapter) string {
+	if a == nil {
+		return ""
+	}
+	cell := joinPresent(" ", a.ID, a.Version)
+	if a.Runtime != nil {
+		cell = joinPresent(" · ", cell, a.Runtime.Name+" "+a.Runtime.Version)
+	}
+	return cell
 }
 
 // Directory is one page of a directory. node is the node that was asked ("" for this one):
@@ -74,9 +128,9 @@ func (v View) Directory(r adapterproto.DirectoryResult, node string) string {
 			for j, a := range ep.Accepts {
 				accepts[j] = string(a)
 			}
-			rows[i] = []string{string(ep.Kind), ep.DisplayName, strings.Join(accepts, ", "), string(ep.Address)}
+			rows[i] = []string{string(ep.Kind), ep.DisplayName, strings.Join(accepts, ", "), adapterCell(ep.Adapter), string(ep.Address)}
 		}
-		text = v.Out.Table([]string{"Kind", "Name", "Accepts", "Address"}, rows)
+		text = v.Out.Table([]string{"Kind", "Name", "Accepts", "Adapter", "Address"}, rows)
 	}
 	if r.NextCursor != "" {
 		args := []string{"directory"}

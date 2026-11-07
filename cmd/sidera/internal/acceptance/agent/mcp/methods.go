@@ -118,18 +118,19 @@ func (c *Client) Directory(ctx context.Context, in fakeagent.DirectoryInput) (fa
 	optional(args, "limit", in.Limit, in.Limit != 0)
 	var wire struct {
 		Endpoints []struct {
-			Address     string   `json:"address"`
-			Kind        string   `json:"kind"`
-			DisplayName string   `json:"display_name"`
-			Description string   `json:"description"`
-			Accepts     []string `json:"accepts"`
+			Address     string                         `json:"address"`
+			Kind        string                         `json:"kind"`
+			DisplayName string                         `json:"display_name"`
+			Description string                         `json:"description"`
+			Accepts     []string                       `json:"accepts"`
+			Adapter     *adapterproto.DirectoryAdapter `json:"adapter"`
 		} `json:"endpoints"`
 		NextCursor string `json:"next_cursor"`
 	}
 	_, err := c.call(ctx, "directory", args, &wire)
 	out := fakeagent.DirectoryResult{NextCursor: wire.NextCursor}
 	for _, ep := range wire.Endpoints {
-		out.Endpoints = append(out.Endpoints, fakeagent.DirectoryEndpoint{Address: ep.Address, Kind: ep.Kind, DisplayName: ep.DisplayName, Description: ep.Description, Accepts: ep.Accepts})
+		out.Endpoints = append(out.Endpoints, fakeagent.DirectoryEndpoint{Address: ep.Address, Kind: ep.Kind, DisplayName: ep.DisplayName, Description: ep.Description, Accepts: ep.Accepts, Adapter: ep.Adapter})
 	}
 	return out, err
 }

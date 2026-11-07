@@ -191,7 +191,7 @@ func (a *agent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
 	}
 	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, 0, len(nodes))}
 	for _, node := range nodes {
-		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected})
+		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected, Profile: apiwire.PeerProfileOf(apiwire.NodeProfileOf(node.Profile))})
 	}
 	return out, nil
 }
@@ -212,7 +212,7 @@ func (a *agent) Directory(ctx context.Context, in fakeagent.DirectoryInput) (fak
 	for _, ep := range page.Endpoints {
 		entry := fakeagent.DirectoryEndpoint{
 			Address: ep.Address.String(), Kind: ep.Kind.String(), DisplayName: ep.DisplayName,
-			Description: ep.Description, Accepts: make([]string, 0, len(ep.Accepts)),
+			Description: ep.Description, Accepts: make([]string, 0, len(ep.Accepts)), Adapter: apiwire.DirectoryAdapter(ep.Adapter),
 		}
 		for _, action := range ep.Accepts {
 			entry.Accepts = append(entry.Accepts, action.String())

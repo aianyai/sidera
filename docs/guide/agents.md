@@ -22,7 +22,7 @@ An agent uses Sidera in one of three ways:
   `peers`; see
   [Getting started](getting-started.md#7-start-the-first-cross-machine-session-a).
   It has no `control`: that needs a session. To find a node's runtime endpoint, run
-  `sidera-adapter-console peers` for the node ids, then
+  `sidera-adapter-console peers` for the node ids and names, then
   `sidera-adapter-console directory --node <node-id>` for its endpoints. This needs a
   daemon new enough to offer it to the console; on an older one both commands say so, and
   `sidera endpoint list --instance <runtime>` on that machine gives the address.

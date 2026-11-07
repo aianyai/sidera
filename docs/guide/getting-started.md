@@ -405,9 +405,10 @@ sidera-adapter-console peers
 sidera-adapter-console directory --node <node-id-b>
 ```
 
-`peers` lists the nodes A can address, A first (its trust is `self`), each with the id to
+`peers` lists the nodes A can address, A first (its trust is `self`), each with its name, system and Sidera version when known (a node A has not been connected to since its daemon started shows `-`) and the id to
 give to `--node`. `directory` prints a table with a row for each endpoint B shows to you:
-its kind, its display name, the actions it accepts and its address, last. Take the address
+its kind, its display name, the actions it accepts, the adapter and runtime that serve it
+(`codex 0.17.0 · Codex CLI 0.163.0`) and its address, last. Take the address
 of the `runtime` row for the agent you want. An address is `<node-id>/<endpoint-id>`. A
 long list is paged: it ends with a line that gives the command for the next page, which names
 the same data directory (and, for the console, the same instance) and the cursor; `--limit <n>`

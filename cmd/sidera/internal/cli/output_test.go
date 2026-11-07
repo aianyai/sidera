@@ -11,6 +11,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/update"
 	"github.com/aianyai/sidera/internal/node/agentapi"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/termout"
@@ -431,16 +432,19 @@ func TestSharedLayoutsAreCalledWithSideraCommands(t *testing.T) {
 	}{
 		{"peers", func(c *command) error {
 			return c.result(agentapi.PeersResult{Nodes: []agentapi.Peer{
-				{Node: testNode, Self: true, Trust: "self", Connected: true},
+				{Node: testNode, Self: true, Trust: "self", Connected: true, Profile: &apiwire.NodeProfile{
+					Name: "imac", HostName: "imac-1", Platform: "darwin/arm64", System: "macOS 27.0.1", SideraVersion: "0.17.0", AsOf: 1}},
 				{Node: testNodeB, Trust: "direct"},
 			}})
-		}, []string{"self connected " + testNode, "direct not connected " + testNodeB}},
+		}, []string{"self connected imac (imac-1) macOS 27.0.1 · arm64 0.17.0 " + testNode, "direct not connected - - - " + testNodeB}},
 		{"directory", func(c *command) error {
 			return c.showDirectory(agentapi.DirectoryResult{Endpoints: []agentapi.DirectoryEntry{
 				{Address: testAddress, Kind: "session", Accepts: []string{"message.send", "session.close"}},
-				{Address: testRuntime, Kind: "runtime", DisplayName: "work (codex)", Accepts: []string{"session.create", "endpoint.status"}},
+				{Address: testRuntime, Kind: "runtime", DisplayName: "work (codex)", Accepts: []string{"session.create", "endpoint.status"},
+					Adapter: &adapterproto.DirectoryAdapter{Instance: "work", ID: "codex", Version: "0.17.0",
+						Runtime: &adapterproto.RuntimeInfo{Name: "Codex CLI", Version: "0.163.0"}}},
 			}, NextCursor: "Zm9v"}, testNodeB)
-		}, []string{"session - message.send, session.close " + testAddress, "runtime work (codex) session.create, endpoint.status " + testNodeB + "/" + runtimeEndpoint,
+		}, []string{"session - message.send, session.close - " + testAddress, "runtime work (codex) session.create, endpoint.status codex 0.17.0 · Codex CLI 0.163.0 " + testNodeB + "/" + runtimeEndpoint,
 			"Run `sidera directory --node " + testNodeB + " --cursor Zm9v` for the next page."}},
 		{"send", func(c *command) error {
 			return c.showSent("send")(agentapi.SendResult{MessageID: testMessage, To: []string{testAddress}, Replayed: true})

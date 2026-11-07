@@ -486,7 +486,8 @@ func TestDirectoryPrintsATableAndTheCommandForTheNextPage(t *testing.T) {
 		Outcome: adapterproto.DirectoryOK,
 		Endpoints: []adapterproto.DirectoryEntry{
 			{Address: "node-2/rt", Kind: adapterproto.EndpointRuntime, DisplayName: "Dev runtime",
-				Accepts: []adapterproto.EndpointAction{adapterproto.ActionSessionCreate, adapterproto.ActionEndpointStatus}},
+				Accepts: []adapterproto.EndpointAction{adapterproto.ActionSessionCreate, adapterproto.ActionEndpointStatus},
+				Adapter: &adapterproto.DirectoryAdapter{Instance: "dev", ID: "codex", Version: "0.17.0", Runtime: &adapterproto.RuntimeInfo{Name: "Codex CLI", Version: "0.163.0"}}},
 			{Address: "node-2/ep-x", Kind: adapterproto.EndpointDirect, Accepts: []adapterproto.EndpointAction{}},
 		},
 		NextCursor: "c-2",
@@ -496,9 +497,9 @@ func TestDirectoryPrintsATableAndTheCommandForTheNextPage(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("directory: exit %d, stderr %q", code, h.errOut.String())
 	}
-	want := "KIND     NAME         ACCEPTS                          ADDRESS\n" +
-		"runtime  Dev runtime  session.create, endpoint.status  node-2/rt\n" +
-		"direct   -            -                                node-2/ep-x\n" +
+	want := "KIND     NAME         ACCEPTS                          ADAPTER                           ADDRESS\n" +
+		"runtime  Dev runtime  session.create, endpoint.status  codex 0.17.0 · Codex CLI 0.163.0  node-2/rt\n" +
+		"direct   -            -                                -                                 node-2/ep-x\n" +
 		"\nMore endpoints follow. Run `sidera-adapter-console directory --node node-2 --cursor c-2` for the next page.\n"
 	if got := h.out.String(); got != want {
 		t.Errorf("output %q, want %q", got, want)
@@ -520,14 +521,15 @@ func TestDirectoryThatGaveNoPageFailsWithItsReason(t *testing.T) {
 
 func TestPeersPrintsATableWithoutTheSelfFlag(t *testing.T) {
 	d := &daemon{directAccess: true, peersAnswer: adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{
-		{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true},
+		{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true,
+			Profile: &adapterproto.PeerProfile{Name: "imac", HostName: "imac-1", Platform: "darwin/arm64", System: "macOS 27.0.1", SideraVersion: "0.17.0", AsOf: 1}},
 		{Node: "node-2", Trust: adapterproto.PeerDirect},
 	}}}
 	h := newHarness(t, d)
 	if code := h.run("peers"); code != exitOK {
 		t.Fatalf("peers: exit %d, stderr %q", code, h.errOut.String())
 	}
-	if got, want := h.out.String(), "TRUST   CONNECTION     NODE\nself    connected      node-1\ndirect  not connected  node-2\n"; got != want {
+	if got, want := h.out.String(), "TRUST   CONNECTION     NAME           SYSTEM                SIDERA  NODE\nself    connected      imac (imac-1)  macOS 27.0.1 · arm64  0.17.0  node-1\ndirect  not connected  -              -                     -       node-2\n"; got != want {
 		t.Errorf("output %q, want %q", got, want)
 	}
 	if len(d.peers) != 1 || d.peers[0].Endpoint != ownerEndpoint {
@@ -604,7 +606,7 @@ func TestResultsGoThroughTheSharedLayout(t *testing.T) {
 		{"empty directory", &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: []adapterproto.DirectoryEntry{}}},
 			[]string{"directory"}, []string{"No endpoints.\n"}},
 		{"this node alone", &daemon{directAccess: true, peersAnswer: adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true}}}},
-			[]string{"peers"}, []string{"TRUST  CONNECTION  NODE\n", "\nNo other node is trusted directly.\n"}},
+			[]string{"peers"}, []string{"TRUST  CONNECTION  NAME  SYSTEM  SIDERA  NODE\n", "\nNo other node is trusted directly.\n"}},
 		{"reply", &daemon{pages: []adapterproto.RecvPage{{Lease: lease, Messages: []adapterproto.PageMessage{{ID: "m-1", From: "node-3/agent", Body: "q"}}}}},
 			[]string{"reply", "m-1", "--to", "node-3/agent", "--body", "a"},
 			[]string{"Reply accepted for delivery.\n", "  To       node-3/agent\n", "Run `sidera-adapter-console status msg-out-1` to see whether it was delivered.\n"}},

@@ -113,7 +113,7 @@ func (a *Agent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
 	_, err := a.call(ctx, []string{"peers"}, nil, &r)
 	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, len(r.Nodes))}
 	for i, n := range r.Nodes {
-		out.Nodes[i] = fakeagent.PeerNode{Node: n.Node, Self: n.Self, Trust: n.Trust, Connected: n.Connected}
+		out.Nodes[i] = fakeagent.PeerNode{Node: n.Node, Self: n.Self, Trust: n.Trust, Connected: n.Connected, Profile: apiwire.PeerProfileOf(n.Profile)}
 	}
 	return out, err
 }
@@ -129,7 +129,7 @@ func (a *Agent) Directory(ctx context.Context, in fakeagent.DirectoryInput) (fak
 	_, err := a.call(ctx, args, nil, &r)
 	out := fakeagent.DirectoryResult{NextCursor: r.NextCursor, Endpoints: make([]fakeagent.DirectoryEndpoint, len(r.Endpoints))}
 	for i, e := range r.Endpoints {
-		out.Endpoints[i] = fakeagent.DirectoryEndpoint{Address: e.Address, Kind: e.Kind, DisplayName: e.DisplayName, Description: e.Description, Accepts: e.Accepts}
+		out.Endpoints[i] = fakeagent.DirectoryEndpoint{Address: e.Address, Kind: e.Kind, DisplayName: e.DisplayName, Description: e.Description, Accepts: e.Accepts, Adapter: e.Adapter}
 	}
 	return out, err
 }

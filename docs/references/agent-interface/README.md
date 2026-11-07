@@ -65,8 +65,8 @@ request durations are integer seconds.
 | --- | --- | --- |
 | `me` | `{}` | The endpoint's `address`, `node`, `kind`, `display_name`, `declaration` and `frontends` |
 | `declare` | A declaration patch | `{"declaration":{...}}` after applying the patch |
-| `peers` | `{}` | `{"nodes":[{"node":"...","self":true,"trust":"self","connected":true}]}` |
-| `directory` | Optional `node`, `cursor`, `limit` | `{"endpoints":[...],"next_cursor":"..."}` |
+| `peers` | `{}` | `{"nodes":[{"node":"...","self":true,"trust":"self","connected":true,"profile":{...}}]}` |
+| `directory` | Optional `node`, `cursor`, `limit` | `{"endpoints":[...],"next_cursor":"..."}`, each endpoint with an optional `adapter` |
 | `send` | Required `to` array and `body`; optional message fields below | `{"message_id":"...","to":["..."],"replayed":false}` |
 | `reply` | Required `message_id`, `body`; optional message fields below | The same shape as `send` |
 | `recv` | Required `frontend`; optional receive fields below | The page bytes, including their newline |
@@ -99,14 +99,34 @@ then every node this node trusts directly, in the order of their identifiers
 allows it through a credential this node holds with it, so a revoked or expired
 credential and a node removed from trust drop out. `connected` is whether a
 connection to the node is up now; it is read without waiting and says nothing about
-whether a send would succeed.
+whether a send would succeed. A node has an optional `profile`, what it says about itself:
+`name`, `host_name`, `platform` (`<goos>/<goarch>`, such as `darwin/arm64`), `system`
+(such as `macOS 27.0.1`), `system_build` and `sidera_version`, each left out when the node
+does not say it, and `as_of`, in Unix seconds, when this node issued its own profile or
+fetched the one of a peer. An agent picks a node by `name`, `host_name` and `system`
+and addresses it by `node`. The profile of a peer is held in memory only and fetched
+when a connection to it comes up, so `profile` is absent for a node this node has not been
+connected to since the daemon started, and always present for the node itself. The shape is
+`apiwire.NodeProfile`, made from the engine's view by `apiwire.NodeProfileOf`; the management
+reads of the trust list and the network have the same object, and the adapter protocol's
+`endpoint.peers` the same members as `adapterproto.PeerProfile`, which the SDK defines
+because it cannot import `apiwire`.
 
 **Directory.** `limit` is 1 through 256, default 100. Entries contain `address`,
 `kind`, `display_name`, `description` and `accepts` (action names such as
 `message.send` and `session.create`). A runtime endpoint's `display_name` is its
 instance and adapter, `work (codex)`, or the one word when they are the same, so an
 agent can tell the runtimes of a node apart; a direct endpoint's is what its adapter
-registered. Only visible open endpoints appear, in
+registered. An entry that an adapter serves also has `adapter`, which says which
+(`adapterproto.DirectoryAdapter`, shared with the adapter protocol and made by
+`apiwire.DirectoryAdapter`): `instance` and `id` (the adapter's identifier, such as `codex`,
+which is how an agent picks a runtime without parsing `display_name`), `version` (the adapter's
+version from its last handshake; left out while it has not connected since that node started)
+and, for a runtime endpoint and the session endpoints under it, `runtime` with `name` and
+`version`, from the adapter's last passing probe (left out before one has passed). A node
+that predates the member never sends `adapter`, and an entry no adapter serves has none. The
+directory says what an endpoint is, never whether it works now: `control` with
+`endpoint.status` answers that. Only visible open endpoints appear, in
 endpoint ID order. Creating, closed and system endpoints do not appear. An open
 endpoint whose adapter has not been admitted still appears; only signals known
 for its kind are advertised, and interrupt requires a confirming admission.

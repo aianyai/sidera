@@ -41,6 +41,14 @@ own interface has other types, as the Agent interface of `sidera` has, maps them
   because a cursor belongs to it.
 - **Peers carry no `Self` column.** The node itself is the row whose trust is `self`; when it
   is the only row, a sentence says that no other node is trusted directly.
+- **A node is told apart by what it says about itself.** `Peers` has the columns `Trust`,
+  `Connection`, `Name`, `System`, `Sidera` and `Node`. `Name` is the node's name, followed by
+  `(host name)` when the host name differs; `System` is the system followed by ` · ` and the
+  architecture, the part of the platform after the slash; `Sidera` is the version. A node with no
+  profile, or a profile without a member, has `-` in its place. `Directory` has an `Adapter`
+  column before the address: `<id> <version>`, followed by ` · <runtime name> <runtime version>`
+  when the entry has a runtime, and `-` for an entry no adapter serves. The text of both comes
+  from the node that issued it and is checked where it enters the node, like every name here.
 - **The session endpoint is printed as the reply carries it.** A `session.create` reply names the
   endpoint without its node, which is the node of the runtime the signal went to; the field is
   labelled `Session endpoint` and is not completed here, since the node that sent the signal

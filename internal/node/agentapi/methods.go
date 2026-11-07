@@ -155,6 +155,11 @@ type DirectoryEntry struct {
 	DisplayName string   `json:"display_name"`
 	Description string   `json:"description"`
 	Accepts     []string `json:"accepts"`
+	// Adapter names the adapter instance that serves the endpoint and the runtime it
+	// drives; absent for an endpoint no adapter serves and when the node that showed
+	// the entry did not say. It is the adapter protocol's shape, which the Agent
+	// interface and the adapters share.
+	Adapter *adapterproto.DirectoryAdapter `json:"adapter,omitempty"`
 }
 
 // DirectoryResult is a live page. An empty NextCursor ends the listing.
@@ -165,12 +170,16 @@ type DirectoryResult struct {
 
 // Peer names a visible node. Self identifies the node serving this interface,
 // Trust is "self" for it and "direct" for a node it trusts through a credential,
-// and Connected says whether a connection to the node is up now.
+// and Connected says whether a connection to the node is up now. Profile is what
+// the node says about itself, in the shape the management interface has for the same
+// facts; it is absent for a node the daemon has not
+// been connected to since it started.
 type Peer struct {
-	Node      string `json:"node"`
-	Self      bool   `json:"self"`
-	Trust     string `json:"trust"`
-	Connected bool   `json:"connected"`
+	Node      string               `json:"node"`
+	Self      bool                 `json:"self"`
+	Trust     string               `json:"trust"`
+	Connected bool                 `json:"connected"`
+	Profile   *apiwire.NodeProfile `json:"profile,omitempty"`
 }
 
 // PeersResult lists the nodes visible to the authenticated endpoint.
@@ -262,7 +271,7 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 		}
 		out := PeersResult{Nodes: make([]Peer, len(nodes))}
 		for i, node := range nodes {
-			out.Nodes[i] = Peer{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected}
+			out.Nodes[i] = Peer{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected, Profile: apiwire.NodeProfileOf(node.Profile)}
 		}
 		return out, nil
 	case "me":
@@ -310,7 +319,7 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 			for j, a := range ep.Accepts {
 				actions[j] = a.String()
 			}
-			out.Endpoints[i] = DirectoryEntry{Address: ep.Address.String(), Kind: ep.Kind.String(), DisplayName: ep.DisplayName, Description: ep.Description, Accepts: actions}
+			out.Endpoints[i] = DirectoryEntry{Address: ep.Address.String(), Kind: ep.Kind.String(), DisplayName: ep.DisplayName, Description: ep.Description, Accepts: actions, Adapter: apiwire.DirectoryAdapter(ep.Adapter)}
 		}
 		return out, nil
 	case "ack":

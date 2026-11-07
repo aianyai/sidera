@@ -185,7 +185,11 @@ one.
 modern result adds `resultType`, cache hints and server metadata as discovery
 does. Read-only hints identify identity and directory queries and status; `probe`
 is explicitly mutable. `declare` and `ack` carry idempotent hints. Hints convey
-no authorization and never replace the Agent interface's checks.
+no authorization and never replace the Agent interface's checks. The descriptions of `peers`
+and `directory` say what the results add to the node and the endpoint (the node's name, host
+name, platform, system and Sidera version when known; the adapter and runtime that serve an
+entry), because the model reads them to choose a node and a runtime; the result shapes are
+those of the [Agent interface](../agent-interface/README.md).
 
 The catalogue's JSON schemas use common object, array, scalar, required, enum and
 numeric-bound keywords without `$ref` or `$schema`. They are both the advertised
