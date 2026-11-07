@@ -8,6 +8,18 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **Go SDK: `termout`, the terminal output of a program that prints for people.** A new package for
+  adapter programs that want their output to look and behave like Sidera's. A `Stream` knows whether
+  its output is decorated (markers) and colored, from the output being a terminal and from a color
+  mode, `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; the package
+  gives styles and marker lines, key/value blocks, tables and two-column lists that line up by the
+  columns text takes on a terminal, wrapping, `SanitizeLine` and `SanitizeText` for text that came from
+  outside, the written form of times, sizes and durations, and `IsTerminal`. It is built for macOS,
+  Linux and Windows, and gives plain output elsewhere. The SDK module now requires
+  `golang.org/x/text`.
+
 ### Changed
 
 - **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a display
