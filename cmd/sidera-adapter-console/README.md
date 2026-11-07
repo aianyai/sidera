@@ -33,6 +33,12 @@ for `sidera adapter install` (see the reference for the three commands).
   because the kit declares the direct capability `feedback`. The body is the one field it
   prints that a peer writes freely, so `printMessage` prints it through `termout.SanitizeText` and indents every line of it, so
   that a body shaped like a header cannot pass for the start of another message.
+- `send`, `reply`, `status`, `directory` and `peers` are laid out by `agentview` (`client.view`), the
+  SDK package `sidera` uses for the same results; the console passes `invocation.command`, which
+  spells the commands the hints name for the node and instance the command acted on (`--home` when
+  it was given, `--instance` when it is not `console`, both after the command name), and keeps in `sessionAddress` the completion of a session endpoint that
+  only `new` needs. `quote` stays for the timeout hint of `new`: it always uses single quotes, even for a plain
+  word and on Windows, where `agentview.ShellWord` leaves a plain word bare and uses double quotes.
 - The client's output goes through one `termout` stream built from `Env` when the client is made
   (`newClient`); the adapter programs have no `--color` flag, so the environment variables alone decide
   the decoration. Error lines (`sidera-adapter-console: <message>`) are written as they are.

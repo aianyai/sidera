@@ -37,11 +37,11 @@ apply to what arrives.
 | `whoami` | Prints the address of the owner endpoint, `<node>/<endpoint>`, as the block `Address  <address>`. |
 | `new <runtime-address> --preset <name> [--body <text> \| --body-file <file>] [--timeout <s>, default 120]` | Sends `endpoint.send` with the `session.create` control signal to the runtime endpoint; the body is the initial message. Prints `Session request accepted for delivery.` with the `Message` id and the `To` address at once, so that a long wait shows that something was sent, then asks `endpoint.message_status` once a second until the control reply is there and prints `Session created.` with the `Session` address, the address of the session on the node of the runtime (`Session created, but not confirmed ready.` and exit 10 for an unconfirmed one). |
 | `recv [--wait <s>]` | Calls `endpoint.recv` (`wait_s` 0 to 30), prints every message, then `endpoint.ack` for what it printed. Follows a message cut into parts to its last part and takes the rest of the queue. A message is a header block (`From`, `Message`, and when they apply `Part` as `1 of 2`, `Notice` and `Repeat`) and its body, every line of it indented by two columns. With nothing waiting it prints `No messages waiting.` on standard output. |
-| `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. |
-| `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. |
-| `directory [--node <id>] [--limit <n>] [--cursor <c>]` | Calls `endpoint.directory`: one page of the endpoints a node shows to the owner endpoint, this node without `--node`. One line per entry, `<address>  <kind>  <display name>  <accepted actions>`, with `-` for an absent name or an empty list, then `next cursor: <c>` when more follow, to give back with `--cursor` (and the same `--node`). `--limit` is 1 to 100. An outcome other than `ok` is printed with its reason and exits 1. |
-| `peers` | Calls `endpoint.peers`: one line per node the owner endpoint can address, this node first, `<node>  [this node  ]trust <trust>  connected\|not connected`. The node text is what `directory --node` takes. |
-| `status <message-id>` | `endpoint.message_status`: the delivery state of each recipient and the control reply. |
+| `reply <message-id> [--to <address>] (--body \| --body-file)` | `endpoint.send` with `reply_to`, addressed to the sender of that message. Prints `Reply accepted for delivery.` with the `Message` id and, when `--to` was given, the `To` address, and the command that shows whether it was delivered (``Run `sidera-adapter-console status <message-id>` to see whether it was delivered.``). |
+| `send --to <address>[,<address>...] (--body \| --body-file)` | `endpoint.send` of a plain message. Prints `Message accepted for delivery.` (which is not that it was delivered) with the `Message` id, the `To` addresses and the same `status` hint. |
+| `directory [--node <id>] [--limit <n>] [--cursor <c>]` | Calls `endpoint.directory`: one page of the endpoints a node shows to the owner endpoint, this node without `--node`. A table of `KIND`, `NAME`, `ACCEPTS` (the action names, comma and space between them) and the whole `ADDRESS` last, with `-` for an absent name or an empty list; `No endpoints.` on standard output when the page is empty (it was a line on standard error); when more follow, a sentence with the command for the next page, ``Run `sidera-adapter-console directory [--node <id>] --cursor <c>` for the next page.`` `--limit` is 1 to 100. An outcome other than `ok` is printed with its reason and exits 1. |
+| `peers` | Calls `endpoint.peers`: a table of the nodes the owner endpoint can address, this node first: `TRUST` (`self` or `direct`), `CONNECTION` (`connected` or `not connected`) and the `NODE`, whole, last; the node text is what `directory --node` takes. When this node is the only row, `No other node is trusted directly.` follows. |
+| `status <message-id>` | `endpoint.message_status`: a table of `STATE` (a rejection adds its reason in brackets) and `TO` for each recipient, then under `Control reply: <signal>` the reply as fields (`Outcome`, `Session endpoint`, `Reason`; for `endpoint.status` the `Activity`, `Queued messages`, `Conditions`, `As of` and `Presets`). `Session endpoint` is the endpoint as the reply carries it, without its node; `new` prints the full address. |
 | `package` | Writes an adapter package (below). |
 | `version [--json]` | Prints the version of the release this program belongs to (`internal/release`), the commit and the Go version; with `--json`, the object `sidera version --json` writes. |
 
@@ -51,6 +51,13 @@ directory: the flag, then `SIDERA_HOME`, then `~/.sidera` or on Windows
 refuses the former Windows default when it is the only one there) and
 `--instance` (default `console`, the name `adapter enable console` gives). Flags may
 come before or after the positional argument.
+
+A command that the output tells the reader to run (the `status` command after a send, the
+command for the next page of `directory`, the `status` command after a timeout of `new`) goes to
+the node and instance of the command that printed it: the hint spells `--home <directory>` after
+the command name when the command was given `--home` (a directory from `SIDERA_HOME` is in the
+environment of the next command too), and `--instance <name>` when the instance is not
+`console`. The values are quoted for the shell of the platform.
 
 `directory` and `peers` need the daemon to have declared the capability
 `direct_endpoint_access` in `initialize` (see [adapter-protocol](../adapter-protocol/README.md)).
@@ -70,8 +77,14 @@ standard output decided when the client starts. The adapter programs have no `--
 flag, so `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb` and whether the
 stream is a terminal decide; a pipe gets the same words and layout without markers and colors.
 Error lines (`sidera-adapter-console: <message>`) and their exit codes are written as they are.
-An empty result is one sentence on standard output (`No messages waiting.` for `recv`); it used to be a
-line on standard error.
+An empty result is one sentence on standard output (`No messages waiting.` for `recv`, `No endpoints.`
+for `directory`); an empty directory is no longer a line on standard error.
+
+`send`, `reply`, `status`, `directory` and `peers` lay out their results with
+[`agentview`](../../../sdk/go/agentview/README.md), the package `sidera` uses for the same
+results, with `sidera-adapter-console` as the program the hints name; so the two print a result
+in the same words. The console does not complete the `Session endpoint` of `status` to an
+address (`new` does, from the recipient of the signal it sent).
 
 ### How replies arrive
 
@@ -189,9 +202,10 @@ sidera adapter enable console
   list`.
 - **The session is on the node of the runtime, not on this one.** The control reply
   names the session endpoint as the node that made the session knows it, without a
-  node, and that node is the one of the runtime address `new` was given. The
-  console prints the node of the message's only recipient (`sessionAddress`), for
-  `new` and for `status` alike; the node of this adapter would be right only for a
+  node, and that node is the one of the runtime address `new` was given.
+  `new` prints the node of the message's only recipient (`sessionAddress`) with it;
+  `status` prints the endpoint as the reply carries it, until the Agent interface returns
+  the full address. The node of this adapter would be right only for a
   runtime on the same node, and sending to that address anywhere else is rejected
   as `endpoint_missing`.
 - **The adapter says when the daemon is too old.** Only the adapter holds the
@@ -223,9 +237,9 @@ sidera adapter enable console
   `TestStartRegistersTheOwnerEndpointAndWhoamiNamesIt`,
   `TestStartIsAnsweredBeforeTheOwnerEndpointIsRegistered`,
   `TestNewSendsTheControlSignalAndPollsForTheReply` (a runtime on another node),
-  `TestStatusNamesTheSessionOnTheNodeOfTheRuntime`,
-  `TestDirectoryPrintsOneLinePerEntryAndTheCursorOfTheNextPage`,
-  `TestDirectoryThatGaveNoPageFailsWithItsReason`, `TestPeersPrintsOneLinePerNode`,
+  `TestStatusPrintsTheControlReplyAsFields`,
+  `TestDirectoryPrintsATableAndTheCommandForTheNextPage`, `TestResultsGoThroughTheSharedLayout`,
+  `TestDirectoryThatGaveNoPageFailsWithItsReason`, `TestPeersPrintsATableWithoutTheSelfFlag`,
   `TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem`,
   `TestRecvPrintsThenAcknowledgesAndFollowsPartsAndPages`,
   `TestPrintMessageSanitizesAndIndentsTheBody`,

@@ -2,7 +2,6 @@ package console
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -44,7 +43,7 @@ func (c *client) create(ctx context.Context, inv *invocation) int {
 			return exitFailed
 		}
 		if !time.Now().Add(inv.pollEvery).Before(deadline) {
-			fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: no reply within %s; ask again with: sidera-adapter-console status %s\n", inv.timeout, quote(string(id)))
+			fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: no reply within %s; ask again with: %s\n", inv.timeout, inv.command("status", quote(string(id))))
 			return exitUnsettled
 		}
 		select {
@@ -86,32 +85,8 @@ func (c *client) printCreateReply(recipients []adapterproto.RecipientStatus, r *
 
 // printStatus writes the delivery state of each recipient and, for a signal, its
 // reply.
-func (c *client) printStatus(s adapterproto.MessageStatusResult) {
-	w := c.env.Stdout
-	for _, r := range s.Recipients {
-		if r.Reason != "" {
-			fmt.Fprintf(w, "to %s: %s (%s)\n", r.To, r.State, r.Reason)
-		} else {
-			fmt.Fprintf(w, "to %s: %s\n", r.To, r.State)
-		}
-	}
-	reply := s.ControlReply
-	switch {
-	case reply == nil:
-	case reply.Create != nil:
-		cr := reply.Create
-		fmt.Fprintf(w, "control %s: %s", reply.Signal, cr.Outcome)
-		if cr.Reason != 0 {
-			fmt.Fprintf(w, " (%s)", cr.Reason)
-		}
-		fmt.Fprintln(w)
-		if cr.SessionEndpoint != "" {
-			fmt.Fprintln(w, "session:", sessionAddress(s.Recipients, cr.SessionEndpoint))
-		}
-	default:
-		raw, _ := json.Marshal(reply)
-		fmt.Fprintf(w, "control reply: %s\n", raw)
-	}
+func (c *client) printStatus(inv *invocation, s adapterproto.MessageStatusResult) {
+	fmt.Fprint(c.out, c.view(inv).Status(time.Now(), s))
 }
 
 // receive is `recv`: it prints each page and acknowledges it after it was
@@ -215,7 +190,7 @@ func (c *client) printMessage(m adapterproto.PageMessage) {
 }
 
 // directory is `directory`: it prints one page of the endpoints a node shows to
-// the owner endpoint, and the cursor of the next page when there is one. A page
+// the owner endpoint, and the command for the next page when there is one. A page
 // the node asked could not give is a result, not a failure of the call, and ends
 // the command as a failure with its reason.
 func (c *client) directory(ctx context.Context, inv *invocation) int {
@@ -228,19 +203,7 @@ func (c *client) directory(ctx context.Context, inv *invocation) int {
 		fmt.Fprintf(c.env.Stderr, "sidera-adapter-console: the directory was not given: %s (%s)\n", res.Outcome, res.Reason)
 		return exitFailed
 	}
-	if len(res.Endpoints) == 0 {
-		fmt.Fprintln(c.env.Stderr, "no endpoints")
-	}
-	for _, e := range res.Endpoints {
-		accepts := make([]string, len(e.Accepts))
-		for i, a := range e.Accepts {
-			accepts[i] = string(a)
-		}
-		fmt.Fprintf(c.env.Stdout, "%s  %s  %s  %s\n", e.Address, e.Kind, orDash(e.DisplayName), orDash(strings.Join(accepts, ",")))
-	}
-	if res.NextCursor != "" {
-		fmt.Fprintln(c.env.Stdout, "next cursor:", res.NextCursor)
-	}
+	fmt.Fprint(c.out, c.view(inv).Directory(*res, inv.req.Directory.Node))
 	return exitOK
 }
 
@@ -251,25 +214,6 @@ func (c *client) peers(ctx context.Context, inv *invocation) int {
 	if err != nil {
 		return c.errorf(err)
 	}
-	for _, n := range resp.Peers.Nodes {
-		line := n.Node
-		if n.Self {
-			line += "  this node"
-		}
-		line += "  trust " + string(n.Trust)
-		if n.Connected {
-			line += "  connected"
-		} else {
-			line += "  not connected"
-		}
-		fmt.Fprintln(c.env.Stdout, line)
-	}
+	fmt.Fprint(c.out, c.view(inv).Peers(*resp.Peers))
 	return exitOK
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

@@ -405,12 +405,13 @@ sidera-adapter-console peers
 sidera-adapter-console directory --node <node-id-b>
 ```
 
-`peers` lists the nodes A can address, A first, each with the id to give to `--node`.
-`directory` prints one line per endpoint B shows to you: its address, its kind, its
-display name and the actions it accepts. Take the address of the `runtime` line for the
-agent you want. An address is `<node-id>/<endpoint-id>`. A long list is paged: when it
-ends with `next cursor: <c>`, run the command again with `--cursor <c>` and the same
-`--node`; `--limit <n>` sets the page size.
+`peers` lists the nodes A can address, A first (its trust is `self`), each with the id to
+give to `--node`. `directory` prints a table with a row for each endpoint B shows to you:
+its kind, its display name, the actions it accepts and its address, last. Take the address
+of the `runtime` row for the agent you want. An address is `<node-id>/<endpoint-id>`. A
+long list is paged: it ends with a line that gives the command for the next page, which names
+the same data directory (and, for the console, the same instance) and the cursor; `--limit <n>`
+sets the page size, and the next page takes it again.
 
 If either command says the daemon of this node is too old, update it
 ([Upgrade](operations.md#upgrade)), or read the address on *(B)* instead:

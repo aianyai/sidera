@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/agentview"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
@@ -207,8 +209,15 @@ func (h *harness) run(args ...string) int {
 	h.out.Reset()
 	h.errOut.Reset()
 	env := h.client.env
-	env.Getenv = func(string) string { return "" }
-	inv, err := parseCommand(append(args, "--home", "/unused"), env)
+	// The data directory comes from the environment, as a person who set SIDERA_HOME has it, so
+	// that the commands in the hints do not name it.
+	env.Getenv = func(name string) string {
+		if name == "SIDERA_HOME" {
+			return "/unused"
+		}
+		return ""
+	}
+	inv, err := parseCommand(args, env)
 	if err != nil {
 		h.t.Fatalf("parsing %v: %v", args, err)
 	}
@@ -415,9 +424,10 @@ func TestReplyGoesToTheSenderSeenInRecv(t *testing.T) {
 	}
 }
 
-// `status` prints the session of a control reply with the node of the runtime the
-// signal went to, as `new` does.
-func TestStatusNamesTheSessionOnTheNodeOfTheRuntime(t *testing.T) {
+// `status` prints the control reply as fields, and the session endpoint of a created
+// session as the reply carries it: the node that made it is the runtime's, which `status`
+// does not claim to know beyond the recipient. (`new` completes it to an address.)
+func TestStatusPrintsTheControlReplyAsFields(t *testing.T) {
 	h := newHarness(t, &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult {
 		return adapterproto.MessageStatusResult{
 			Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryDelivered}},
@@ -425,20 +435,30 @@ func TestStatusNamesTheSessionOnTheNodeOfTheRuntime(t *testing.T) {
 				Create: &adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: "ep-session"}},
 		}
 	}})
-	if code := h.run("status", "msg-out-1"); code != exitOK || !strings.Contains(h.out.String(), "session: node-2/ep-session\n") {
-		t.Errorf("status: exit %d, output %q", code, h.out.String())
+	want := "STATE      TO\n" +
+		"delivered  node-2/rt\n" +
+		"\nControl reply: session.create\n" +
+		"  Outcome           created\n" +
+		"  Session endpoint  ep-session\n"
+	if code := h.run("status", "msg-out-1"); code != exitOK || h.out.String() != want {
+		t.Errorf("status: exit %d, output %q, want %q", code, h.out.String(), want)
 	}
 }
+
+const sentMessage = "Message accepted for delivery.\n" +
+	"  Message  msg-out-1\n" +
+	"  To       node-3/agent\n" +
+	"  Run `sidera-adapter-console status msg-out-1` to see whether it was delivered.\n"
 
 func TestSendAndStatusAndTheDaemonsRefusal(t *testing.T) {
 	d := &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult {
 		return adapterproto.MessageStatusResult{Recipients: []adapterproto.RecipientStatus{{To: "node-3/agent", State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectEndpointClosed}}}
 	}}
 	h := newHarness(t, d)
-	if code := h.run("send", "--to", "node-3/agent", "--body", "hi"); code != exitOK || h.out.String() != "message: msg-out-1\n" {
+	if code := h.run("send", "--to", "node-3/agent", "--body", "hi"); code != exitOK || h.out.String() != sentMessage {
 		t.Errorf("send: exit %d, output %q, stderr %q", code, h.out.String(), h.errOut.String())
 	}
-	if code := h.run("status", "msg-out-1"); code != exitOK || h.out.String() != "to node-3/agent: rejected (endpoint_closed)\n" {
+	if code := h.run("status", "msg-out-1"); code != exitOK || h.out.String() != "STATE                       TO\nrejected (endpoint_closed)  node-3/agent\n" {
 		t.Errorf("status: exit %d, output %q", code, h.out.String())
 	}
 	// A request the SDK refuses before it reaches the daemon comes back as a failure.
@@ -459,7 +479,7 @@ func TestTheClientFindsNoAdapterWhenNoneIsRunning(t *testing.T) {
 	}
 }
 
-func TestDirectoryPrintsOneLinePerEntryAndTheCursorOfTheNextPage(t *testing.T) {
+func TestDirectoryPrintsATableAndTheCommandForTheNextPage(t *testing.T) {
 	d := &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{
 		Outcome: adapterproto.DirectoryOK,
 		Endpoints: []adapterproto.DirectoryEntry{
@@ -474,7 +494,10 @@ func TestDirectoryPrintsOneLinePerEntryAndTheCursorOfTheNextPage(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("directory: exit %d, stderr %q", code, h.errOut.String())
 	}
-	want := "node-2/rt  runtime  Dev runtime  session.create,endpoint.status\nnode-2/ep-x  direct  -  -\nnext cursor: c-2\n"
+	want := "KIND     NAME         ACCEPTS                          ADDRESS\n" +
+		"runtime  Dev runtime  session.create, endpoint.status  node-2/rt\n" +
+		"direct   -            -                                node-2/ep-x\n" +
+		"\nMore endpoints follow. Run `sidera-adapter-console directory --node node-2 --cursor c-2` for the next page.\n"
 	if got := h.out.String(); got != want {
 		t.Errorf("output %q, want %q", got, want)
 	}
@@ -493,7 +516,7 @@ func TestDirectoryThatGaveNoPageFailsWithItsReason(t *testing.T) {
 	}
 }
 
-func TestPeersPrintsOneLinePerNode(t *testing.T) {
+func TestPeersPrintsATableWithoutTheSelfFlag(t *testing.T) {
 	d := &daemon{directAccess: true, peersAnswer: adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{
 		{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true},
 		{Node: "node-2", Trust: adapterproto.PeerDirect},
@@ -502,7 +525,7 @@ func TestPeersPrintsOneLinePerNode(t *testing.T) {
 	if code := h.run("peers"); code != exitOK {
 		t.Fatalf("peers: exit %d, stderr %q", code, h.errOut.String())
 	}
-	if got, want := h.out.String(), "node-1  this node  trust self  connected\nnode-2  trust direct  not connected\n"; got != want {
+	if got, want := h.out.String(), "TRUST   CONNECTION     NODE\nself    connected      node-1\ndirect  not connected  node-2\n"; got != want {
 		t.Errorf("output %q, want %q", got, want)
 	}
 	if len(d.peers) != 1 || d.peers[0].Endpoint != ownerEndpoint {
@@ -522,5 +545,83 @@ func TestDirectoryAndPeersSayWhenTheDaemonDoesNotSupportThem(t *testing.T) {
 	}
 	if len(d.dirs) != 0 || len(d.peers) != 0 {
 		t.Errorf("requests reached the daemon: directory %v, peers %v", d.dirs, d.peers)
+	}
+}
+
+// A command the output tells the reader to run goes to the node and instance the printing
+// command acted on: the flags that select them are spelled after the command name, where this
+// program takes its flags, and a directory given by SIDERA_HOME is not repeated.
+func TestHintsKeepTheHomeAndInstanceTheCommandWasGiven(t *testing.T) {
+	home := t.TempDir()
+	selected := "--home " + agentview.ShellWord(runtime.GOOS, home) + " --instance " + agentview.ShellWord(runtime.GOOS, "work")
+	d := &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, NextCursor: "c-2",
+		Endpoints: []adapterproto.DirectoryEntry{}}}
+	h := newHarness(t, d)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"send", []string{"send", "--to", "node-3/agent", "--body", "b", "--home", home, "--instance", "work"},
+			"Run `sidera-adapter-console status " + selected + " msg-out-"},
+		{"directory", []string{"directory", "--node", "node-2", "--home", home, "--instance", "work"},
+			"Run `sidera-adapter-console directory " + selected + " --node node-2 --cursor c-2` for the next page."},
+		{"the environment names the directory", []string{"directory", "--instance", "work"},
+			"Run `sidera-adapter-console directory --instance " + agentview.ShellWord(runtime.GOOS, "work") + " --cursor c-2` for the next page."},
+		{"the default instance", []string{"send", "--to", "node-3/agent", "--body", "b"},
+			"Run `sidera-adapter-console status msg-out-"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if code := h.run(tc.args...); code != exitOK {
+				t.Fatalf("exit %d, stderr %q", code, h.errOut.String())
+			}
+			if !strings.Contains(h.out.String(), tc.want) {
+				t.Errorf("%q is missing from\n%s", tc.want, h.out.String())
+			}
+		})
+	}
+}
+
+// The five commands print through the layout the console shares with `sidera`, which its own
+// tests cover; this guards the wiring: an empty result is a sentence on standard output, not a
+// line on standard error, a control reply is fields, and the hints name this program's commands.
+func TestResultsGoThroughTheSharedLayout(t *testing.T) {
+	statusReply := adapterproto.MessageStatusResult{
+		Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryDelivered}},
+		ControlReply: &adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
+			Activity: adapterproto.ActivityIdle, Queued: 2, AsOf: time.Now().Unix(),
+			Presets: []adapterproto.PresetAvailability{{Name: "dev", Available: true}},
+		}},
+	}
+	for _, tc := range []struct {
+		name   string
+		d      *daemon
+		args   []string
+		stdout []string
+	}{
+		{"empty directory", &daemon{directAccess: true, directoryAnswer: adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: []adapterproto.DirectoryEntry{}}},
+			[]string{"directory"}, []string{"No endpoints.\n"}},
+		{"this node alone", &daemon{directAccess: true, peersAnswer: adapterproto.PeersResult{Nodes: []adapterproto.PeerNode{{Node: "node-1", Self: true, Trust: adapterproto.PeerSelf, Connected: true}}}},
+			[]string{"peers"}, []string{"TRUST  CONNECTION  NODE\n", "\nNo other node is trusted directly.\n"}},
+		{"reply", &daemon{pages: []adapterproto.RecvPage{{Lease: lease, Messages: []adapterproto.PageMessage{{ID: "m-1", From: "node-3/agent", Body: "q"}}}}},
+			[]string{"reply", "m-1", "--to", "node-3/agent", "--body", "a"},
+			[]string{"Reply accepted for delivery.\n", "  To       node-3/agent\n", "Run `sidera-adapter-console status msg-out-1` to see whether it was delivered.\n"}},
+		{"status with a control reply", &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult { return statusReply }},
+			[]string{"status", "msg-out-1"}, []string{"Control reply: endpoint.status\n", "  Activity         idle\n", "  Presets          dev  available\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, tc.d)
+			if len(tc.d.pages) > 0 {
+				h.run("recv")
+			}
+			if code := h.run(tc.args...); code != exitOK || h.errOut.Len() != 0 {
+				t.Fatalf("exit %d, stderr %q", code, h.errOut.String())
+			}
+			for _, want := range tc.stdout {
+				if !strings.Contains(h.out.String(), want) {
+					t.Errorf("stdout lacks %q:\n%s", want, h.out.String())
+				}
+			}
+		})
 	}
 }

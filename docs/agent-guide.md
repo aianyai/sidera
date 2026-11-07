@@ -686,8 +686,8 @@ warning about the unconfirmed backup on every call.
 
 1. Get the address of the other machine's agent runtime. The console on this
    machine lists them with `sidera-adapter-console peers` (the node ids) and
-   `sidera-adapter-console directory --node <node-id>`: take the `runtime` line whose
-   display name is the agent you want; its address is `<node-id>/<endpoint-id>`. If the
+   `sidera-adapter-console directory --node <node-id>`: take the `runtime` row whose
+   `NAME` is the agent you want; its address is `<node-id>/<endpoint-id>`. If the
    command says the daemon is too old, read it on the other machine instead: run
    `sidera endpoint list --instance codex` (or `claude`) there as its owner. It lists
    endpoints, closed ones included: take the `runtime` row whose `STATE` is `open`.
@@ -793,7 +793,7 @@ server (see rule 15). Use the owner's console instead:
 `sidera-adapter-console new | send | reply | recv | status | whoami | directory | peers`.
 The console has no `control`: that needs a session. To find a node's runtime endpoint,
 run `sidera-adapter-console peers`, then `sidera-adapter-console directory --node
-<node-id>`, and take the `runtime` line of the agent you want. If the command says the
+<node-id>`, and take the `runtime` row of the agent you want. If the command says the
 daemon of the node is too old, run `sidera endpoint list --instance codex` (or `claude`)
 on that machine and take the `runtime` row whose `STATE` is `open`.
 

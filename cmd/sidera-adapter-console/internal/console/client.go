@@ -11,10 +11,12 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/agentview"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
@@ -24,10 +26,13 @@ var errNotRunning = errors.New("the console adapter is not running: enable it wi
 // request the command sends. Every command is that request, and `new` and `recv`
 // follow it up (see execute).
 type invocation struct {
-	cmd      string
-	home     string
-	instance string
-	req      request
+	cmd  string
+	home string
+	// homeGiven says that the data directory was named by --home and not left to SIDERA_HOME
+	// and the default; see command.
+	homeGiven bool
+	instance  string
+	req       request
 	// wait is how long `recv` asks the daemon to wait, and timeout how long `new`
 	// waits for the reply to its control signal.
 	wait    time.Duration
@@ -110,6 +115,7 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 	if inv.home, err = resolveHome(home, env.Getenv); err != nil {
 		return nil, err
 	}
+	inv.homeGiven = set["home"]
 
 	switch inv.cmd {
 	case "whoami":
@@ -237,6 +243,29 @@ func newClient(env Env, dir string, dial func(ctx context.Context, stateDir stri
 	return &client{env: env, out: env.streams().Out(), dir: dir, dial: dial}
 }
 
+// view is the layout the console shares with `sidera` for the results of the endpoint's
+// view of the network, on the standard output stream. The commands it names in its hints
+// are the console's own, spelled for the invocation they are printed for.
+func (c *client) view(inv *invocation) agentview.View {
+	return agentview.View{Out: c.out, Command: inv.command}
+}
+
+// command spells a command of this program as a person types it, for the node and the
+// instance this invocation acted on. The flags that select them go after the command name,
+// where the program takes its flags: --home when the invocation named the directory (what
+// SIDERA_HOME says is in the environment of the next command too), --instance when it is not
+// the default. The words that can hold any text arrive quoted, and so are the values added.
+func (inv *invocation) command(args ...string) string {
+	words := []string{ProgramName, args[0]}
+	if inv.homeGiven {
+		words = append(words, "--home", agentview.ShellWord(runtime.GOOS, inv.home))
+	}
+	if inv.instance != AdapterID {
+		words = append(words, "--instance", agentview.ShellWord(runtime.GOOS, inv.instance))
+	}
+	return strings.Join(append(words, args[1:]...), " ")
+}
+
 // call makes one request on a connection of its own. A failure the adapter or the
 // daemon reports comes back as an error.
 func (c *client) call(ctx context.Context, req request) (response, error) {
@@ -323,13 +352,21 @@ func (c *client) execute(ctx context.Context, inv *invocation) int {
 		if err != nil {
 			return c.errorf(err)
 		}
-		fmt.Fprintln(c.env.Stdout, "message:", resp.Send.MessageID)
+		kind := agentview.SentMessage
+		if inv.cmd == "reply" {
+			kind = agentview.SentReply
+		}
+		to := make([]string, len(inv.req.Send.To))
+		for i, a := range inv.req.Send.To {
+			to[i] = string(a)
+		}
+		fmt.Fprint(c.out, c.view(inv).Sent(kind, resp.Send.MessageID, to, false))
 	case "status":
 		resp, err := c.call(ctx, inv.req)
 		if err != nil {
 			return c.errorf(err)
 		}
-		c.printStatus(*resp.Status)
+		c.printStatus(inv, *resp.Status)
 	case "directory":
 		return c.directory(ctx, inv)
 	case "peers":

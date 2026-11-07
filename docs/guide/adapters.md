@@ -627,7 +627,8 @@ and prints the session's address; `send`, `reply`, `recv` and `status` follow
 ([Getting started](getting-started.md#7-start-the-first-cross-machine-session-a)).
 `peers` lists the nodes you can address, and `directory [--node <id>]` lists the endpoints
 a node shows to the owner endpoint, which is how you find the address of a runtime before
-`new`; a page that has more ends with `next cursor: <c>`, to give back with `--cursor`.
+`new`; a page that has more ends with the command for the next one (``Run `sidera-adapter-console
+directory --node <id> --cursor <c>` for the next page.``).
 Both need a daemon that offers them to a direct endpoint; on an older one they say that
 the daemon is too old and exit with code 1. The console has no `control`, so it cannot
 interrupt or close a session it started: close one with
