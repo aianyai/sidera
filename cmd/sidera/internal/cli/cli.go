@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
 	"github.com/aianyai/sidera/cmd/sidera/internal/launch"
@@ -117,12 +118,12 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 	}
 	var u *usageError
 	if errors.As(err, &u) {
-		fmt.Fprintln(c.Stderr, "error:", u.message)
+		c.printError(u.message)
 		return apiwire.ExitUsage
 	}
 	var fail *failure
 	if errors.As(err, &fail) {
-		fmt.Fprintln(c.Stderr, "error:", fail.message)
+		c.printError(fail.message)
 		return 1
 	}
 	var d *daemonError
@@ -130,7 +131,7 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 		if c.json {
 			_ = c.encode(apiwire.Body{Error: *apiwire.FromError(err)})
 		} else {
-			fmt.Fprintln(c.Stderr, "error:", d.err)
+			c.printError(d.err)
 		}
 		return daemon.ExitCode(d.err)
 	}
@@ -138,12 +139,19 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 	if c.json && c.arguments.flags.Name() != "mcp" {
 		_ = c.encode(apiwire.Body{Error: *e})
 	} else {
-		fmt.Fprintln(c.Stderr, "error:", e)
+		c.printError(e)
 		if id, ok := e.Details["operation_id"].(string); ok && id != "" {
 			fmt.Fprintln(c.Stderr, "operation_id", id)
 		}
 	}
 	return e.Category.ExitCode()
+}
+
+// printError writes the line of an error to standard error, the one place errors are
+// written. Only the word "error:" is styled, red on a colored stream, so that what
+// follows it reads the same everywhere.
+func (c *command) printError(message any) {
+	fmt.Fprintln(c.errOut, c.errOut.Red("error:"), message)
 }
 
 // readGlobals removes the global flags from args and builds the two output streams.
@@ -201,7 +209,7 @@ func (c *command) globals(args []string, local *flag.FlagSet) ([]string, error) 
 			c.json = b
 		default:
 			out = append(out, a)
-			name, _, has := strings.Cut(strings.TrimLeft(a, "-"), "=")
+			name, _, has := splitFlag(a)
 			if v := local.Lookup(name); strings.HasPrefix(a, "-") && !has && v != nil && takesValue(v) && i+1 < len(args) {
 				i++
 				out = append(out, args[i])
@@ -230,9 +238,11 @@ func flags(name string) *flag.FlagSet {
 }
 
 // parse accepts flags on either side of positional arguments, as the command
-// examples promise, while leaving flag values and -- literals untouched.
+// examples promise, while leaving flag values and -- literals untouched. It sets
+// each flag itself, so that a flag that is wrong is reported in the words of
+// flagError and not in those of the flag package.
 func parse(f *flag.FlagSet, args []string) ([]string, error) {
-	var options, positionals []string
+	var positionals []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--" {
@@ -243,24 +253,76 @@ func parse(f *flag.FlagSet, args []string) ([]string, error) {
 			positionals = append(positionals, a)
 			continue
 		}
-		name, _, has := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		v := f.Lookup(name)
-		if v == nil {
-			return nil, usage("unknown flag: " + name)
+		name, value, has := splitFlag(a)
+		fl := f.Lookup(name)
+		if fl == nil {
+			return nil, flagError(f, "unknown flag --"+name)
 		}
-		options = append(options, a)
-		if !has && takesValue(v) {
-			i++
-			if i == len(args) {
-				return nil, usage("flag needs a value: " + name)
+		if !has {
+			value = "true"
+			if takesValue(fl) {
+				i++
+				if i == len(args) {
+					return nil, flagError(f, "--"+name+" needs "+valueExpected(fl))
+				}
+				value = args[i]
 			}
-			options = append(options, args[i])
 		}
-	}
-	if err := f.Parse(options); err != nil {
-		return nil, usage(err.Error())
+		if err := f.Set(name, value); err != nil {
+			return nil, flagError(f, fmt.Sprintf("--%s needs %s, not %q", name, valueExpected(fl), value))
+		}
 	}
 	return positionals, nil
+}
+
+// splitFlag is the name and the value joined with = of a word that starts with a dash.
+// One dash or two may precede the name, as the flag package reads it; a third is part of
+// the name, which then is no flag of any command.
+func splitFlag(word string) (name, value string, has bool) {
+	return strings.Cut(strings.TrimPrefix(strings.TrimPrefix(word, "-"), "-"), "=")
+}
+
+// flagError is the usage error for a flag of the command that f belongs to: the
+// complaint, then where the flags of the command are described.
+func flagError(f *flag.FlagSet, complaint string) error {
+	return usage(fmt.Sprintf("%s; run `sidera %s --help` for its flags", complaint, f.Name()))
+}
+
+// seconds is a flag whose value is a whole number of seconds, read as the other integer
+// flags read theirs (base 0: a 0x or 0 prefix and digit separators are accepted).
+type seconds int64
+
+func (s *seconds) Set(text string) error {
+	n, err := strconv.ParseInt(text, 0, 64)
+	*s = seconds(n)
+	return err
+}
+func (s *seconds) String() string { return strconv.FormatInt(int64(*s), 10) }
+func (s *seconds) Get() any       { return *s }
+
+// valueExpected says what a flag takes, from the type its value holds. Every type a
+// flag of this program uses is listed: a flag of another type is a mistake in the
+// program, found by the test that visits every flag.
+func valueExpected(fl *flag.Flag) string {
+	getter, _ := fl.Value.(flag.Getter)
+	if getter == nil {
+		return "a value"
+	}
+	switch getter.Get().(type) {
+	case string:
+		return "a value"
+	case bool:
+		return "true or false"
+	case time.Duration:
+		return "a duration such as 2m"
+	case seconds:
+		return "a whole number of seconds"
+	case int:
+		return "a whole number"
+	case uint64:
+		return "a whole number, 0 or more"
+	}
+	panic(fmt.Sprintf("cli: flag --%s holds a %T that valueExpected does not describe", fl.Name, getter.Get()))
 }
 
 func (c *command) encode(v any) error {
@@ -372,7 +434,7 @@ type receiveFlags struct {
 }
 
 func (r *receiveFlags) add(f *flag.FlagSet) {
-	f.Int64Var(&r.wait, "wait", 0, "seconds to wait")
+	f.Var((*seconds)(&r.wait), "wait", "seconds to wait")
 	f.StringVar(&r.msg, "msg", "", "message from page next")
 	f.IntVar(&r.part, "part", 0, "part from page next")
 	f.StringVar(&r.ack, "ack", "", "earlier lease to acknowledge")

@@ -25,7 +25,11 @@ and its bound values. A local value stays attached, including a body spelled
 `--json`. Parsing accepts flags after positional arguments and honors `--`.
 
 - `arguments.go`: command discovery and registration before global scanning.
-- `cli.go`: global parsing and dispatch. An agent command is dispatched in two steps: `agentRequest`
+- `cli.go`: global parsing and dispatch. `parse` is the one place that sets local flags, so it is
+  also the one place where a flag that is wrong is described (`flagError`, with `valueExpected` saying what a
+  flag takes from the type of its value; a flag of a type it does not know panics, which the test
+  that visits every flag finds), and `printError` is the one place an error line is written, with
+  its `error:` in red on a colored stream. An agent command is dispatched in two steps: `agentRequest`
   (in `agent.go`) checks its arguments and builds its one call, and only then is the Agent client
   opened, so a usage error is reported before any call and a data directory or socket that cannot
   be used never hides it. `mcp` checks its arguments the same way before it opens the client.
@@ -128,7 +132,12 @@ and its bound values. A local value stays attached, including a body spelled
   carries the wake keys but is not repeated between commands: the endpoint is closed a
   queue time after the last command when nothing waits on it, and the wake values the
   node holds in memory are lost when it restarts until the next command.
-- `help.go`: usage, purpose and example for every command.
+- `help.go`: the help. Every command has one `helpEntry` (usage, a one-clause summary, details, an
+  example) and is listed in exactly one of `helpGroups`; `sidera --help` lays the groups out with the
+  summaries, `sidera <command> --help` prints the usage, the summary and details as one paragraph, and
+  the example; the usage and the paragraph are wrapped to the stream's text width, the example never
+  (it is a command to copy). A command added to the dispatcher needs an
+  entry and a group (a test compares the groups with the list of dispatched commands).
 
 Agent flags are assembled into presence-preserving objects for `Client.Call`;
 explicit empty strings and zeroes reach the existing interface validation rather

@@ -23,7 +23,7 @@ that started empty beside the one that holds the identity would be worse than no
 `--home` and `SIDERA_HOME` are not subject to the check. The reason for the place is
 that a protected list on a folder of `%LOCALAPPDATA%` does not take the entries that a
 sandbox's setup adds to the first-level folders of `%USERPROFILE%`. Each command's help describes its
-arguments, purpose and one example.
+arguments, purpose and one example (see Help below).
 
 | Command | Purpose |
 | --- | --- |
@@ -502,7 +502,9 @@ Human success goes to stdout. Agent and management failures go to stderr as
 `error: <category>/<code>: <message>`. Missing-daemon errors tell the caller to
 run `sidera daemon`; commands never start it automatically. Usage errors print
 `error: <message>` on stderr and return 2 before any method call, in every mode,
-including `--json`; no error body is emitted for usage errors. Human initialization
+including `--json`; no error body is emitted for usage errors. A flag that is wrong is
+a usage error in `sidera`'s own words (see Error output under
+[Conventions of every program](#conventions-of-every-program)), never the flag package's. Human initialization
 and foreground-daemon failures print `error: <err>` on stderr, retaining the
 daemon's original explanation.
 
@@ -621,6 +623,11 @@ usage error. A Git-Bash or mintty window on Windows presents its terminal to the
 and so gets output that is not decorated; `--color always` asks for the decorations there. On
 Windows a colored console has virtual terminal processing switched on first; a console that
 refuses leaves the stream decorated and not colored.
+
+**Errors.** Every error line of `sidera` is written through the standard error stream by one function,
+so `error:` is red when that stream is colored and the line is otherwise the same bytes as ever:
+`error: <category>/<code>: <message>`, `error: <message>` and the `operation_id` line that follows when
+an outcome is unknown.
 
 **Layout.** These are the rules every command's human output follows; the agent commands, the management commands and the operations all follow them. The same words and shapes in all three states of a stream:
 
@@ -772,8 +779,16 @@ adapter command is a usage error (a known difference: the adapter programs have 
 output of their commands yet).
 
 **Help.** `-h`, `--help` and (for the adapter programs) `help` print the usage on standard output
-and exit 0. With `sidera` the flag may follow any command (`sidera send --help` prints that
-command's usage, an example included, and a command that does not exist is a usage error). In an
+and exit 0. `sidera --help` prints the usage line, then every command under a heading (messages, node,
+endpoints and presets, network, trust, identity and clock, adapters, update and maintenance) with a
+one-clause summary, wrapped under the names, and closes with the hint to run `sidera <command> --help`.
+Each command is in exactly one group. Text is wrapped at the stream's text width: the terminal's
+width up to 100 columns, and 80 on a pipe. On a colored stream the headings are bold and the command
+names cyan. With `sidera` the flag may follow any command: `sidera send --help` prints that command's
+usage, its purpose (the summary of the list as the first sentence, then the details) and an example. The
+usage and the purpose are wrapped; the example is a command to copy and is never wrapped, so a long one
+runs past the width. A group name (`sidera trust --help`) prints each command of the group one after the other. A
+command that does not exist is a usage error. In an
 adapter program `--help` after `package` or `version` prints that command's usage, and so does it
 after `setup` of an adapter program; after a client command of the console it prints the usage of
 the program, which lists every command. `serve` is the exception: it takes no argument, `--help`
@@ -797,13 +812,17 @@ with `commit unknown` when the build carries no commit, and takes `--json` and n
 
 **Error output.** Standard output carries the result and standard error the errors, of every
 program. `sidera` writes `error: <message>`, and `error: <category>/<code>: <message>` for what the
-node refused (see [Output and errors](#output-and-errors)). An adapter program writes
+node refused (see [Output and errors](#output-and-errors)); on a colored stream only the word `error:`
+is red. An adapter program writes
 `<program>: <message>`. After a usage error what follows depends on the command: an unknown command
 prints the usage, and so does a run with no command (without a message); a flag error of a client
 command of the console points at `help`; `setup` of an adapter program takes no flag and reads a request, so an argument is the message alone; `serve` with an argument, and `package` and `version` with a flag error, are the
 message alone. The words of
 a flag parser's complaint differ between the programs, and the message of an error is not a stable
-identifier; the exit code is.
+identifier; the exit code is. `sidera` reports a flag that is wrong in its own words: the flag in its
+`--` form, what it takes, and where its command is described, for example `error: --wait needs a
+duration such as 2m, not "x"; run `sidera daemon restart --help` for its flags` (exit 2). An unknown
+flag reads `unknown flag --bogus; run …`, and a flag with no value after it says what it needs.
 
 **Confirmation.** A command that changes the machine beyond the node's own state asks as `update`
 does: by default it shows the plan on standard error and asks one question for the whole plan

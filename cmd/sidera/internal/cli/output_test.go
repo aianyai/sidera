@@ -739,18 +739,20 @@ func btoi(b bool) int {
 func TestEveryManagementCommandHasALayout(t *testing.T) {
 	printsItself := map[string]bool{"daemon.restart": true, "trust.request": true, "trust.list": true, "identity.export_revocation": true}
 	seen := 0
-	for _, name := range helpOrder {
-		c := command{Config: Config{Getenv: func(string) string { return "" }}}
-		args := strings.Fields(name)
-		c.arguments = arguments(args)
-		// A plan comes back with its method even when the arguments are wrong for it, as here.
-		plan, _ := c.managementPlan(args)
-		if plan.method == "" || printsItself[plan.method] {
-			continue
-		}
-		seen++
-		if _, ok := humanLayouts[plan.method]; !ok {
-			t.Errorf("%q sends %s, which has no human layout", name, plan.method)
+	for _, group := range helpGroups {
+		for _, name := range group.commands {
+			c := command{Config: Config{Getenv: func(string) string { return "" }}}
+			args := strings.Fields(name)
+			c.arguments = arguments(args)
+			// A plan comes back with its method even when the arguments are wrong for it, as here.
+			plan, _ := c.managementPlan(args)
+			if plan.method == "" || printsItself[plan.method] {
+				continue
+			}
+			seen++
+			if _, ok := humanLayouts[plan.method]; !ok {
+				t.Errorf("%q sends %s, which has no human layout", name, plan.method)
+			}
 		}
 	}
 	if seen < 30 {

@@ -144,7 +144,7 @@ func (m *messageFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&m.thread, "thread", "", "thread identifier")
 	}
 	if name != "reply" {
-		f.Int64Var(&m.accept, "accept-before", 0, "delivery deadline in seconds")
+		f.Var((*seconds)(&m.accept), "accept-before", "delivery deadline in seconds")
 	}
 	if name == "control" {
 		f.StringVar(&m.preset, "preset", "", "session preset")
