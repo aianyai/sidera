@@ -46,7 +46,12 @@ func TestDisplayNameRule(t *testing.T) {
 	// emoji), U+00AD and U+180E stay accepted.
 	for _, r := range []struct{ first, last rune }{
 		{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200B, 0x200B}, {0x200E, 0x200F},
-		{0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F}, {0xFEFF, 0xFEFF}, {0xE0000, 0xE007F},
+		{0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F}, {0xFEFF, 0xFEFF}, {0xE0000, 0xE00FF},
+		// The characters that fill a place with nothing: the combining grapheme
+		// joiner, the Hangul and Khmer fillers, the shorthand and musical format
+		// controls, and the reserved default-ignorable ranges.
+		{0x034F, 0x034F}, {0x115F, 0x1160}, {0x17B4, 0x17B5}, {0x3164, 0x3164}, {0xFFA0, 0xFFA0},
+		{0xFFF0, 0xFFF8}, {0x1BCA0, 0x1BCA3}, {0x1D173, 0x1D17A}, {0xE01F0, 0xE0FFF},
 	} {
 		for _, c := range []rune{r.first, (r.first + r.last) / 2, r.last} {
 			rows = append(rows, row{fmt.Sprintf("U+%04X is refused", c), "a" + string(c) + "b", false, false, false})
@@ -55,6 +60,9 @@ func TestDisplayNameRule(t *testing.T) {
 			rows = append(rows, row{fmt.Sprintf("U+%04X below the range is accepted", r.first-1), "a" + string(r.first-1) + "b", true, true, false})
 		}
 		rows = append(rows, row{fmt.Sprintf("U+%04X above the range is accepted", r.last+1), "a" + string(r.last+1) + "b", true, true, false})
+	}
+	for _, c := range personTextSequences {
+		rows = append(rows, row{c.name, c.in, c.nameOK, c.descOK, false})
 	}
 	rows = append(rows,
 		row{"a name that ends with an escape", "name\x1b[2J", false, false, false},
@@ -167,26 +175,89 @@ func TestDescriptionLength(t *testing.T) {
 	}
 }
 
-// TestPatternsFollowThePredicates: the schema states the rule as a regular
-// expression and the validators apply it as a predicate on one code point, two
-// derivations of one table. Every code point must be judged the same by both, so
-// a table edit that one of them gets wrong is caught for any range, whatever its
-// plane.
+// personTextSequences are the rules of a text taken as a whole, beyond the
+// characters one by one: a variation selector needs a base character before it
+// and is never repeated, and a name draws at least one visible character. nameOK
+// is the verdict for a display name and for every other name-like field, descOK
+// for a description, which may be blank.
+var personTextSequences = []struct {
+	name, in       string
+	nameOK, descOK bool
+}{
+	{"a normal name", "Owner console", true, true},
+	{"an emoji with its variation selector", "\u2764\ufe0f", true, true},
+	{"an emoji sequence joined by a zero width joiner", "\u2764\ufe0f\u200d\U0001F525", true, true},
+	{"a keycap", "1\ufe0f\u20e3", true, true},
+	{"an ideographic variation sequence", "\u8fbb\U000e0100", true, true},
+	{"a Mongolian letter with a free variation selector", "\u1820\u180b", true, true},
+	{"every kind of selector once, each after its own base", "a\ufe0fb\U000e0100c\u180bd\u180ce\u180df\u180f", true, true},
+	{"a selector after a zero width joiner", "a\u200d\ufe0f", true, true},
+	{"a selector first", "\ufe0fa", false, false},
+	{"a supplementary selector first", "\U000e0100a", false, false},
+	{"a Mongolian selector first", "\u180ba", false, false},
+	{"the Mongolian selector U+180F first", "\u180fa", false, false},
+	{"two selectors in a row", "a\ufe0f\ufe0f", false, false},
+	{"two selectors in a row in the middle", "a\ufe0f\ufe0fb", false, false},
+	{"two selectors of different blocks in a row", "a\ufe0f\U000e0100", false, false},
+	{"a Mongolian selector after a selector", "a\ufe0f\u180b", false, false},
+	{"a run of selectors after an emoji", "\u2764" + strings.Repeat("\ufe0f", 8), false, false},
+	{"a selector alone", "\ufe0f", false, false},
+	{"a selector after a base after a run is still a run", "a\ufe0f\ufe0fb\ufe0f", false, false},
+	{"selectors apart", "a\ufe0fb\ufe0f", true, true},
+	{"a Hangul filler alone", "\u3164", false, false},
+	{"a Hangul filler in a name", "a\u3164b", false, false},
+	{"a halfwidth Hangul filler", "ab\uffa0", false, false},
+	{"only spaces", "   ", false, true},
+	{"only a no-break space", "\u00a0", false, true},
+	{"only an ideographic space", "\u3000", false, true},
+	{"only an en space", "\u2002", false, true},
+	{"only a braille blank", "\u2800", false, true},
+	{"only a zero width joiner", "\u200d", false, true},
+	{"only zero width non-joiners", "\u200c\u200c", false, true},
+	{"only a soft hyphen", "\u00ad", false, true},
+	{"only a Mongolian vowel separator", "\u180e", false, true},
+	{"only a joiner and a selector", "\u200d\ufe0f", false, true},
+	{"only blanks and invisible characters mixed", " \u200d\u00ad\u2800\u3000\u180e", false, true},
+	{"a visible character among blanks", " \u2800 a\u200d ", true, true},
+	{"a visible character after a joiner", "\u200da", true, true},
+	{"a single character", "x", true, true},
+}
+
+// TestPatternsFollowThePredicates: the schema states the rules as a regular
+// expression and the validators apply them in Go, two derivations of one table.
+// They must judge alike: every code point, in the middle of a name, whatever its
+// plane (so a table edit that one gets wrong is caught for any range), and every
+// text of the sequence table, which holds the rules that only a whole text
+// shows.
 func TestPatternsFollowThePredicates(t *testing.T) {
 	for _, c := range []struct {
 		definition string
 		refused    func(rune) bool
+		validate   func(string) error
+		sequenceOK func(nameOK, descOK bool) bool
 	}{
-		{"DisplayName", adapterproto.RefusedInPersonText},
-		{"Description", adapterproto.RefusedInDescription},
+		{"DisplayName", adapterproto.RefusedInPersonText, adapterproto.ValidateDisplayName, func(nameOK, _ bool) bool { return nameOK }},
+		{"Description", adapterproto.RefusedInDescription, adapterproto.ValidateDescription, func(_, descOK bool) bool { return descOK }},
 	} {
 		re := regexp.MustCompile(adapterproto.Patterns()[c.definition])
 		for r := rune(0); r <= unicode.MaxRune; r++ {
 			if r >= 0xD800 && r <= 0xDFFF {
 				continue // a surrogate is not a character, and a Go string cannot hold one
 			}
-			if got := !re.MatchString(string(r)); got != c.refused(r) {
+			// Between two letters, so that a variation selector has its base and a
+			// blank has a visible neighbour: only the class itself decides.
+			in := "a" + string(r) + "b"
+			if got := !re.MatchString(in); got != c.refused(r) {
 				t.Fatalf("%s: U+%04X is refused by the pattern %v, by the predicate %v", c.definition, r, got, c.refused(r))
+			}
+			if got := c.validate(in) != nil; got != c.refused(r) {
+				t.Fatalf("%s: U+%04X is refused by the validator %v, by the predicate %v", c.definition, r, got, c.refused(r))
+			}
+		}
+		for _, s := range personTextSequences {
+			want := c.sequenceOK(s.nameOK, s.descOK)
+			if got := re.MatchString(s.in); got != want {
+				t.Errorf("%s: the pattern accepts %q = %v, want %v (%s)", c.definition, s.in, got, want, s.name)
 			}
 		}
 	}

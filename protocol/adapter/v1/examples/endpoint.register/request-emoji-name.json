@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 102,
+  "method": "endpoint.register",
+  "params": {
+    "key": "chat:carol",
+    "display_name": "Carol ❤️"
+  }
+}

@@ -489,7 +489,8 @@ signed by the node's identity key.
   - `name`, `host_name` and `system` follow the display-name rule of the adapter
     protocol (`adapterproto.ValidateDisplayName`: 1 to 128 characters, none of
     the control, line-separator, bidirectional-control and invisible
-    format characters of the person-text class);
+    characters of the person-text class, no variation selector first or right
+    after another, and at least one visible character);
   - `system_build` and `sidera_version` follow the same rule and are at most 64
     characters;
   - `platform` is `<goos>/<goarch>`, each part one or more of `[a-z0-9]`, at most

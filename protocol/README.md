@@ -57,12 +57,15 @@ fetched, they only let the files refer to each other
   validator or a hand-written check must match the whole string and nothing more
   (Python: `re.fullmatch`, or `\Z` in place of the final `$`; PCRE: the `D`
   modifier). The patterns of `DisplayName` and `Description` name characters
-  beyond U+FFFF (the tag characters), so they must be read as Unicode code points: with
-  the `u` flag in ECMAScript, where a pattern without it reads a surrogate pair as
+  beyond U+FFFF (the tag characters and other format characters), so they must be read as
+  Unicode code points: with the `u` flag in ECMAScript, where a pattern without it reads a surrogate pair as
   two units and is a syntax error. The Go side uses RE2, where `$`
   without the multi-line flag matches only at the end of the text, and a
   conformance test checks it. A value with a trailing newline is not valid for
-  any pattern of the protocol.
+  any pattern of the protocol. The same two patterns are written over the sequence of
+  characters (a character, then at most one variation selector) without lookaround, so
+  that RE2 and ECMAScript with the `u` flag read them alike and a name with no visible
+  character or a run of variation selectors does not match.
 - **Numbers** are integers written as plain integer literals. The schema accepts
   `1.0` as an integer, as the specification says; the Go types do not, and
   neither should a sender.

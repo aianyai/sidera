@@ -392,6 +392,8 @@ func TestPackEscapesWhatATerminalActsOn(t *testing.T) {
 		{"the last deprecated format character", "a\u206fb", `\u206f`},
 		{"the byte order mark", "a\ufeffb", `\ufeff`},
 		{"a tag character, written as a surrogate pair", "a\U000e0041b", `\udb40\udc41`},
+		{"the Hangul filler", "a\u3164b", `\u3164`},
+		{"a reserved character beyond U+FFFF, written as a surrogate pair", "a\U000e01f0b", `\udb40\uddf0`},
 		{"a line feed", "a\nb", `\n`},
 	}
 	for _, r := range rows {

@@ -447,6 +447,8 @@ func TestSanitize(t *testing.T) {
 		{"invisible operators and word joiner", "\u2060\u2061\u2062\u2063\u2064", `\u2060\u2061\u2062\u2063\u2064`, `\u2060\u2061\u2062\u2063\u2064`},
 		{"deprecated format characters", "\u206a\u206b\u206c\u206d\u206e\u206f", `\u206a\u206b\u206c\u206d\u206e\u206f`, `\u206a\u206b\u206c\u206d\u206e\u206f`},
 		{"tag characters carry hidden text", "ok\U000e0001\U000e0069\U000e007f", `ok\U000e0001\U000e0069\U000e007f`, `ok\U000e0001\U000e0069\U000e007f`},
+		{"fillers and the combining grapheme joiner", "a\u034fb\u115f\u1160\u3164\uffa0", `a\u034fb\u115f\u1160\u3164\uffa0`, `a\u034fb\u115f\u1160\u3164\uffa0`},
+		{"reserved invisible ranges", "\ufff0\ufff8\U000e0080\U000e00ff\U000e01f0\U000e0fff", `\ufff0\ufff8\U000e0080\U000e00ff\U000e01f0\U000e0fff`, `\ufff0\ufff8\U000e0080\U000e00ff\U000e01f0\U000e0fff`},
 		{"line feed", "a\nb", `a\nb`, "a\nb"},
 		{"tab", "a\tb", `a\tb`, "a\tb"},
 		{"CRLF", "a\r\nb", `a\r\nb`, "a\r\nb"},
@@ -462,7 +464,7 @@ func TestSanitize(t *testing.T) {
 		{"emoji and joined emoji", "😀 👨\u200d👩\u200d👧", "😀 👨\u200d👩\u200d👧", "😀 👨\u200d👩\u200d👧"},
 		{"accents and combining marks", "e\u0301 é ñ", "e\u0301 é ñ", "e\u0301 é ñ"},
 		{"a real replacement character", "a\ufffdb", "a\ufffdb", "a\ufffdb"},
-		{"neighbours of the classes", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0080", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0080", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0080"},
+		{"neighbours of the classes", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100"},
 		{"backslashes are not doubled", `C:\dir\n`, `C:\dir\n`, `C:\dir\n`},
 		{"empty", "", "", ""},
 	} {

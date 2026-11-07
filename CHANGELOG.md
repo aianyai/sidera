@@ -90,16 +90,21 @@ protocol has a version of its own.
   without those characters; the adapters shipped with Sidera already do.
 - Names, descriptions and other display text that comes from adapters and other nodes (endpoint
   names and descriptions, the name and version of a runtime, what a node says about itself) now
-  also refuse zero-width and other invisible formatting characters: the zero width space, the word
-  joiner, the byte order mark and the tag characters. They make two names that look the same
-  differ and hide text from a person, and from a model reading the result of a tool, which still
-  reads it. The text is refused where it enters, never cleaned. A stored endpoint name or
-  description that contains such a character is treated as damaged on upgrade and removed with an
-  alert, and the messages queued for that endpoint are rejected as `endpoint_closed`. The page
-  `recv` prints writes these characters in message bodies as visible `\uXXXX` escapes.
-  A Hermes instance whose configured `display_name` contains one of these characters no longer
-  starts: its start is refused with the configuration problem until the character is removed from
-  the instance configuration.
+  also refuse characters that draw nothing: the zero width space, the word joiner, the byte order
+  mark, the tag characters, the combining grapheme joiner, the Hangul and Khmer fillers, the
+  shorthand and music format controls and the ranges Unicode reserves for more of them. A
+  variation selector (the invisible character that picks the emoji or variant form of the
+  character before it) is still allowed after a character, as in a red heart, but not first and
+  not twice in a row, because a run of them can hide any text behind one emoji. A name (not a
+  description) must also show at least one visible character: a name of only spaces and invisible
+  characters is refused. These make two names that look the same differ and hide text from a
+  person, and from a model reading the result of a tool, which still reads it. The text is refused
+  where it enters, never cleaned. A stored endpoint name or description that breaks these rules is
+  treated as damaged on upgrade and removed with an alert, and the messages queued for that
+  endpoint are rejected as `endpoint_closed`. The page `recv` prints writes these characters in
+  message bodies as visible `\uXXXX` escapes. A Hermes instance whose configured `display_name`
+  breaks these rules no longer starts: its start is refused with the configuration problem until
+  the name is changed in the instance configuration.
 
 ## [0.16.0] - 2026-11-07
 

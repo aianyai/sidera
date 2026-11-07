@@ -149,9 +149,12 @@ checks that the model saw it before acknowledging for the agent.
   short form Go uses for `\n`, `\r`, `\t`, `\b` and `\f`. The class is the C0
   controls and U+2028 and U+2029, which Go's encoder escapes, and also DEL (U+007F),
   the controls U+0080 to U+009F, the bidirectional formatting controls
-  (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and the invisible format
-  characters (U+200B, U+2060 to U+2064, U+206A to U+206F, U+FEFF and the tag characters
-  U+E0000 to U+E007F, the last as a pair of escapes for the two UTF-16 units). It is
+  (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and the characters that draw
+  nothing (U+200B, U+2060 to U+2064, U+206A to U+206F, U+FEFF, U+034F, the Hangul fillers,
+  the format controls of shorthand and music, the reserved default-ignorable ranges and the
+  tag characters U+E0000 to U+E00FF; what lies beyond U+FFFF is written as a pair of escapes
+  for the two UTF-16 units; the table is `personTextRefused` in `adapterproto`). Variation
+  selectors are not in it, so an emoji reads back as it was. It is
   `adapterproto.RefusedInPersonText`, the same definition that decides what a
   display name or a description may hold, so the page and those fields never
   disagree about which characters are dangerous. A character beyond U+FFFF, should
@@ -412,7 +415,7 @@ The delivery side that these rules call into is described in
   the refused class (see above) are the exception: a message body is written by
   a sender who may not be trusted and the page may be printed in a terminal, where
   the C1 controls, DEL and the bidirectional controls act as themselves or reorder
-  the text around them, and the invisible format characters hide text from the person
+  the text around them, and the invisible characters hide text from the person
   that a model reading the page still reads. They are rare in honest text, and every budget is checked
   against the encoded page (the cut points of a message, each page and each part
   are measured on the bytes that will be printed), so an escape that costs six

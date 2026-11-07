@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.register",
+  "note": "display name with two variation selectors in a row after an emoji",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.register",
+    "params": {
+      "key": "k",
+      "display_name": "❤️️"
+    }
+  }
+}

@@ -48,8 +48,10 @@ width).
 - **Foreign text is sanitized by its caller, once, at the point of output.** The class of
   characters is the person-text rule of `adapterproto` (`RefusedInPersonText`, called, not
   copied), which covers the controls, the separators, the characters that reorder text and the
-  invisible format characters (tag characters, zero-width space, word joiner and the like) that a
-  person cannot see and an agent reading the same text can. There is no second list here, so
+  invisible characters (tag characters, zero-width space, word joiner, the fillers and the like)
+  that a person cannot see and an agent reading the same text can. Only the class of one
+  character is used: the rules of a whole name (variation selectors, a visible character) are
+  of validation, and a variation selector is shown as it is. There is no second list here, so
   what a source refuses and what this package escapes cannot drift. U+200D stays, to keep emoji
   sequences whole.
 - **Windows.** A colored console stream first has `ENABLE_VIRTUAL_TERMINAL_PROCESSING`

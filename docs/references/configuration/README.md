@@ -105,7 +105,7 @@ patch is merged into the current settings and the result is validated whole.
 
 | Setting | Meaning | Default (from) | Valid when |
 | ------- | ------- | -------------- | ---------- |
-| `name` | what the owner calls the node, shown beside its identifier in the owner's reads of the other nodes (`trust list`, `network show`) and to agents; `node show` shows it, or says that the node is called by its host name; empty means the node is called by its host name | none: the setting is absent | `adapterproto.ValidateDisplayName` accepts it (1 to 128 characters, none of the control, line-separator and bidirectional-control characters); a patch with `""` takes the name away |
+| `name` | what the owner calls the node, shown beside its identifier in the owner's reads of the other nodes (`trust list`, `network show`) and to agents; `node show` shows it, or says that the node is called by its host name; empty means the node is called by its host name | none: the setting is absent | `adapterproto.ValidateDisplayName` accepts it (1 to 128 characters, none of the control, line-separator, bidirectional-control and invisible characters, no variation selector first or right after another, and at least one visible character); a patch with `""` takes the name away |
 | `reply_permission` | whether a reply with evidence may reach an endpoint that did not ask for it | on | a boolean; it is written explicitly because the zero value of the rule it feeds is "off" |
 | `node_queue_limit` | unfinished deliveries the node holds before new sends are refused | 10,000 (`config`) | at least 1, and the reserve rule below |
 | `disk_reserve_bytes` | free space below which new work is refused | 256 MiB (`config`) | at least 1, and the reserve rule below |

@@ -743,8 +743,8 @@ sequences in it can clear the screen, rewrite lines, set the window title or wri
 clipboard. `termout` provides the sanitizer (`SanitizeLine` for a field of a line, `SanitizeText`
 for a message body, which keeps its line breaks and tabs): control characters (including DEL and
 U+0080 to U+009F), the line and paragraph separators, the bidirectional formatting characters, the
-invisible format characters that carry hidden text (tag characters, zero-width space, word joiner and
-the like) and bytes that are not UTF-8 are shown as visible escapes (`\x1b`, `\u202e`). The
+invisible characters that carry hidden text (tag characters, zero-width space, word joiner, the fillers
+and the like) and bytes that are not UTF-8 are shown as visible escapes (`\x1b`, `\u202e`). The
 console client shows the body of a received message through it (see
 [adapter-console](../adapter-console/README.md)), and the operations above show what an adapter wrote through it.
 

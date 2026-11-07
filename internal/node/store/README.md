@@ -65,8 +65,9 @@ engine applies the delivery rules and calls the writes.
   bounds.** `EndpointRecord.DisplayName` and `Description` are optional, omitted
   when empty, and limited to `adapterproto.MaxDisplayName` and
   `adapterproto.MaxDescription` characters of valid UTF-8 without a control,
-  bidirectional formatting or invisible format character, except that a description
-  keeps line feed and tab (`adapterproto.ValidateOptionalDisplayName` and
+  bidirectional formatting or invisible character and without a variation selector
+  first or right after another (a name also holds a visible character), except that a
+  description keeps line feed and tab and may be blank (`adapterproto.ValidateOptionalDisplayName` and
   `ValidateOptionalDescription`), on write and on read. A record whose text holds
   a character the rule has since come to refuse is a damaged body: the file is
   removed with a `corrupt_record` alert and the deliveries accepted for the endpoint

@@ -482,13 +482,33 @@ of copying the number.
 A display name also holds no character that a terminal acts on or that reorders
 text: no control character (U+0000 to U+001F, U+007F to U+009F), no line or
 paragraph separator (U+2028, U+2029), no bidirectional formatting control
-(U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and no invisible format
-character (the zero width space U+200B, the word joiner and invisible operators U+2060
-to U+2064, the deprecated format characters U+206A to U+206F, the byte order mark U+FEFF
-and the tag characters U+E0000 to U+E007F). The invisible ones move nothing, but they make
+(U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and no character that draws
+nothing: the zero width space U+200B, the word joiner and invisible operators U+2060
+to U+2064, the deprecated format characters U+206A to U+206F, the byte order mark U+FEFF,
+the tag characters U+E0000 to U+E007F, the combining grapheme joiner U+034F, the Hangul
+fillers (U+115F, U+1160, U+3164, U+FFA0), the withdrawn Khmer vowels U+17B4 and U+17B5,
+the shorthand format controls U+1BCA0 to U+1BCA3, the musical format controls U+1D173 to
+U+1D17A, and the ranges reserved for more of them (U+FFF0 to U+FFF8, U+E0080 to U+E00FF,
+U+E01F0 to U+E0FFF). They move nothing, but they make
 two names that look the same differ and hide text from a person, which a model that reads
 the same text still reads; the zero width joiner and non-joiner (U+200D, U+200C) stay
-legal, because they join emoji and spell words of Persian and Indic scripts. A name that has one
+legal, because they join emoji and spell words of Persian and Indic scripts.
+
+Two rules look at the text as a whole, not at one character. A variation selector
+(U+FE00 to U+FE0F, U+E0100 to U+E01EF, and the Mongolian free variation selectors U+180B
+to U+180D and U+180F) is legal after a character, as in an emoji such as the red heart
+(U+2764 U+FE0F), a keycap or a variant of an ideograph, but not at the start of the text
+and not right after another selector: no real text has two in a row, and a run of them is
+the known way to carry arbitrary bytes behind one visible character. A name (a display
+name, each text of a node profile, and the name and version of a runtime) also holds
+at least one visible character: a name made only of spaces (the Unicode white space
+characters, with the braille blank U+2800) and of the invisible characters that stay legal
+(the zero width joiner and non-joiner, the soft hyphen U+00AD, U+180E and selectors)
+cannot be told from another such name. A description is prose and may be blank, so only the
+selector rule applies to it. These two rules are of validation: the characters of the
+class alone decide what a terminal or a page writes as an escape.
+
+A name that breaks a rule
 is refused with `-32602`; it is never cleaned, because the node cannot know what
 the adapter meant. The rule is the `DisplayName` definition of the schema (a
 length and a pattern) and `adapterproto.ValidateDisplayName` in Go, which is the
@@ -500,8 +520,8 @@ it may span several lines and be indented, so a line feed (U+000A) and a horizon
 (U+0009) are legal in it, and every other character a display name refuses is refused
 there too, with `-32602` and never cleaned. That is every other control character (the
 carriage return, ESC, the rest of U+0000 to U+001F, DEL and U+0080 to U+009F),
-the line and paragraph separators, the bidirectional formatting controls and the invisible
-format characters. Its length is
+the line and paragraph separators, the bidirectional formatting controls and the characters
+that draw nothing; a variation selector is held to the order rule above. Its length is
 1 to `MaxDescription`. The reason: a description is shown to agents and may be shown to a
 person, in a command, a page or a log line, and a terminal acts on a control character in
 it and a reordering character changes what the person reads; a line feed and a tab only lay
@@ -509,7 +529,8 @@ text out. A peer's description is no more trusted than its display name, and hol
 the rule at every entry means whoever shows it later does not have to clean it first.
 
 The class has one definition, `adapterproto.RefusedInPersonText` (one code point) with
-`ValidatePersonText` and `PersonTextPattern`. The description is that class with line feed and
+`ValidatePersonText` (the characters, the selector order and the visible character) and
+`PersonTextPattern`. The description is that class with line feed and
 tab taken out, `adapterproto.RefusedInDescription` and `DescriptionPattern`, built from the
 same table, not a second list; the schema states them as the `DisplayName` and `Description`
 definitions, and `ValidateDescription` and `ValidateOptionalDescription` apply the rule to a
@@ -628,7 +649,7 @@ what they took away:
   that is no longer a known code is refused by validation like any other unknown one;
   an adapter that reads a record whose form it does not know answers `record_unreadable`.
 
-Three rules were **tightened** in place, and each is a change that can refuse what was
+Four rules were **tightened** in place, and each is a change that can refuse what was
 valid. The first: a `display_name` with a control or bidirectional formatting character, which
 `endpoint.register` accepted before, is refused with `-32602`, and so is a `description`
 with one other than the line feed and the tab it may hold. It is done in place because no
@@ -655,6 +676,21 @@ cleaned. It is done in place for the same reason as the others, and the adapters
 repository register plain names and descriptions. The node also reads its own endpoint
 records under the rule: a stored name or description that holds one of these characters makes
 the record damaged (see the storage reference).
+
+The fourth: more characters that draw nothing or a blank join the class (U+034F, U+115F,
+U+1160, U+17B4, U+17B5, U+3164, U+FFA0, U+1BCA0 to U+1BCA3, U+1D173 to U+1D17A and the
+reserved ranges U+FFF0 to U+FFF8, U+E0080 to U+E00FF and U+E01F0 to U+E0FFF), and two rules
+of the whole text are added: a variation selector is never first and never right after
+another, and a name holds at least one visible character. The reason: these characters
+draw nothing and serve no name; a run of variation selectors is the known way to hide
+arbitrary bytes after one emoji and to hide instructions from a model, and no real text has
+two in a row; a name of only blank or invisible characters cannot be told apart from
+another. A single selector after a character stays legal, since emoji, keycaps and
+ideograph variants need it. The schema pattern of the display name and of the description
+is written over the sequence (a character, then at most one selector), in the subset that
+RE2 and ECMAScript with the `u` flag read alike. A text that breaks a rule is refused where
+it enters, as for the others, and a stored endpoint record that does is damaged (see the
+storage reference). It is done in place for the same reason as the others.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
