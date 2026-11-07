@@ -125,6 +125,11 @@ whether `codex` itself is found is first shown when a session is created. If the
 daemon cannot find `codex` or `claude`, see
 [Troubleshooting](operations.md#troubleshooting).
 
+If you will also direct agents from a Claude Code or Codex session that you open yourself,
+run `sidera adapter setup claude` (or `codex`) once the instance has run; it asks before it
+changes your client's configuration. See
+[The controller](agents.md#the-controller-a-session-you-started-yourself).
+
 The adapter packages are in `~/sidera-release/adapters/` when you extracted the
 archive as described in [Install](install.md#put-the-programs-on-your-path)
 (on Windows, `%USERPROFILE%\sidera-release\adapters\`).
@@ -462,7 +467,7 @@ Sessions do not close by themselves. When you are done with one, run
   other machines, and what to put in presets.
 - [The controller](agents.md#the-controller-a-session-you-started-yourself): let a
   Claude Code or Codex session you open yourself direct the others, and be woken when
-  they reply.
+  they reply. Run `sidera adapter setup claude` (or `codex`) once for it.
 - [Operations](operations.md): health checks, upgrades, backups and troubleshooting.
 - Or give [`docs/agent-guide.md`](../agent-guide.md) to your own agent and let it
   do the setup.

@@ -41,6 +41,9 @@ Sidera 0.15.0 is the current release; 0.8.0 was the first public release.
 - The console bridge: the owner starts sessions and reads replies from a terminal.
 - A Claude Code or Codex session you opened yourself becomes a controller with an
   endpoint of its own, and is woken when a reply arrives.
+- Client setup: `sidera adapter setup` registers Sidera with Claude Code, installs it as a
+  plugin in Codex and places the Skill for Hermes, asking about each change;
+  `sidera update` keeps it current.
 - Dynamic adapter install, replace, configuration and removal, while Sidera runs.
 - `sidera update` upgrades an installation from a release archive in place, and
   `sidera daemon restart` restarts the daemon.

@@ -64,11 +64,24 @@ conversation. Ask once, say what you will do and why, and wait.
 10. **Choosing the working directory** (`project_dir` for Claude, `cwd` for Codex)
     that sessions started by trusted nodes will work in. Ask which directory to use.
 11. **Persistent changes outside Sidera's own directories:** editing a shell
-    profile, changing the Windows user `PATH`, registering a scheduled task, adding
-    the `sidera` MCP server to Claude Code or Codex, or allowing its tools there (the
-    rule `mcp__sidera` in `~/.claude/settings.json`, the line
-    `default_tools_approval_mode = "approve"` in `~/.codex/config.toml`). Ask once
-    before the first one and name the file or setting.
+    profile, changing the Windows user `PATH`, registering a scheduled task, or
+    changing the configuration of Claude Code or Codex. Ask once before the first one
+    and name the file or setting. For Claude Code and Codex, the supported way is
+    `sidera adapter setup claude` or `sidera adapter setup codex`, never editing their
+    files by hand. Setup shows every change it would make and asks `y/N` about each
+    one that touches the client's configuration, so the owner answers item by item:
+    run it where the owner can answer, or pass `--yes` (which accepts every item, and
+    which a run without a terminal needs) only after the owner agreed to the whole
+    list that `sidera adapter setup <instance>` shows. What it changes:
+    - Claude Code: registers the `sidera` MCP server for the user (`claude mcp add
+      --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in Claude
+      Code's `settings.json`, and installs a plugin that carries the Sidera Skill.
+    - Codex: adds a plugin marketplace `sidera` and installs the plugin `sidera@sidera`,
+      whose `.mcp.json` carries the `sidera` MCP server with its tools approved in
+      advance (`default_tools_approval_mode = "approve"`), and a Skill. Setup runs the
+      `codex` commands and edits no Codex file by hand. If the owner had added a `sidera`
+      server by hand that differs from the plugin's, it offers `codex mcp remove
+      sidera`, because that entry would hide the plugin's.
 
 Also ask before you delete anything under `~/.sidera` (on Windows `%LOCALAPPDATA%\Sidera`; the node's
 keys and state)
@@ -224,10 +237,15 @@ Choose A (release archive) or B (source).
    programs for Codex, Claude Code and Hermes are inside them and are not copied by hand.
 
    From 0.12.0 on, upgrade a node installed this way with `sidera update` (ask your owner first: it
-   replaces the programs, restarts the daemon and installs the new adapter packages;
-   `sidera update --check` only reads). It needs a terminal or `--yes`, refuses to run with
-   `sudo` or from a symbolic link, and does the missing steps again if it is interrupted;
-   see [Upgrade](guide/operations.md#upgrade).
+   replaces the programs, restarts the daemon, installs the new adapter packages and
+   refreshes what `sidera adapter setup` put in Claude Code, Codex and Hermes, which it
+   does without asking; `sidera update --check` only reads). It needs a terminal or `--yes`,
+   refuses to run with `sudo` or from a symbolic link, and does the missing steps again if it
+   is interrupted; see [Upgrade](guide/operations.md#upgrade). After an upgrade to 0.15 or
+   later from an earlier release, nothing is recorded to refresh yet: ask your owner, then
+   run `sidera adapter setup <instance>` once for each Claude Code, Codex and Hermes
+   instance on the node (item 11 of "Ask your owner before" for what it changes in Claude
+   Code and Codex; [Hermes](guide/adapters.md#hermes) for the profiles).
 
 ### B. Build from source
 
@@ -725,6 +743,11 @@ recv       {"wait_s": 60}                                 acknowledge the page a
 control    {"to": "<session-address>", "signal": "session.close"}    when you are done
 ```
 
+If your owner will also direct agents from a Claude Code or Codex session of their
+own on this machine, propose `sidera adapter setup claude` (or `codex`) as the last step
+and run it only after a yes (item 11 of "Ask your owner before"; why it is needed is in
+Part 2 and in [The controller](guide/agents.md#the-controller-a-session-you-started-yourself)).
+
 Report to your owner: this machine's node id, the paired node ids, the preset
 names, and the result of this step.
 
@@ -779,9 +802,11 @@ them there without your owner's yes (see "Ask your owner before").
 3. **Always acknowledge the page.** `recv` does not acknowledge. Until you do, the
    next `recv` returns the same page again at once. Acknowledge with
    `ack` (`sidera ack <lease>`), or pass the page's lease to your next `recv`
-   (`ack_lease` in MCP, `--ack <lease>` on the command line). The exception is the
-   owner's console: `sidera-adapter-console recv` acknowledges what it printed for
-   you.
+   (`ack_lease` in MCP, `--ack <lease>` on the command line). `ack` can name `items`
+   (each a `message_id` and a `part`; on the command line
+   `sidera ack <lease> <message-id>:<part>`) to acknowledge only some of a page. The
+   exception is the owner's console: `sidera-adapter-console recv` acknowledges what it
+   printed for you.
 4. **Answer with `reply`, not by printing.** `reply` takes the message id and the
    body (`sidera reply <message-id> --body <text>`). The node sends it to the
    message's sender. Reply even when you only report a failure.
@@ -803,17 +828,24 @@ them there without your owner's yes (see "Ask your owner before").
    ```
 
    (MCP: `control` with `to`, `signal` set to `session.create`, `preset`, `body`.)
-   Use a preset that exists on that node. Put the whole task in the first message:
-   it reaches the new session at once, so do not send it again.
-8. **Wait for answers with `recv`.** `control` returns at once with the message id
+   Use a preset that exists on that node. To learn its presets, call `control` with
+   `to` set to the runtime endpoint and `signal` set to `endpoint.status` (command line:
+   `sidera control <runtime-address> endpoint.status`), then `status` with the returned
+   message id: the control reply lists `presets`, each with a `name` and whether it is
+   `available`. Put the whole task in the first message: it reaches the new session at
+   once, so do not send it again.
+8. **Know how you will get the answer.** `control` returns at once with the message id
    only: its result does not carry the new session's address. To learn the address, call
    `status` with the message id (MCP: `status` with `message_id`): the control reply
    appears there within seconds, as soon as the first message is in the new session, long
    before the task ends; the `from` of the new session's first message to you is its address too. The answer
-   to the task is a message, not the control reply. Call `recv` with a
-   wait (`wait_s=60`) in a loop, passing `ack_lease` from the previous page, until
-   the answer arrives. A runtime caps the wait (see `recv_wait_max_s` in `me`), so
-   `recv` can return early with no messages; call it again.
+   to the task is a message, not the control reply. After sending, you may end your
+   turn: a notice wakes you when the answer arrives (rule 15). Wait inside the turn
+   only when you need the answer now, or when the first result of your first Sidera
+   tool call says the node cannot wake the session. Then call `recv` with a wait
+   (`wait_s=60`) in a loop, passing `ack_lease` from the previous page, until the answer
+   arrives. A runtime caps the wait (see `recv_wait_max_s` in `me`), so `recv` can return
+   early with no messages; call it again only while you are waiting for an answer.
 9. **Name arguments exactly.** In MCP `recv` takes `wait_s` (an integer), `ack_lease`,
    `msg` and `part`. An unknown argument is refused with an error that lists the
    accepted names; read it and correct the call. An empty page after `wait_s=60`
@@ -853,8 +885,8 @@ them there without your owner's yes (see "Ask your owner before").
       minutes by default) is rejected back to its sender as `backlog_expired`: the
       work is done and the report is lost.
     - **If the node cannot wake you,** the first result of your first Sidera tool
-      call says so, with the reason. Then nothing interrupts you: call `recv` with a
-      wait inside a turn (`wait_s=60`, rule 8) until the answers arrive. If you use
+      call says so, with the reason. Then nothing interrupts you: wait inside the turn
+      with `recv` and a wait (`wait_s=60`, rule 8) until the answers arrive. If you use
       only `sidera` commands and no MCP tool, every command attaches you again with the
       wake information, so you can be woken, but nothing repeats it between commands:
       your endpoint closes a queue time after your last command when nothing is waiting
@@ -881,8 +913,10 @@ Your owner asks: "Ask the agent on node `<node-id>` to compute 37*41+11."
 1. `sidera directory --node <node-id>`: take the address of the `runtime` endpoint
    that accepts `session.create`.
 2. `sidera control <address> session.create --preset light --body 'Compute 37*41+11 and reply to me with only the number, using sidera reply.'`
-3. `sidera recv --wait 60` and read the page; `sidera recv --wait 60 --ack <lease>`
-   until the number arrives (this acknowledges the earlier page too).
+3. The owner wants the number now, so wait inside the turn: `sidera recv --wait 60` and
+   read the page; `sidera recv --wait 60 --ack <lease>` until the number arrives (this
+   acknowledges the earlier page too). A controller that does not need it now may end its
+   turn instead and read the answer when the notice wakes it (rule 15).
 4. `sidera reply <owner-message-id> --body '1528'`, naming the result.
 
 ## More

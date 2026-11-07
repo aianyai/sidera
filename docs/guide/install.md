@@ -187,12 +187,16 @@ run the same release. A program built from source without release settings repor
 
 A node installed from a release archive is upgraded with `sidera update`: it fetches the
 latest release, checks its signature against the key built into the program, replaces the
-programs next to the running one, restarts the running daemon (`sidera daemon restart`) and
-installs the new adapter packages, asking first. `sidera update --check` only reports.
+programs next to the running one, restarts the running daemon (`sidera daemon restart`),
+installs the new adapter packages, asking first, and refreshes what `sidera adapter setup`
+put in your Claude Code, Codex or Hermes. `sidera update --check` only reports.
 `sidera version --json` says `"distribution":"archive"` for a program it can replace; a
 program built from source is rebuilt, and a release before 0.12.0 has no `update` and is
-installed once by hand. The procedure, the refusals and how to go back are in
-[Upgrade](operations.md#upgrade).
+installed once by hand. After the upgrade to 0.15, the first release with a client setup,
+run `sidera adapter setup <instance>` once for each Claude Code, Codex and Hermes
+instance: until then the update has nothing recorded to refresh. The procedure, the
+refusals and how to go back are in [Upgrade](operations.md#upgrade); what the setup does is
+in [Setting up an adapter's client](adapters.md#setting-up-an-adapters-client).
 
 ## Build from source
 
