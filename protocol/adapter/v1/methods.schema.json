@@ -208,12 +208,12 @@
       "properties": {
         "runtime": {
           "type": "object",
-          "description": "What the adapter found: the runtime's name and version.",
+          "description": "What the adapter found: the runtime's name and version, each 1 to 64 characters under the character rule of a display name, because both reach other nodes and their terminals in the directory.",
           "required": ["name", "version"],
           "additionalProperties": false,
           "properties": {
-            "name": { "type": "string", "minLength": 1, "maxLength": 64 },
-            "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+            "name": { "$ref": "types.schema.json#/$defs/DisplayName", "maxLength": 64 },
+            "version": { "$ref": "types.schema.json#/$defs/DisplayName", "maxLength": 64 }
           }
         },
         "auth": { "$ref": "types.schema.json#/$defs/AuthState" },

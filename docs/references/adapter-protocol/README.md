@@ -509,6 +509,15 @@ definitions, and `ValidateDescription` and `ValidateOptionalDescription` apply t
 description. A line feed and a tab are the reader's to lay out: a place that shows a
 description on one line decides how to show them.
 
+The `name` and `version` of the `runtime` an `adapter.probe` result reports are 1 to 64
+characters each and follow the character rule of a display name, not only its class but the
+same definition: `RuntimeInfo.Validate` applies `ValidatePersonText` to both, and the schema
+points both members at the `DisplayName` definition with the shorter length. The node passes
+them on in its directory answers, so they reach other nodes and their terminals as text a
+person reads. A probe result that breaks the rule is refused as a whole, which the host logs
+as a failed probe, and the adapter is left unprobed; see the
+[adapter-host reference](../adapter-host/README.md).
+
 `MaxAckItems` exports the existing acknowledgement limit of 1024 entries. The
 adapter request and result validators, the observed-receive result, and other
 interfaces accepting these acknowledgement values use the same bound; exposing
@@ -603,8 +612,8 @@ what they took away:
   that is no longer a known code is refused by validation like any other unknown one;
   an adapter that reads a record whose form it does not know answers `record_unreadable`.
 
-One rule was **tightened** in place, and this is a change that can refuse what was
-valid: a `display_name` with a control or bidirectional formatting character, which
+Two rules were **tightened** in place, and each is a change that can refuse what was
+valid. The first: a `display_name` with a control or bidirectional formatting character, which
 `endpoint.register` accepted before, is refused with `-32602`, and so is a `description`
 with one other than the line feed and the tab it may hold. It is done in place because no
 implementation outside this repository exists, and the adapters in it register plain
@@ -612,6 +621,13 @@ names and descriptions; none that was ever registered by them is affected. The
 `display_name` and `description` members of a node's answer to a directory query are
 tightened the same way: the node that asked refuses the whole answer that carries a text
 breaking the rule.
+
+The second: the `name` and `version` of the `runtime` in an `adapter.probe` result are held to
+the same characters, where only their length was checked. The runtime's name and version now
+reach other nodes and their terminals through the directory, and refusing them where they
+enter keeps one bad probe from making the node's whole directory answer impossible to encode
+for every node that asks. It is done in place for the same reason, and the runtimes the
+adapters in this repository report are plain names and versions.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,

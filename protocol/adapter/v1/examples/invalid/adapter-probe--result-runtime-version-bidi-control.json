@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "runtime version with a right-to-left override",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "runtime": { "name": "n", "version": "1‮2" },
+      "auth": "valid",
+      "dependencies": [],
+      "presets": [],
+      "tool_probes": []
+    }
+  }
+}

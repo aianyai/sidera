@@ -629,18 +629,20 @@ func (p ProbeParams) Validate() error {
 }
 
 // RuntimeInfo is what a probe found out about the native runtime: its name and
-// version, nothing more.
+// version, nothing more. Both reach other nodes and their terminals in the
+// directory, so each is text shown to a person.
 type RuntimeInfo struct {
 	// Name is the runtime's product name.
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// Validate checks the fields.
+// Validate checks the fields: each is 1 to 64 characters and none is refused by
+// RefusedInPersonText, the rule of a display name.
 func (r RuntimeInfo) Validate() error {
 	var c checker
-	c.field("name", strLen(r.Name, 1, maxNameLen))
-	c.field("version", strLen(r.Version, 1, maxVersionLen))
+	c.field("name", personTextLen(r.Name, maxNameLen))
+	c.field("version", personTextLen(r.Version, maxVersionLen))
 	return c.err
 }
 

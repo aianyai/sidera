@@ -168,8 +168,13 @@ func textPattern(kept []rune) string {
 // ValidateDisplayName checks a display name: MaxDisplayName characters at most,
 // at least one, none of them refused by RefusedInPersonText. The one rule of every
 // display name the node reads, stores, forwards or prints.
-func ValidateDisplayName(s string) error {
-	if err := strLen(s, 1, MaxDisplayName); err != nil {
+func ValidateDisplayName(s string) error { return personTextLen(s, MaxDisplayName) }
+
+// personTextLen checks a text shown to a person of 1 to most characters: the
+// length bound of a display name, or of another short field that follows its
+// character rule.
+func personTextLen(s string, most int) error {
+	if err := strLen(s, 1, most); err != nil {
 		return err
 	}
 	return ValidatePersonText(s)

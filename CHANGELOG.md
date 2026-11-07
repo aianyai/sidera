@@ -8,6 +8,16 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Security
+
+- The name and version of the runtime that an adapter reports in its probe result are now held to
+  the characters of a display name: a control character (an escape sequence, a line break, DEL, a
+  control in the range U+0080 to U+009F), a line or paragraph separator or a text-direction control
+  makes the whole probe result refused, and the node logs a failed probe. They are shown to other
+  nodes in the directory, and one such adapter would otherwise have made the node's whole directory
+  answer unreadable to every node that asks. An adapter must report a runtime name and version
+  without those characters; the adapters shipped with Sidera already do.
+
 ## [0.16.0] - 2026-11-07
 
 The human output of every command changed in 0.16: `sidera` and `sidera-adapter-console` now

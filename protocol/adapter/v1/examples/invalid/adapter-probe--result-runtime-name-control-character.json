@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "runtime name with an escape character",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "runtime": { "name": "a\u001b[2Jb", "version": "1" },
+      "auth": "valid",
+      "dependencies": [],
+      "presets": [],
+      "tool_probes": []
+    }
+  }
+}

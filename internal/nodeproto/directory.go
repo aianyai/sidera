@@ -293,11 +293,6 @@ func adapterFromWire(w *directoryAdapterWire) (*DirectoryAdapter, error) {
 		if err := rt.Validate(); err != nil {
 			return nil, invalid("runtime: %v", err)
 		}
-		// The probe bounds the length of both; both are shown to a person, so they
-		// are held to the character rule of a display name as well.
-		if err := adapterproto.ValidatePersonText(rt.Name + rt.Version); err != nil {
-			return nil, invalid("runtime: %v", err)
-		}
 		a.Runtime = &rt
 	}
 	return a, nil

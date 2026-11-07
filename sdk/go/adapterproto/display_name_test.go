@@ -10,8 +10,8 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// TestDisplayNameRule holds the whole rule of a display name and of a
-// description: the characters they refuse, and the length of a display name in
+// TestDisplayNameRule holds the whole rule of a display name, of a
+// description and of the name and version of a probed runtime: the characters they refuse, and the length of a display name in
 // characters. A text with a control or a bidirectional formatting character is
 // refused, never cleaned, because it would reach a terminal as an escape
 // sequence, a line break or reordered text.
@@ -91,6 +91,15 @@ func TestDisplayNameRule(t *testing.T) {
 			}
 			if c.nameOnly {
 				return
+			}
+			// The name and the version a probe reports reach other nodes' terminals
+			// through the directory, so each is held to the characters of a display
+			// name. Their length is 1 to 64, which bounds_test covers.
+			if err := (adapterproto.RuntimeInfo{Name: c.in, Version: "1"}).Validate(); (err == nil) != c.ok {
+				t.Errorf("RuntimeInfo.Validate(name %q) = %v, accepted should be %v", c.in, err, c.ok)
+			}
+			if err := (adapterproto.RuntimeInfo{Name: "n", Version: c.in}).Validate(); (err == nil) != c.ok {
+				t.Errorf("RuntimeInfo.Validate(version %q) = %v, accepted should be %v", c.in, err, c.ok)
 			}
 			// A description is only present when it is at least one character.
 			if err := adapterproto.ValidateDescription(c.in); (err == nil) != c.descOK {
