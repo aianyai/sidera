@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 const (
@@ -541,7 +542,7 @@ func (c *command) adapterSetup(ctx context.Context, args []string) error {
 	if o.yes && !asks {
 		return usage("--yes answers the questions of setup and of --remove; --check and --refresh ask none")
 	}
-	if asks && !o.yes && !isTerminal(c.Stdin) {
+	if asks && !o.yes && !termout.IsTerminal(c.Stdin) {
 		return noTerminalToAsk("adapter setup")
 	}
 	home, err := c.dataDir()

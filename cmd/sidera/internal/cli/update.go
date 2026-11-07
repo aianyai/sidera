@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 type updateFlags struct {
@@ -48,7 +49,7 @@ func (c *command) update(ctx context.Context, args []string) error {
 	if err != nil {
 		return usage("--version: " + err.Error())
 	}
-	if !o.check && !o.yes && !isTerminal(c.Stdin) {
+	if !o.check && !o.yes && !termout.IsTerminal(c.Stdin) {
 		return noTerminalToAsk("update")
 	}
 	keys, err := verify.EmbeddedKeys()

@@ -64,7 +64,7 @@ var helpOrder = []string{"init", "daemon", "daemon stop", "daemon restart", "me"
 
 func (c *command) printHelp(args []string) error {
 	if len(args) == 0 {
-		if _, err := fmt.Fprintln(c.Stdout, "Usage: sidera [--home <directory>] [--json] <command> [arguments]\nGlobal flags may precede or follow the command. Use <command> --help for arguments and an example."); err != nil {
+		if _, err := fmt.Fprintln(c.Stdout, "Usage: sidera [--home <directory>] [--json] [--color <when>] <command> [arguments]\nGlobal flags may precede or follow the command; <when> is auto, always or never. Use <command> --help for arguments and an example."); err != nil {
 			return err
 		}
 		for _, name := range helpOrder {

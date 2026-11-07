@@ -14,7 +14,11 @@ stdin/stdout ownership to the MCP peer and borrows stderr for diagnostics. MCP
 process failures always use stderr, including with `--json`; tool and RPC failures
 remain protocol messages.
 
-Global flags are removed before dispatch. Command discovery registers the local
+Global flags (`--home`, `--json`, `--color`, `--help`) are removed before dispatch by `readGlobals`. `--color`
+sets `command.color`, and `readGlobals` builds the `out` and `errOut` `termout.Stream`s from it and the
+environment, once per run and even when a flag is wrong, since the error is reported through them. They
+are what a command's human output is written through (`Stdout` and `Stderr` stay the raw writers); the
+commands move onto them as their output is restyled. Command discovery registers the local
 flags once; global scanning reads their arity through `FlagSet.Lookup` and the
 standard-library `IsBoolFlag` convention, then local parsing uses that same set
 and its bound values. A local value stays attached, including a body spelled
@@ -46,7 +50,7 @@ and its bound values. A local value stays attached, including a body spelled
   asks the confirmation (the plan to standard error, the answer from stdin), writes the
   report, and implements the run's `Node` over the management client, opened at its first
   call so that a run that stops early never needs the data directory. It reads the answers
-  loosely. `terminal*.go` say whether stdin is a terminal, which a run without `--yes` needs.
+  loosely. A run without `--yes` needs a terminal on stdin, which `termout.IsTerminal` says.
 - `adapter_setup.go`: `adapter setup`. `openSetupSession` asks the daemon (`adapters.setup_info`) how the
   instance's setup runs and builds the one request every call of the command shares; `setupSession.call`
   runs the program (`execSetup`: argv exec'd directly, request on stdin, result on stdout, the tail of

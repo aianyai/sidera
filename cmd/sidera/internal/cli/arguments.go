@@ -102,6 +102,8 @@ func globalOption(arg string) (globalFlag, bool) {
 		return globalFlag{name: "help"}, true
 	case arg == "--home" || strings.HasPrefix(arg, "--home="):
 		return globalFlag{name: "home", value: value, takesNext: !has}, true
+	case arg == "--color" || strings.HasPrefix(arg, "--color="):
+		return globalFlag{name: "color", value: value, takesNext: !has}, true
 	case arg == "--json" || strings.HasPrefix(arg, "--json="):
 		if !has {
 			value = "true"

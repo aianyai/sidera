@@ -19,6 +19,10 @@ protocol has a version of its own.
   outside, the written form of times, sizes and durations, and `IsTerminal`. It is built for macOS,
   Linux and Windows, and gives plain output elsewhere. The SDK module now requires
   `golang.org/x/text`.
+- `sidera --color auto|always|never` (default `auto`; before or after the command) chooses whether the
+  program colors its output for people. `auto` colors a terminal and nothing else, and follows
+  `NO_COLOR`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `CLICOLOR=0` and `TERM=dumb`; standard output and
+  standard error are decided separately. Nothing a command prints changes yet.
 
 ### Changed
 

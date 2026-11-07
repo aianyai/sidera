@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 func TestGlobalFlagsUseTheRegisteredLocalArity(t *testing.T) {
@@ -129,4 +131,42 @@ func orEmpty(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+func TestColorFlagIsGlobalAndTakesBothSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		want    termout.ColorMode
+		rest    []string
+		wantErr string
+	}{
+		{args: []string{"me"}, want: termout.ColorAuto, rest: []string{"me"}},
+		{args: []string{"--color", "always", "me"}, want: termout.ColorAlways, rest: []string{"me"}},
+		{args: []string{"me", "--color=never"}, want: termout.ColorNever, rest: []string{"me"}},
+		{args: []string{"--color=auto", "send", "--body", "--color"}, want: termout.ColorAuto, rest: []string{"send", "--body", "--color"}},
+		{args: []string{"me", "--color"}, wantErr: "--color needs auto, always or never"},
+		{args: []string{"me", "--color", "sometimes"}, wantErr: "--color needs auto, always or never"},
+		{args: []string{"me", "--color="}, wantErr: "--color needs auto, always or never"},
+		{args: []string{"--color", "always", "me", "--json=maybe"}, want: termout.ColorAlways, wantErr: "--json needs a boolean"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			c := command{Config: Config{Getenv: func(string) string { return "" }}}
+			rest, err := c.readGlobals(tc.args)
+			// The error is reported through the streams, so they exist whether or not the
+			// flags could be read.
+			if c.out == nil || c.errOut == nil {
+				t.Fatalf("streams not built: out %v, errOut %v", c.out, c.errOut)
+			}
+			var u *usageError
+			if tc.wantErr != "" {
+				if !errors.As(err, &u) || u.message != tc.wantErr || c.color != tc.want {
+					t.Fatalf("err = %v, color %v; want usage error %q, color %v", err, c.color, tc.wantErr, tc.want)
+				}
+				return
+			}
+			if err != nil || c.color != tc.want || !reflect.DeepEqual(rest, tc.rest) {
+				t.Fatalf("color %v, rest %q, err %v; want %v, %q", c.color, rest, err, tc.want, tc.rest)
+			}
+		})
+	}
 }

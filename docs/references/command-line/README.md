@@ -6,7 +6,7 @@ no CLI framework or second implementation of the local HTTP protocol.
 
 ## Commands
 
-Global flags are `--home <directory>`, `--json` and `-h`/`--help`. They may
+Global flags are `--home <directory>`, `--json`, `--color <when>` and `-h`/`--help`. They may
 precede or follow a subcommand. A value following a local flag remains that
 flag's value, even if spelled `--json` or `--home`. The command registers each
 local flag once; both global scanning and local parsing consult that same
@@ -504,6 +504,58 @@ failures use `daemon.ExitCode`; a fatal storage failure retains 74. All owned
 clients and daemon resources are closed before `main` calls `os.Exit`. The adapter programs map
 into the same table; see [Conventions of every program](#conventions-of-every-program).
 
+## Human output
+
+The decoration and color rules below are implemented once, by the SDK package
+[`termout`](../../../sdk/go/termout/README.md). `sidera` builds its standard output and its
+standard error as two `termout` streams, once per run, and each stream decides for itself.
+No command writes through them yet; the commands move over as their output is restyled, and
+each such change describes its layout here.
+
+**Decorated** means that lines may carry markers (`✓` done, `!` attention, `✗` failure). A stream
+is decorated when it is a terminal, or when it is colored. It is not decorated when it is a pipe
+or a file that nothing forces color on, so a person at a terminal and a script reading a pipe see
+the same words and layout, and only the person sees the marks. Take the markers and colors away
+and every line still means what it meant.
+
+**Colored** means that ANSI color sequences are written (only the eight basic colors, bold and dim).
+A colored stream is always decorated. It is decided for each stream, the first rule that matches
+winning:
+
+1. `--color never`: no color;
+2. `--color always`: color;
+3. `NO_COLOR` set and not empty: no color;
+4. `CLICOLOR_FORCE` or `FORCE_COLOR` forces: color. A variable forces when it is set and is neither
+   empty, `0` nor `false`; `FORCE_COLOR=0` switches color off in Node.js, and the environments that
+   run agents are built on it;
+5. `CLICOLOR=0` or `TERM=dumb`: no color;
+6. otherwise color exactly when the stream is a terminal.
+
+`NO_COLOR` removes color and nothing else: a terminal stays decorated. Standard output may be
+colored while standard error, redirected to a file, is not. Variables that merely announce an agent
+(`AI_AGENT`, `CLAUDECODE`) play no part, because they are unauthenticated hints; what protects an
+agent from escape sequences is that the shell of an agent is a pipe, not a terminal, and that Codex
+sets `NO_COLOR=1` and `TERM=dumb` for the commands it runs. Only the forcing choices (`--color
+always`, `CLICOLOR_FORCE`, `FORCE_COLOR`) put sequences, and with them the markers, into such a
+stream.
+
+**`--color auto|always|never`** is a global flag (default `auto`), accepted before or after the
+command like `--home` and `--json`, as `--color always` or `--color=always`. Any other value is a
+usage error. A Git-Bash or mintty window on Windows presents its terminal to the program as a pipe
+and so gets output that is not decorated; `--color always` asks for the decorations there. On
+Windows a colored console has virtual terminal processing switched on first; a console that
+refuses leaves the stream decorated and not colored.
+
+**Text the program did not write itself** has to be sanitized before it is shown, because escape
+sequences in it can clear the screen, rewrite lines, set the window title or write to the
+clipboard. `termout` provides the sanitizer (`SanitizeLine` for a field of a line, `SanitizeText`
+for a message body, which keeps its line breaks and tabs): control characters (including DEL and
+U+0080 to U+009F), the line and paragraph separators, the bidirectional formatting characters, the
+invisible format characters that carry hidden text (tag characters, zero-width space, word joiner and
+the like) and bytes that are not UTF-8 are shown as visible escapes (`\x1b`, `\u202e`). So far the
+console client shows the body of a received message through it (see
+[adapter-console](../adapter-console/README.md)).
+
 ## Conventions of every program
 
 Sidera has five programs: `sidera`, and the adapter programs `sidera-adapter-console`,
@@ -537,10 +589,11 @@ Windows `sidera-adapter-claude` is started as a helper of the SDK's interrupt wi
 its own, which `process.HandleHelperInvocation` answers before any command is read; its exit code 3
 means the process to interrupt is not running, and no person types that invocation.)
 
-**Global flags.** Only `sidera` has global flags: `--home <directory>`, `--json` and `-h`/`--help`,
-before or after the command (see [Commands](#commands)). The adapter programs have none. The
-client commands of the console take `--home` and `--instance` after the command name only (a known
-difference: `--home` before the command is a usage error). A flag of the adapter programs is never accepted before the command.
+**Global flags.** Only `sidera` has global flags: `--home <directory>`, `--json`, `--color <when>` and
+`-h`/`--help`, before or after the command (see [Commands](#commands)). The adapter programs have none,
+and so no `--color`. The client commands of the console take `--home` and `--instance` after the command
+name only (a known difference: `--home` before the command is a usage error). A flag of the adapter
+programs is never accepted before the command.
 
 **`--json`.** Every command of `sidera` that prints a result takes it (`adapter setup` writes the object described in [Adapter setup](#adapter-setup)), except `mcp`, where it has no effect, and `recv`, which writes the node's page unchanged in both
 modes (see [Output and errors](#output-and-errors) for the shapes). Of the adapter programs only

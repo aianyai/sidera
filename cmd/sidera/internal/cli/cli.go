@@ -25,6 +25,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/release"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 // Config supplies the process streams and environment. Run borrows them.
@@ -56,6 +57,11 @@ type command struct {
 	arguments  *commandArguments
 	// restart is set when the foreground daemon ended because it was asked to restart.
 	restart bool
+	// color is the value of --color. out and errOut are the program's two outputs with
+	// what is known about each (decorated, colored, how wide), built once per run from it
+	// and the environment; they write to Stdout and Stderr, which stay the raw writers.
+	color       termout.ColorMode
+	out, errOut *termout.Stream
 }
 type usageError struct{ message string }
 
@@ -79,8 +85,7 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 	if len(argv) > 0 && strings.TrimSuffix(filepath.Base(argv[0]), ".exe") == "siderad" {
 		args = append([]string{"daemon"}, args...)
 	}
-	c.arguments = arguments(args)
-	args, err := c.globals(args, c.arguments.flags)
+	args, err := c.readGlobals(args)
 	if err == nil {
 		if c.help {
 			err = c.printHelp(args)
@@ -141,6 +146,17 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 	return e.Category.ExitCode()
 }
 
+// readGlobals removes the global flags from args and builds the two output streams.
+// The streams exist even when a flag is wrong, because the error is reported through
+// them; a --color that could not be read leaves the mode at auto.
+func (c *command) readGlobals(args []string) ([]string, error) {
+	c.arguments = arguments(args)
+	args, err := c.globals(args, c.arguments.flags)
+	c.out = termout.Open(c.Stdout, c.color, c.Getenv)
+	c.errOut = termout.Open(c.Stderr, c.color, c.Getenv)
+	return args, err
+}
+
 func (c *command) globals(args []string, local *flag.FlagSet) ([]string, error) {
 	var out []string
 	// A value belongs to its preceding local flag, even when it happens to be
@@ -164,6 +180,19 @@ func (c *command) globals(args []string, local *flag.FlagSet) ([]string, error) 
 				option.value = args[i]
 			}
 			c.home = option.value
+		case "color":
+			if option.takesNext {
+				i++
+				if i == len(args) {
+					return nil, usage("--color needs auto, always or never")
+				}
+				option.value = args[i]
+			}
+			mode, err := termout.ParseColorMode(option.value)
+			if err != nil {
+				return nil, usage("--color needs auto, always or never")
+			}
+			c.color = mode
 		case "json":
 			b, err := strconv.ParseBool(option.value)
 			if err != nil {
