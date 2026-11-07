@@ -998,6 +998,18 @@ that is not that list is an error, since reading it as "none" would plan to add 
 marketplace that exists), `codex plugin list --json`, `codex mcp list --json` and, for the
 approval mode that its JSON does not carry, the text of `codex mcp get sidera`.
 
+**A listing that is slow.** Codex 0.166.0 has no option that lists only the plugins installed
+on the machine (`--available` only adds the uninstalled plugins to the JSON), and
+`codex plugin list` waits for the remote plugin catalogue, so the first listing after a
+while can take longer than the 60 second limit of one run. The next listing finds the
+catalogue cached and answers in seconds. So a command that only reads (the listings and
+`codex mcp get`) that ran out of time is run once more, and a second timeout, like any other
+failure, is final. A command that changes Codex's configuration (adding or removing a
+marketplace or a plugin, removing a server) is never run again, because the first run may have
+taken effect. The error of a command that ran out of time names the command, says that Codex
+did not answer in time, likely while it fetched its remote plugin catalogue, and that running
+`sidera adapter setup codex --refresh` again usually succeeds.
+
 **An unreadable marketplace.** When any configured marketplace has no readable manifest,
 Codex fails every listing of marketplaces and plugins, and names each marketplace it cannot
 read with the directory it has for that one:

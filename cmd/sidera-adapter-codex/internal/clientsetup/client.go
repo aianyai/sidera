@@ -150,6 +150,8 @@ type cli struct {
 	dir string
 	// env is the environment of every run; it decides which Codex home Codex works in.
 	env []string
+	// timeout bounds one run; zero means commandTimeout.
+	timeout time.Duration
 }
 
 func (c cli) run(ctx context.Context, args ...string) (string, error) {
@@ -157,11 +159,17 @@ func (c cli) run(ctx context.Context, args ...string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Codex is not installed: %w", err)
 	}
-	cmd := adaptersetup.ClientCommand{Program: program, Args: args, Dir: c.dir, Env: c.env, Timeout: commandTimeout}
+	timeout := c.timeout
+	if timeout == 0 {
+		timeout = commandTimeout
+	}
+	cmd := adaptersetup.ClientCommand{Program: program, Args: args, Dir: c.dir, Env: c.env, Timeout: timeout}
 	out, err := cmd.Run(ctx)
 	switch {
 	case adaptersetup.NotInstalled(err):
 		return "", fmt.Errorf("Codex is not installed: %w", err)
+	case err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded):
+		return "", &noAnswerError{command: strings.Join(args, " "), err: err}
 	case err != nil:
 		return "", err
 	case out.ExitCode != 0:
@@ -172,6 +180,34 @@ func (c cli) run(ctx context.Context, args ...string) (string, error) {
 		return "", failure
 	}
 	return string(out.Stdout), nil
+}
+
+// noAnswerError is a run of Codex that ran out of its time limit. A listing waits for
+// Codex's remote plugin catalogue, which can take longer than the limit when nothing of
+// it is cached, and the next run finds it cached; the message says so, since the person
+// reads it after an update that looks as if it broke Codex.
+type noAnswerError struct {
+	command string
+	err     error
+}
+
+func (e *noAnswerError) Error() string {
+	return fmt.Sprintf("Codex did not answer `codex %s` in time, likely while it fetched its remote plugin catalogue; "+
+		"running `sidera adapter setup codex --refresh` again usually succeeds (%v)", e.command, e.err)
+}
+func (e *noAnswerError) Unwrap() error { return e.err }
+
+// runRead runs a command that only reads Codex's state. One that ran out of time is run
+// once more: Codex is usually quicker the second time, and asking again changes nothing.
+// A command that changes Codex's configuration is run with run, never again, since the
+// first run may have taken effect.
+func (c cli) runRead(ctx context.Context, args ...string) (string, error) {
+	out, err := c.run(ctx, args...)
+	var noAnswer *noAnswerError
+	if errors.As(err, &noAnswer) {
+		return c.run(ctx, args...)
+	}
+	return out, err
 }
 
 type pluginListJSON struct {
@@ -198,7 +234,7 @@ func parsePlugin(out string) (plugin, error) {
 }
 
 func (c cli) Plugin(ctx context.Context) (plugin, error) {
-	out, err := c.run(ctx, "plugin", "list", "--json")
+	out, err := c.runRead(ctx, "plugin", "list", "--json")
 	if err != nil {
 		return plugin{}, err
 	}
@@ -232,7 +268,7 @@ func parseMarketplace(out, name string) (marketplace, error) {
 }
 
 func (c cli) Marketplace(ctx context.Context, name string) (marketplace, error) {
-	out, err := c.run(ctx, "plugin", "marketplace", "list", "--json")
+	out, err := c.runRead(ctx, "plugin", "marketplace", "list", "--json")
 	if err != nil {
 		return marketplace{}, err
 	}
@@ -287,7 +323,7 @@ func parseServer(listJSON, name string) (server, error) {
 }
 
 func (c cli) Server(ctx context.Context, name string) (server, error) {
-	out, err := c.run(ctx, "mcp", "list", "--json")
+	out, err := c.runRead(ctx, "mcp", "list", "--json")
 	if err != nil {
 		return server{}, err
 	}
@@ -295,7 +331,7 @@ func (c cli) Server(ctx context.Context, name string) (server, error) {
 	if err != nil || !s.Found {
 		return s, err
 	}
-	text, err := c.run(ctx, "mcp", "get", name)
+	text, err := c.runRead(ctx, "mcp", "get", name)
 	if err != nil {
 		return server{}, err
 	}

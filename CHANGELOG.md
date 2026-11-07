@@ -57,6 +57,12 @@ protocol has a version of its own.
   code 1 although the restart had succeeded; a connection lost before a request is written now counts like
   any other unknown outcome, which the wait goes through and a change is sent again after.
 
+- **The Codex setup refresh right after `sidera update` no longer fails while Codex fetches its remote
+  plugin catalogue.** The first listing after a while can take longer than a minute through a slow
+  connection, and the refresh reported `codex broken` until it was run again. A listing that runs out
+  of time is now asked once more, and when Codex still does not answer, the message says so and that
+  running `sidera adapter setup codex --refresh` again usually succeeds.
+
 ### Security
 
 - The name and version of the runtime that an adapter reports in its probe result are now held to

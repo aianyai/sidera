@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestMain lets the test binary stand in for the Codex program: when
@@ -21,7 +22,27 @@ func TestMain(m *testing.M) {
 }
 
 func fakeCodexMain(mode string) int {
+	// One byte per run lets a test count how often Codex was asked.
+	if count := os.Getenv("CLIENTSETUP_FAKE_COUNT"); count != "" {
+		f, err := os.OpenFile(count, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 4
+		}
+		f.WriteString("x")
+		f.Close()
+	}
 	switch mode {
+	case "hang":
+		time.Sleep(time.Minute)
+		return 0
+	case "hang-once":
+		// The first run waits for a catalogue that is slow to arrive; later runs have it cached.
+		if _, err := os.Stat(os.Getenv("CLIENTSETUP_FAKE_COUNT") + ".hung"); err != nil {
+			os.WriteFile(os.Getenv("CLIENTSETUP_FAKE_COUNT")+".hung", nil, 0o600)
+			time.Sleep(time.Minute)
+		}
+		fmt.Print(`{"installed":[{"name":"sidera","marketplaceName":"sidera","version":"1","installed":true,"enabled":true}],"available":[]}`)
+		return 0
 	case "echo":
 		// Standard input is closed, not a terminal that would be waited on.
 		buf := make([]byte, 1)
@@ -75,6 +96,58 @@ func TestCommandsRunWithoutInputInTheirDirectoryAndReportWhatCodexSaid(t *testin
 	_, err = fakeCLI("chatty", t).run(ctx, "mcp", "list")
 	if err == nil || !strings.HasSuffix(err.Error(), "THE END") || len(err.Error()) > 3000 {
 		t.Errorf("a failure keeps the end of standard error, clipped: %d bytes", len(err.Error()))
+	}
+}
+
+// fakeCountingCLI is fakeCLI with a time limit short enough to wait out, and a count of
+// how many times the program was run.
+func fakeCountingCLI(mode string, t *testing.T) (cli, func() int) {
+	t.Helper()
+	count := filepath.Join(t.TempDir(), "runs")
+	t.Setenv("CLIENTSETUP_FAKE_COUNT", count)
+	c := fakeCLI(mode, t)
+	// Long enough for the test program to start under -race on a busy machine.
+	c.timeout = 3 * time.Second
+	return c, func() int {
+		b, _ := os.ReadFile(count)
+		return len(b)
+	}
+}
+
+func TestACodexThatIsSlowToAnswerIsAskedAgainOnlyForWhatItReads(t *testing.T) {
+	ctx := context.Background()
+
+	// The first listing after a while waits for Codex's remote plugin catalogue and runs
+	// out of time; the second finds it cached.
+	c, runs := fakeCountingCLI("hang-once", t)
+	if p, err := c.Plugin(ctx); err != nil || !p.Installed || runs() != 2 {
+		t.Errorf("a listing that timed out once: %+v, %v after %d runs, want it answered on the second", p, err, runs())
+	}
+
+	// A listing that times out twice is an error that says what happened and what to do.
+	c, runs = fakeCountingCLI("hang", t)
+	_, err := c.Plugin(ctx)
+	if runs() != 2 {
+		t.Errorf("a listing that never answers was run %d times, want 2", runs())
+	}
+	if err == nil {
+		t.Fatal("a listing that never answers succeeded")
+	}
+	for _, part := range []string{"plugin list --json", "Codex did not answer", "remote plugin catalogue", "sidera adapter setup codex --refresh"} {
+		if !strings.Contains(err.Error(), part) {
+			t.Errorf("err = %q, want it to contain %q", err, part)
+		}
+	}
+
+	// A failure that is not a timeout is final, and so is a timeout of a call that changes
+	// Codex's configuration: it may have taken effect.
+	c, runs = fakeCountingCLI("fail", t)
+	if _, err := c.Plugin(ctx); err == nil || runs() != 1 {
+		t.Errorf("a listing that failed: %v after %d runs, want an error after 1", err, runs())
+	}
+	c, runs = fakeCountingCLI("hang", t)
+	if err := c.AddPlugin(ctx, "sidera@sidera"); err == nil || runs() != 1 {
+		t.Errorf("an install that timed out: %v after %d runs, want an error after 1", err, runs())
 	}
 }
 
