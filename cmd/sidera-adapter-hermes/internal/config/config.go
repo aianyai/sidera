@@ -151,7 +151,7 @@ type Config struct {
 	// Board is the slug of the one board the instance serves.
 	Board string
 	// DisplayName is what the instance endpoint is called in the directory. Empty
-	// leaves the choice to the adapter, which names it after the host.
+	// leaves the choice to the adapter, which names it Hermes.
 	DisplayName string
 	// Home is where a wake-up goes when a card has no conversation to wake and
 	// where an inbound request from a stranger lands.

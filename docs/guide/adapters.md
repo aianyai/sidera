@@ -424,7 +424,7 @@ sidera adapter list
 
 The probe goes to `passed` when `hermes` runs, its release is in the range, the board
 exists and no profile has an adapter name. The instance registers one endpoint, named
-`Hermes (<host name>)` unless `display_name` says otherwise, which other nodes find with
+`Hermes` unless `display_name` says otherwise, which other nodes find with
 `directory`.
 
 **The settings that matter.** A setting the adapter does not know is refused with the

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -153,16 +152,13 @@ func (a *App) goLoop(fn func()) {
 	}()
 }
 
-// instanceName is what the instance endpoint is called in the directory.
+// instanceName is what the instance endpoint is called in the directory. The name
+// only tells the endpoints of one node apart; the node describes the host.
 func instanceName(cfg config.Config) string {
 	if cfg.DisplayName != "" {
 		return cfg.DisplayName
 	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		return "Hermes"
-	}
-	return "Hermes (" + host + ")"
+	return "Hermes"
 }
 
 // EndpointPending wakes the receive loop for the endpoint.

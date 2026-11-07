@@ -299,7 +299,7 @@ changes two things for the agents on the other nodes.
   the task should say to reply once, with the final result: a progress note sent first
   would be taken for the answer, and a second reply arrives at Hermes as a new request.
 - **An agent that wants something from Hermes** finds its endpoint in `directory`, named
-  `Hermes (<host name>)` unless its owner chose another name, and sends to it with `send`.
+  `Hermes` unless its owner chose another name, and sends to it with `send`.
   The message becomes a card for the Hermes agent, which is woken to read it and answers
   with a card of mode `reply`; the answer reaches the sender as an ordinary message to read with
   `recv`. The sender's text is shown to the Hermes agent as untrusted content, not as an

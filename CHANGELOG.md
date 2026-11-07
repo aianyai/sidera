@@ -8,6 +8,13 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Changed
+
+- **A Hermes instance with no `display_name` is listed in the directory as `Hermes`.** It used to be
+  `Hermes (<host name>)`; the host is described by the node itself now, so the name only tells the
+  endpoints of one node apart. The endpoint's address is unchanged, so aliases and anything that
+  addresses it by address keep working. Set `display_name` to keep a custom name.
+
 ### Security
 
 - The name and version of the runtime that an adapter reports in its probe result are now held to

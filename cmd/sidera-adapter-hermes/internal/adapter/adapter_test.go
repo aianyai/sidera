@@ -480,3 +480,23 @@ func TestPollHandsOverLaneCards(t *testing.T) {
 		t.Errorf("handed over %v, want only t_4fa05d4f", s.cards)
 	}
 }
+
+// The instance endpoint is called Hermes unless the owner chose a name: the host is
+// described by the node, so the default carries nothing of it.
+func TestInstanceName(t *testing.T) {
+	tests := []struct {
+		name        string
+		displayName string
+		want        string
+	}{
+		{"default", "", "Hermes"},
+		{"configured name wins", "Hermes (study)", "Hermes (study)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := instanceName(config.Config{DisplayName: tt.displayName}); got != tt.want {
+				t.Errorf("instanceName(%q) = %q, want %q", tt.displayName, got, tt.want)
+			}
+		})
+	}
+}

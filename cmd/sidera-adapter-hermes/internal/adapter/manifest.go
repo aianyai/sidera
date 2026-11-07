@@ -67,7 +67,7 @@ func settings() []manifest.Field {
 		required(dir(config.KeyHermesHome, "Hermes home", "HERMES_HOME given to every Hermes process the adapter starts.")),
 		dir(config.KeyKanbanHome, "Kanban home", "HERMES_KANBAN_HOME, if you set one for Hermes."),
 		required(str(config.KeyBoard, "Board", "The slug of the one Kanban board this instance serves.")),
-		str(config.KeyDisplayName, "Name in the directory", "What other nodes see for this Hermes. Default: Hermes (<host name>)."),
+		str(config.KeyDisplayName, "Name in the directory", "What other nodes see for this Hermes. Default: Hermes."),
 		required(str(config.KeyHomeProfile, "Home profile", "The Hermes profile whose gateway is woken when a card has no conversation.")),
 		required(str(config.KeyHomePlatform, "Home platform", "The messaging platform of the home conversation, for example feishu or telegram.")),
 		required(str(config.KeyHomeChatID, "Home chat id", "The chat id of the home conversation.")),
