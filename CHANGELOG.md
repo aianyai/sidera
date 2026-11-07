@@ -8,6 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-07
+
+Nodes describe themselves in 0.17: the name, host name, system and Sidera version of every
+node you trust show up in `peers` and in `trust list` and `network show`, and every directory
+entry names the adapter and the runtime that serve it, so an agent can pick a machine and a
+runtime by what it is instead of by a node id or a display name. Clients now ignore members of
+a successful answer that they do not know, and the checks on display text are stricter (see
+Security below). The restart, Codex setup refresh and macOS process listing fixes are under
+Fixed. Restart the Claude Code and Codex sessions that were running when you upgrade; see
+Changed below.
+
 ### Added
 
 - **`peers` shows what each node says about itself, and `directory` shows which adapter and runtime serve
@@ -1235,7 +1246,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/aianyai/sidera/releases/tag/v0.17.0
 [0.16.0]: https://github.com/aianyai/sidera/releases/tag/v0.16.0
 [0.15.0]: https://github.com/aianyai/sidera/releases/tag/v0.15.0
 [0.14.0]: https://github.com/aianyai/sidera/releases/tag/v0.14.0
