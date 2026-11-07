@@ -117,6 +117,9 @@ type Engine struct {
 	// pairing is the state machine of the pairing protocol and the sessions and
 	// fetches that go with it; see pairing.go.
 	pairing *pairingDriver
+	// profiles are the node profiles: this node's own and those fetched from its
+	// peers; see profile.go.
+	profiles *profileState
 	// directoryKey authenticates cursors for this process only, minted on its
 	// first directory query and never persisted.
 	directoryKey []byte
@@ -266,6 +269,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		ready:    map[ident.EndpointID]bool{},
 		pages:    map[delivery.LeaseID]*issuedPage{},
 		outbox:   newOutbox(),
+		profiles: newProfileState(),
 		parked:   map[ident.EndpointID][]command{},
 
 		creations:  map[store.TargetKey]*creation{},

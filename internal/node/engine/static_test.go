@@ -19,7 +19,7 @@ func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
 		"Ack", "Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSetupInfo", "AdapterSignals", "AdapterStarted",
 		"AddArchiveSweep", "AddClockState", "AddPeriodic", "Alerts", "AttachSession", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Control", "Declare", "Directory", "Done",
-		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "PairingClosed", "PairingFrame", "PairingOpened", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
+		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "Me", "MemberConnected", "MessageStatus", "NetworkView", "NodeSettings", "NotePeerCertificate", "OperationResult", "PairingClosed", "PairingFrame", "PairingOpened", "Peers", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Profile", "Pull", "QueryDirectory", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"Recv", "RecvObserved", "RefusalReason", "RegisterDirect", "Reply", "Send", "SendDirect", "Serve", "SetNetwork", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "TrustView", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})

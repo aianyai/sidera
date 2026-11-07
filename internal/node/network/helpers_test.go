@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -67,6 +68,10 @@ type fakeNode struct {
 	pull    func(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error)
 	dir     func(ctx context.Context, from transport.Origin, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error)
 	refusal func(err error) (string, bool)
+	profile func(ctx context.Context, from transport.Origin) (record.Record, error)
+	// members are the nodes whose connections became a member's, in the order the
+	// engine was told.
+	members []ident.NodeID
 
 	// noteBlock, when set, holds NotePeerCertificate until it is closed.
 	noteBlock chan struct{}
@@ -122,6 +127,29 @@ func (f *fakeNode) QueryDirectory(ctx context.Context, from transport.Origin, se
 		return transport.DirectoryPage{}, nil
 	}
 	return h(ctx, from, sender, req)
+}
+
+func (f *fakeNode) Profile(ctx context.Context, from transport.Origin) (record.Record, error) {
+	f.mu.Lock()
+	f.origins = append(f.origins, from)
+	h := f.profile
+	f.mu.Unlock()
+	if h == nil {
+		return record.Record{}, errors.New("no profile")
+	}
+	return h(ctx, from)
+}
+
+func (f *fakeNode) MemberConnected(_ context.Context, node ident.NodeID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.members = append(f.members, node)
+}
+
+func (f *fakeNode) memberConnections() []ident.NodeID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ident.NodeID(nil), f.members...)
 }
 
 func (f *fakeNode) NotePeerCertificate(ctx context.Context, cert record.Verified[record.NetworkKeyCertificate], _ record.Record, seen record.SerialSeen) error {
@@ -200,6 +228,20 @@ func (f *fakeNode) noted() []record.SerialSeen {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]record.SerialSeen(nil), f.notes...)
+}
+
+// setProfile and setRefusal change the handlers a test sets once the connection
+// is up, while the network's goroutines may read them.
+func (f *fakeNode) setProfile(h func(ctx context.Context, from transport.Origin) (record.Record, error)) {
+	f.mu.Lock()
+	f.profile = h
+	f.mu.Unlock()
+}
+
+func (f *fakeNode) setRefusal(h func(err error) (string, bool)) {
+	f.mu.Lock()
+	f.refusal = h
+	f.mu.Unlock()
 }
 
 func (f *fakeNode) setBlock(c chan struct{}) {

@@ -74,6 +74,10 @@ func TestPeersShowsThisNodeAndEveryNodeTrustedDirectlyWithItsConnection(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
+		// This test is about who is listed; the profiles have tests of their own.
+		for i := range got {
+			got[i].Profile = nil
+		}
 		return got
 	}
 	self := engine.PeerView{Node: r.node, Trust: engine.PeerTrustSelf, Connected: true}

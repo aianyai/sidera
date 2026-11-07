@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/hostfacts"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
@@ -256,6 +257,14 @@ type Deps struct {
 	// it: a reader rooted at that directory. It is given by the composition root,
 	// which alone reaches the file system; an engine without it refuses to install.
 	OpenPackage func(dir string) (fsx.Reader, error)
+	// Version is the release version of the program, which the node's profile
+	// states. The engine does not read it from the build itself. Empty states none.
+	Version string
+	// HostFacts reads what the machine says about itself, for the node's profile.
+	// It is called when the profile is made and again whenever another node asks
+	// for it, so it has to be cheap. Nil reads nothing: the profile then holds only
+	// the owner's name, if any, and the version.
+	HostFacts func() hostfacts.Facts
 	// Log receives diagnostics, never a message body, a token or a key; nil
 	// discards them.
 	Log *slog.Logger

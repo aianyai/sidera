@@ -121,8 +121,57 @@ credential and a removed node therefore drop out by the one evaluator. Connectio
 state comes from `Network.Connected`, which reads and never waits, and is true
 for this node itself; with no network it is false for every other node. Its
 `PeerView` carries the node, the engine-owned `Trust` (`PeerTrustSelf` or
-`PeerTrustDirect`) and `Connected`; interface backends only map the view. Neither
-read exposes an endpoint token.
+`PeerTrustDirect`), `Connected` and `Profile` (below); interface backends only map
+the view. Neither read exposes an endpoint token.
+
+**The node profile.** A node tells the nodes that trust it what it is called and
+what machine and release it runs, as a record it signs with its network key
+(`sidera/node-profile/1`, see the records topic). The profile is descriptive: no
+decision of addressing, trust or policy reads it.
+
+- *Issuing.* The engine makes its profile from the owner's `name` (the host name
+  when there is none), the facts the composition root gives it (`Deps.HostFacts`,
+  `hostfacts.Read` in the daemon; nil reads nothing) and the release version it is
+  given (`Deps.Version`, which the command line takes from `internal/release`; the
+  engine never reads build information). `refreshProfile` is the one place a
+  profile is made. It runs after the owner changes the settings, whenever
+  another node asks, and when `Peers` shows this node (so the first profile is made
+  by the first of these after the start, and a node that cannot sign yet makes it at
+  the first that can), and it makes a new record
+  only when what the profile would say differs from the current one, so asking is
+  cheap and a record changes exactly when its content does. A new record's
+  `issued_at` is the later of now and one second after the record before it: the
+  nodes that hold profiles keep the strictly later one and keep the stored one on a
+  tie, so a change made within the second of the last one would otherwise never
+  replace it. A field that does not satisfy its rule is left out (the host name is
+  read from the machine and can be anything), and the dropped fields and the
+  machine's reasons for a fact it could not read are logged when a profile is
+  issued, not when it is asked for. A node that may not sign (the identity is
+  retired or the clock is in doubt) keeps serving the record it signed before, and
+  issues none until it may.
+- *Who may ask.* `Profile` is the target side of the profile protocol. It answers a
+  node for which `trust.Evaluate` answers `AllowedDirect`, the set `Peers` lists, and
+  refuses any other with `not_permitted`. The policy vocabulary is not asked: its
+  actions are about endpoints, and a node-level read of a label has no endpoint to
+  judge; membership alone is not enough, because a member can be trusted by
+  inheritance only.
+- *Fetching.* The network tells the engine (`MemberConnected`) each time a
+  connection to a node becomes a member's. When the node is trusted directly and no
+  fetch from it is under way, a worker of the engine (`spawn`, under the engine's
+  context) asks it through `Network.FetchProfile`, and the answer returns to the loop
+  as a command. The record is kept only if it names the node it was fetched from,
+  verifies against the network key certificate this node holds for that node, and
+  `publication.ProfileReplaces` says it is later than the one held (or none is
+  held). Nothing is retried and nothing polls: a failed fetch is logged, a node that
+  does not serve the protocol (an earlier release) is logged once at debug level and
+  has no profile, and the next connection asks again. A connection to a restarted
+  or upgraded node is a new connection, which is how a new version, a new system
+  version or a new name arrives.
+- *Holding.* The profiles fetched are held in memory by the loop, one per node, with
+  the time they were fetched. They go with the trust in the node: the records are
+  dropped for every node that is no longer trusted directly when the trust records
+  change, and `Peers` shows a profile only for nodes it lists. `Peers` shows this
+  node's own profile as it would issue it now.
 
 **Directory reads.** `Directory` resolves the caller in a `gateRead` command,
 normalizes its limit and queues a typed directory task in the same outbound FIFO
@@ -2126,6 +2175,8 @@ reproducible).
 | The backup is confirmed only for the statement the node holds; the reminder is derived | `operations_identity.go`, `nodestatus.go` | `TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds`, `TestAConfirmationOfAnotherStatementDoesNotPutTheReminderOut` |
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
 | After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
+| The node profile is made from the owner's name or the host name, the machine and the version, is issued again only when its content changes and always strictly later, leaves out a field that breaks its rules, and is answered only to a node trusted directly | `profile.go` (`refreshProfile`, `Profile`) | `TestTheProfileStatesTheMachineTheVersionAndTheOwnersNameOrElseTheHostName`, `TestAProfileIsIssuedAgainOnlyWhenItsContentChanges`, `TestAValueTheMachineGivesThatBreaksTheRulesIsLeftOutOfTheProfile`, `TestOnlyANodeTrustedDirectlyMayAskForTheProfile` |
+| A peer's profile is fetched when a connection to it comes up, and kept only when it is the peer's own, verified against the certificate held for it, and newer; a failed fetch or a peer that does not serve the protocol leaves none; trust ending drops it | `profile.go` (`fetchProfile`, `profileFetched`, `verifyProfile`, `pruneProfiles`) | `TestTheProfileOfAPeerIsFetchedWhenAConnectionComesUpAndKeptWhenNewer`, `TestAProfileThatIsNotThePeersOwnIsNotKept`, `TestAPeerWithoutAProfileIsStillListed`, `TestTheProfileOfANodeNoLongerTrustedIsDropped` |
 | An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
 | A session nobody controls is one alert for the control record of its creation, however often the node starts | `alerts.go` (`raiseAlertOnce`), `create.go` (`alertUncontrolled`) | `TestAnUncontrolledCreationIsToldOnceAcrossRestarts` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |

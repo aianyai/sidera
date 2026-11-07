@@ -3,7 +3,7 @@
 The node's connection to the other nodes: the libp2p host, the gate in front of
 every stream, the table of connections and its accounting, the certificate
 exchange that makes a connection a member's, dialing, and the client and server
-of the send, pull and directory protocols, and the streams and result fetches of
+of the send, pull, directory and profile protocols, and the streams and result fetches of
 the pairing protocol. Read
 [../../../docs/references/network/README.md](../../../docs/references/network/README.md)
 for the reasons and for what the tests prove, and
@@ -25,7 +25,7 @@ clock), touches no file and draws randomness only from the reader it is given (f
 | ---- | ------- |
 | `New(Config)`, `Network.Close` | Build the host (it listens on nothing) and start the connection checks and the watch on the host's address events; close the listeners and every connection and wait for every goroutine the package started. |
 | `Config`, `DefaultParams` | The network key, the clock, the accounting parameters (zero means `DefaultParams`), the source of randomness, the log, and the timeouts (4 s to connect, 10 s per call, the pairing protocol's fetch timeout, 10 s unreachable memo, 1 s tick). |
-| `Network.SetNode(Node)`, `Node` | The engine's side: `transport.Handler`, `NotePeerCertificate` (a member's certificate before its connection becomes a member's) and `RefusalReason` (the name of a refusal, for the answer). |
+| `Network.SetNode(Node)`, `Node` | The engine's side: `transport.Handler`, `NotePeerCertificate` (a member's certificate before its connection becomes a member's), `RefusalReason` (the name of a refusal, for the answer), `Profile` (the answer to a profile request) and `MemberConnected` (a connection became a member's; called from a goroutine of the network, once per connection). |
 | `Network.Listen(addrs)`, `ListenAddrs`, `PeerID` | Open the listeners (the address is in the error when one cannot open); where they are open; the identifier a contact line names after `/p2p/`. |
 | `Network.SetMembership(Membership)` | The snapshot of the node's own certificate, the facts of a decision and the held certificates; decides live connections again and closes those that no longer keep, and those of a non-member that is now a member (once idle, forgetting the node's unreachable memo). |
 | `Network.SetAddressBook(map)` | The multiaddrs of each node, with `/p2p/<peer id>` unless a held certificate gives the peer. |
@@ -35,6 +35,7 @@ clock), touches no file and draws randomness only from the reader it is given (f
 | `Network.PairingFetch(ctx, node, addrs, frame)` | One frame out, one frame back (no half-close before it), then the stream closed, within the fetch timeout from the stream's opening; returns the answer and the `PairingPeer` of the connection. |
 | `PairingPeer`, `PairingStream` | The facts of a pairing connection (both parties, protocol, the accepted remote certificate with its record and serial state), and the engine's queue-backed end of a stream: `Send` never blocks, `Close` half-closes the stream once the queue is written; the stream, its handler and the connection's busy count stay until the peer ends its side. |
 | `Node.PairingOpened`, `PairingFrame`, `PairingClosed` | The target's side of a pairing stream, and the frames and ends of both sides. |
+| `Network.FetchProfile(ctx, node)` | Asks a node, on the member connection that is up to it, for the signed profile it issued for itself; the record comes back unverified. A node that does not serve the protocol is `served` false and no error. It dials nothing. |
 | `Network.askDialBack(ctx, node)` | Asks a member, on the member connection that is up to it, whether it can dial this node back: reached (with the address), not reached, no address, or cannot ask (the member does not serve the protocol). It dials nothing; its caller is the tick (`askMembers`, `reach.go`), which records the answers. |
 | `Network.Send`, `Pull`, `QueryDirectory`, `Connected` | The remote client, with the signatures of the loopback (each logs the first failure of a run of failed calls to a node and the first success after it, `callhealth.go`); whether a member connection to a node is up. |
 | `NewRouter(self, loopback, remote)`, `Router` | The transport the engine calls: this node's calls to the loopback, every other node's to the remote client. |

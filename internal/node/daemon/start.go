@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/hostfacts"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/manageapi"
@@ -238,7 +239,7 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 	deps := engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.clockPausedSince,
 		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Home: d.home, Log: d.log,
-		OpenPackage: d.openPackage,
+		OpenPackage: d.openPackage, Version: d.cfg.Version, HostFacts: hostfacts.Read,
 	}
 	if d.cfg.AdapterHost != nil { // never a nil host inside the interface: the engine tests it for nil
 		deps.Adapters = d.cfg.AdapterHost

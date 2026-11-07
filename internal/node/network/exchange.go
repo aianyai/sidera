@@ -246,6 +246,14 @@ func (n *Network) apply(ctx context.Context, e *connEntry, ex preauth.Exchange, 
 		n.limiter.setMember(e.conn.RemotePeer(), true)
 	}
 	n.log.Debug("certificate exchange completed", "peer", e.conn.RemotePeer(), "state", d.State.String())
+	if d.State == preauth.StateMember && ex.Kind == preauth.KindNode {
+		// The engine fetches the node's profile now that the connection serves
+		// member protocols. It is told from a goroutine of ours so that this
+		// exchange does not wait for it.
+		if node := n.currentNode(); node != nil {
+			n.start(func() { node.MemberConnected(n.ctx, d.Node) })
+		}
+	}
 	return applied
 }
 

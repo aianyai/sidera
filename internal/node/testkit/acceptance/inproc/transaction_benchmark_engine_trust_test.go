@@ -54,9 +54,12 @@ func (*transactionBenchmarkNetwork) SetMembership(engine.Membership) error      
 func (*transactionBenchmarkNetwork) Connected(ident.NodeID) bool                    { return false }
 func (*transactionBenchmarkNetwork) SetAddressBook(map[ident.NodeID][]string) error { return nil }
 func (*transactionBenchmarkNetwork) CheckAddresses(ident.NodeID, []string) error    { return nil }
-func (*transactionBenchmarkNetwork) PeerID() string                                 { return "benchmark" }
-func (*transactionBenchmarkNetwork) ListenAddrs() []string                          { return nil }
-func (*transactionBenchmarkNetwork) ContactAddrs() []string                         { return nil }
+func (*transactionBenchmarkNetwork) FetchProfile(context.Context, ident.NodeID) (record.Record, bool, error) {
+	return record.Record{}, false, nil
+}
+func (*transactionBenchmarkNetwork) PeerID() string         { return "benchmark" }
+func (*transactionBenchmarkNetwork) ListenAddrs() []string  { return nil }
+func (*transactionBenchmarkNetwork) ContactAddrs() []string { return nil }
 
 func (*transactionBenchmarkNetwork) PairingFetch(context.Context, ident.NodeID, []string, []byte) ([]byte, engine.PairingPeer, error) {
 	return nil, engine.PairingPeer{}, transport.ErrUnreachable

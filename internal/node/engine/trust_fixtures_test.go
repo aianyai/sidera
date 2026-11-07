@@ -100,12 +100,18 @@ func (p peerNode) report(sentBy ident.NodeID, serial uint64) record.Record {
 // is own, and the peer, signed by both ends. The credential has the signature of
 // the peer's end only when onlyPeer is set: the record a node cannot have made.
 func (p peerNode) credentialWith(own record.Signer, onlyPeer bool) store.CredentialRecord {
+	return p.credentialWithNonce(own, onlyPeer, credential.Nonce{p.n, 1})
+}
+
+// credentialWithNonce is credentialWith for another credential between the same
+// two nodes: the nonce is what tells them apart.
+func (p peerNode) credentialWithNonce(own record.Signer, onlyPeer bool, nonce credential.Nonce) store.CredentialRecord {
 	p.t.Helper()
 	ownNode, err := ident.NodeIDFromKey(own.Public())
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	c := credential.New(ownNode, p.node, t0, t0.Add(30*24*time.Hour), credential.Nonce{p.n, 1})
+	c := credential.New(ownNode, p.node, t0, t0.Add(30*24*time.Hour), nonce)
 	first, second := own, p.identity
 	if c.A != ownNode {
 		first, second = p.identity, own
@@ -137,6 +143,10 @@ type fakeNetwork struct {
 	connected map[ident.NodeID]bool
 	// fetches are the pairing fetches the engine asked for, by the node asked.
 	fetches []ident.NodeID
+	// profiles answers FetchProfile by node: a node with no entry does not serve the
+	// protocol. profileAsked counts the fetches, by node.
+	profiles     map[ident.NodeID]func() (record.Record, error)
+	profileAsked map[ident.NodeID]int
 	// dial is what StartPairing does; nil means the node cannot be reached.
 	dial func(ctx context.Context, node ident.NodeID, addrs []string, sid pairing.SessionID) (engine.PairingPeer, engine.PairingStream, error)
 }
@@ -147,6 +157,38 @@ func (n *fakeNetwork) PairingFetch(_ context.Context, node ident.NodeID, _ []str
 	defer n.mu.Unlock()
 	n.fetches = append(n.fetches, node)
 	return nil, engine.PairingPeer{}, errors.New("no answer")
+}
+
+// FetchProfile answers with what the test gave the node, or that it does not
+// serve the protocol.
+func (n *fakeNetwork) FetchProfile(_ context.Context, node ident.NodeID) (record.Record, bool, error) {
+	n.mu.Lock()
+	answer, ok := n.profiles[node]
+	if n.profileAsked == nil {
+		n.profileAsked = map[ident.NodeID]int{}
+	}
+	n.profileAsked[node]++
+	n.mu.Unlock()
+	if !ok {
+		return record.Record{}, false, nil
+	}
+	rec, err := answer()
+	return rec, err == nil, err
+}
+
+func (n *fakeNetwork) servesProfile(node ident.NodeID, answer func() (record.Record, error)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.profiles == nil {
+		n.profiles = map[ident.NodeID]func() (record.Record, error){}
+	}
+	n.profiles[node] = answer
+}
+
+func (n *fakeNetwork) profilesAsked(node ident.NodeID) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.profileAsked[node]
 }
 
 // StartPairing answers that the node cannot be reached, unless a test gave the

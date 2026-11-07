@@ -42,6 +42,12 @@ type Network interface {
 	// with the facts of the connection it came over. The engine calls it from a
 	// worker, never from the loop.
 	PairingFetch(ctx context.Context, node ident.NodeID, addrs []string, frame []byte) ([]byte, PairingPeer, error)
+	// FetchProfile asks a node, on the member connection that is up to it, for the
+	// signed node profile it issued for itself. It dials nothing. served is false,
+	// and the error nil, when the node does not serve the profile protocol, as a
+	// node of an earlier release does not. The record is as the node signed it and
+	// is not verified. The engine calls it from a worker, never from the loop.
+	FetchProfile(ctx context.Context, node ident.NodeID) (rec record.Record, served bool, err error)
 	// StartPairing opens the initiator's end of a pairing stream to a node and
 	// returns the facts of the connection and the stream the engine writes to. The
 	// frames the node sends, and the end of the stream when it is not the engine's

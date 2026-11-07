@@ -33,6 +33,7 @@ func (n *Network) registerHandlers() {
 	n.handleCall(nodeproto.ProtocolPull, runPull)
 	n.handleCall(nodeproto.ProtocolDirectory, runDirectory)
 	n.handleCall(nodeproto.ProtocolDialBack, n.runDialBack)
+	n.handleCall(nodeproto.ProtocolProfile, runProfile)
 	n.handle(string(preauth.ProtocolPairing), n.servePairing)
 }
 

@@ -47,6 +47,11 @@ func (o *setNodeSettingsOp) run(e *Engine, x *opRun) ([]byte, error) {
 		return nil, err
 	}
 	e.promptsDirty = true // the cap on the turns that prompts start may have been raised
+	if _, err := e.refreshProfile(x.now); err != nil {
+		// The name is kept; the profile is issued with it by the next request that
+		// finds the node able to sign.
+		e.log.Info("the node profile was not re-issued after the settings changed", "error", err.Error())
+	}
 	return n.LastOperation.Result, nil
 }
 

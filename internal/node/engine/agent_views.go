@@ -85,6 +85,9 @@ type PeerView struct {
 	Node      ident.NodeID
 	Trust     PeerTrust
 	Connected bool
+	// Profile is what the node says about itself; nil when this node has not
+	// fetched one. For this node itself it is the profile it issues now.
+	Profile *ProfileView
 }
 
 type cmdPeers struct {
@@ -110,11 +113,11 @@ func (c *cmdPeers) run(e *Engine, now time.Time) {
 			direct[party] = struct{}{}
 		}
 	}
-	out := []PeerView{{Node: e.d.Node, Trust: PeerTrustSelf, Connected: true}}
+	out := []PeerView{{Node: e.d.Node, Trust: PeerTrustSelf, Connected: true, Profile: e.profileOf(e.d.Node, now)}}
 	for _, node := range slices.SortedFunc(maps.Keys(direct), func(a, b ident.NodeID) int {
 		return strings.Compare(a.String(), b.String())
 	}) {
-		out = append(out, PeerView{Node: node, Trust: PeerTrustDirect, Connected: e.net != nil && e.net.Connected(node)})
+		out = append(out, PeerView{Node: node, Trust: PeerTrustDirect, Connected: e.net != nil && e.net.Connected(node), Profile: e.profileOf(node, now)})
 	}
 	c.done(out, nil)
 }

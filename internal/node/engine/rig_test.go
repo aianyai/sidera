@@ -22,6 +22,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/hostfacts"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -75,6 +76,10 @@ type rig struct {
 	home string
 	// adapters is the adapter host the engine is given, nil when a test has none.
 	adapters engine.Adapters
+	// version and facts are what the engine is told to publish about the node in its
+	// profile; facts nil is a machine that says nothing.
+	version string
+	facts   func() hostfacts.Facts
 	// network, when set, is the network layer the engine is given before it starts.
 	network engine.Network
 	// packages are the package directories an owner can name to install, by the
@@ -106,6 +111,12 @@ func (r *rig) loadKeys() {
 		r.t.Fatalf("keys.Load: %v", err)
 	}
 	r.keys = k
+}
+
+// withProfileSource sets the version and the facts of the machine the engine
+// publishes in the node profile.
+func withProfileSource(version string, facts func() hostfacts.Facts) rigOption {
+	return func(r *rig) { r.version, r.facts = version, facts }
 }
 
 func withNetwork(n engine.Network) rigOption { return func(r *rig) { r.network = n } }
@@ -183,6 +194,7 @@ func (r *rig) deps() engine.Deps {
 		Node: r.node, Clock: clk, HighWater: r.hw, RollbackPaused: r.paused, RollbackPausedSince: r.pausedSince,
 		Writer: r.w, Store: r.st, Config: r.cfg, Rand: harness.RandReader(r.seed),
 		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log), OpenPackage: r.openPackage,
+		Version: r.version, HostFacts: r.facts,
 	}
 	if r.keys != nil {
 		d.Keys = r.keys

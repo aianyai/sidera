@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
@@ -30,6 +31,18 @@ type Node interface {
 	// the engine. A refused call is answered with that name; any other error is
 	// answered as a failure that says nothing more.
 	RefusalReason(err error) (string, bool)
+
+	// Profile answers a profile request of a member: the signed node profile this
+	// node issued for itself, or an error that is a refusal when the node does not
+	// answer the asker (the engine answers only nodes it trusts directly).
+	Profile(ctx context.Context, from transport.Origin) (record.Record, error)
+
+	// MemberConnected tells the engine that a connection to a node became a
+	// member's, which is the moment it fetches the node's profile if it trusts the
+	// node directly. It is called in a goroutine of the network, once for every
+	// connection that becomes a member's, and returns when the engine has taken
+	// the news.
+	MemberConnected(ctx context.Context, node ident.NodeID)
 
 	// PairingOpened takes a pairing stream the peer opened, the target's end
 	// of an online segment or of a result fetch. peer holds the facts of the

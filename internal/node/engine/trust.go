@@ -171,6 +171,7 @@ func (e *Engine) trustOf(node ident.NodeID, now time.Time) trust.Outcome {
 // is done.
 func (e *Engine) trustChanged() {
 	e.trust.rebuild(e.d.Node)
+	e.pruneProfiles(e.d.Clock.Now())
 	e.publishMembership()
 }
 
