@@ -179,7 +179,8 @@ func OperationUnknown() *Error {
 // request again with, which returns the stored result if the request did run and
 // runs it if it did not. A connection obtained and lost before the request was
 // written is the same, since the client cannot tell how far the request went. This is
-// the one definition the command line, the MCP front end and the test fixture share.
+// the one definition; the local HTTP client, through which the command line and the
+// MCP front end call the node, is what says it.
 func OutcomeUnknown(operationID string) *Error {
 	message := "no complete answer to the request was read; whether it took effect is not known"
 	if operationID != "" {

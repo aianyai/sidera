@@ -42,19 +42,19 @@ protocol has a version of its own.
   tools, the `sidera` commands and the attachment of a session ignore members of a successful answer
   that they do not know, so a session started after this release keeps working after the next
   upgrade without being restarted for that reason. Requests are as strict as before.
-- **An answer that a program cannot read is reported as `internal/answer_unreadable`.** It used to be
-  `outcome_unknown`, which tells the caller to send the request again. The node had answered that the
-  request succeeded, so the new error says so, says the program is probably older than the node and
-  should be updated or the session restarted, and for a change (send, reply, ack, declare, control and
-  the owner's changes) says that it was accepted and where to see it. It exits
-  with code 1. `outcome_unknown` stays for a request that was written and got no complete answer.
+- **An answer that a program cannot read is reported as `internal/answer_unreadable`.** It used to
+  be `outcome_unknown`, which tells the caller to send the request again. The node had answered that
+  the request succeeded, so the new error says so, says the program is probably older than the node
+  and should be updated or the session restarted, and for a change (send, reply, ack, declare,
+  control, a recv that acknowledges a page (ack_lease) and the owner's changes) says that it was
+  accepted and where to see it. It exits with code 1. `outcome_unknown` stays for a request that was
+  written and got no complete answer.
 - **Restart the agent sessions that were running when you upgrade.** A Claude Code or Codex session
   started before the upgrade keeps the `sidera mcp` of the earlier release, and that program cannot
   read the new members of the `peers` and `directory` results: those two tools fail with
   `outcome_unknown` in such a session until it is restarted. Its other tools keep working, and
   `sidera peers` and `sidera directory` from a shell, and every session started after the upgrade,
   work at once.
-
 - **A Hermes instance with no `display_name` is listed in the directory as `Hermes`.** It used to be
   `Hermes (<host name>)`; the host is described by the node itself now, so the name only tells the
   endpoints of one node apart. The endpoint's address is unchanged, so aliases and anything that
