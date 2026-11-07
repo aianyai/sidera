@@ -243,7 +243,7 @@ producers must keep request bodies, credentials and private keys out of them.
 | `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`; `data_directory_unusable`, `expectations_full` |
 | `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy`, `pairing_paused` |
 | `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `node_unreachable`, `request_canceled`, `request_timeout`, `data_directory_not_initialized`, `daemon_storage_fatal` |
-| `internal` | 500 | 1 | `internal`, `engine_not_stopped`, `instance_lock_not_held` |
+| `internal` | 500 | 1 | `internal`, `answer_unreadable`, `engine_not_stopped`, `instance_lock_not_held` |
 | `outcome_unknown` | 500 | 10 | `outcome_unknown`, `storage_fatal` |
 
 The command exits above are the shared category defaults. Local `init` and
@@ -254,6 +254,13 @@ The [daemon reference](../daemon/README.md#errors-and-command-output) describes
 the codes and actionable messages. `daemon_storage_fatal` means the daemon
 stopped and must recover on restart; an engine request with an uncertain outcome
 retains `outcome_unknown/storage_fatal`.
+
+`answer_unreadable` is said by a client, never by the daemon: the node answered
+success and the client could not read the answer, most likely because the node is
+newer than the program. It is not `outcome_unknown`, since the node said what
+happened; it advises no resend, and for a change (send, reply, ack, declare,
+control) it adds that the change was accepted and can be seen with `status` or the
+matching read.
 
 An emitted stable code is never renamed, removed or reused for another meaning.
 Directory timeout is a known unavailable result, not an unknown message outcome.

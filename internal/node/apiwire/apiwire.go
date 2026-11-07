@@ -155,6 +155,7 @@ const (
 	CodeLeaseUnknown      = "lease_unknown"
 	CodeOperationUnknown  = "operation_unknown"
 	CodeOutcomeUnknown    = "outcome_unknown"
+	CodeAnswerUnreadable  = "answer_unreadable"
 )
 
 // EndpointUnknown is the answer for an address that names no endpoint of this
@@ -183,6 +184,26 @@ func OutcomeUnknown(operationID string) *Error {
 		message += ": send it again with the same operation identifier"
 	}
 	e := New(CategoryOutcomeUnknown, CodeOutcomeUnknown, message)
+	if operationID != "" {
+		e.with("operation_id", operationID)
+	}
+	return e
+}
+
+// AnswerUnreadable is what a client says when the node answered that the request
+// succeeded and the client could not read the answer it was given whole: most
+// likely the node is newer than the program. It is not an unknown outcome, since
+// the node said what happened, so it advises no resend; changed says the request
+// was a change, which was accepted and can be seen with the matching read. The
+// operation identifier, when the request had one, is in the details. This is the
+// one definition the command line, the MCP front end and the test fixture share.
+func AnswerUnreadable(changed bool, operationID string) *Error {
+	message := "the node answered that the request succeeded, but this program cannot read the answer; " +
+		"it is probably older than the node, so update it or restart the session"
+	if changed {
+		message += "; the change was accepted, and status or the matching read shows it"
+	}
+	e := New(CategoryInternal, CodeAnswerUnreadable, message)
 	if operationID != "" {
 		e.with("operation_id", operationID)
 	}

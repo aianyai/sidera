@@ -25,6 +25,7 @@ not import it: the words of the wire never enter the engine.
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
 | `OutcomeUnknown(operationID)` | What a client says when it read no complete answer to a request (it wrote the request and the answer was cut off or invalid, or the connection was lost): category and code `outcome_unknown`, the identifier in the details. The one definition the command line, the MCP front end and the test fixture share. |
+| `AnswerUnreadable(changed, operationID)` | What a client says when the node answered that the request succeeded and the client could not read the answer: category `internal`, code `answer_unreadable`, exit code 1. It is the node's success that was not understood, so it is not `outcome_unknown` and advises no resend; `changed` adds that the change was accepted and `status` or the matching read shows it; the identifier, when there is one, is in the details. |
 | `Category`, `Categories`, `HTTPStatus`, `ExitCode`, `ExitUsage`, `ExitOutcomeUnknown` | The nine categories, the status of the answer for each, and the exit code of the command line for each, with the one exit code no category gives (2, a command used wrongly). |
 
 ## Rules
@@ -144,6 +145,12 @@ not import it: the words of the wire never enter the engine.
   has to be told to send the request again with the same operation identifier,
   exactly as when an answer is lost. The category is also the one a client judges
   itself (`OutcomeUnknown`), so both come to the same place.
+- **An answer of success that cannot be read is `internal/answer_unreadable`, not
+  `outcome_unknown`.** The two differ in what the client knows: after
+  `outcome_unknown` it does not know whether the request took effect and a resend
+  with the same operation identifier settles it; after `answer_unreadable` the node
+  said it succeeded and a resend would only repeat what was done. The fix is on
+  the reading side (update the program, restart the session), which the message says.
 - **A resend is suggested only with an operation identifier.** `OutcomeUnknown`
   without one reports the uncertainty alone: an Agent send without an explicit
   idempotency key may create another message if it is sent again.

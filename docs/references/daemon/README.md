@@ -613,7 +613,10 @@ in flight; either way the request is sent again with the same operation identifi
 which returns the stored result if it ran and runs it if it did not. The client's
 `OutcomeUnknown` suggests that resend only when given an operation identifier;
 without one it reports the uncertainty alone, because an Agent send without an
-explicit idempotency key may create another message. A refusal for an
+explicit idempotency key may create another message. A client that was
+answered success and cannot read the answer says `internal/answer_unreadable` (exit
+code 1), not `outcome_unknown`: the node said what happened, so no resend is
+advised, and the likely cause is a program older than the node. A refusal for an
 invalid argument with no detail is `malformed_request`. The text of an error nobody
 expected is logged and never sent. Some words belong to the owner's operations alone:
 `not_found/alert_unknown`; `invalid_argument/empty_patch`, `node_mismatch`,

@@ -539,6 +539,46 @@ func TestAnOutcomeThatIsNotKnownIsOneDefinitionForEveryClient(t *testing.T) {
 	}
 }
 
+// An answer of success that the program cannot read is not an unknown outcome: the
+// node said it worked. The words say so, point at the likely cause, and for a
+// change add that it was accepted and where to see it. The program must not
+// suggest a resend, which would repeat a change that took effect.
+func TestAnAnswerThatCannotBeReadIsAnInternalErrorOfTheClient(t *testing.T) {
+	read := apiwire.AnswerUnreadable(false, "")
+	change := apiwire.AnswerUnreadable(true, "")
+	for name, e := range map[string]*apiwire.Error{"read": read, "change": change} {
+		if e.Category != apiwire.CategoryInternal || e.Code != "answer_unreadable" {
+			t.Errorf("%s: category/code %s/%s, want internal/answer_unreadable", name, e.Category, e.Code)
+		}
+		if e.Category.ExitCode() != 1 {
+			t.Errorf("%s: exit code %d, want 1", name, e.Category.ExitCode())
+		}
+		for _, want := range []string{"succeeded", "cannot read the answer", "older than the node", "update it or restart the session"} {
+			if !strings.Contains(e.Message, want) {
+				t.Errorf("%s: message %q lacks %q", name, e.Message, want)
+			}
+		}
+		if strings.Contains(e.Message, "send it again") {
+			t.Errorf("%s: message %q advises a resend", name, e.Message)
+		}
+		if len(e.Details) != 0 {
+			t.Errorf("%s: details %v without an operation identifier", name, e.Details)
+		}
+		if got := apiwire.FromError(e); got != e {
+			t.Errorf("%s: an error the client made was mapped again", name)
+		}
+	}
+	if strings.Contains(read.Message, "accepted") {
+		t.Errorf("a read is told %q; it changed nothing", read.Message)
+	}
+	if !strings.Contains(change.Message, "the change was accepted") || !strings.Contains(change.Message, "status") {
+		t.Errorf("a change is told %q; it must say the change was accepted and where to see it", change.Message)
+	}
+	if got := apiwire.AnswerUnreadable(true, "ab").Details["operation_id"]; got != "ab" {
+		t.Errorf("operation_id %v, want ab", got)
+	}
+}
+
 // The answers an interface gives without an error of the engine behind them are
 // defined here, once: the endpoint that is not on this node says the same as the
 // engine's refusal for an endpoint that does not exist, and an operation identifier
