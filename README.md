@@ -100,9 +100,9 @@ tmux new-session -d -s sidera -c "$HOME" -e PATH="$PATH" 'sidera daemon'  # keep
 sidera adapter install <release>/adapters/console && sidera adapter enable console
 sidera adapter install <release>/adapters/codex && sidera adapter enable codex
 sidera preset add light --file light.json      # a preset: see the guide
-sidera network show                            # first line: the contact line
+sidera network show                            # prints the command that enters this node on the other machine
 
-# On A, with B's contact line (node id, then addresses); on B the same for A
+# On A, run the command that B's network show printed (node id, then addresses); on B the same for A
 sidera network address set <node-id-b> <addresses-of-b>
 sidera trust expect <node-id-b>                # and on B: sidera trust expect <node-id-a>
 sidera trust request <node-id-b> --wait 60s    # on A, once both expect

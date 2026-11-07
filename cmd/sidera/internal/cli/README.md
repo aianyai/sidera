@@ -18,7 +18,7 @@ Global flags (`--home`, `--json`, `--color`, `--help`) are removed before dispat
 sets `command.color`, and `readGlobals` builds the `out` and `errOut` `termout.Stream`s from it and the
 environment, once per run and even when a flag is wrong, since the error is reported through them. They
 are what a command's human output is written through (`Stdout` and `Stderr` stay the raw writers); the
-agent commands write through them and the others move over as their output is restyled. Command discovery registers the local
+agent commands and the management commands that only read write through them and the others move over as their output is restyled. Command discovery registers the local
 flags once; global scanning reads their arity through `FlagSet.Lookup` and the
 standard-library `IsBoolFlag` convention, then local parsing uses that same set
 and its bound values. A local value stays attached, including a body spelled
@@ -36,7 +36,7 @@ and its bound values. A local value stays attached, including a body spelled
 - `message.go`: message and control flags; one body source for send and reply.
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: `result`, which writes the answer of an agent command (JSON with `--json`, the
-  layouts below otherwise) through `c.out`; `jsonText` for the management tables.
+  layouts below otherwise) through `c.out`; `jsonText` for the generic management listing.
 - `agent_output.go`: the layouts of the agent commands (`me`, `declare`, `peers`, `directory`,
   `send`/`reply`/`control`, `ack`, `status <message-id>`), each a function from the stream and the
   result to text, so a test reads them without a process. They share one convention (see "Human
@@ -79,10 +79,18 @@ and its bound values. A local value stays attached, including a body spelled
 - `manage.go`: management arguments, expected versions and one retained request
   for a single resend after an unknown outcome (`callResending`); the commands `network address set|remove`
   and `network listen set` have three words, which `commandPath` discovers.
-- `manage_output.go`: complete JSON responses and human settings and lists; a `contact`
-  line of a result is printed first, on a line of its own, so that it can be copied.
-  `statusWithHome` adds `home`, the directory the command resolved, to a node status, which
-  the daemon does not report.
+- `manage_output.go`: `managementOutput`, which writes the answer of a management command: the
+  complete response with `--json`, the layout of the command when it only reads, and otherwise
+  the generic listing (`managementResult`, sorted `key value` lines and tables with a column for
+  each key), which the changes still use until each has a layout of its own. `statusWithHome` adds
+  `home`, the directory the command resolved, to a node status, which the daemon does not report.
+- `manage_read_output.go`: the layouts of the management commands that only read (`status`,
+  `node show`, `network show`, `preset list`, `adapter list`, `endpoint list`, `alerts list`), in the
+  convention of `agent_output.go`. Each has a type that reads the daemon's answer, which is the one
+  place the CLI names its fields, and a function from the stream and that type to text. A new
+  field in one of these answers is given its human form here, or deliberately left to `--json`
+  and listed in the comment at the top of the file: a type that does not name the field drops it
+  from the human output without a sound, and no command falls back to printing the answer as JSON.
 - `trust.go`: `trust request` (the answer printed with its code first, then the client-side wait
   that polls `trust.list`; a refusal by the target is an error of category `refused`, a wait that
   ends otherwise is a plain failure, exit 1) and the human `trust list`. The other `trust`

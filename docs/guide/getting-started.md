@@ -66,8 +66,8 @@ In another terminal, check that it answers:
 sidera status
 ```
 
-A healthy node prints a listing that contains `daemon.state running`. A warning line
-before it (the self-revocation is not backed up yet) is expected at this point. If
+A healthy node prints a block of facts whose `Daemon` line starts with `running`. A
+warning (`!`) before it (the self-revocation is not backed up yet) is expected at this point. If
 `status` says the daemon is not running, start it first. Every other command in this
 guide needs the daemon.
 
@@ -77,16 +77,18 @@ guide needs the daemon.
 sidera network show
 ```
 
-The first line is the **contact line**: the node id followed by the addresses
-other machines can use to reach this node.
+`Reachable at` lists, one to a line, the addresses other machines can use to reach
+this node. Below the block is the command that enters this node on another machine,
+on one line:
 
 ```
-<node-id-a> /ip4/192.168.1.10/tcp/7744/p2p/<peer-id-a> /ip4/192.168.1.10/udp/7744/quic-v1/p2p/<peer-id-a>
+To enter this node on another machine, run there:
+  sidera network address set <node-id-a> /ip4/192.168.1.10/tcp/7744/p2p/<peer-id-a> /ip4/192.168.1.10/udp/7744/quic-v1/p2p/<peer-id-a>
 ```
 
 Keep it for step 6. If the machine has addresses that the other machine cannot
-reach (a VPN or proxy interface, for example), leave those out when you enter it
-on the other side.
+reach (a VPN or proxy interface, for example), leave those out of the command when
+you run it on the other side.
 
 ## 4. Install and enable adapters (both)
 
@@ -336,12 +338,12 @@ removing a preset restarts the adapters that run.
 
 ## 6. Connect the machines (both)
 
-Enter the other machine's contact line, then pair. Pairing is a one-time
+Enter the other machine's address, then pair. Pairing is a one-time
 step that makes the two nodes trust each other. Both owners confirm in advance
 by naming the other node, so there is nothing to compare by eye.
 
-*(A)* Enter B's address. Paste B's contact line after the command, without the
-addresses that A cannot reach (see step 3):
+*(A)* Enter B's address. Run the command that `network show` printed on B (step 3),
+without the addresses that A cannot reach:
 
 ```sh
 sidera network address set <node-id-b> /ip4/192.168.1.20/tcp/7744/p2p/<peer-id-b> /ip4/192.168.1.20/udp/7744/quic-v1/p2p/<peer-id-b>
@@ -380,7 +382,7 @@ Check on both machines:
 
 ```sh
 sidera trust list     # the other node is listed under `trusted`
-sidera network show   # the other node is listed with connected true
+sidera network show   # the other node is listed under Known nodes as connected
 ```
 
 `connected` can read `false` until one side sends something: a connection is

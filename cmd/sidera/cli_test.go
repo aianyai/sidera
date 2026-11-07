@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -909,7 +910,7 @@ func TestManagementNetworkCommands(t *testing.T) {
 		t.Fatalf("stale version: %d %q", code, out)
 	}
 	code, out, diag = n.run(session{}, "network", "show")
-	if code != 0 || diag != "" || !strings.Contains(out, addr) {
+	if code != 0 || diag != "" || !strings.Contains(out, "Known nodes") || !strings.Contains(strings.Join(strings.Fields(out), " "), peer+" "+addr) {
 		t.Fatalf("network show: %d %q %q", code, out, diag)
 	}
 	if code, out, _ = n.run(session{}, "network", "address", "set", peer, "nonsense", "--json"); code != 3 || !strings.Contains(out, "addresses[0]") {
@@ -1155,12 +1156,23 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 		}
 	}
 	code, out, diag := runHome(t, home, "status")
-	if code != 0 || diag != "" || !strings.Contains(out, "daemon.state running") || !strings.HasPrefix(out, "The statement that can retire this node") {
+	if code != 0 || diag != "" || !strings.Contains(out, "\nDaemon ") || !strings.Contains(out, " running, version ") || !strings.HasPrefix(out, "The statement that can retire this node") {
 		t.Fatalf("status: %d %q %q", code, out, diag)
 	}
 	// The daemon does not report its directory; the command adds the one it used.
-	if !strings.Contains(out, "\nhome "+home+"\n") {
+	if !regexp.MustCompile(`(?m)^Home +` + regexp.QuoteMeta(home) + `$`).MatchString(out) {
 		t.Fatalf("human status does not show the data directory %q: %q", home, out)
+	}
+	// The human form of each command that only reads is made from the answer the real daemon
+	// gives, so a field the CLI reads wrongly shows here.
+	for args, want := range map[string]string{
+		"node show": "Settings version", "preset list": "Presets version", "adapter list": "No adapters are installed.",
+		"endpoint list": "No endpoints.", "alerts list": "No open alerts.", "network show": "Network version",
+	} {
+		code, out, diag = runHome(t, home, strings.Fields(args)...)
+		if code != 0 || diag != "" || !strings.Contains(out, want) {
+			t.Fatalf("%s: %d %q %q, want %q", args, code, out, diag, want)
+		}
 	}
 	code, out, diag = runHome(t, home, "status", "--json")
 	var node struct {

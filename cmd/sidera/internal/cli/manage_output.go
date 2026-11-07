@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 )
@@ -56,6 +57,51 @@ func statusWithHome(raw []byte, home string) ([]byte, error) {
 	return append(out, '\n'), err
 }
 
+// managementOutput writes the answer of a management command: the response itself with
+// --json, the layout of the command when it only reads, and the generic listing for the
+// changes, which are moved to layouts of their own one by one.
+func (c *command) managementOutput(plan managementPlan, raw []byte) error {
+	if c.json {
+		return c.managementResult(raw)
+	}
+	var text string
+	var err error
+	now := time.Now()
+	switch plan.method {
+	case "status":
+		text, err = readLayout(raw, func(v statusView) string { return renderNodeStatus(c.out, now, v) })
+	case "node.show":
+		text, err = readLayout(raw, func(v nodeView) string { return renderNodeSettings(c.out, v) })
+	case "network.show":
+		text, err = readLayout(raw, func(v networkView) string { return renderNetwork(c.out, v) })
+	case "presets.list":
+		text, err = readLayout(raw, func(v presetsView) string { return renderPresets(c.out, v) })
+	case "adapters.list":
+		text, err = readLayout(raw, func(v adaptersView) string { return renderAdapters(c.out, v) })
+	case "endpoints.list":
+		text, err = readLayout(raw, func(v endpointsView) string { return renderEndpoints(c.out, v) })
+	case "alerts.list":
+		all, _ := plan.params["include_acknowledged"].(bool)
+		text, err = readLayout(raw, func(v alertsView) string { return renderAlerts(c.out, v, all) })
+	default:
+		return c.managementResult(raw)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(c.out, text)
+	return err
+}
+
+// readLayout reads the result of a response into the view a layout takes and lays it out.
+func readLayout[V any](raw []byte, layout func(V) string) (string, error) {
+	var v V
+	if err := decodeResult(raw, &v); err != nil {
+		return "", err
+	}
+	return layout(v), nil
+}
+
 func (c *command) managementResult(raw []byte) error {
 	if c.json {
 		_, err := c.Stdout.Write(raw)
@@ -64,26 +110,6 @@ func (c *command) managementResult(raw []byte) error {
 	result, err := managementObject(raw)
 	if err != nil {
 		return err
-	}
-	if reminders, ok := result["reminders"].([]any); ok {
-		for _, entry := range reminders {
-			if reminder, ok := entry.(map[string]any); ok {
-				if _, err := fmt.Fprintln(c.Stdout, reminder["message"]); err != nil {
-					return err
-				}
-			}
-		}
-		delete(result, "reminders")
-	}
-	// A contact line is shown on a line of its own, first, so that it can be copied
-	// whole and given to another owner.
-	if contact, ok := result["contact"].(string); ok {
-		if contact != "" {
-			if _, err := fmt.Fprintln(c.Stdout, contact); err != nil {
-				return err
-			}
-		}
-		delete(result, "contact")
 	}
 	w := tabwriter.NewWriter(c.Stdout, 0, 2, 2, ' ', 0)
 	if err := humanFields(w, "", result); err != nil {

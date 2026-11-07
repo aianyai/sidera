@@ -386,8 +386,8 @@ Expected: `0`.
 sidera status
 ```
 
-Expected: a listing that contains the line `daemon.state running`, possibly after a
-warning line (the self-revocation is not confirmed yet; step 9). If you get
+Expected: a block of facts whose `Daemon` line starts with `running`, possibly after a
+warning (`!`) (the self-revocation is not confirmed yet; step 9). If you get
 `daemon_not_running`, read the log you redirected to. Common causes: port 7744 in
 use (the error names the address and the daemon exits; free the port, or create
 the node again on another port as in step 1.3 if nothing is paired yet and your
@@ -577,22 +577,24 @@ light`, then add it again. The default preset `default` that `init` made holds n
 agent settings and cannot start a session. Adding a preset restarts the adapters that
 run.
 
-## 7. Exchange contact lines with the other machine
+## 7. Exchange addresses with the other machine
 
-1. Show this machine's contact line.
+1. Show where this machine can be reached.
 
    ```sh
    sidera network show
    ```
 
-   The first line is `<node-id> <multiaddr> <multiaddr>...`. Each address ends in
-   `/p2p/<peer-id>`. Some addresses cannot be reached from the other machine: those
+   `Reachable at` lists the addresses, one to a line; each ends in `/p2p/<peer-id>`.
+   Below the block, after `To enter this node on another machine, run there:`, is the
+   command `sidera network address set <node-id> <multiaddr> <multiaddr>...` that
+   enters this machine on the other one. Some addresses cannot be reached from the other machine: those
    of a VPN or proxy interface, or of a network the other machine is not on. Note
    which ones to leave out; the other machine enters only the addresses it can
    reach. The port in them is the one from step 1.3.
 
-2. Give that line to your owner (or, through the owner, to the agent on the other
-   machine) and get the other machine's contact line in return. Do not guess an
+2. Give that command to your owner (or, through the owner, to the agent on the other
+   machine) and get the other machine's command in return. Do not guess an
    address.
 
 3. Enter the other machine's address:
@@ -601,7 +603,7 @@ run.
    sidera network address set <other-node-id> <multiaddr> <multiaddr>
    ```
 
-   Check: `sidera network show` lists `<other-node-id>` under `peers` with exactly
+   Check: `sidera network show` lists `<other-node-id>` under `Known nodes` with exactly
    the addresses you entered. If an address you meant to leave out is listed, run
    `network address set` again with only the right ones (it replaces the list).
 

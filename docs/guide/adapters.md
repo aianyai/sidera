@@ -389,7 +389,7 @@ process and no session.
   profile for the shared one. Without a running gateway, or with the setting false,
   results are written to cards but no conversation is woken. The adapter keeps working in
   the second case and says so: `sidera adapter list` shows the instance's availability
-  with the reason, and `sidera adapter setup` warns of the profiles it prepares. It checks the profile's
+  with the reason as a `!` line under its row, and `sidera adapter setup` warns of the profiles it prepares. It checks the profile's
   own setting and the default profile's, since it cannot see which gateway runs, and it
   does not tell you that a gateway is not running.
 - The toolsets `kanban` and `skills` enabled on every platform the agent delegates from
@@ -559,8 +559,8 @@ a cron job an hour after the card finished.
 
 **When Hermes is down.** The adapter checks that Hermes answers before every round of
 reading and of polling. When it does not, it stops reading and tells the daemon the
-dependency is missing (the `availability` column of `sidera adapter list` shows it for the
-instance, with the reason, for instance that the board does not exist), and tries again after pauses that grow from a second to two
+dependency is missing (`sidera adapter list` shows it as a `!` line under the
+instance's row, with the reason, for instance that the board does not exist), and tries again after pauses that grow from a second to two
 minutes. Messages for Hermes wait in the node's queue, and are neither lost nor used up;
 they wait as long as the endpoint's queue time allows (30 minutes by default; see
 [deadlines](../references/delivery/README.md#deadlines-and-retention)), and a sender whose

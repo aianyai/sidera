@@ -373,7 +373,7 @@ local network.
 Choose another port with `sidera init --port <n>` when you create the node, and
 use that port in every rule and address below. To change the listen addresses of a
 node whose daemon runs, use `sidera network listen set <multiaddr> ...`, restart the
-daemon (`sidera daemon restart`) and give the other nodes the new contact line. A daemon that cannot start
+daemon (`sidera daemon restart`) and give the other nodes the new addresses (the command `sidera network show` prints). A daemon that cannot start
 because its port is taken cannot be reconfigured by a command: free the port (see
 [Troubleshooting](operations.md#troubleshooting)).
 

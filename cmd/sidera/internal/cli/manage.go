@@ -93,7 +93,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	case plan.method == "trust.list" && !c.json:
 		return c.trustList(raw)
 	}
-	if err := c.managementResult(raw); err != nil {
+	if err := c.managementOutput(plan, raw); err != nil {
 		return err
 	}
 	if plan.method == "adapters.remove" && plan.force {

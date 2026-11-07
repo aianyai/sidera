@@ -9,11 +9,11 @@ as the user that owns the data directory (`~/.sidera`, on Windows `%LOCALAPPDATA
 Run these on each node:
 
 ```sh
-sidera adapter list      # the probe state of each enabled instance and what its adapter reports as unavailable (see the notes)
+sidera adapter list      # the probe result of each enabled instance, and a `!` line under it for what its adapter reports as unavailable (see the notes)
 sidera trust list        # the nodes you paired with are under `trusted`
-sidera network show      # the first line is the contact line; peers show connected
+sidera network show      # where this node listens, the command that enters it on another machine, and the known nodes with their connection
 sidera alerts list       # normally empty
-sidera status            # daemon state, queues, delivery counts, and `home`, the data directory
+sidera status            # reminders first, then the daemon, `Home` (the data directory), deliveries, disk and alerts
 sidera endpoint list     # console, runtime and session endpoints of this node
 ```
 
@@ -24,12 +24,12 @@ Notes:
   may show `failed`, because no command-line front end is offered under that
   sandbox; this is a known limit of the display, and sessions still work. Whether
   `codex` is found shows when a session is created.
-- `home` in `sidera status` (also `result.home` with `--json`) is the data directory the
+- `Home` in `sidera status` (`result.home` with `--json`) is the data directory the
   command used, and so the directory of the daemon that answered: the command asks the
   daemon that runs in the directory it resolved from `--home`, then `SIDERA_HOME`, then
   the default. Check it after a move or when two nodes share a machine.
-- `connected` in `network show` is whether a connection is up now. It can be
-  `false` for a healthy node until one side sends.
+- `connected` in `network show` is whether a connection is up now. A healthy node can
+  show `not connected` until one side sends.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
   they fail with `unauthenticated/token_missing`; that is expected. They work
   inside an agent session, and inside a Claude Code or Codex session you opened
@@ -280,10 +280,10 @@ release before 0.12.0 are upgraded with these steps.
    address for as it starts, and keeps retrying (after 5, 10, 20 and 40 seconds, then
    every minute) the ones it cannot reach and the ones that cannot dial it, so nothing
    needs to be sent. Give it a minute, then run `sidera network show` on each node: the
-   peers are listed with `connected true`. A connection that nothing uses for five
+   peers are listed as `connected`. A connection that nothing uses for five
    minutes is closed when both nodes can dial each other, so a peer may later show
-   `connected false` without being down; it is connected again when something is sent.
-   A peer that stays `connected false` right after the restart is down, or neither side
+   `not connected` without being down; it is connected again when something is sent.
+   A peer that stays `not connected` right after the restart is down, or neither side
    holds an address the other can be reached on; `logs/daemon.log` says at info level
    why the first dial failed, with the error of each address.
 
@@ -372,7 +372,7 @@ first, in this order, and move only when the check in step 3 shows nothing:
    Move-Item "$env:USERPROFILE\.sidera" "$env:LOCALAPPDATA\Sidera"
    ```
 
-5. Start the daemon, the way you started it before, and run `sidera status`: its `home`
+5. Start the daemon, the way you started it before, and run `sidera status`: its `Home`
    line is the new directory.
 6. The old adapter is still the one installed until you run `sidera adapter install`
    (step 4 of the upgrade), and when it found no App Server at the first start it
@@ -560,7 +560,7 @@ cannot start cannot be given another port by a command. To move a node that runs
 sidera network listen set /ip4/0.0.0.0/tcp/7745 /ip4/0.0.0.0/udp/7745/quic-v1
 ```
 
-then restart the daemon and give the other nodes the new contact line. A new node
+then restart the daemon and give the other nodes the new addresses (the command `sidera network show` prints). A new node
 that has not paired yet can be created again on a free port with
 `sidera init --port <n>`, after you delete its data directory.
 `daemon_already_running` means a daemon on the same data directory is already up.
@@ -663,7 +663,7 @@ Claude, `cwd` for Codex). Check with `sidera preset list` on the target node.
 **An agent keeps seeing the same message.** It does not acknowledge. See
 [Reading messages](agents.md#reading-messages).
 
-**After a restart, peers show `connected false`.** Nothing is wrong yet: send a
+**After a restart, peers show `not connected`.** Nothing is wrong yet: send a
 message in either direction, as in step 5 of the upgrade.
 
 **A pairing is stuck.** `sidera trust list` shows requests under `incoming` and
