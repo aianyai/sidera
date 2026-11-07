@@ -326,8 +326,11 @@ default_permissions, permissions.<profile>   # presets with a sandbox only; see 
 The values are the `tool_access.env` of `session.create` or of the session's entry in
 `adapter.start`. They are held in memory only: not in a checkpoint, not in a file.
 
-**The owner may have a `sidera` server of their own.** A person who wants their own Codex
-sessions to reach Sidera adds `[mcp_servers.sidera]` to `config.toml`
+**The owner may have a `sidera` server of their own.** The supported way for a person's own
+Codex sessions to reach Sidera is `sidera adapter setup <codex instance>`, which installs a
+plugin that carries the server (see [Client setup](#client-setup)); a `sidera` entry added by hand
+hides the plugin's server of the same name. A person who wants their own Codex
+sessions to reach Sidera by hand adds `[mcp_servers.sidera]` to `config.toml`
 (`codex mcp add sidera -- <sidera> mcp`), and a thread's `config` is merged into the owner's
 file key by key, a table into a table of the same name, not replaced by it. The adapter keeps
 the name `sidera`: under another name the thread would also start the owner's server, which
