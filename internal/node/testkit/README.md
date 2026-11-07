@@ -14,13 +14,13 @@ The packages fall on two sides of one line.
 
 | Side | Packages | May import |
 | ---- | -------- | ---------- |
-| Third party | [`ledger`](ledger/README.md), [`fakectl`](fakectl/README.md), [`fakeruntime`](fakeruntime/README.md), [`fakeadapter`](fakeadapter/README.md), and the programs `cmd/sidera-fake-adapter`, `cmd/sidera-fake-runtime` | the standard library, `sdk/go/...` and each other |
+| Third party | [`ledger`](ledger/README.md), [`fakectl`](fakectl/README.md), [`fakeruntime`](fakeruntime/README.md), [`fakeadapter`](fakeadapter/README.md), and the programs `cmd/sidera-fake-adapter`, `cmd/sidera-fake-runtime` | the standard library, `sdk/go/...`, the modules `sdk/go/go.mod` requires and each other |
 | Sidera | [`fakeagent`](fakeagent/README.md), [`fakeagent/engineagent`](fakeagent/engineagent/README.md), [`scenario`](scenario/README.md), [`harness`](harness/README.md), [`crashwalk`](crashwalk/README.md), [`diskfacts`](diskfacts/README.md) | anything of the runtime tree and the contract packages, except that `scenario` imports neither the engine nor a fixture and `diskfacts` is restricted to the disk readers and contracts listed in its README |
 
 The third-party side plays programs a stranger would write: an adapter that speaks
 the published protocol, a native runtime that has never heard of Sidera, and the
 ledger that records what they did. They import nothing of the repository but the SDK
-module, so a test against them proves the protocol boundary and not an agreement
+module (and, with it, what that module requires), so a test against them proves the protocol boundary and not an agreement
 between two internal packages. `imports_test.go` enforces it with `go list -deps`
 for the three operating systems and the tag sets that change the build. The Sidera
 side may know the daemon: it is the part that drives it and judges it. `scenario` is

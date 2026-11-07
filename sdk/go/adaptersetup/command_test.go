@@ -192,7 +192,7 @@ func TestCommandMapsErrorsToExitCodes(t *testing.T) {
 func TestCommandHelpIsDone(t *testing.T) {
 	for _, flag := range []string{"-h", "--help"} {
 		code, out, _ := runSetup(t, &script{}, "", flag)
-		if code != adapterkit.ExitOK || !strings.Contains(out, "usage: prog setup") {
+		if code != adapterkit.ExitOK || !strings.Contains(out, "Usage: prog setup") {
 			t.Errorf("%s: exit %d, stdout %q", flag, code, out)
 		}
 	}

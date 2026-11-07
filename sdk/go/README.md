@@ -7,8 +7,9 @@ words every agent is told about Sidera. It is a separate module,
 third-party adapter can import them without pulling in the daemon's dependency graph,
 with three exceptions: `adapterkit/process` and `adapterkit/realpath` use
 `golang.org/x/sys`, and `termout` uses `golang.org/x/sys` and `golang.org/x/text`. The
-`sidera` binary imports `termout`, so it links both; an adapter that leaves those three
-packages out does not.
+`sidera` binary imports `termout`, so it links both. `adapterkit` imports `termout` for the
+output of the commands it runs (`package`, `version` and the help), so an adapter built on the
+kit links both as well, and so does one that imports `adaptersetup` (it lays out its usage with `termout`); one that speaks the protocol with `peer` and `adapterproto` alone does not.
 
 | Package | Holds |
 | ------- | ----- |

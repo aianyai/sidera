@@ -43,7 +43,7 @@ const (
 func runClient(args []string, env Env) int {
 	inv, err := parseCommand(args, env)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(env.Stdout, usageText)
+		fmt.Fprint(env.Stdout, program(env).Text(env.streams().Out()))
 		return exitOK
 	}
 	if err != nil {

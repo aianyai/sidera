@@ -32,6 +32,7 @@ for `sidera adapter install` (see the reference for the three commands).
   (`printMessage`); the console decides nothing from it, and the member reaches it only
   because the kit declares the direct capability `feedback`. The body is the one field it
   prints that a peer writes freely, so `printMessage` prints it through `termout.SanitizeText`.
+- The program's help is `help` in `console.go` (an `adapterkit.Help`); the kit adds the commands it runs.
 - `internal/console` holds the adapter's identity (`AdapterID`, and the release
   version from `internal/release`) once; the manifest and `initialize` both read it.
 - A change to the commands, the local protocol or the control channel updates the

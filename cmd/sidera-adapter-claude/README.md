@@ -48,7 +48,7 @@ library, `sdk/go`, `internal/release` (for the version alone), `golang.org/x/sys
 | `internal/runtime/proc/` | The operating-system layer: the process table, starting a process detached from the adapter, and interrupting one; the adapter's own interface over `sdk/go/adapterkit/process`, which implements it on macOS, Linux and Windows. |
 
 `main.go` first lets the SDK's interrupt helper (Windows) take over when the executable was started as one, then runs its command line, an `adapterkit.Program`: the subcommand `serve` (the one the manifest's entry names) serves the adapter protocol over the standard input and output with
-`sdk/go/adapterkit`, `version [--json]` prints the version, `setup` is the client setup that `sidera adapter setup` runs (the manifest's `setup` member names it), and `--help`, no argument and an unknown command print the usage (`usageText`): nothing serves unless `serve` is named.
+`sdk/go/adapterkit`, `version [--json]` prints the version, `setup` is the client setup that `sidera adapter setup` runs (the manifest's `setup` member names it), and `--help`, no argument and an unknown command print the help (`help`): nothing serves unless `serve` is named.
 `sidera-adapter.json` is the package manifest, built into the
 executable so that the identity answered in `initialize` is read from it; its version is
 the placeholder `@version@`, replaced by the release version when the manifest is read. The

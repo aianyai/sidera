@@ -164,8 +164,8 @@ them.
 `sidera-adapter-claude` has four commands: `serve`, which the daemon starts (the manifest's
 `entry.args` is `["serve"]`), `package`, `version` and `setup` (see [Client setup](#client-setup)),
 which the manifest's `setup` member names and `sidera adapter setup` runs. It does nothing else: `--help`, `-h` and
-`help` print the usage to standard output and exit 0, no argument prints the usage to standard
-error, an unknown command names itself and prints the usage there, and an argument after `serve`
+`help` print the help to standard output and exit 0, no argument prints the help to standard
+error, an unknown command names itself and prints the help there, and an argument after `serve`
 is refused with "serve takes no arguments" (all three exit 2). A program run by a person with
 nothing to do therefore never waits on its input as if the daemon had started it. The commands
 are the kit's `adapterkit.Program`, the same in all four adapter programs. The daemon starts an installed adapter with the entry of the manifest in its own
@@ -182,7 +182,7 @@ sidera adapter install <dir>
 writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-claude` through
 `manifest.WritePackage`. `package` itself is `adapterkit.RunPackage`, which every adapter program
 shares: the directory must be new or empty, a missing flag or an extra argument is a usage error
-(exit 2) and success prints `package: <dir>`. The manifest is the one
+(exit 2) and success prints `Wrote the adapter package.` with the platform and the directory. The manifest is the one
 built into the executable, with `platforms` narrowed to the platform asked for, since the
 package holds one binary and the installation checks the list. A platform the manifest does
 not list (today anything but `darwin`, `linux` and `windows` on `amd64` and `arm64`) is refused and nothing is

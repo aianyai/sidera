@@ -10,9 +10,10 @@ requests and notifications. "D to A" below means the daemon calls the adapter an
 
 The SDK lives in its own Go module, `github.com/aianyai/sidera/sdk/go`, which
 is imported by the daemon and by third-party adapters alike. Its packages use the
-standard library only, except `adapterkit/process`, `adapterkit/realpath` and
-`termout`, which also use `golang.org/x/sys` (`termout` uses `golang.org/x/text`
-as well). The frames are handled by
+standard library only, except `adapterkit/process`, `adapterkit/realpath`, `termout`,
+`adapterkit` and `adaptersetup` (the last two are built on `termout`), which also use
+`golang.org/x/sys` (`termout` uses `golang.org/x/text` as well, so every package built on it
+links both). The frames are handled by
 `sdk/go/peer`; the messages, enums, application error codes and manifest are
 defined in the packages `adapterproto` and `manifest` and, for other languages, by
 the JSON Schema under `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon

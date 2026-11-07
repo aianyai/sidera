@@ -119,7 +119,9 @@ replacement and explicit clearing through its run-owned registry.
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
 The first four, with the two programs, are the **third-party side**: they import the
-standard library, the SDK module and each other and nothing else. `fakeagent`,
+standard library, the SDK module, the modules the SDK module itself requires (read
+from `sdk/go/go.mod`, since a real adapter that imports the SDK links them too) and
+each other, and nothing else. `fakeagent`,
 `engineagent`, `scenario`, `harness` and `crashwalk` are the **Sidera side** and may
 import any runtime or contract package; `scenario` imports neither the engine
 nor a fixture.

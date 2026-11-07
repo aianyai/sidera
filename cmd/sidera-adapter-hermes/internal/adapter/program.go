@@ -20,19 +20,17 @@ type ProgramEnv struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// Getenv reads the environment that decides how the output is decorated and colored.
+	Getenv func(string) string
 }
 
-const usageText = `usage: sidera-adapter-hermes <command>
-
-commands:
-  serve      the adapter role; the daemon starts it, a person does not
-  package --goos <os> --goarch <arch> --binary <file> --out <directory>
-             write an adapter package for 'sidera adapter install'
-  setup      the client setup that 'sidera adapter setup <instance>' runs, not a person:
-             it reads a request on standard input (options after --: --profile, --platform)
-  version [--json]
-             the version, the commit and the Go version of this program
-`
+var help = adapterkit.Help{
+	Usage: ProgramName + " <command>",
+	Groups: []adapterkit.HelpGroup{{Title: "Client setup", Entries: []adapterkit.HelpEntry{
+		{Name: "setup", Arguments: "[-- --profile <name> --platform <name>]",
+			Purpose: "The client setup that `sidera adapter setup <instance>` runs, not a person: it reads a request on standard input."},
+	}}},
+}
 
 const (
 	exitOK     = adapterkit.ExitOK
@@ -44,12 +42,12 @@ const (
 func Main(args []string, env ProgramEnv) int {
 	return adapterkit.Program{
 		Name:     ProgramName,
-		Usage:    usageText,
+		Help:     help,
 		Serve:    runServe,
 		Package:  writePackage,
 		Build:    release.Read(),
 		Commands: map[string]adapterkit.Command{"setup": adaptersetup.Command(ProgramName, setup.NewHandler())},
-	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr})
+	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr, Getenv: env.Getenv})
 }
 
 func runServe(s adapterkit.Streams) int {

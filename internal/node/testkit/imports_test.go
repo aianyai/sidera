@@ -2,6 +2,7 @@ package testkit
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,9 +16,13 @@ import (
 // The third-party side of the testkit stands in for what a stranger would write:
 // an adapter, a native runtime, the files they leave behind. Those programs know
 // the adapter protocol and nothing else of Sidera, so the packages that play
-// them import only the standard library, the SDK module and each other. If one
-// of them reached an internal package, the protocol boundary would be proved
-// against a program that is not a third party, and the proof would be empty.
+// them import only the standard library, the SDK module, the modules the SDK
+// module itself requires, and each other. A real third-party adapter that
+// imports the SDK links what the SDK needs, so those requirements belong to
+// "the SDK module" and are not a dependency of the adapter's own choosing. If
+// one of the packages reached an internal package, or a module only the daemon
+// requires, the protocol boundary would be proved against a program that is not
+// a third party, and the proof would be empty.
 
 // thirdPartyPackages are the packages of the third-party side, relative to the
 // module path, and the two programs built from them.
@@ -34,6 +39,7 @@ func TestThirdPartySideImportsOnlyStandardLibraryAndSDK(t *testing.T) {
 	root := moduleRoot(t)
 	module := modulePath(t, root)
 	sdk := module + "/sdk/go"
+	sdkRequires := sdkRequirements(t, root)
 	own := make([]string, len(thirdPartyPackages))
 	for i, p := range thirdPartyPackages {
 		own[i] = module + "/" + p
@@ -53,7 +59,7 @@ func TestThirdPartySideImportsOnlyStandardLibraryAndSDK(t *testing.T) {
 						t.Errorf("%s: package %s is not in the dependency listing: it does not exist or is not buildable", name, p)
 					}
 				}
-				for _, v := range forbiddenDeps(deps, sdk, own) {
+				for _, v := range forbiddenDeps(deps, sdk, sdkRequires, own) {
 					t.Errorf("%s: %s", name, v)
 				}
 			})
@@ -62,25 +68,52 @@ func TestThirdPartySideImportsOnlyStandardLibraryAndSDK(t *testing.T) {
 }
 
 // forbiddenDeps returns one message per non-standard dependency that is neither
-// in the SDK module nor one of the third-party packages themselves.
-func forbiddenDeps(deps []string, sdkPath string, own []string) []string {
+// in the SDK module, nor in a module the SDK module requires, nor one of the
+// third-party packages themselves.
+func forbiddenDeps(deps []string, sdkPath string, sdkRequires []string, own []string) []string {
+	allowedModules := append([]string{sdkPath}, sdkRequires...)
 	var out []string
 	for _, d := range deps {
 		d, _, _ = strings.Cut(d, " [")
-		if d == sdkPath || strings.HasPrefix(d, sdkPath+"/") {
+		if slices.ContainsFunc(allowedModules, func(m string) bool { return d == m || strings.HasPrefix(d, m+"/") }) {
 			continue
 		}
 		if slices.Contains(own, d) {
 			continue
 		}
-		out = append(out, fmt.Sprintf("depends on %s: only the standard library, %s/... and the third-party side itself are allowed", d, sdkPath))
+		out = append(out, fmt.Sprintf("depends on %s: only the standard library, %s/..., the modules %s requires and the third-party side itself are allowed", d, sdkPath, sdkPath))
 	}
 	sort.Strings(out)
 	return out
 }
 
+// sdkRequirements are the module paths that sdk/go/go.mod requires, direct and
+// indirect, read from the file so that the list cannot drift from it.
+func sdkRequirements(t *testing.T, root string) []string {
+	t.Helper()
+	cmd := exec.Command("go", "mod", "edit", "-json", filepath.Join("sdk", "go", "go.mod"))
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go mod edit -json sdk/go/go.mod: %v\n%s", err, stderr.String())
+	}
+	var mod struct {
+		Require []struct{ Path string }
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &mod); err != nil {
+		t.Fatalf("decode go mod edit -json of sdk/go/go.mod: %v", err)
+	}
+	var paths []string
+	for _, r := range mod.Require {
+		paths = append(paths, r.Path)
+	}
+	return paths
+}
+
 func TestImportRuleDetectsViolations(t *testing.T) {
 	const sdk = "m/sdk/go"
+	sdkRequires := []string{"golang.org/x/sys", "golang.org/x/text"}
 	own := []string{"m/internal/node/testkit/ledger", "m/cmd/sidera-fake-adapter"}
 	cases := []struct {
 		name string
@@ -94,13 +127,15 @@ func TestImportRuleDetectsViolations(t *testing.T) {
 		{"a runtime package is not", []string{"m/internal/node/fsx"}, 1},
 		{"another testkit package is not", []string{"m/internal/node/testkit/harness"}, 1},
 		{"a third-party module is not", []string{"github.com/fxamacker/cbor/v2"}, 1},
+		{"a package of a module the SDK requires is allowed", []string{"golang.org/x/sys/unix", "golang.org/x/text"}, 0},
+		{"a path that only starts like a required module is not", []string{"golang.org/x/sysx"}, 1},
 		{"a path that only starts like the SDK is not", []string{"m/sdk/gonext"}, 1},
 		{"a test variant of an allowed package is allowed", []string{"m/sdk/go/peer [m/sdk/go/peer.test]"}, 0},
 		{"two violations are two messages", []string{"m/internal/delivery", "m/internal/node/store"}, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := forbiddenDeps(c.deps, sdk, own); len(got) != c.want {
+			if got := forbiddenDeps(c.deps, sdk, sdkRequires, own); len(got) != c.want {
 				t.Fatalf("got %d violations %q, want %d", len(got), got, c.want)
 			}
 		})

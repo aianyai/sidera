@@ -15,7 +15,8 @@ func TestTheProgramHasTheSetupCommandTheManifestNames(t *testing.T) {
 	if code != adapterkit.ExitUsage || !strings.Contains(stderr.String(), "setup:") || strings.Contains(stderr.String(), "unknown command") {
 		t.Errorf("exit %d, stderr %q", code, stderr.String())
 	}
-	if !strings.Contains(usageText, "\n  setup ") {
-		t.Error("the usage does not list setup")
+	stdout.Reset()
+	if program.Run([]string{"help"}, adapterkit.Streams{Stdout: &stdout, Stderr: &stderr}); !strings.Contains(stdout.String(), "\n  setup ") {
+		t.Errorf("the help does not list setup: %q", stdout.String())
 	}
 }

@@ -29,8 +29,14 @@ func run(f func(adapterkit.Streams) int) (code int, stdout, stderr string) {
 // testProgram is a program whose serve, package and own command say that they ran.
 func testProgram() adapterkit.Program {
 	return adapterkit.Program{
-		Name:  "prog",
-		Usage: "usage text\n",
+		Name: "prog",
+		Help: adapterkit.Help{
+			Usage: "prog <command>",
+			Groups: []adapterkit.HelpGroup{{Title: "Own", Entries: []adapterkit.HelpEntry{
+				{Name: "own", Arguments: "[args]", Purpose: "Say that it ran."},
+			}}},
+			Footer: "Exit codes: 0 done.",
+		},
 		Serve: func(s adapterkit.Streams) int {
 			io.WriteString(s.Stdout, "served\n")
 			return 7
@@ -50,7 +56,21 @@ func testProgram() adapterkit.Program {
 // have, says so and ends: only the name `serve`, alone, reaches the adapter role,
 // which would wait on its input.
 func TestProgramRun(t *testing.T) {
-	const usage = "usage text\n"
+	const usage = `Usage: prog <command>
+
+Own
+  own  Say that it ran.
+       [args]
+
+Adapter program
+  serve    The adapter role; the daemon starts it, a person does not.
+  package  Write an adapter package for ` + "`sidera adapter install`" + `.
+           --goos <os> --goarch <arch> --binary <file> --out <directory>
+  version  Print the version, the commit and the Go version of this program.
+           [--json]
+
+Exit codes: 0 done.
+`
 	for _, c := range []struct {
 		args   []string
 		code   int
@@ -64,8 +84,8 @@ func TestProgramRun(t *testing.T) {
 		{[]string{"serve"}, 7, "served\n", ""},
 		{[]string{"serve", "--help"}, adapterkit.ExitUsage, "", "prog: serve takes no arguments\n"},
 		{[]string{"serve", "extra"}, adapterkit.ExitUsage, "", "prog: serve takes no arguments\n"},
-		{[]string{"bogus"}, adapterkit.ExitUsage, "", "prog: unknown command \"bogus\"\n" + usage},
-		{[]string{"--bogus"}, adapterkit.ExitUsage, "", "prog: unknown command \"--bogus\"\n" + usage},
+		{[]string{"bogus"}, adapterkit.ExitUsage, "", "prog: unknown command \"bogus\"\n\n" + usage},
+		{[]string{"--bogus"}, adapterkit.ExitUsage, "", "prog: unknown command \"--bogus\"\n\n" + usage},
 		{[]string{"own", "a", "--b"}, 5, "own [a --b]\n", ""},
 		{[]string{"version"}, 0, "prog 1.2.3\n", ""},
 	} {
@@ -96,8 +116,16 @@ func TestProgramRefusesAnOwnCommandTheKitRuns(t *testing.T) {
 func TestHelpOfACommandIsNotAnError(t *testing.T) {
 	for _, command := range []string{"package", "version"} {
 		code, stdout, stderr := run(func(s adapterkit.Streams) int { return testProgram().Run([]string{command, "--help"}, s) })
-		if code != adapterkit.ExitOK || !strings.HasPrefix(stdout, "usage: prog "+command) || stderr != "" {
+		if code != adapterkit.ExitOK || !strings.HasPrefix(stdout, "Usage: prog "+command) || stderr != "" {
 			t.Errorf("%s --help: code %d, stdout %q, stderr %q", command, code, stdout, stderr)
+		}
+		// The flags are listed from the flag set, with the placeholder of each value.
+		if command == "package" {
+			for _, want := range []string{"--goos <os>  The os the binary was built for (GOOS).", "--out <directory>  The directory to write the package into; it must be new or empty."} {
+				if !strings.Contains(strings.Join(strings.Fields(stdout), " "), strings.Join(strings.Fields(want), " ")) {
+					t.Errorf("package --help lacks %q:\n%s", want, stdout)
+				}
+			}
 		}
 	}
 }
@@ -141,7 +169,7 @@ func TestRunPackage(t *testing.T) {
 	}
 
 	out := filepath.Join(dir, "new")
-	if code, stdout, stderr := pkg(full(out)...); code != 0 || stdout != "package: "+out+"\n" || stderr != "" {
+	if code, stdout, stderr := pkg(full(out)...); code != 0 || stdout != "Wrote the adapter package.\n  Platform   linux/amd64\n  Directory  "+out+"\n" || stderr != "" {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if len(written) != 1 || written[0] != [4]string{"linux", "amd64", "bin", out} {
@@ -183,5 +211,29 @@ func TestRunPackage(t *testing.T) {
 	})
 	if code != adapterkit.ExitFailed || stdout != "" || stderr != "prog: no such binary\n" {
 		t.Errorf("failing writer: code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+// A program decorates and colors its human output by the same rules as every Sidera
+// program, from the environment it passes in; the words stay the same without it.
+func TestKitOutputFollowsTheEnvironmentOfTheProgram(t *testing.T) {
+	write := func(string, string, string, string) error { return nil }
+	args := []string{"--goos", "linux", "--goarch", "amd64", "--binary", "bin", "--out", filepath.Join(t.TempDir(), "new")}
+	for _, c := range []struct {
+		name   string
+		getenv func(string) string
+		marker string
+		color  bool
+	}{
+		{"no environment", nil, "", false},
+		{"forced color", func(k string) string { return map[string]string{"FORCE_COLOR": "1"}[k] }, "✓", true},
+		{"no color wins", func(k string) string { return map[string]string{"FORCE_COLOR": "1", "NO_COLOR": "1"}[k] }, "", false},
+	} {
+		var out bytes.Buffer
+		adapterkit.RunPackage("prog", args, write, adapterkit.Streams{Stdout: &out, Stderr: io.Discard, Getenv: c.getenv})
+		got := out.String()
+		if strings.Contains(got, "✓") != (c.marker != "") || strings.Contains(got, "\x1b[") != c.color {
+			t.Errorf("%s: output %q", c.name, got)
+		}
 	}
 }

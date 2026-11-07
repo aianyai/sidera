@@ -312,7 +312,7 @@ func TestNewThatGetsNoReplyIsUnsettled(t *testing.T) {
 func TestHelpOfACommandIsNotAnError(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Main([]string{"new", "--help"}, Env{Getenv: func(string) string { return "" }, Stdout: &out, Stderr: &errOut})
-	if code != exitOK || !strings.Contains(out.String(), "usage: sidera-adapter-console") || errOut.Len() != 0 {
+	if code != exitOK || !strings.Contains(out.String(), "Usage: sidera-adapter-console") || errOut.Len() != 0 {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errOut.String())
 	}
 }

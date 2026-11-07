@@ -588,7 +588,9 @@ The agent commands (`me`, `peers`, `directory`, `declare`, `send`, `reply`, `con
 `status <message-id>` and `ack`), the management commands, whether they read or change something,
 and the operations `update`, `adapter setup`, `daemon restart`, `init`, `identity
 export-revocation` (its instruction on standard error), `trust list`, `trust request` and the
-notice of a controller session write through them and follow the layout below.
+notice of a controller session write through them and follow the layout below, and so do the
+adapter programs' help and `package` (see
+[Conventions of every program](#conventions-of-every-program)).
 
 **Decorated** means that lines may carry markers (`✓` done, `!` attention, `✗` failure). A stream
 is decorated when it is a terminal, or when it is colored. It is not decorated when it is a pipe
@@ -778,7 +780,7 @@ and `go_version` are always there. The object does not name the program. `--json
 adapter command is a usage error (a known difference: the adapter programs have no machine-readable
 output of their commands yet).
 
-**Help.** `-h`, `--help` and (for the adapter programs) `help` print the usage on standard output
+**Help.** `-h`, `--help` and (for the adapter programs) `help` print the help on standard output
 and exit 0. `sidera --help` prints the usage line, then every command under a heading (messages, node,
 endpoints and presets, network, trust, identity and clock, adapters, update and maintenance) with a
 one-clause summary, wrapped under the names, and closes with the hint to run `sidera <command> --help`.
@@ -797,11 +799,22 @@ with no argument is a usage error (2): the usage goes to standard error (`sidera
 `error: a command is required; use --help`), and an unknown command is a usage error (2) that names
 it. A program therefore never starts doing something when it is run with nothing to do: `serve`
 has to be named, and the manifest of every adapter says so in `entry.args`. `sidera help <command>`
-does not exist.
+does not exist. The help of an adapter program is laid out like a list of `sidera`'s commands: a
+usage line, then titled groups of commands, each name cyan on a colored stream with its purpose
+wrapped under it and its arguments on the line below, then closing prose; the commands the kit
+runs (`serve`, `package`, `version`) are one group the same in all four programs. `package --help`
+and `version --help` list their flags the same way.
+
+**Output of the adapter programs.** They write through `termout` like `sidera`, with one difference:
+they have no `--color` flag, so what the environment says (`NO_COLOR`, `CLICOLOR_FORCE`,
+`FORCE_COLOR`, `CLICOLOR=0`, `TERM=dumb`) and whether the stream is a terminal decide, each stream
+separately. The words and the layout are the same in every state of a stream. Error lines keep
+the form `<program>: <message>`, and `version`, `version --json`, the exit codes and `serve` (whose
+standard output is the protocol) are unchanged.
 
 **`package` and `version` of the adapter programs.** They are one implementation
 (`sdk/go/adapterkit`), so they behave alike. `package --goos --goarch --binary --out` writes the
-adapter package of one platform and prints `package: <directory>`; a missing flag, an unknown flag
+adapter package of one platform and prints `Wrote the adapter package.` with the `Platform` and the `Directory`; a missing flag, an unknown flag
 or any other argument is a usage error; a directory that already holds files, or a platform the
 program refuses, is an ordinary failure (1) and nothing is written. Which platforms a program
 refuses differs: the Claude program has a fixed list of six (`darwin`, `linux` and `windows`, each

@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 // maxRequest bounds what the helper reads from standard input: a request holds an
@@ -95,7 +96,8 @@ type Refresh struct {
 func Command(program string, h Handler) adapterkit.Command {
 	return func(args []string, s adapterkit.Streams) int {
 		if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
-			fmt.Fprintf(s.Stdout, "usage: %s setup\nReads one setup request as JSON on standard input and writes one result as JSON on standard output; it is run by `sidera adapter setup`, not by a person.\n", program)
+			out := s.Out()
+			fmt.Fprintf(out, "Usage: %s setup\n\n%s\n", program, termout.Wrap("Reads one setup request as JSON on standard input and writes one result as JSON on standard output; it is run by `sidera adapter setup`, not by a person.", out.TextWidth()))
 			return adapterkit.ExitOK
 		}
 		if len(args) != 0 {

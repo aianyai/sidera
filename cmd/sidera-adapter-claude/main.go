@@ -7,7 +7,7 @@
 // It does nothing unless it is told what: the subcommand serve (what the manifest's
 // entry says) serves, package writes the adapter package for a platform from a
 // binary built for it, setup is the client setup `sidera adapter setup` runs, and
-// version prints its version. See usageText.
+// version prints its version. See help.
 package main
 
 import (
@@ -51,22 +51,17 @@ func loadManifest() (manifest.Manifest, error) {
 	return m, nil
 }
 
-const usageText = `usage: sidera-adapter-claude <command>
-
-commands:
-  serve      the adapter role; the daemon starts it, a person does not
-  package --goos <os> --goarch <arch> --binary <file> --out <directory>
-             write an adapter package for 'sidera adapter install'
-  setup      bring Claude Code's configuration in line with an instance; run by
-             'sidera adapter setup', not by a person
-  version [--json]
-             the version, the commit and the Go version of this program
-`
+var help = adapterkit.Help{
+	Usage: programName + " <command>",
+	Groups: []adapterkit.HelpGroup{{Title: "Client setup", Entries: []adapterkit.HelpEntry{
+		{Name: "setup", Purpose: "Bring Claude Code's configuration in line with an instance; run by `sidera adapter setup`, not by a person."},
+	}}},
+}
 
 // program is the command line of the executable.
 var program = adapterkit.Program{
 	Name:    programName,
-	Usage:   usageText,
+	Help:    help,
 	Serve:   serve,
 	Package: writePackage,
 	Build:   release.Read(),
@@ -86,7 +81,7 @@ func main() {
 	// A helper process of the SDK's interrupt (Windows) is this executable started
 	// with an argument of its own; it does its work and ends here.
 	process.HandleHelperInvocation()
-	os.Exit(program.Run(os.Args[1:], adapterkit.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}))
+	os.Exit(program.Run(os.Args[1:], adapterkit.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr, Getenv: os.Getenv}))
 }
 
 // serve is the command the manifest's entry names.

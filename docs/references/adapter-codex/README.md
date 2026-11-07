@@ -872,9 +872,9 @@ descriptions the manifest declares and the checks that read them, from one list.
 
 The program has four commands: `serve`, which the daemon starts (the manifest's
 `entry.args` is `["serve"]`), `setup`, which `sidera adapter setup` runs (the manifest's
-`setup.args` is `["setup"]`; see "Client setup"), `package` and `version`. `--help`, `-h` and `help` print the usage
-to standard output and exit 0; no argument prints the usage to standard error, an unknown command
-names itself and prints the usage there, and an argument after `serve` is refused with "serve
+`setup.args` is `["setup"]`; see "Client setup"), `package` and `version`. `--help`, `-h` and `help` print the help
+to standard output and exit 0; no argument prints the help to standard error, an unknown command
+names itself and prints the help there, and an argument after `serve` is refused with "serve
 takes no arguments" (all three exit 2), so a program run by a person never waits on its input as
 if the daemon had started it. The commands are the kit's `adapterkit.Program`, the same in all
 four adapter programs. The daemon starts an installed adapter with
@@ -893,7 +893,7 @@ go build -o <binary> ./cmd/sidera-adapter-codex   # with GOOS and GOARCH set
 writes `<dir>/sidera-adapter.json` and `<dir>/bin/sidera-adapter-codex` (with `.exe`
 for Windows) through `manifest.WritePackage`. `package` itself is `adapterkit.RunPackage`, which every adapter
 program shares: the directory must be new or empty, a missing flag or an extra argument is a
-usage error (exit 2) and success prints `package: <dir>`. The platforms are `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`,
+usage error (exit 2) and success prints `Wrote the adapter package.` with the platform and the directory. The platforms are `darwin/arm64`, `darwin/amd64`, `linux/amd64`, `linux/arm64`,
 `windows/amd64` and `windows/arm64`. The version in the manifest, in `initialize` and in the client information sent to
 the App Server is the release version (`internal/release`; a build without it is `0.0.0-dev`), and
 `<binary> version` prints it with the commit and the Go version. Receive budgets are 8000 tokens for both front ends (Codex cuts a tool

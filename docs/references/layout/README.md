@@ -95,8 +95,8 @@ own decision.
   `testkit/fakeadapter`, `testkit/fakeruntime`) touch files, the composition root reads `crypto/rand`, and the
   crash model's seeded `math/rand` source is injected by the test. Writing the
   lists in the test file means widening one is a visible change. The third-party
-  packages of the testkit import only the standard library, `sdk/go` and each
-  other, as a real third party would, so they cannot reach `fsx`; their files are
+  packages of the testkit import only the standard library, `sdk/go`, the
+  modules `sdk/go` requires and each other, as a real third party would, so they cannot reach `fsx`; their files are
   not daemon state; and the ledger is a test oracle that must stay independent of
   the `fsx` under test (see [testkit](../testkit/README.md)).
 - **Test tooling never reaches a production binary.** Tooling consists of the

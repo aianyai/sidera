@@ -49,31 +49,37 @@ const (
 	exitUnsettled = adapterkit.ExitUnknownOutcome
 )
 
-const usageText = `usage: sidera-adapter-console <command> [flags]
-
-commands:
-  new <runtime-address> --preset <name> [--body <text> | --body-file <file>] [--timeout <seconds>, default 120]
-                         start a session on a runtime endpoint; prints the new session's address
-  recv [--wait <seconds>]
-                         print the messages waiting for the owner endpoint, then acknowledge them
-  reply <message-id> [--to <address>] (--body <text> | --body-file <file>)
-  send --to <address>[,<address>...] (--body <text> | --body-file <file>)
-  directory [--node <id>] [--limit <n>] [--cursor <c>]
-                         list the endpoints a node shows to the owner endpoint (--node names a node from 'peers')
-  peers                  list the nodes the owner endpoint can address
-  status <message-id>    delivery state of a message sent from the owner endpoint
-  whoami                 the address of the owner endpoint
-  version [--json]       the version, the commit and the Go version of this program
-  package --goos <os> --goarch <arch> --binary <file> --out <directory>
-                         write an adapter package for 'sidera adapter install'
-  serve                  the adapter role; the daemon starts it, a person does not
-
-flags of every client command:
-  --home <directory>     the node's data directory (default: $SIDERA_HOME, then ~/.sidera, on Windows %LOCALAPPDATA%\Sidera)
-  --instance <name>      the adapter instance (default: console)
-
-exit codes: 0 done, 1 failed, 2 usage, 10 outcome not known yet (the same codes as sidera)
-`
+// help is what `help` and `--help` print, besides the commands the kit runs.
+var help = adapterkit.Help{
+	Usage: ProgramName + " <command> [flags]",
+	Groups: []adapterkit.HelpGroup{
+		{Title: "Messages", Entries: []adapterkit.HelpEntry{
+			{Name: "send", Arguments: "--to <address>[,<address>...] (--body <text> | --body-file <file>)",
+				Purpose: "Send a message from the owner endpoint."},
+			{Name: "reply", Arguments: "<message-id> [--to <address>] (--body <text> | --body-file <file>)",
+				Purpose: "Reply to a message the owner endpoint received."},
+			{Name: "recv", Arguments: "[--wait <seconds>]",
+				Purpose: "Print the messages waiting for the owner endpoint, then acknowledge them."},
+			{Name: "status", Arguments: "<message-id>",
+				Purpose: "Show the delivery state of a message sent from the owner endpoint."},
+		}},
+		{Title: "Sessions", Entries: []adapterkit.HelpEntry{
+			{Name: "new", Arguments: "<runtime-address> --preset <name> [--body <text> | --body-file <file>] [--timeout <seconds>, default 120]",
+				Purpose: "Start a session on a runtime endpoint; prints the new session's address."},
+		}},
+		{Title: "Where things are", Entries: []adapterkit.HelpEntry{
+			{Name: "whoami", Purpose: "Show the address of the owner endpoint."},
+			{Name: "peers", Purpose: "List the nodes the owner endpoint can address."},
+			{Name: "directory", Arguments: "[--node <id>] [--limit <n>] [--cursor <c>]",
+				Purpose: "List the endpoints a node shows to the owner endpoint (--node names a node from `peers`)."},
+		}},
+		{Title: "Flags of every client command", Entries: []adapterkit.HelpEntry{
+			{Name: "--home <directory>", Purpose: "The node's data directory (default: $SIDERA_HOME, then ~/.sidera, on Windows %LOCALAPPDATA%\\Sidera)."},
+			{Name: "--instance <name>", Purpose: "The adapter instance (default: console)."},
+		}},
+	},
+	Footer: "Exit codes: 0 done, 1 failed, 2 usage, 10 outcome not known yet (the same codes as sidera).",
+}
 
 // clientCommands are the commands of the client role, which talks to the adapter's
 // socket (see client.go).
@@ -82,6 +88,12 @@ var clientCommands = []string{"new", "recv", "reply", "send", "directory", "peer
 // Main runs the program with its arguments after the program name and returns the
 // exit code. It is the only entry the program has.
 func Main(args []string, env Env) int {
+	return program(env).Run(args, env.streams())
+}
+
+// program is the command line of the executable: the client commands run the client
+// role with env, and `serve` the adapter role.
+func program(env Env) adapterkit.Program {
 	commands := make(map[string]adapterkit.Command, len(clientCommands))
 	for _, name := range clientCommands {
 		commands[name] = func(rest []string, _ adapterkit.Streams) int {
@@ -90,12 +102,17 @@ func Main(args []string, env Env) int {
 	}
 	return adapterkit.Program{
 		Name:     ProgramName,
-		Usage:    usageText,
+		Help:     help,
 		Serve:    runServe,
 		Package:  writePackage,
 		Build:    release.Read(),
 		Commands: commands,
-	}.Run(args, adapterkit.Streams{Stdin: env.Stdin, Stdout: env.Stdout, Stderr: env.Stderr})
+	}
+}
+
+// streams are the streams of env for the kit.
+func (e Env) streams() adapterkit.Streams {
+	return adapterkit.Streams{Stdin: e.Stdin, Stdout: e.Stdout, Stderr: e.Stderr, Getenv: e.Getenv}
 }
 
 func runServe(s adapterkit.Streams) int {

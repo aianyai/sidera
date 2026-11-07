@@ -15,5 +15,6 @@ func main() {
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
+		Getenv: os.Getenv,
 	}))
 }

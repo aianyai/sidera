@@ -6,12 +6,13 @@ protocol's lifecycle. Read
 [the adapter-protocol reference](../../../docs/references/adapter-protocol/README.md)
 for the rules; the kit adds none, it only applies them once.
 
-This package imports the standard library, `peer` and `adapterproto`, and nothing
-else, so the instance lock is `flock` on Unix and a file opened without sharing on
-Windows, through `syscall`. What an adapter needs beyond the serve loop lives in
-subpackages that an adapter imports only when it needs them; `process` and
-`realpath` alone bring in `golang.org/x/sys`, so an adapter that imports only this
-package does not build it:
+This package imports the standard library, `peer`, `adapterproto` and `termout`
+(the output of the commands the kit runs; through it the kit links `golang.org/x/sys`
+and `golang.org/x/text`), so the instance lock is `flock` on Unix and a
+file opened without sharing on Windows, through `syscall`. What an adapter needs beyond
+the serve loop lives in subpackages that an adapter imports only when it needs them;
+`process` and `realpath` use `golang.org/x/sys` themselves, which the kit already links
+through `termout`:
 
 | Package | Holds |
 | ------- | ----- |
@@ -28,7 +29,7 @@ package does not build it:
 | `Application` | What the adapter implements: `Initialize`, `Shutdown`, `Start`, `Probe`, the five runtime methods, `AttachSession`, `SessionDetached` and `EndpointPending`. |
 | `Base` | Embed it to implement only the methods the adapter has: an empty start and probe, and `capability_not_declared` for the runtime methods and `session.attach`, with `session.detached` ignored. |
 | `Conn` | What the adapter sends: `Call` and `Notify` for any method it may send, and typed helpers for each (`CheckpointPut`, `Register`, `Recv`, `Ack`, `Send`, `MessageStatus`, `Directory`, `Peers`, `Declare`, `RecvObserved`, `Availability`, `PromptPersisted`, `TurnStarted`, `TurnEnded`, `NativeRequestHandled`); `DaemonCapabilities()` returns what the daemon declared in `initialize`. |
-| `Program`, `Command`, `Streams`, `RunPackage`, `RunVersion`, `ExitOK`/`ExitFailed`/`ExitUsage`/`ExitUnknownOutcome` | The command line every adapter program has the same way. `Program.Run` runs it: `-h`/`--help`/`help` print the usage to standard output and are done (0); no argument and an unknown command are usage errors (2); `serve` is the adapter role the program supplies and takes no argument, so nothing serves unless it is named; `package` and `version [--json]` are written once, with one output, one usage error for a missing flag or an extra argument, one refusal of a package directory that is not empty, and their own `--help` (0). A program adds its own commands in `Program.Commands` (the console's client commands, a `setup` that reads a request on `Streams.Stdin`); a name the kit runs is refused with a panic. The exit codes are those of the [command-line reference](../../../docs/references/command-line/README.md#conventions-of-every-program). |
+| `Program`, `Command`, `Streams`, `Help`, `HelpGroup`, `HelpEntry`, `RunPackage`, `RunVersion`, `ExitOK`/`ExitFailed`/`ExitUsage`/`ExitUnknownOutcome` | The command line every adapter program has the same way. `Program.Run` runs it: `-h`/`--help`/`help` print the help to standard output and are done (0); no argument and an unknown command are usage errors (2) that print the help to standard error; `serve` is the adapter role the program supplies and takes no argument, so nothing serves unless it is named; `package` and `version [--json]` are written once, with one output, one usage error for a missing flag or an extra argument, one refusal of a package directory that is not empty, and their own `--help` (0). The help is `Program.Help`, the groups of the program's own commands with a purpose and the arguments of each; the kit adds the group of the three commands it runs, so no program writes them down, and lays all of it out through `termout` (command names cyan, purposes wrapped at the width of the terminal). `Streams.Getenv` is the environment `Streams.Out` and `Streams.Err` decide decoration and color from; a program passes `os.Getenv`, and nil leaves the output plain unless it goes to a terminal. A program adds its own commands in `Program.Commands` (the console's client commands, a `setup` that reads a request on `Streams.Stdin`); a name the kit runs is refused with a panic. The exit codes are those of the [command-line reference](../../../docs/references/command-line/README.md#conventions-of-every-program). |
 
 ## Rules
 

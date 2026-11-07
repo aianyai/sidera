@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
 // Exit codes of an adapter program. They are the codes of the `sidera` program
@@ -25,6 +27,26 @@ type Streams struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// Getenv reads the environment variables that decide whether the output is
+	// decorated and colored (NO_COLOR and the like). A program passes os.Getenv; nil
+	// reads nothing, which leaves the output plain unless it is written to a terminal.
+	Getenv func(string) string
+}
+
+// Out is Stdout as a stream of human-readable output: whether it is decorated, colored
+// and how wide it is are decided once from what it is and from Getenv.
+func (s Streams) Out() *termout.Stream { return s.open(s.Stdout) }
+
+// Err is Stderr as a stream of human-readable output; see [Streams.Out]. The two are
+// decided separately, so a terminal on one and a file on the other each get their own.
+func (s Streams) Err() *termout.Stream { return s.open(s.Stderr) }
+
+func (s Streams) open(w io.Writer) *termout.Stream {
+	getenv := s.Getenv
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+	return termout.Open(w, termout.ColorAuto, getenv)
 }
 
 // BuildInfo is what a program was built from, as `version` reports it. The value
@@ -63,8 +85,9 @@ type Command func(args []string, s Streams) int
 type Program struct {
 	// Name is the program as its messages call it, such as "sidera-adapter-claude".
 	Name string
-	// Usage lists every command, the kit's included. It is what help prints.
-	Usage string
+	// Help describes the commands of the program's own; the kit adds the ones it runs.
+	// It is what help prints.
+	Help Help
 	// Serve is the adapter role; its result is the exit code.
 	Serve func(s Streams) int
 	// Package writes the program's adapter package.
@@ -87,13 +110,13 @@ func (p Program) Run(args []string, s Streams) int {
 		}
 	}
 	if len(args) == 0 {
-		fmt.Fprint(s.Stderr, p.Usage)
+		fmt.Fprint(s.Stderr, p.Text(s.Err()))
 		return ExitUsage
 	}
 	command, rest := args[0], args[1:]
 	switch command {
 	case "-h", "--help", "help":
-		fmt.Fprint(s.Stdout, p.Usage)
+		fmt.Fprint(s.Stdout, p.Text(s.Out()))
 		return ExitOK
 	case "serve":
 		if len(rest) > 0 {
@@ -109,7 +132,7 @@ func (p Program) Run(args []string, s Streams) int {
 	if run, ok := p.Commands[command]; ok {
 		return run(rest, s)
 	}
-	fmt.Fprintf(s.Stderr, "%s: unknown command %q\n%s", p.Name, command, p.Usage)
+	fmt.Fprintf(s.Stderr, "%s: unknown command %q\n\n%s", p.Name, command, p.Text(s.Err()))
 	return ExitUsage
 }
 
@@ -118,17 +141,22 @@ func (p Program) Run(args []string, s Streams) int {
 // install`. args are the arguments after `package`. A missing flag, an unknown flag
 // or a positional argument is a usage error (2); a directory that is not empty, or
 // a package that cannot be written, is an ordinary failure (1). On success it prints
-// `package: <directory>`; `--help` prints the usage and is done (0).
+// the directory and platform written; `--help` prints the usage and is done (0).
 func RunPackage(program string, args []string, write PackageWriter, s Streams) int {
 	fs := flag.NewFlagSet("package", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	goos := fs.String("goos", "", "operating system the binary was built for (GOOS)")
-	goarch := fs.String("goarch", "", "architecture the binary was built for (GOARCH)")
-	binary := fs.String("binary", "", "the binary built for that platform")
-	out := fs.String("out", "", "the directory to write the package into")
+	// The description of a flag is its usage text, written once: the help lists the flags from it,
+	// and the back-quoted word is the placeholder of the value.
+	goos := fs.String("goos", "", "The `os` the binary was built for (GOOS).")
+	goarch := fs.String("goarch", "", "The CPU `arch` the binary was built for (GOARCH).")
+	binary := fs.String("binary", "", "The `file` that holds the binary built for that platform.")
+	out := fs.String("out", "", "The `directory` to write the package into; it must be new or empty.")
 	err := fs.Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
-		return printFlagUsage(fs, "usage: "+program+" package --goos <os> --goarch <arch> --binary <file> --out <directory>\n", s)
+		return printHelp(Help{
+			Usage:  program + " package --goos <os> --goarch <arch> --binary <file> --out <directory>",
+			Groups: []HelpGroup{{Title: "Flags", Entries: flagEntries(fs, "goos", "goarch", "binary", "out")}},
+		}, s)
 	}
 	if err != nil || fs.NArg() != 0 || *goos == "" || *goarch == "" || *binary == "" || *out == "" {
 		fmt.Fprintf(s.Stderr, "%s: package needs --goos, --goarch, --binary and --out, and no other argument\n", program)
@@ -147,8 +175,23 @@ func RunPackage(program string, args []string, write PackageWriter, s Streams) i
 		fmt.Fprintf(s.Stderr, "%s: %v\n", program, err)
 		return ExitFailed
 	}
-	fmt.Fprintln(s.Stdout, "package:", *out)
+	term := s.Out()
+	fmt.Fprint(term, term.OK("Wrote the adapter package.\n"+term.Block([]termout.Field{
+		{Label: "Platform", Value: *goos + "/" + *goarch},
+		{Label: "Directory", Value: *out},
+	})))
 	return ExitOK
+}
+
+// flagEntries lists the named flags of fs as help entries, in the order given: the name
+// with the placeholder of its value, and its usage text as the purpose.
+func flagEntries(fs *flag.FlagSet, names ...string) []HelpEntry {
+	entries := make([]HelpEntry, len(names))
+	for i, name := range names {
+		placeholder, usage := flag.UnquoteUsage(fs.Lookup(name))
+		entries[i] = HelpEntry{Name: "--" + name + " <" + placeholder + ">", Purpose: usage}
+	}
+	return entries
 }
 
 // RunVersion is the `version` command of an adapter program: the one line that
@@ -161,7 +204,12 @@ func RunVersion(program string, args []string, info BuildInfo, s Streams) int {
 	asJSON := fs.Bool("json", false, "write the report as JSON")
 	err := fs.Parse(args)
 	if errors.Is(err, flag.ErrHelp) {
-		return printFlagUsage(fs, "usage: "+program+" version [--json]\n", s)
+		return printHelp(Help{
+			Usage: program + " version [--json]",
+			Groups: []HelpGroup{{Title: "Flags", Entries: []HelpEntry{
+				{Name: "--json", Purpose: "Write the report as JSON."},
+			}}},
+		}, s)
 	}
 	if err != nil || fs.NArg() != 0 {
 		fmt.Fprintf(s.Stderr, "%s: version takes no argument but --json\n", program)
@@ -180,11 +228,8 @@ func RunVersion(program string, args []string, info BuildInfo, s Streams) int {
 	return ExitOK
 }
 
-// printFlagUsage answers `--help` of a command: its usage line and its flags, on
-// standard output.
-func printFlagUsage(fs *flag.FlagSet, line string, s Streams) int {
-	fmt.Fprint(s.Stdout, line)
-	fs.SetOutput(s.Stdout)
-	fs.PrintDefaults()
+// printHelp answers `--help` of a command: its usage and its flags, on standard output.
+func printHelp(h Help, s Streams) int {
+	fmt.Fprint(s.Stdout, h.render(s.Out()))
 	return ExitOK
 }

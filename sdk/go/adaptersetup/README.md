@@ -5,8 +5,9 @@ adapter's setup shares. The rules and their reasons are in
 [the adapter-setup reference](../../../docs/references/adapter-setup/README.md); this
 package applies them once.
 
-It imports the standard library and `adapterkit` (for the exit codes and the streams of
-a program's commands).
+It imports the standard library, `adapterkit` (for the exit codes and the streams of
+a program's commands) and `termout` (to lay out its usage), so it links `golang.org/x/sys`
+and `golang.org/x/text` through them.
 
 ## Entry points
 
