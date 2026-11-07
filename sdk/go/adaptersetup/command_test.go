@@ -215,6 +215,29 @@ func TestResultValidate(t *testing.T) {
 		{"item without action", func(r *adaptersetup.Result) { r.Items[0].Action = "" }, "no action"},
 		{"outcome without id", func(r *adaptersetup.Result) { r.Outcomes = []adaptersetup.Outcome{{Status: "done"}} }, "no id"},
 		{"drift without problem", func(r *adaptersetup.Result) { r.Drift = []adaptersetup.Drift{{ID: "a"}} }, "no problem"},
+		// The words the core CLI shows as they are: a break or a terminal control in one is refused,
+		// and a requirement needs no row of its own, since it must be the id of an earlier item.
+		{"item id with a line break and a control", func(r *adaptersetup.Result) { r.Items[0].ID = "a\nb\x1b[2J" }, `"a\nb\x1b[2J"`},
+		{"item id with a space", func(r *adaptersetup.Result) { r.Items[0].ID = "a b" }, `"a b"`},
+		{"item id that starts with a sign", func(r *adaptersetup.Result) { r.Items[0].ID = "-a" }, `"-a"`},
+		{"outcome id with a control", func(r *adaptersetup.Result) {
+			r.Outcomes = []adaptersetup.Outcome{{ID: "a\x1b]0;t\x07", Status: "done"}}
+		}, "not a word"},
+		{"outcome status with a line break", func(r *adaptersetup.Result) { r.Outcomes = []adaptersetup.Outcome{{ID: "a", Status: "done\nfailed"}} }, "not a word"},
+		{"outcome without status", func(r *adaptersetup.Result) { r.Outcomes = []adaptersetup.Outcome{{ID: "a"}} }, "not a word"},
+		{"drift id with a control", func(r *adaptersetup.Result) {
+			r.Drift = []adaptersetup.Drift{{ID: "a\x1b]0;t\x07", Problem: "missing"}}
+		}, "not a word"},
+		{"drift problem with a control", func(r *adaptersetup.Result) { r.Drift = []adaptersetup.Drift{{ID: "a", Problem: "\x1b[2J"}} }, "not a word"},
+		{"the ids and words of the shipped programs", func(r *adaptersetup.Result) {
+			r.Items[0].ID, r.Items[1].ID = "plugin_source", "skill:Work.2-b"
+			r.Outcomes = []adaptersetup.Outcome{{ID: "skill:Work.2-b", Status: "done"}}
+			r.Drift = []adaptersetup.Drift{{ID: "mcp_server", Problem: "needs_setup"}}
+		}, ""},
+		{"an outcome status and a problem of a later release", func(r *adaptersetup.Result) {
+			r.Outcomes = []adaptersetup.Outcome{{ID: "a", Status: "partly-done"}}
+			r.Drift = []adaptersetup.Drift{{ID: "a", Problem: "moved_away"}}
+		}, ""},
 		{"a requirement that is not an item", func(r *adaptersetup.Result) { r.Items[1].Requires = []string{"zzz"} }, `"zzz"`},
 		{"a requirement that comes later", func(r *adaptersetup.Result) { r.Items[0].Requires = []string{"b"} }, `"b"`},
 		{"an item that requires itself", func(r *adaptersetup.Result) { r.Items[1].Requires = []string{"b"} }, `"b"`},

@@ -13,7 +13,7 @@ a program's commands).
 | Name | What it is |
 | ---- | ---------- |
 | `Request`, `Result`, `Item`, `Outcome`, `Drift` and their enumerations | The contract's JSON, versions `MinVersion` to `Version` (1) |
-| `Result.Validate(op, version)` | What the CLI relies on in a result: version, op, a known `status`, unique item ids, `requires` naming earlier items, `recorded` on check and refresh, consent on a plan's removals. A value of `action`, `problem` or an outcome status it does not know passes (`Outcome.Failed` reads an unknown status as a failure) |
+| `Result.Validate(op, version)` | What the CLI relies on in a result: version, op, a known `status`, unique item ids, the ids and words it passes through held to single words (`IsWord`: letters, digits and `. _ : -`, starting with a letter or digit), `requires` naming earlier items, `recorded` on check and refresh, consent on a plan's removals. A value of `action`, `problem` or an outcome status it does not know passes (`Outcome.Failed` reads an unknown status as a failure) |
 | `Handler` | What an adapter implements: `Plan`, `Apply`, `Remove`, `Undo`, `Refresh`, `Check` |
 | `Noter` | Optional on a `Handler`: advice for the person that is neither an item nor drift; `Handle` puts it in `Result.Notes` of a plan and a check, and it never changes the status |
 | `Command(program, handler)` | The `setup` command of an adapter program, for `adapterkit.Program.Commands`; the handler runs under a context that SIGINT, SIGTERM (and SIGHUP on Linux and macOS) cancel, which kills the client a `ClientCommand` is running |

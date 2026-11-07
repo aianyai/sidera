@@ -76,7 +76,7 @@ id, with different meaning, and a mistake would delete what it should create.
 An item is `{id, kind, target, action, summary, consent, requires?}`. The `id` is unique in a
 result and stable from the `plan` to the `apply` that follows, because the adapter
 recomputes what the id means when it applies; an id it no longer lists is answered
-`skipped`. `kind` and `target` are the adapter's words for what and where, and the CLI
+`skipped`. It is a word (see Results). `kind` and `target` are the adapter's words for what and where, and the CLI
 only shows them. `action` is `create`, `update`, `remove` or `adopt` (take something
 that was already there, and that setup did not make, into the record). `remove`
 is what a `remove` listing says of every recorded item; a plan may also list it for
@@ -117,7 +117,16 @@ and not a failure: not asked, no longer applies, depends on an item that was not
 `failed`; a status a later release adds counts as `failed`, with the adapter's message. A
 drift entry is `{id, kind, target, problem, summary}` with the problem `missing`,
 `changed`, `stale`, `broken` or `needs_setup`; the CLI shows it and acts on nothing but
-whether there is drift. `notes` is a list of strings that `plan` and `check` may carry: advice
+whether there is drift. The CLI shows the ids of items, outcomes and drift, the status of an
+outcome and the problem of a drift as they are, in table cells and lines of their own, where
+a line break or a terminal control would break the layout or act on the terminal. So `Validate`
+holds each of them to a word: letters, digits and `.` `_` `:` `-`, starting with a letter or a
+digit (a Hermes item is `skill:` and the profile's name). A value a later release adds, a
+status or a problem the CLI does not know, passes as long as it is a word. A result with
+anything else is an error of the setup program: `Handle` refuses it (exit 1, nothing written),
+and the CLI, which applies the same check, reports it as a result it cannot use; text meant for
+a person (`summary`, `message`, `notes`) is free, and the CLI shows it with control characters
+escaped. `requires` is covered by the rule for ids, since it names earlier items. `notes` is a list of strings that `plan` and `check` may carry: advice
 for the person that is neither an item setup would do nor drift, such as which toolsets of the
 client to enable by hand, which setup never edits. It never affects the status or the exit
 code. Why not drift: a standing piece of advice reported as drift makes `--check` exit 1 for

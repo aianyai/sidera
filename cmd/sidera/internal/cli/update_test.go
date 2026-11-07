@@ -340,7 +340,7 @@ func TestManagementNodeRefreshSetup(t *testing.T) {
 	t.Run("an item fails", func(t *testing.T) {
 		for name, tc := range map[string]struct{ raw, message string }{
 			"an item failed":                       {`{"version":1,"op":"refresh","status":"error","recorded":true,"outcomes":[{"id":"a","kind":"file","target":"t","status":"failed","message":"boom"}]}`, "1 item(s) failed"},
-			"an outcome status of a later release": {`{"version":1,"op":"refresh","status":"refreshed","recorded":true,"outcomes":[{"id":"a","kind":"file","target":"t","status":"a status of a later release"}]}`, "1 item(s) failed"},
+			"an outcome status of a later release": {`{"version":1,"op":"refresh","status":"refreshed","recorded":true,"outcomes":[{"id":"a","kind":"file","target":"t","status":"partly-done"}]}`, "1 item(s) failed"},
 			"an error without a failed item":       {`{"version":1,"op":"refresh","status":"error","recorded":true}`, "without a failed item"},
 		} {
 			r := newRig(t, clientA)

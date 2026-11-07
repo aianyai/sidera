@@ -303,8 +303,12 @@ type Result struct {
 // of the request it answers (version) and the op that was asked (op), the status is one of
 // this version and one the op can have (it decides the exit code, so a guess is not made),
 // the ids of the items are unique, an item requires only earlier ones, check and refresh say
-// whether a record exists, and a plan asks before it removes. A value of Action, Problem or an outcome's status that
-// a later release added is not an error (see Version and Outcome.Failed), and neither is a
+// whether a record exists, and a plan asks before it removes. The words the core CLI shows
+// as they are (the ids of items, outcomes and drift, the status of an outcome, the problem of
+// a drift) are single words (see [IsWord]): they sit in table cells and in lines of their own,
+// where text with a line break or a terminal control would break the layout or act on the
+// terminal. A value of Action, Problem or an outcome's status that a later release added is
+// not an error as long as it is a word (see Version and Outcome.Failed), and neither is a
 // member this version does not know.
 func (r Result) Validate(op Op, version int) error {
 	if r.Version != version {
@@ -327,6 +331,8 @@ func (r Result) Validate(op Op, version int) error {
 		switch {
 		case it.ID == "":
 			return fmt.Errorf("items[%d] has no id", i)
+		case !IsWord(it.ID):
+			return fmt.Errorf("items[%d] has the id %q, which is not a word", i, it.ID)
 		case it.Action == "":
 			return fmt.Errorf("items[%d] has no action", i)
 		case op == OpPlan && it.Action == ActionRemove && !it.Consent:
@@ -343,17 +349,44 @@ func (r Result) Validate(op Op, version int) error {
 		position[it.ID] = i
 	}
 	for i, o := range r.Outcomes {
-		if o.ID == "" {
+		switch {
+		case o.ID == "":
 			return fmt.Errorf("outcomes[%d] has no id", i)
+		case !IsWord(o.ID):
+			return fmt.Errorf("outcomes[%d] has the id %q, which is not a word", i, o.ID)
+		case !IsWord(string(o.Status)):
+			return fmt.Errorf("outcomes[%d] has the status %q, which is not a word", i, o.Status)
 		}
 	}
 	for i, d := range r.Drift {
 		switch {
 		case d.ID == "":
 			return fmt.Errorf("drift[%d] has no id", i)
+		case !IsWord(d.ID):
+			return fmt.Errorf("drift[%d] has the id %q, which is not a word", i, d.ID)
 		case d.Problem == "":
 			return fmt.Errorf("drift[%d] has no problem", i)
+		case !IsWord(string(d.Problem)):
+			return fmt.Errorf("drift[%d] has the problem %q, which is not a word", i, d.Problem)
 		}
 	}
 	return nil
+}
+
+// IsWord says whether s is a word in the sense of [Result.Validate]: letters, digits and the
+// signs . _ : - , starting with a letter or a digit (^[A-Za-z0-9][A-Za-z0-9._:-]*$). Every id and
+// status the shipped setup programs produce is one (a Hermes item is "skill:" and the
+// profile's name); the signs are the ones an id or a status needs, and none of them is a
+// space, a quote or a control.
+func IsWord(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case i > 0 && (c == '.' || c == '_' || c == ':' || c == '-'):
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
