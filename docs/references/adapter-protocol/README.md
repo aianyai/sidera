@@ -1584,8 +1584,12 @@ for a process that is not dumpable (`PR_SET_DUMPABLE 0`, as agent runtimes set).
 On Windows the token's user SID is compared, and the processes `OpenProcess` or
 the token refuses (higher integrity levels, protected processes) are left out
 whoever owns them, because their owner cannot be read without opening them. Those
-that end during the pass are left out too; any other failure, token errors
-included, is an error. A PID of zero or below is never found.
+that end during the pass are left out too, on Windows a process that is still
+exiting included (`NtQueryInformationProcess` answers `STATUS_PROCESS_IS_TERMINATING`
+for it); on macOS the read of a process's arguments fails with `EIO` while the
+kernel tears its memory down, before it is a zombie, and with `EINVAL` or `ESRCH`
+once it is gone, and each of these leaves the process out as well, as do `EPERM`
+and `EACCES`. Any other failure, token errors included, is an error. A PID of zero or below is never found.
 
 **Detachment.** `Start` always asks for a process that outlives the adapter and
 the daemon, and says in `Started.Detachment` how far that succeeded; falling back

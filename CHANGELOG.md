@@ -63,6 +63,12 @@ protocol has a version of its own.
   of time is now asked once more, and when Codex still does not answer, the message says so and that
   running `sidera adapter setup codex --refresh` again usually succeeds.
 
+- **On macOS, the Claude adapter no longer reports an observation error when another process on the
+  machine exits while it lists processes.** The macOS kernel refuses to hand out the arguments of a
+  process that is being torn down with an input/output error, and the listing of processes failed
+  with it; the process is now left out of the listing, as one that ended during it already was on
+  Windows.
+
 ### Security
 
 - The name and version of the runtime that an adapter reports in its probe result are now held to

@@ -56,8 +56,7 @@ func list() ([]Process, error) {
 		p := fromKinfo(kp)
 		args, err := procArgs(p.PID)
 		switch {
-		case errors.Is(err, unix.EINVAL), errors.Is(err, unix.ESRCH), errors.Is(err, unix.EPERM), errors.Is(err, unix.EACCES):
-			// The process ended between the two reads, or its details are denied.
+		case unlistable(err):
 			continue
 		case err != nil:
 			return nil, fmt.Errorf("process: read the arguments of process %d: %w", p.PID, err)
@@ -66,6 +65,22 @@ func list() ([]Process, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// unlistable reports whether the error of reading the arguments of a process leaves
+// it out of a listing: its details are denied, or it has ended or is ending. Any
+// other error is a failure to ask.
+//
+// The kernel answers EINVAL for a PID it no longer finds, for a process that has
+// no task or user stack any more and for one of another user; EIO when it cannot
+// copy the argument area out of the process's address space, which is what a
+// process that is exiting looks like while its memory is torn down (and which is
+// not yet a zombie, so the state in the process list does not show it). The sysctl
+// layer itself refuses with EPERM or EACCES. Lookup never meets these: it reads
+// no arguments.
+func unlistable(err error) bool {
+	return errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EIO) ||
+		errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)
 }
 
 // procArgs reads the argument vector of a process: kern.procargs2 holds the
