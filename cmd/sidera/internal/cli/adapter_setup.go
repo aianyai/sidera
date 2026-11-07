@@ -94,7 +94,7 @@ func openSetupSession(ctx context.Context, client caller, exec setupExecutor, in
 		Config    map[string]json.RawMessage `json:"config"`
 		SetupArgv []string                   `json:"setup_argv"`
 	}
-	if err := decodeResult(raw, &info); err != nil {
+	if err := manageapi.DecodeResult(raw, &info); err != nil {
 		return nil, err
 	}
 	if len(info.SetupArgv) == 0 {

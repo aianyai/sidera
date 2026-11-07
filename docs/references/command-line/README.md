@@ -134,7 +134,11 @@ Each change chooses one random operation identifier. Its params, version and
 identifier are retained, and an unknown outcome permits only one resend of that
 same request. The CLI does not reread files or regenerate an identifier when the
 answer was lost. A second unknown outcome returns 10 with the original identifier
-in the error details and on stderr in human mode. The management client itself
+in the error details and on stderr in human mode. A success whose result the CLI cannot
+read (`manageapi.DecodeResult`, the one reader of results) is not an unknown outcome: it
+is `internal/answer_unreadable` (exit 1), which for a change names the identifier and
+says it was accepted, so a script does not send it again; the wait of `daemon restart`
+ends with it instead of treating the status as "not yet" and running to its end. The management client itself
 never retries.
 
 Installation only resolves the package directory and names it to the daemon.
@@ -480,9 +484,11 @@ armor and the digest on standard output are exactly the bytes a script redirects
 the same `result` shape online and offline.
 
 Before reporting an export, `keys.ParseRevocationExport` verifies the armor and
-the CLI compares the verified record digest with the response's digest. Invalid
-armor or a mismatch is an invalid answer (`outcome_unknown`, exit 10), and no
-output file is created. The armor format and signature rules stay in
+the CLI compares the verified record digest with the response's digest. Armor that
+does not verify, or a result with no armor or digest, is an answer the program cannot
+read (`internal/answer_unreadable`, exit 1). A digest that differs from the verified
+record's is a plain failure (exit 1), since the program is not older than the node but
+the statement is not the one the node named. No output file is created in either case. The armor format and signature rules stay in
 [identity](../identity/README.md).
 
 `--out` calls `fsx.CreatePrivateFile`: the final name must not exist, and the

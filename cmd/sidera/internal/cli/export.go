@@ -46,13 +46,25 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 		}
 		raw = document.Bytes()
 	}
-	var response exportResponse
-	if err := json.Unmarshal(raw, &response); err != nil || response.Result.Armored == "" || response.Result.Digest == "" {
-		return apiwire.OutcomeUnknown("")
+	answer, err := manageapi.ReadAnswer(raw)
+	if err != nil {
+		return err
 	}
-	statement, err := keys.ParseRevocationExport([]byte(response.Result.Armored))
-	if err != nil || statement.Digest().String() != response.Result.Digest {
-		return apiwire.OutcomeUnknown("")
+	var exported manageapi.RevocationExportResult
+	if err := answer.DecodeResult(&exported); err != nil {
+		return err
+	}
+	if exported.Armored == "" || exported.Digest == "" {
+		return answer.Unreadable()
+	}
+	statement, err := keys.ParseRevocationExport([]byte(exported.Armored))
+	if err != nil {
+		return answer.Unreadable()
+	}
+	// The node answered and the answer reads, but the statement is not the one the
+	// digest names: that is not an older program, and a copy of it must not be kept.
+	if statement.Digest().String() != exported.Digest {
+		return &failure{"the statement the node exported does not match its digest, so it was not written; run the command again"}
 	}
 	if output != nil {
 		file, openErr := fsx.CreatePrivateFile(*output)
@@ -78,7 +90,7 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 			return errors.Join(writeErr, closeErr)
 		}
 	}
-	if _, err = io.WriteString(c.errOut, renderExportReminder(c.errOut, response.Result.Digest)); err != nil {
+	if _, err = io.WriteString(c.errOut, renderExportReminder(c.errOut, exported.Digest)); err != nil {
 		return err
 	}
 	if c.json && output != nil {
@@ -88,15 +100,15 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 				File   string `json:"file"`
 			} `json:"result"`
 		}
-		result.Result.Digest = response.Result.Digest
+		result.Result.Digest = exported.Digest
 		result.Result.File = *output
 		err = c.encode(result)
 	} else if c.json {
 		_, err = c.Stdout.Write(raw)
 	} else if output != nil {
-		_, err = fmt.Fprintln(c.Stdout, response.Result.Digest)
+		_, err = fmt.Fprintln(c.Stdout, exported.Digest)
 	} else {
-		_, err = fmt.Fprint(c.Stdout, response.Result.Armored)
+		_, err = fmt.Fprint(c.Stdout, exported.Armored)
 	}
 	return err
 }

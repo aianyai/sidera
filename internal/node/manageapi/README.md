@@ -21,6 +21,7 @@ reading a body.
 | `Listen(addr, lock, opts)`, `Listener` | Listens on the address of the management interface and on no other: it refuses the address of the Agent interface. Only it makes a `Listener`. |
 | `New(Config)`, `Server.Serve`, `Shutdown`, `Close` | The server over a `Listener`. `Shutdown` waits for the requests being served and then closes what is left. |
 | `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Call one node as its local owner; return the complete management response without retrying. |
+| `ReadAnswer`, `Answer.DecodeResult`, `Answer.Unreadable`, `DecodeResult` | The one reader of an answer of success: the envelope and the result as `encoding/json` reads them (members the caller does not name are ignored). What cannot be read is `internal/answer_unreadable`, with the identifier of a change. |
 | `RevocationExportResult` | The shared online and offline export result: the armored statement and its backup digest. |
 | `Request` | The caller's operation identifier, optional expected version and params; zero identifier and nil members are omitted. |
 | `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop and restart entries of the composition root and the check of what a restart would start, the start identifier and the version of the program for the status, and the log. |

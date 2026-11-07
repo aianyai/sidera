@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -65,18 +64,6 @@ type trustView struct {
 	LocallyRevoked []string        `json:"locally_revoked"`
 }
 
-// decodeResult reads the result of a management response into v. An answer that
-// is not what the method gives is an unknown outcome, as for every other command.
-func decodeResult(raw []byte, v any) error {
-	var envelope struct {
-		Result json.RawMessage `json:"result"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || json.Unmarshal(envelope.Result, v) != nil {
-		return apiwire.OutcomeUnknown("")
-	}
-	return nil
-}
-
 // awaitPairing is the end of `trust request`. A refusal by the target is a
 // successful answer of the node and a failure of the command, with the exit code of
 // a refusal. Otherwise the answer is printed at once, the code first, because the
@@ -84,15 +71,13 @@ func decodeResult(raw []byte, v any) error {
 // the command reads the trust view through poll until the pairing is complete, and
 // says so only when it is: by the answer itself or by the wait it ended on.
 func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (trustView, error), raw []byte, wait time.Duration) error {
-	var answer pairingAnswer
-	if err := decodeResult(raw, &answer); err != nil {
+	envelope, err := manageapi.ReadAnswer(raw)
+	if err != nil {
 		return err
 	}
-	var envelope struct {
-		Replayed bool `json:"replayed"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return apiwire.OutcomeUnknown("")
+	var answer pairingAnswer
+	if err := envelope.DecodeResult(&answer); err != nil {
+		return err
 	}
 	if answer.Status == "refused" {
 		e := apiwire.New(apiwire.CategoryRefused, "pairing_refused", fmt.Sprintf("%s refused the request for a pairing (%s)", answer.Node, answer.Refusal))
@@ -118,7 +103,7 @@ func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (
 	if c.json || !complete {
 		return nil
 	}
-	_, err := io.WriteString(c.out, renderPaired(c.out, answer.Node))
+	_, err = io.WriteString(c.out, renderPaired(c.out, answer.Node))
 	return err
 }
 
@@ -130,7 +115,7 @@ func readTrustView(client *manageapi.Client) func(context.Context) (trustView, e
 			return trustView{}, err
 		}
 		var view trustView
-		return view, decodeResult(raw, &view)
+		return view, manageapi.DecodeResult(raw, &view)
 	}
 }
 
@@ -202,7 +187,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 // trustList prints the view of trust in sections (layouts in ops_output.go).
 func (c *command) trustList(raw []byte) error {
 	var view trustView
-	if err := decodeResult(raw, &view); err != nil {
+	if err := manageapi.DecodeResult(raw, &view); err != nil {
 		return err
 	}
 	_, err := io.WriteString(c.out, renderTrust(c.out, view))

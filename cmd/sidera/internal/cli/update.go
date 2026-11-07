@@ -203,7 +203,7 @@ func (n *managementNode) Status(ctx context.Context) (update.NodeStatus, error) 
 			Version string `json:"version"`
 		} `json:"node"`
 	}
-	if err := decodeResult(raw, &out); err != nil {
+	if err := manageapi.DecodeResult(raw, &out); err != nil {
 		return update.NodeStatus{}, err
 	}
 	return update.NodeStatus{Version: out.Node.Version}, nil
@@ -235,7 +235,7 @@ func (n *managementNode) Adapters(ctx context.Context) ([]update.Adapter, error)
 			Fault   *fault `json:"fault"`
 		} `json:"instances"`
 	}
-	if err := decodeResult(raw, &out); err != nil {
+	if err := manageapi.DecodeResult(raw, &out); err != nil {
 		return nil, err
 	}
 	faulted := map[string]bool{}
@@ -272,7 +272,7 @@ func (n *managementNode) Install(ctx context.Context, dir string) (update.Instal
 		AlreadyCurrent bool `json:"already_current"`
 		Replaced       bool `json:"replaced"`
 	}
-	if err := decodeResult(raw, &out); err != nil {
+	if err := manageapi.DecodeResult(raw, &out); err != nil {
 		return update.Installed{}, err
 	}
 	return update.Installed{ID: out.Adapter.ID, Version: out.Adapter.Version, AlreadyCurrent: out.AlreadyCurrent, Replaced: out.Replaced}, nil
@@ -289,7 +289,7 @@ func (n *managementNode) Instances(ctx context.Context) ([]update.Instance, erro
 			Adapter  string `json:"adapter"`
 		} `json:"instances"`
 	}
-	if err := decodeResult(raw, &out); err != nil {
+	if err := manageapi.DecodeResult(raw, &out); err != nil {
 		return nil, err
 	}
 	instances := make([]update.Instance, len(out.Instances))

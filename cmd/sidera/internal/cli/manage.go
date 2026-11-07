@@ -114,15 +114,20 @@ func callResending(ctx context.Context, client caller, method string, req manage
 }
 
 func managementVersion(raw []byte) (admin.Version, error) {
-	var out struct {
-		Result struct {
-			Version *admin.Version `json:"version"`
-		} `json:"result"`
+	answer, err := manageapi.ReadAnswer(raw)
+	if err != nil {
+		return 0, err
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.Result.Version == nil {
-		return 0, apiwire.OutcomeUnknown("")
+	var result struct {
+		Version *admin.Version `json:"version"`
 	}
-	return *out.Result.Version, nil
+	if err := answer.DecodeResult(&result); err != nil {
+		return 0, err
+	}
+	if result.Version == nil {
+		return 0, answer.Unreadable()
+	}
+	return *result.Version, nil
 }
 
 func (c *command) managementPlan(args []string) (managementPlan, error) {

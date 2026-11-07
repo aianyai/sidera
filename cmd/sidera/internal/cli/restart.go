@@ -78,22 +78,22 @@ func restartDaemon(ctx context.Context, node caller, random io.Reader, req resta
 		}
 		return restartResult{}, err
 	}
-	var answer struct {
-		OperationID string `json:"operation_id"`
-		Replayed    bool   `json:"replayed"`
-		Result      struct {
-			Restarting bool   `json:"restarting"`
-			Program    string `json:"program"`
-			Version    string `json:"version"`
-			StartID    string `json:"start_id"`
-		} `json:"result"`
+	answer, err := manageapi.ReadAnswer(raw)
+	if err != nil {
+		return restartResult{}, err
 	}
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return restartResult{}, apiwire.OutcomeUnknown("")
+	var result struct {
+		Restarting bool   `json:"restarting"`
+		Program    string `json:"program"`
+		Version    string `json:"version"`
+		StartID    string `json:"start_id"`
+	}
+	if err := answer.DecodeResult(&result); err != nil {
+		return restartResult{}, err
 	}
 	res := restartResult{
-		Restarting: answer.Result.Restarting, Program: answer.Result.Program, Version: answer.Result.Version,
-		PreviousStartID: answer.Result.StartID, OperationID: answer.OperationID, Replayed: answer.Replayed,
+		Restarting: result.Restarting, Program: result.Program, Version: result.Version,
+		PreviousStartID: result.StartID, OperationID: answer.OperationID, Replayed: answer.Replayed,
 	}
 	if announce != nil {
 		if err := announce(res); err != nil {
@@ -157,7 +157,7 @@ func readDaemon(ctx context.Context, node caller) (daemonView, error) {
 			StartID string `json:"start_id"`
 		} `json:"daemon"`
 	}
-	if err := decodeResult(raw, &out); err != nil {
+	if err := manageapi.DecodeResult(raw, &out); err != nil {
 		return daemonView{}, err
 	}
 	return daemonView{out.Daemon.State, out.Daemon.StartID}, nil

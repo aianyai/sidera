@@ -85,6 +85,8 @@ func TestWaitingForARestartedDaemon(t *testing.T) {
 		{"nothing comes back", []func() (json.RawMessage, error){notRunning}, 11, 10 * restartPollInterval, "no new daemon was running within 2s"},
 		{"another failure is the answer", []func() (json.RawMessage, error){
 			statusOf("running", "old"), failed(apiwire.New(apiwire.CategoryUnavailable, "peer_check_failed", "not the same user"))}, 2, restartPollInterval, "peer_check_failed"},
+		{"an answer this program cannot read is the answer", []func() (json.RawMessage, error){
+			statusOf("running", "old"), answered(`{"result":{"daemon":{"state":5}}}`)}, 2, restartPollInterval, "cannot read the answer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &scriptedNode{status: tc.status}

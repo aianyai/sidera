@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/aianyai/sidera/internal/node/apiwire"
+	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
@@ -16,10 +16,17 @@ import (
 // command reached, and the command knows it from the same resolution that chose
 // which daemon to ask. No field of the daemon's answer changes.
 func statusWithHome(raw []byte, home string) ([]byte, error) {
-	var envelope map[string]json.RawMessage
+	answer, err := manageapi.ReadAnswer(raw)
+	if err != nil {
+		return nil, err
+	}
 	var result map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &envelope); err != nil || json.Unmarshal(envelope["result"], &result) != nil || result == nil {
-		return nil, apiwire.OutcomeUnknown("")
+	if err := answer.DecodeResult(&result); err != nil {
+		return nil, err
+	}
+	var envelope map[string]json.RawMessage
+	if result == nil || json.Unmarshal(raw, &envelope) != nil {
+		return nil, answer.Unreadable()
 	}
 	encode := func(v any) ([]byte, error) {
 		var out bytes.Buffer
@@ -28,7 +35,6 @@ func statusWithHome(raw []byte, home string) ([]byte, error) {
 		err := encoder.Encode(v)
 		return bytes.TrimSuffix(out.Bytes(), []byte("\n")), err
 	}
-	var err error
 	if result["home"], err = encode(home); err != nil {
 		return nil, err
 	}
@@ -55,7 +61,7 @@ type layout func(s *termout.Stream, req request, raw []byte) (string, error)
 func read[V any](render func(s *termout.Stream, req request, v V) string) layout {
 	return func(s *termout.Stream, req request, raw []byte) (string, error) {
 		var v V
-		if err := decodeResult(raw, &v); err != nil {
+		if err := manageapi.DecodeResult(raw, &v); err != nil {
 			return "", err
 		}
 		return render(s, req, v), nil
@@ -67,18 +73,16 @@ func read[V any](render func(s *termout.Stream, req request, v V) string) layout
 // operation identifier is not shown (see manage_change_output.go).
 func change[V any](render func(s *termout.Stream, req request, v V) string) layout {
 	return func(s *termout.Stream, req request, raw []byte) (string, error) {
-		var v V
-		if err := decodeResult(raw, &v); err != nil {
+		answer, err := manageapi.ReadAnswer(raw)
+		if err != nil {
 			return "", err
 		}
-		var meta struct {
-			Replayed bool `json:"replayed"`
-		}
-		if err := json.Unmarshal(raw, &meta); err != nil {
-			return "", apiwire.OutcomeUnknown("")
+		var v V
+		if err := answer.DecodeResult(&v); err != nil {
+			return "", err
 		}
 		text := render(s, req, v)
-		if meta.Replayed {
+		if answer.Replayed {
 			text += s.Warn(replayNote) + "\n"
 		}
 		return text, nil

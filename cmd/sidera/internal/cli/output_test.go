@@ -11,6 +11,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/update"
 	"github.com/aianyai/sidera/internal/node/agentapi"
+	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/termout"
@@ -44,7 +45,7 @@ const (
 func answer[T any](t testing.TB, result string) T {
 	t.Helper()
 	var v T
-	if err := decodeResult([]byte(`{"result":`+result+`}`), &v); err != nil {
+	if err := manageapi.DecodeResult([]byte(`{"result":`+result+`}`), &v); err != nil {
 		t.Fatalf("fixture does not decode: %v\n%s", err, result)
 	}
 	return v
