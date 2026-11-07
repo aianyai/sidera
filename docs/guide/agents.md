@@ -175,7 +175,7 @@ as a session Sidera started and is woken when a reply arrives.
 **Set it up once.** Run `sidera adapter setup <instance>` for the instance of the
 adapter whose client you use (`claude` for Claude Code, `codex` for Codex). The daemon
 has to run, and the instance has to have run once. The command shows what it would do
-and asks `y/N` about each change to the client's configuration:
+and asks `[Y/n]` about each change to the client's configuration (Enter accepts):
 
 ```sh
 sidera adapter setup claude          # Claude Code

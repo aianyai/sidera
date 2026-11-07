@@ -201,9 +201,16 @@ func TestAdapterSetupAsksItemByItem(t *testing.T) {
 		notAsked []string
 		ops      string
 	}{
-		{"yes and no", "y\nn\n", false, map[string]bool{"a": true, "b": false, "o": true}, []string{"write a? [y/N]", "write b? [y/N]"}, []string{"write o?"}, "plan apply"},
+		{"yes and no", "y\nn\n", false, map[string]bool{"a": true, "b": false, "o": true}, []string{"write a? [Y/n]", "write b? [Y/n]"}, []string{"write o?"}, "plan apply"},
 		{"the whole word, in capitals", "YES\nyes\n", false, map[string]bool{"a": true, "b": true, "o": true}, []string{"write a?"}, nil, "plan apply"},
-		{"--yes does not ask", "", true, map[string]bool{"a": true, "b": true, "o": true}, nil, []string{"[y/N]"}, "plan apply"},
+		{"Enter accepts", "\n\n", false, map[string]bool{"a": true, "b": true, "o": true}, []string{"write a? [Y/n]", "write b? [Y/n]"}, nil, "plan apply"},
+		{"Enter accepts, n declines", "\nn\n", false, map[string]bool{"a": true, "b": false, "o": true}, nil, nil, "plan apply"},
+		{"spaces are an Enter", "  \n \n", false, map[string]bool{"a": true, "b": true, "o": true}, nil, nil, "plan apply"},
+		{"the word no, in capitals", "NO\nNo\n", false, map[string]bool{"a": false, "b": false, "o": true}, nil, nil, "plan apply"},
+		{"other text is a no", "sure\nmaybe\n", false, map[string]bool{"a": false, "b": false, "o": true}, nil, nil, "plan apply"},
+		{"the input ends at once", "", false, map[string]bool{"a": false, "b": false, "o": true}, nil, nil, "plan apply"},
+		{"the input ends after Enter", "\n", false, map[string]bool{"a": true, "b": false, "o": true}, nil, nil, "plan apply"},
+		{"--yes does not ask", "", true, map[string]bool{"a": true, "b": true, "o": true}, nil, []string{"[Y/n]"}, "plan apply"},
 		{"the input ends", "y\n", false, map[string]bool{"a": true, "b": false, "o": true}, []string{"write b?"}, nil, "plan apply"},
 		{"declining everything still does the item that needs no consent", "n\nn\n", false, map[string]bool{"a": false, "b": false, "o": true}, nil, nil, "plan apply"},
 	} {
@@ -285,7 +292,7 @@ func TestAdapterSetupRemove(t *testing.T) {
 	if verdict != nil || r.exec.ops() != "remove apply(undo)" {
 		t.Fatalf("verdict %v, ops %q", verdict, r.exec.ops())
 	}
-	if !strings.Contains(asked, "delete a? [y/N]") || strings.Contains(asked, "delete o?") {
+	if !strings.Contains(asked, "delete a? [Y/n]") || strings.Contains(asked, "delete o?") {
 		t.Errorf("questions:\n%s", asked)
 	}
 	if !r.exists(filepath.Join(r.client, "a")) || r.exists(filepath.Join(r.client, "b")) || r.exists(filepath.Join(r.state, "setup", "files", "o")) {
@@ -300,6 +307,39 @@ func TestAdapterSetupRemove(t *testing.T) {
 	}
 	if rec, _ := adaptersetup.ReadRecord(r.state); rec != nil {
 		t.Errorf("the record outlived its last item: %+v", rec)
+	}
+}
+
+// In --remove every question defaults to yes too: Enter undoes the item, and the end of
+// the input undoes nothing. A no is not a decline there, so nothing is remembered.
+func TestAdapterSetupRemoveDefaultsToYes(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		answers      string
+		aGone, bGone bool
+	}{
+		{"Enter undoes", "\n\n", true, true},
+		{"Enter undoes, n keeps", "\nn\n", true, false},
+		{"the input ends", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, clientA, clientB, ownO)
+			if _, _, err := r.run(modeSetup, "", true); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := r.run(modeRemove, tc.answers, false); err != nil {
+				t.Fatal(err)
+			}
+			if got := !r.exists(filepath.Join(r.client, "a")); got != tc.aGone {
+				t.Errorf("a removed = %v, want %v", got, tc.aGone)
+			}
+			if got := !r.exists(filepath.Join(r.client, "b")); got != tc.bGone {
+				t.Errorf("b removed = %v, want %v", got, tc.bGone)
+			}
+			if rec, _ := adaptersetup.ReadRecord(r.state); rec != nil && len(rec.Declined) != 0 {
+				t.Errorf("a no in --remove was remembered as a decline: %+v", rec.Declined)
+			}
+		})
 	}
 }
 
@@ -431,7 +471,7 @@ func TestAdapterSetupShowsNotes(t *testing.T) {
 		r := newRig(t, clientA)
 		r.script.Notes = []string{note}
 		asked, report, err := r.run(modeSetup, "y\n", false)
-		if err != nil || strings.Index(asked, "note: "+note) < 0 || strings.Index(asked, "note: "+note) > strings.Index(asked, "write a? [y/N]") {
+		if err != nil || strings.Index(asked, "note: "+note) < 0 || strings.Index(asked, "note: "+note) > strings.Index(asked, "write a? [Y/n]") {
 			t.Errorf("err %v, questions:\n%s", err, asked)
 		}
 		if strings.Contains(report, note) {
@@ -700,7 +740,7 @@ func TestAdapterSetupHonoursRequires(t *testing.T) {
 			if !strings.Contains(asked, tc.prompt) || !strings.Contains(report, tc.report) {
 				t.Errorf("questions:\n%s\nreport:\n%s", asked, report)
 			}
-			if tc.prompt != "" && strings.Contains(asked, "write b? [y/N]") {
+			if tc.prompt != "" && strings.Contains(asked, "write b? [Y/n]") {
 				t.Errorf("asked about b after a was declined:\n%s", asked)
 			}
 			var f *failure
@@ -907,7 +947,7 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 		// The plan of a setup run by hand lists it again; accepting it records it and
 		// it is no longer declined.
 		asked, _, err = r.run(modeSetup, "y\nn\n", false)
-		if err != nil || !strings.Contains(asked, "write a? [y/N]") {
+		if err != nil || !strings.Contains(asked, "write a? [Y/n]") {
 			t.Fatalf("the plan did not offer the declined item again: %v\n%s", err, asked)
 		}
 		if rec := record(r); rec == nil || !rec.Installed() || slices.Contains(rec.Declined, "a") || !slices.Contains(rec.Declined, "n") {
@@ -924,6 +964,19 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 			if _, report, err := r.run(mode, "", false); err != nil || !strings.Contains(report, "status none") || !strings.Contains(report, "recorded false") {
 				t.Errorf("mode %d: %v\n%s", mode, err, report)
 			}
+		}
+	})
+
+	t.Run("the end of the input is a decline", func(t *testing.T) {
+		r := newRig(t, clientA, clientB, ownO)
+		if _, _, err := r.run(modeSetup, "\n", false); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastApply(r).Declined; fmt.Sprint(got) != "[b]" {
+			t.Errorf("declined sent = %v, want [b]", got)
+		}
+		if rec := record(r); rec == nil || !slices.Contains(rec.Declined, "b") || slices.Contains(rec.Declined, "a") {
+			t.Errorf("record = %+v, want b declined and a recorded", rec)
 		}
 	})
 

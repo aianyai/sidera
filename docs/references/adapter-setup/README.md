@@ -347,7 +347,7 @@ error that says to enable the instance and start the daemon so that it runs once
   which under a state directory is the owner's alone. The rename is not flushed to the
   directory: a crash may lose the write, and setup is then run again.
 
-Asking a person y/N is not in the SDK; the CLI asks.
+Asking a person is not in the SDK; the CLI asks, with yes as the answer to Enter and no for the end of the input.
 
 ### Running a client's command line
 

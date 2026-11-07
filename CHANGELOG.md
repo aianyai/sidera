@@ -8,6 +8,10 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Changed
+
+- `sidera adapter setup` (and `--remove`) now asks `[Y/n]` for each item: pressing Enter accepts it, since you ran setup to be asked about exactly these changes. `n`, any other text and the end of the input (a script, a closed pipe, a dropped terminal) still decline, so nothing changes a client's configuration unasked. `sidera update` still asks `Update? [y/N]`.
+
 ## [0.15.0] - 2026-11-06
 
 After upgrading to 0.15, run `sidera adapter setup <instance>` once for each Claude Code, Codex

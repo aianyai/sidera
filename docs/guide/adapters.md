@@ -88,8 +88,9 @@ sidera adapter setup claude --check  # exit 0 when nothing has drifted or is sti
 sidera adapter setup claude --remove # undoes what it did, asking about each item
 ```
 
-It lists the items and asks `y/N` for every one that touches the client's own
-configuration; anything but `y` is a no. An item you decline is remembered: `--check` and
+It lists the items and asks `[Y/n]` for every one that touches the client's own
+configuration: Enter or `y` accepts, anything else is a no, and so is the end of the input
+(a script, a closed pipe), so that nothing changes a client's configuration unasked. An item you decline is remembered: `--check` and
 `sidera update` do not report it as still to set up, and running `sidera adapter setup`
 again offers it again. Without a terminal it needs `--yes`, like
 `sidera update`. Setup remembers what it did, and only what it did and only while it is still
@@ -469,7 +470,7 @@ sidera adapter setup hermes -- --profile <profile>
 `--profile` names a profile whose agents delegate and repeats (the default is `home_profile`);
 `--platform` names a platform they delegate from and repeats (the default is `home_platform`),
 and setup remembers the platforms, so that `--check` reads the same ones; `-- --help` lists
-the options. Setup asks one question for each profile (`y/N`), or none with `--yes`. It places
+the options. Setup asks one question for each profile (`[Y/n]`), or none with `--yes`. It places
 the Skill as `skills/sidera/SKILL.md` in the directory of the profile and remembers that it
 did. A Skill file that setup did not write, or that was changed since, is replaced only after
 you say yes (and `--yes` says yes): its content is discarded and no copy of it is kept. A copy that

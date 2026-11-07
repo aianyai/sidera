@@ -141,7 +141,7 @@ func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, e
 	if yes {
 		return true, nil
 	}
-	return askYes(out, bufio.NewReader(c.Stdin), "Update?")
+	return askDefaultNo(out, bufio.NewReader(c.Stdin), "Update?")
 }
 
 // updateOutcome is what --json writes: the report, and why the run failed when it did.

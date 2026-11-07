@@ -156,6 +156,7 @@ func TestConfirmUpdate(t *testing.T) {
 		{"y", "y\n", false, true, true},
 		{"yes in capitals", "YES\n", false, true, true},
 		{"n", "n\n", false, false, true},
+		{"Enter", "\n", false, false, true},
 		{"nothing", "", false, false, true},
 		{"anything else", "sure\n", false, false, true},
 		{"--yes does not ask", "", true, true, false},

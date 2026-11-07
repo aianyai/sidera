@@ -56,8 +56,8 @@ and its bound values. A local value stays attached, including a body spelled
   honours an item's `requires` once the questions are answered (an item whose required item did not
   complete is not sent to the adapter). The executor and the dialog are the seams the
   tests use; the same session is what `update` refreshes the setups with (`managementNode.RefreshSetup` in
-  `update.go` runs `runSetup` in refresh mode and puts the result in the update's words). `prompt.go` is the `[y/N]` question and the
-  "no terminal, add --yes" refusal that `update` and `adapter setup` share. `program.go` is `programPath`, the path
+  `update.go` runs `runSetup` in refresh mode and puts the result in the update's words). `prompt.go` is the question that `update` and `adapter setup` share, one implementation with two defaults (`askDefaultNo`, `[y/N]`, for `update`; `askDefaultYes`, `[Y/n]`, for the items of `adapter setup`; the end of the input is a no for both), and the
+  "no terminal, add --yes" refusal. `program.go` is `programPath`, the path
   of this program that `update` and `adapter setup` name, and the helpers that go with it: `shellWord`, `warnIfTemporary`, `isDefaultDataDir`. `refuseRemoveWhileSetUp` is the guard `manage` runs before
   `adapters.remove`: a `check` of the instance's setup, and a refusal when it has a record.
 - `crashtest*.go`, `testclock*.go`: independently tagged process controls, their

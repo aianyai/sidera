@@ -68,11 +68,12 @@ conversation. Ask once, say what you will do and why, and wait.
     changing the configuration of Claude Code or Codex. Ask once before the first one
     and name the file or setting. For Claude Code and Codex, the supported way is
     `sidera adapter setup claude` or `sidera adapter setup codex`, never editing their
-    files by hand. Setup shows every change it would make and asks `y/N` about each
+    files by hand. Setup shows every change it would make and asks `[Y/n]` about each
     one that touches the client's configuration, so the owner answers item by item:
     run it where the owner can answer, or pass `--yes` (which accepts every item, and
     which a run without a terminal needs) only after the owner agreed to the whole
-    list that `sidera adapter setup <instance>` shows. What it changes:
+    list that `sidera adapter setup <instance>` shows. Enter accepts an item, so never
+    press it for the owner. What it changes:
     - Claude Code: registers the `sidera` MCP server for the user (`claude mcp add
       --scope user`), adds the rule `mcp__sidera` to `permissions.allow` in Claude
       Code's `settings.json`, and installs a plugin that carries the Sidera Skill.

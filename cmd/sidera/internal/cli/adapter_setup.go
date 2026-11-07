@@ -222,7 +222,7 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 			continue
 		}
 		if it.Consent && !d.yes {
-			ok, err := askYes(d.out, d.answers, it.Summary+"?")
+			ok, err := askDefaultYes(d.out, d.answers, it.Summary+"?")
 			if err != nil {
 				return nil, nil, err
 			}
