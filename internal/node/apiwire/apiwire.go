@@ -37,7 +37,8 @@ const (
 	CategoryInternal        Category = "internal"
 	// CategoryOutcomeUnknown: whether the request took effect is not known. A
 	// client judges it itself when it wrote a request and did not read the answer
-	// whole (OutcomeUnknown); the daemon says it for a failure of the disk after
+	// whole, or lost a connection it had obtained before the request was written
+	// (OutcomeUnknown); the daemon says it for a failure of the disk after
 	// which memory and disk may disagree (ReasonStorageFatal). Either way the way
 	// out is the same: send the request again with the same operation identifier.
 	CategoryOutcomeUnknown Category = "outcome_unknown"
@@ -176,8 +177,9 @@ func OperationUnknown() *Error {
 // lost), so it cannot tell whether the request took effect. The operation
 // identifier, when the request had one, is in the details: it is the one to send the
 // request again with, which returns the stored result if the request did run and
-// runs it if it did not. This is the one definition the command line, the MCP front
-// end and the test fixture share.
+// runs it if it did not. A connection obtained and lost before the request was
+// written is the same, since the client cannot tell how far the request went. This is
+// the one definition the command line, the MCP front end and the test fixture share.
 func OutcomeUnknown(operationID string) *Error {
 	message := "no complete answer to the request was read; whether it took effect is not known"
 	if operationID != "" {
@@ -196,7 +198,9 @@ func OutcomeUnknown(operationID string) *Error {
 // the node said what happened, so it advises no resend; changed says the request
 // was a change, which was accepted and can be seen with the matching read. The
 // operation identifier, when the request had one, is in the details. This is the
-// one definition the command line, the MCP front end and the test fixture share.
+// one definition of the error: the Agent client (the MCP front end and the commands
+// that call the Agent interface), the reader of management results (manageapi) and
+// the attachment of a controller session all say it through here.
 func AnswerUnreadable(changed bool, operationID string) *Error {
 	message := "the node answered that the request succeeded, but this program cannot read the answer; " +
 		"it is probably older than the node, so update it or restart the session"

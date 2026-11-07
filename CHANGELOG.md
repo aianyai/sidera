@@ -66,13 +66,11 @@ protocol has a version of its own.
   closes its connection during the restart.** The command could fail with `internal/internal` and exit
   code 1 although the restart had succeeded; a connection lost before a request is written now counts like
   any other unknown outcome, which the wait goes through and a change is sent again after.
-
 - **The Codex setup refresh right after `sidera update` no longer fails while Codex fetches its remote
   plugin catalogue.** The first listing after a while can take longer than a minute through a slow
   connection, and the refresh reported `codex broken` until it was run again. A listing that runs out
   of time is now asked once more, and when Codex still does not answer, the message says so and that
   running `sidera adapter setup codex --refresh` again usually succeeds.
-
 - **On macOS, the Claude adapter no longer reports an observation error when another process on the
   machine exits while it lists processes.** The macOS kernel refuses to hand out the arguments of a
   process that is being torn down with an input/output error, and the listing of processes failed
@@ -104,7 +102,10 @@ protocol has a version of its own.
   endpoint are rejected as `endpoint_closed`. The page `recv` prints writes these characters in
   message bodies as visible `\uXXXX` escapes. A Hermes instance whose configured `display_name`
   breaks these rules no longer starts: its start is refused with the configuration problem until
-  the name is changed in the instance configuration.
+  the name is changed in the instance configuration. While nodes are being upgraded one at a time,
+  an upgraded node refuses as a whole the directory answer of a node that has not been upgraded
+  yet and still holds an endpoint whose name or description has such a character, until that node
+  is upgraded.
 
 ## [0.16.0] - 2026-11-07
 
