@@ -21,7 +21,8 @@ protocol has a version of its own.
   The agent guidance tells agents to pick the node and the runtime this way.
 - **`sidera node set name=<name>` names the node for the other nodes.** Without a name the node is
   called by its host name; `sidera node set name=` takes the name away again, and `sidera node show`
-  says which of the two applies.
+  says which of the two applies. The other nodes see a new name after their next connection to this
+  node, for instance after `sidera daemon restart`; nothing is pushed to them.
 - **`sidera trust list` and `sidera network show` show each node's name.** A `Name` column gives the
   name a node calls itself, with its host name after it when that is another, and a dash for a node
   this node has not been connected to since its daemon started. The `--json` results carry the same

@@ -117,10 +117,11 @@ const (
 	// maxDirectoryEntry bounds the encoding of one directory entry. Without its
 	// adapter it is an endpoint identifier, a kind and up to eight action names, a
 	// display name of 128 characters and a description of 1024, four bytes each at
-	// the most: 5 KiB. The adapter adds at most 659 bytes: the key, the map head, an
+	// the most: 5 KiB. The adapter adds at most 661 bytes: the key, the map head, an
 	// instance and an adapter id of 32 bytes each, a version of 64 bytes and a
-	// runtime whose name and version are 64 characters of four bytes each (1 + 1 +
-	// 2*(1+2+32) + (1+2+64) + (1+1+2*(1+2+256))), so 6 KiB holds an entry.
+	// runtime whose name and version are 64 characters of four bytes each, a head
+	// of two bytes for a text of 24 to 255 bytes and of three for 256 (1 + 1 +
+	// 2*(1+2+32) + (1+2+64) + (1+1+2*(1+3+256))), so 6 KiB holds an entry.
 	maxDirectoryEntry = 6 << 10
 	// maxDirectoryRequest holds a sender endpoint, a cursor and a page size.
 	maxDirectoryRequest = 512

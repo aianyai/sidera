@@ -106,7 +106,7 @@ does not say it, and `as_of`, in Unix seconds, when this node issued its own pro
 fetched the one of a peer. An agent picks a node by `name`, `host_name` and `system`
 and addresses it by `node`. The profile of a peer is held in memory only and fetched
 when a connection to it comes up, so `profile` is absent for a node this node has not been
-connected to since the daemon started, and always present for the node itself. The shape is
+connected to since the daemon started, and present for the node itself once it can sign. The shape is
 `adapterproto.PeerProfile` (which the SDK defines because it cannot import `apiwire`), made
 from the engine's view by `apiwire.PeerProfileOf`; the management reads of the trust list
 and the network and the adapter protocol's `endpoint.peers` give the same object.

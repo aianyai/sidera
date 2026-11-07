@@ -34,6 +34,8 @@ Notes:
   name its owner gave it with `sidera node set name=<name>`, or else its host name, with the
   host name after it in parentheses when it differs. A node shows a dash until this node has
   been connected to it since its daemon started; run the command again after it connects.
+  A node that is renamed is seen under the new name only after the next connection to it, for
+  instance after `sidera daemon restart`; nothing is pushed.
   `sidera node show` shows the name of this node.
 - `sidera peers` and `sidera directory` are agent commands. From your own shell
   they fail with `unauthenticated/token_missing`; that is expected. They work
