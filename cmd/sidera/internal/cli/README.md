@@ -40,7 +40,7 @@ and its bound values. A local value stays attached, including a body spelled
 - `message.go`: message and control flags; one body source for send and reply.
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: `result`, which writes the answer of an agent command (JSON with `--json`, the
-  layouts below otherwise) through `c.out`; `jsonText` for the generic management listing.
+  layouts below otherwise) through `c.out`.
 - `agent_output.go`: the layouts of the agent commands (`me`, `declare`, `peers`, `directory`,
   `send`/`reply`/`control`, `ack`, `status <message-id>`), each a function from the stream and the
   result to text, so a test reads them without a process. They share one convention (see "Human
@@ -101,8 +101,9 @@ and its bound values. A local value stays attached, including a body spelled
   A method without a layout is an error that names it, never a dump of the answer, and
   `TestEveryManagementCommandHasALayout` walks the commands to find one added without. `read` and
   `change` make a layout from a function over the type that reads the answer; `change` adds the line
-  that says a replayed request changed nothing this time. `managementResult` and the helpers under it
-  (`humanFields`, `humanList`, `humanValue`) remain for one caller that is being restyled and are to be removed with it.
+  that says a replayed request changed nothing this time. Every command has a layout of its own and
+  no code prints a response generically: a field that nothing named would reach the owner as a raw
+  dotted key.
   `statusWithHome` adds `home`, the directory the command resolved, to a node status, which the
   daemon does not report.
 - `manage_read_output.go`: the layouts of the management commands that only read (`status`,

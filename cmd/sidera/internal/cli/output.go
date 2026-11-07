@@ -1,11 +1,8 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/agentapi"
@@ -37,15 +34,6 @@ func (c *command) result(v any) error {
 	}
 	_, err := io.WriteString(c.out, text)
 	return err
-}
-
-// jsonText is a value as one line of JSON, for the management commands' tables.
-func jsonText(v any) (string, error) {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	err := e.Encode(v)
-	return strings.TrimSuffix(b.String(), "\n"), err
 }
 
 // version is `version`: what this program was built from, which needs no node.

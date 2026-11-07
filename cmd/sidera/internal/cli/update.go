@@ -87,7 +87,7 @@ type updateRequest struct {
 }
 
 // runUpdate runs or checks and writes the outcome: the report on standard output, in
-// the layout of the restyled commands or as one JSON object, and the plan, the question and
+// the layout of the other commands or as one JSON object, and the plan, the question and
 // the steps on standard error, so that what a script reads is only the report.
 func (c *command) runUpdate(ctx context.Context, cfg update.Config, req updateRequest) error {
 	cfg.Step = func(step string) { fmt.Fprintln(c.errOut, step) }

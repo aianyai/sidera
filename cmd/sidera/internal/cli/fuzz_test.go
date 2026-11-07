@@ -1,27 +1,20 @@
 package cli
 
 import (
-	"io"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"testing"
 )
 
-// The management client validates the envelope. These projections and the human
-// renderer additionally handle the heterogeneous result objects of each method.
-func FuzzManagementProjectionAndRendering(f *testing.F) {
+// The management client validates the envelope. The projection additionally handles the
+// heterogeneous result objects of each method.
+func FuzzManagementProjection(f *testing.F) {
 	for _, seed := range []string{`{"result":{"version":1}}`, `{"result":{"settings":{"limit":20000,"flag":false}}}`, `{"result":{"endpoints":[{"address":"a","state":"open"}]}}`, `{"result":{"version":18446744073709551615}}`, `{"result":{"version":null}}`, `{"result":[]}`} {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		_, _ = managementVersion(raw)
-		object, err := managementObject(raw)
-		if err == nil {
-			if err := humanFields(io.Discard, "", object); err != nil {
-				t.Fatalf("a decoded result could not be rendered: %v", err)
-			}
-		}
 	})
 }
 
