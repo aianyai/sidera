@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.register",
+  "note": "description with an escape sequence",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.register",
+    "params": {
+      "key": "k",
+      "display_name": "n",
+      "description": "x\ny\u001b[2J"
+    }
+  }
+}

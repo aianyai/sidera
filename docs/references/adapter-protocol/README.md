@@ -487,12 +487,25 @@ length and a pattern) and `adapterproto.ValidateDisplayName` in Go, which is the
 one rule for every place a display name is read, stored, forwarded or shown;
 `ValidateOptionalDisplayName` is the same rule for a name that may be absent.
 
-The `description` is held to its length only, and not to this rule, on purpose: it may
-legitimately span several lines, and it is never printed as a line of a terminal. The human
-output of the command line does not show it. JSON output escapes its control characters
-(Go's encoder) but passes bidirectional formatting characters such as U+202E through
-unchanged, which is acceptable because JSON output is read by programs, not shown as a
-terminal line.
+The `description` of an endpoint is held to the same class with two characters allowed:
+it may span several lines and be indented, so a line feed (U+000A) and a horizontal tab
+(U+0009) are legal in it, and every other character a display name refuses is refused
+there too, with `-32602` and never cleaned. That is every other control character (the
+carriage return, ESC, the rest of U+0000 to U+001F, DEL and U+0080 to U+009F),
+the line and paragraph separators, and the bidirectional formatting controls. Its length is
+1 to `MaxDescription`. The reason: a description is shown to agents and may be shown to a
+person, in a command, a page or a log line, and a terminal acts on a control character in
+it and a reordering character changes what the person reads; a line feed and a tab only lay
+text out. A peer's description is no more trusted than its display name, and holding it to
+the rule at every entry means whoever shows it later does not have to clean it first.
+
+The class has one definition, `adapterproto.RefusedInPersonText` (one code point) with
+`ValidatePersonText` and `PersonTextPattern`. The description is that class with line feed and
+tab taken out, `adapterproto.RefusedInDescription` and `DescriptionPattern`, built from the
+same table, not a second list; the schema states them as the `DisplayName` and `Description`
+definitions, and `ValidateDescription` and `ValidateOptionalDescription` apply the rule to a
+description. A line feed and a tab are the reader's to lay out: a place that shows a
+description on one line decides how to show them.
 
 `MaxAckItems` exports the existing acknowledgement limit of 1024 entries. The
 adapter request and result validators, the observed-receive result, and other
@@ -590,11 +603,13 @@ what they took away:
 
 One rule was **tightened** in place, and this is a change that can refuse what was
 valid: a `display_name` with a control or bidirectional formatting character, which
-`endpoint.register` accepted before, is refused with `-32602`. It is done in place
-because no implementation outside this repository exists, and the adapters in it
-register plain names; no name that was ever registered by them is affected. The
-`display_name` members of a node's answer to a directory query are tightened the same
-way: the node that asked refuses the whole answer that carries a name breaking the rule.
+`endpoint.register` accepted before, is refused with `-32602`, and so is a `description`
+with one other than the line feed and the tab it may hold. It is done in place because no
+implementation outside this repository exists, and the adapters in it register plain
+names and descriptions; none that was ever registered by them is affected. The
+`display_name` and `description` members of a node's answer to a directory query are
+tightened the same way: the node that asked refuses the whole answer that carries a text
+breaking the rule.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
@@ -907,9 +922,12 @@ adapter uses them only when the daemon declared `direct_endpoint_access` in the
   for and grants nothing: every page is read and judged anew, so entries may appear or
   disappear between pages. `limit` is 1 to 100 and 100 when absent, below the 256 a
   node page can hold because a page of 256 entries of up to 5 KiB each can be over
-  the line (1 MiB) of the protocol, and a description is held to its length only, so that
-  even 128 entries with their control characters escaped come close to it; with 100 the
-  largest page the result accepts is about 650 KiB.
+  the line (1 MiB) of the protocol, and a description may be 1024 characters of four bytes
+  each, so that even 128 entries come close to it; with 100 the largest page the result
+  accepts (the longest display name and description in every entry) is about 480 KiB on
+  the wire. Checked with Go's default JSON encoding, which escapes `<`, `>` and `&` to six
+  bytes each, the same page is about 700 KiB; a line feed and a tab, the only control
+  characters a description keeps, take two.
 - **A directory read that got no page is a result.** The request was well formed, and what
   it found out is a fact about the node asked, which is what a result is for; an error only
   says the request was misused. `outcome` is `ok` with the page, `unavailable` when the

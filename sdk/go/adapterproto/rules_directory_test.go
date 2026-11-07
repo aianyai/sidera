@@ -101,26 +101,36 @@ func TestDirectoryResultRules(t *testing.T) {
 	}
 }
 
-// TestDirectoryPageFitsALine: the largest page the result accepts, with the
-// longest entries the rules allow, and every control character of the
-// description escaped to six bytes by the encoder, stays under the line limit.
+// TestDirectoryPageFitsALine: the largest page the result accepts stays under the
+// line limit, with the longest entries the rules allow. A description of 1024
+// characters takes the most bytes as `<`, which Encode (encoding/json with HTML
+// escaping) writes as six, or as a character of four bytes, which is the most the
+// wire encoder (no HTML escaping) writes; a line feed and a tab, the only control
+// characters it may hold, take two. The test measures both.
 func TestDirectoryPageFitsALine(t *testing.T) {
-	e := adapterproto.DirectoryEntry{Address: adapterproto.Address(repeat("a", 128)), Kind: adapterproto.EndpointSession,
-		DisplayName: repeat("n", 128), Description: repeat("\x01", 1024),
-		Accepts: []adapterproto.EndpointAction{"message.send", "session.create", "session.close", "session.interrupt", "endpoint.status"}}
-	r := adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: make([]adapterproto.DirectoryEntry, adapterproto.MaxDirectoryLimit), NextCursor: repeat("c", adapterproto.MaxCursorLen)}
-	for i := range r.Endpoints {
-		r.Endpoints[i] = e
+	for _, c := range []struct{ name, char string }{
+		{"six bytes escaped", "<"},
+		{"four bytes as they are", "\U0001F600"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := adapterproto.DirectoryEntry{Address: adapterproto.Address(repeat("a", 128)), Kind: adapterproto.EndpointSession,
+				DisplayName: repeat(c.char, 128), Description: repeat(c.char, adapterproto.MaxDescription),
+				Accepts: []adapterproto.EndpointAction{"message.send", "session.create", "session.close", "session.interrupt", "endpoint.status"}}
+			r := adapterproto.DirectoryResult{Outcome: adapterproto.DirectoryOK, Endpoints: make([]adapterproto.DirectoryEntry, adapterproto.MaxDirectoryLimit), NextCursor: repeat("c", adapterproto.MaxCursorLen)}
+			for i := range r.Endpoints {
+				r.Endpoints[i] = e
+			}
+			b, err := adapterproto.Encode(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const line = 1 << 20
+			if len(b) >= line {
+				t.Fatalf("a page of %d entries is %d bytes, over the line limit %d", adapterproto.MaxDirectoryLimit, len(b), line)
+			}
+			t.Logf("the largest page is %d bytes", len(b))
+		})
 	}
-	b, err := adapterproto.Encode(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const line = 1 << 20
-	if len(b) >= line {
-		t.Fatalf("a page of %d entries is %d bytes, over the line limit %d", adapterproto.MaxDirectoryLimit, len(b), line)
-	}
-	t.Logf("the largest page is %d bytes", len(b))
 }
 
 func TestPeersRules(t *testing.T) {

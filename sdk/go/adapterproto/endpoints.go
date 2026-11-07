@@ -29,9 +29,7 @@ func (p RegisterParams) Validate() error {
 	var c checker
 	c.field("key", strLen(p.Key, 1, MaxIdentLen))
 	c.field("display_name", ValidateDisplayName(p.DisplayName))
-	if p.Description != "" {
-		c.field("description", strLen(p.Description, 1, MaxDescription))
-	}
+	c.field("description", ValidateOptionalDescription(p.Description))
 	return c.err
 }
 
@@ -299,9 +297,12 @@ func (r MessageStatusResult) Validate() error {
 const (
 	// MaxDirectoryLimit is the most entries one page of endpoint.directory holds.
 	// A remote directory page can hold up to 256 entries of up to 5 KiB each, which
-	// is more than a line of the protocol (1 MiB) can carry, and a description is
-	// held to its length only, so that even 128 entries with their control
-	// characters escaped come close to the line. A hundred leave room.
+	// is more than a line of the protocol (1 MiB) can carry, and a description may be
+	// 1024 characters of four bytes each (a character is at most six bytes when
+	// encoding/json escapes it), so that even 128 entries come close to the line.
+	// A hundred leave room: with the longest display name and description too,
+	// the largest page is about 480 KiB on the wire and about 700 KiB as
+	// encoding/json writes it.
 	MaxDirectoryLimit = 100
 	// DefaultDirectoryLimit is the page size the node reads when the request names
 	// no limit. The node applies it, so a test holds it equal to the node's own.
@@ -381,9 +382,7 @@ func (e DirectoryEntry) Validate() error {
 	c.field("address", e.Address.Validate())
 	c.field("kind", enumOK(e.Kind, endpointKinds))
 	c.field("display_name", ValidateOptionalDisplayName(e.DisplayName))
-	if e.Description != "" {
-		c.field("description", strLen(e.Description, 1, MaxDescription))
-	}
+	c.field("description", ValidateOptionalDescription(e.Description))
 	c.field("accepts", present(e.Accepts))
 	for i, a := range e.Accepts {
 		c.field("accepts"+index(i), enumOK(a, endpointActions))

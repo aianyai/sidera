@@ -10,7 +10,26 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Go SDK, incompatible: `adapterproto.DisplayNamePattern` is removed.** The expression of a display
+  name is now built from the one table of characters a text shown to a person never holds, so it is a
+  function: use `adapterproto.PersonTextPattern()` where you used the constant. A description gets
+  the same rule with line feed and tab allowed. `adapterproto` gains `RefusedInPersonText` and
+  `RefusedInDescription` (one code point each), `ValidatePersonText`, `PersonTextPattern`,
+  `DescriptionPattern`, `ValidateDescription` and `ValidateOptionalDescription`. Code that validates
+  a display name with `ValidateDisplayName` or `ValidateOptionalDisplayName` is not affected.
 - `sidera adapter setup` (and `--remove`) now asks `[Y/n]` for each item: pressing Enter accepts it, since you ran setup to be asked about exactly these changes. `n`, any other text and the end of the input (a script, a closed pipe, a dropped terminal) still decline, so nothing changes a client's configuration unasked. `sidera update` still asks `Update? [y/N]`.
+
+### Security
+
+- The description of an endpoint is now held to the characters of its display name, except that it
+  may still span lines and be indented, so line feed and tab stay allowed. A description with any
+  other control character (an escape sequence, a carriage return, DEL, a control in the range U+0080
+  to U+009F), a line or paragraph separator or a text-direction control is refused instead of kept.
+  An adapter's `endpoint.register` fails with an invalid-params error, and a directory answer from
+  another node that carries such a description is refused as a whole, as one with such a display
+  name already was. A description stored before this change that carries such a character is a
+  damaged endpoint record, so the endpoint is dropped at the next start. The adapters shipped with
+  Sidera register descriptions without them and are not affected.
 
 ## [0.15.0] - 2026-11-06
 

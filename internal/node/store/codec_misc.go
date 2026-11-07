@@ -89,8 +89,8 @@ const TokenLen = 32
 // of DecodeRecord, which is where a body the encoder never writes is caught; the
 // test is kept on that path only so that this function states the whole rule and
 // the encoder and the decoder cannot drift apart. The rules of the name
-// (adapterproto.ValidateOptionalDisplayName) and the length bound of the
-// description are checked on both paths.
+// and the description (adapterproto.ValidateOptionalDisplayName and
+// adapterproto.ValidateOptionalDescription) are checked on both paths.
 func checkEndpointText(displayName, description string) error {
 	if !utf8.ValidString(displayName) {
 		return errors.New("an endpoint's display name is not valid UTF-8")
@@ -101,8 +101,8 @@ func checkEndpointText(displayName, description string) error {
 	if !utf8.ValidString(description) {
 		return errors.New("an endpoint's description is not valid UTF-8")
 	}
-	if n := utf8.RuneCountInString(description); n > adapterproto.MaxDescription {
-		return fmt.Errorf("an endpoint's description is %d characters, at most %d", n, adapterproto.MaxDescription)
+	if err := adapterproto.ValidateOptionalDescription(description); err != nil {
+		return fmt.Errorf("an endpoint's description: %w", err)
 	}
 	return nil
 }

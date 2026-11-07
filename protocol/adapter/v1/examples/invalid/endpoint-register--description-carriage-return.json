@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.register",
+  "note": "description with a carriage return, which is not the line feed a description may hold",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.register",
+    "params": {
+      "key": "k",
+      "display_name": "n",
+      "description": "x\r\ny"
+    }
+  }
+}

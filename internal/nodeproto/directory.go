@@ -1,8 +1,6 @@
 package nodeproto
 
 import (
-	"unicode/utf8"
-
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
@@ -123,9 +121,11 @@ func (a DirectoryAnswer) Encode() ([]byte, error) {
 
 // DecodeDirectoryAnswer parses a directory answer strictly, within the answer
 // limit of the protocol. An entry names a kind and actions by their names, a
-// display name of at most adapterproto.MaxDisplayName characters and a
-// description of at most adapterproto.MaxDescription; the text is valid UTF-8,
-// which the decoder guarantees.
+// display name of at most adapterproto.MaxDisplayName characters holding none of
+// the characters adapterproto.RefusedInPersonText names, and a description of at
+// most adapterproto.MaxDescription holding none that
+// adapterproto.RefusedInDescription names (an entry that does makes the whole
+// answer invalid); the text is valid UTF-8, which the decoder guarantees.
 func DecodeDirectoryAnswer(data []byte) (DirectoryAnswer, error) {
 	var w directoryAnswerWire
 	if err := record.UnmarshalStrict(data, &w, limit(ProtocolDirectory).Answer); err != nil {
@@ -167,8 +167,8 @@ func entryFromWire(w directoryEntryWire) (DirectoryEntry, error) {
 	if err := adapterproto.ValidateOptionalDisplayName(w.DisplayName); err != nil {
 		return DirectoryEntry{}, invalid("display name: %v", err)
 	}
-	if n := utf8.RuneCountInString(w.Description); n > adapterproto.MaxDescription {
-		return DirectoryEntry{}, invalid("description of %d characters, at most %d", n, adapterproto.MaxDescription)
+	if err := adapterproto.ValidateOptionalDescription(w.Description); err != nil {
+		return DirectoryEntry{}, invalid("description: %v", err)
 	}
 	actions := make([]authz.Action, len(w.Actions))
 	seen := make(map[authz.Action]struct{}, len(w.Actions))

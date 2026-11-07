@@ -1146,14 +1146,16 @@ transactions that close the endpoint when they already know the answer
 (`TestRecordGoldenVectors`, vectors `endpoint released` and `endpoint closed unreleased`). The name and the
 description are what the adapter registered the endpoint under and are held to the
 bounds of that protocol (`adapterproto.MaxDisplayName` and
-`adapterproto.MaxDescription`, counted in characters, valid UTF-8) and, for the
-name, to `adapterproto.ValidateOptionalDisplayName`, which also refuses control and
-bidirectional formatting characters: a record the protocol could not have
+`adapterproto.MaxDescription`, counted in characters, valid UTF-8) and to
+`adapterproto.ValidateOptionalDisplayName` and `ValidateOptionalDescription`, which
+also refuse control and bidirectional formatting characters (a description keeps line
+feed and tab): a record the protocol could not have
 registered is refused when it is written and when it is read. A record written
-before the name was held to that rule and carrying such a character is therefore a
-damaged body: the node still starts, the scan entry settles the file like any
-other damaged endpoint record (the file is removed, the owner has an alert of
-kind `corrupt_record`, which here does not mean the disk is damaged). The endpoint
+before the name or the description was held to that rule and carrying such a
+character is therefore a damaged body: the node still starts, the scan entry
+settles the file like any other damaged endpoint record (the file is removed, the
+owner has an alert of kind `corrupt_record`, which here does not mean the disk is
+damaged). The endpoint
 is gone with its record: the deliveries accepted for it have a recipient with no
 record, so endpoint-drain-replay rejects them as `endpoint_closed` and their senders
 are told; the token went with the record, so a session that holds it must obtain

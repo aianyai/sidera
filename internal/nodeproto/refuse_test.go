@@ -32,6 +32,26 @@ func runRefusals[T any](t *testing.T, decode func([]byte) (T, error), rows []ref
 	}
 }
 
+// personTextClasses are the classes of character that text shown to a person
+// never holds, each in a form that reaches a terminal as an escape sequence, a
+// line break or reordered text. A description may span lines and be indented, so
+// it keeps the two that only lay text out, line feed and tab.
+var personTextClasses = []struct {
+	name, text    string
+	inDescription bool
+}{
+	{"an escape sequence (CSI)", "n\x1b[2J", false},
+	{"an operating system command ended by BEL", "n\x1b]0;title\x07", false},
+	{"the C1 control sequence introducer U+009B", "n\u009b2J", false},
+	{"the C1 next line U+0085", "two\u0085lines", false},
+	{"a DEL", "n\x7f", false},
+	{"a carriage return", "two\rlines", false},
+	{"a right-to-left override U+202E", "n\u202etxt", false},
+	{"a bidirectional isolate U+2066", "n\u2066txt", false},
+	{"a line feed", "two\nlines", true},
+	{"a tab", "two\tcolumns", true},
+}
+
 func TestDecodeSendRequestRefuses(t *testing.T) {
 	env := w.bstr([]byte{1})
 	sender := w.tstr(ep1Text)
@@ -148,7 +168,7 @@ func TestDecodeDirectoryAnswerRefuses(t *testing.T) {
 	}
 	with := func(n uint64, v []byte) [2][]byte { return [2][]byte{{byte(n)}, v} }
 	answer := func(entries ...[]byte) []byte { return w.mapOf(w.uint(1), w.uint(1), w.uint(2), entry(entries...)) }
-	runRefusals(t, DecodeDirectoryAnswer, []refusal{
+	rows := []refusal{
 		{"empty input", nil, record.ErrMalformed},
 		{"input over the answer limit", bytes.Repeat([]byte{0}, limit(ProtocolDirectory).Answer+1), record.ErrOversize},
 		{"a refusal with no reason", w.mapOf(w.uint(1), w.uint(2), w.uint(2), entry()), ErrInvalid},
@@ -167,7 +187,36 @@ func TestDecodeDirectoryAnswerRefuses(t *testing.T) {
 		{"a display name that is not UTF-8", answer(good(with(3, []byte{0x62, 0xff, 0xfe}))), record.ErrMalformed},
 		{"an entry missing a field", answer(w.mapOf(w.uint(1), ep1Bytes, w.uint(2), w.tstr("direct"))), record.ErrNotCanonical},
 		{"an entry with an unknown field", answer(w.mapOf(w.uint(1), ep1Bytes, w.uint(2), w.tstr("direct"), w.uint(3), w.tstr("n"), w.uint(4), w.tstr(""), w.uint(5), w.arr(), w.uint(6), w.uint(0))), record.ErrMalformed},
-	})
+	}
+	// The display name and the description are text shown to a person and obey
+	// one rule: a character class a terminal acts on or that reorders text makes
+	// the whole answer invalid, whichever field holds it.
+	// A description keeps line feed and tab, which a display name refuses.
+	type acceptance struct {
+		name, text string
+		field      uint64
+	}
+	var accepted []acceptance
+	for _, c := range personTextClasses {
+		for field, name := range map[uint64]string{3: "display name", 4: "description"} {
+			if field == 4 && c.inDescription {
+				accepted = append(accepted, acceptance{"a description with " + c.name, c.text, field})
+				continue
+			}
+			rows = append(rows, refusal{"a " + name + " with " + c.name, answer(good(with(field, w.tstr(c.text)))), ErrInvalid})
+		}
+	}
+	runRefusals(t, DecodeDirectoryAnswer, rows)
+	for _, text := range []string{"Reads for a person.", "\u8bfb\u53d6\u4fe1\u606f \U0001F600 \u0645\u0631\u062d\u0628\u0627"} {
+		for field, name := range map[uint64]string{3: "display name", 4: "description"} {
+			accepted = append(accepted, acceptance{"a " + name + " of plain text", text, field})
+		}
+	}
+	for _, c := range accepted {
+		if _, err := DecodeDirectoryAnswer(answer(good(with(c.field, w.tstr(c.text))))); err != nil {
+			t.Errorf("%s %q is refused: %v", c.name, c.text, err)
+		}
+	}
 }
 
 func TestDecodeDialBackRequestRefuses(t *testing.T) {

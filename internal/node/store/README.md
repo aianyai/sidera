@@ -64,7 +64,10 @@ engine applies the delivery rules and calls the writes.
 - **An endpoint's display name and description are the adapter's, held to its
   bounds.** `EndpointRecord.DisplayName` and `Description` are optional, omitted
   when empty, and limited to `adapterproto.MaxDisplayName` and
-  `adapterproto.MaxDescription` characters of valid UTF-8, on write and on read.
+  `adapterproto.MaxDescription` characters of valid UTF-8 without a control or
+  bidirectional formatting character, except that a description keeps line feed and
+  tab (`adapterproto.ValidateOptionalDisplayName` and `ValidateOptionalDescription`),
+  on write and on read.
   They are not part of the engine-owned `Declaration`, and the record does not
   apply the tighter bound of the node's declaration to peers
   (`publication.MaxNameLen`): whoever builds that declaration decides what happens

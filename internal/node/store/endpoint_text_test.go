@@ -25,6 +25,12 @@ func TestEndpointTextIsBoundedAsTheRegistrationIs(t *testing.T) {
 		{"a description one character over", "n", strings.Repeat("€", adapterproto.MaxDescription+1)},
 		{"a display name with a line break", "two\nlines", ""},
 		{"a display name with a right-to-left override", "gpj.\u202Etxt", ""},
+		{"a description with lines and an indent", "n", "Reads:\n\tmessages\n\tfiles"},
+		{"a description with a carriage return", "n", "two\r\nlines"},
+		{"a description with a vertical tab", "n", "two\vlines"},
+		{"a description with an escape sequence", "n", "n\x1b[2J"},
+		{"a description with a right-to-left override", "n", "gpj.\u202Etxt"},
+		{"a description in Chinese", "n", "\u8bfb\u53d6\u4fe1\u606f"},
 		{"a display name of 129 characters of ASCII", strings.Repeat("n", 129), ""},
 		{"both at their bounds", strings.Repeat("n", adapterproto.MaxDisplayName), strings.Repeat("n", adapterproto.MaxDescription)},
 	} {
@@ -118,6 +124,9 @@ func TestEndpointTextOverTheBoundIsRefusedOnRead(t *testing.T) {
 		{"a display name one character over", "Bxro", strings.Repeat("n", adapterproto.MaxDisplayName+1)},
 		{"a description one character over", "Dxsc", strings.Repeat("n", adapterproto.MaxDescription+1)},
 		{"a display name with an escape character", "Bxro", `n\u001b[2J`},
+		{"a description with an escape character", "Dxsc", `n\u001b[2J`},
+		{"a description with a carriage return", "Dxsc", `two\r\nlines`},
+		{"a description with a right-to-left override", "Dxsc", `gpj.\u202etxt`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			body := bytes.Replace(fr.Body, []byte(c.from), []byte(c.to), 1)

@@ -444,6 +444,7 @@ func TestPatternsRefuseATrailingNewline(t *testing.T) {
 		"AdapterID":   "example",
 		"PresetName":  "review.readonly",
 		"DisplayName": "Owner console",
+		"Description": "Reads for a person",
 		"ConfigKey":   "project_dir",
 		"EnvName":     "SIDERA_TOKEN",
 		"ReasonWord":  "too_many_recipients",
@@ -462,7 +463,14 @@ func TestPatternsRefuseATrailingNewline(t *testing.T) {
 			t.Errorf("%s: the sample %q is not valid", name, sample)
 			continue
 		}
-		for _, bad := range []string{sample + "\n", sample + "\r\n", "\n" + sample} {
+		variants := []string{sample + "\n", sample + "\r\n", "\n" + sample}
+		if name == "Description" {
+			// A description may hold a line feed, so a trailing one proves nothing;
+			// a carriage return, which the class refuses, shows the pattern is
+			// anchored at both ends.
+			variants = []string{sample + "\r", sample + "\r\n", "\r" + sample}
+		}
+		for _, bad := range variants {
 			if re.MatchString(bad) {
 				t.Errorf("%s: the Go pattern matches %q", name, bad)
 			}
