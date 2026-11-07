@@ -64,10 +64,14 @@ engine applies the delivery rules and calls the writes.
 - **An endpoint's display name and description are the adapter's, held to its
   bounds.** `EndpointRecord.DisplayName` and `Description` are optional, omitted
   when empty, and limited to `adapterproto.MaxDisplayName` and
-  `adapterproto.MaxDescription` characters of valid UTF-8 without a control or
-  bidirectional formatting character, except that a description keeps line feed and
-  tab (`adapterproto.ValidateOptionalDisplayName` and `ValidateOptionalDescription`),
-  on write and on read.
+  `adapterproto.MaxDescription` characters of valid UTF-8 without a control,
+  bidirectional formatting or invisible format character, except that a description
+  keeps line feed and tab (`adapterproto.ValidateOptionalDisplayName` and
+  `ValidateOptionalDescription`), on write and on read. A record whose text holds
+  a character the rule has since come to refuse is a damaged body: the file is
+  removed with a `corrupt_record` alert and the deliveries accepted for the endpoint
+  are rejected as `endpoint_closed`. The rule is not kept in two forms to spare such
+  a record.
   They are not part of the engine-owned `Declaration`, and the record does not
   apply the tighter bound of the node's declaration to peers
   (`publication.MaxNameLen`): whoever builds that declaration decides what happens

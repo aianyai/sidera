@@ -488,8 +488,8 @@ signed by the node's identity key.
   home, a table in `profile.go`, read by decoding and by `NewNodeProfile`:
   - `name`, `host_name` and `system` follow the display-name rule of the adapter
     protocol (`adapterproto.ValidateDisplayName`: 1 to 128 characters, none of
-    the control, line-separator and bidirectional-control characters of the
-    person-text class);
+    the control, line-separator, bidirectional-control and invisible
+    format characters of the person-text class);
   - `system_build` and `sidera_version` follow the same rule and are at most 64
     characters;
   - `platform` is `<goos>/<goarch>`, each part one or more of `[a-z0-9]`, at most

@@ -39,11 +39,14 @@ func TestDisplayNameRule(t *testing.T) {
 		{"empty", "", false, false, false},
 	}
 	// Each range (U+2028 to U+202E joins the two separators and the embedding
-	// controls) is refused at both ends and in the middle; the character on either
-	// side of it is a name like any other.
+	// controls, U+2066 to U+206F the isolates and the deprecated format
+	// characters) is refused at both ends and in the middle; the character on
+	// either side of it is a name like any other. Beside the invisible
+	// characters, U+200C and U+200D (which spell Persian and Indic words and join
+	// emoji), U+00AD and U+180E stay accepted.
 	for _, r := range []struct{ first, last rune }{
-		{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200E, 0x200F},
-		{0x2028, 0x202E}, {0x2066, 0x2069},
+		{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200B, 0x200B}, {0x200E, 0x200F},
+		{0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F}, {0xFEFF, 0xFEFF}, {0xE0000, 0xE007F},
 	} {
 		for _, c := range []rune{r.first, (r.first + r.last) / 2, r.last} {
 			rows = append(rows, row{fmt.Sprintf("U+%04X is refused", c), "a" + string(c) + "b", false, false, false})
@@ -61,6 +64,13 @@ func TestDisplayNameRule(t *testing.T) {
 		row{"a name with a next line", "two\u0085lines", false, false, false},
 		row{"a name with an isolate", "name\u2066txt", false, false, false},
 		row{"a name with a DEL", "name\x7f", false, false, false},
+		row{"a name with a zero width space", "name\u200bname", false, false, false},
+		row{"a name with a byte order mark", "\ufeffname", false, false, false},
+		row{"a name with a tag character", "name\U000e0041", false, false, false},
+		row{"a description with a zero width space", "a\nname\u200b", false, false, false},
+		row{"a name with a zero width non-joiner", "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", true, true, false},
+		row{"a name with a soft hyphen", "co\u00adoperate", true, true, false},
+		row{"a name with a Mongolian vowel separator", "\u1820\u180e\u1821", true, true, false},
 		// Line feed and tab are the two characters of the refused class that a
 		// description keeps; the characters on either side of them, and the
 		// carriage return that goes with a line feed on some systems, stay refused.

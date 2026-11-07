@@ -64,15 +64,28 @@ func ValidatePresetName(s string) error {
 }
 
 // personTextRefused are the code points that text shown to a person never
-// holds, as inclusive ranges: the control characters (U+0000 to U+001F, U+007F to
-// U+009F), the line and paragraph separators (U+2028, U+2029) and the
-// bidirectional formatting controls (U+061C, U+200E, U+200F, U+202A to U+202E,
-// U+2066 to U+2069). A terminal acts on the first group, and the others break or
-// reorder lines of text. This table is the one definition of the class: every
-// function below follows it, for a display name and for a description alike.
+// holds, as inclusive ranges, in ascending order:
+//   - the control characters (U+0000 to U+001F, U+007F to U+009F), which a
+//     terminal acts on;
+//   - the line and paragraph separators (U+2028, U+2029) and the bidirectional
+//     formatting controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
+//     U+2069), which break or reorder lines of text;
+//   - the invisible format characters that draw nothing: the zero width space
+//     (U+200B), the word joiner and the invisible operators (U+2060 to U+2064),
+//     the deprecated format characters (U+206A to U+206F), the byte order mark
+//     used as a zero width no-break space (U+FEFF) and the tag characters
+//     (U+E0000 to U+E007F, an invisible copy of ASCII). They move nothing, but
+//     they make two names that look the same differ and hide text from a person,
+//     which a model reading the same text still reads.
+//
+// The zero width joiner and non-joiner (U+200D, U+200C) are not in the class:
+// they join emoji and spell words of Persian and Indic scripts. This table is the
+// one definition of the class: every function below follows it, for a display
+// name and for a description alike.
 var personTextRefused = [...][2]rune{
-	{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200E, 0x200F},
-	{0x2028, 0x202E}, {0x2066, 0x2069},
+	{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200B, 0x200B},
+	{0x200E, 0x200F}, {0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F},
+	{0xFEFF, 0xFEFF}, {0xE0000, 0xE007F},
 }
 
 // descriptionKept are the characters of that class that a description keeps, in
@@ -99,7 +112,7 @@ func refusedIn(r rune, kept []rune) bool {
 
 // RefusedInPersonText reports whether r may not appear in a text that is shown
 // to a person: a display name, which a terminal or a page would otherwise act on,
-// or reorder. It is the rule that every place that reads, stores, forwards or
+// reorder or read differently from a person. It is the rule that every place that reads, stores, forwards or
 // prints such text applies; a text with such a character is refused, never
 // cleaned. A description is held to the same class with line feed and tab
 // allowed: see RefusedInDescription.
@@ -114,7 +127,7 @@ func RefusedInDescription(r rune) bool { return refusedIn(r, descriptionKept[:])
 // repeats the text.
 func ValidatePersonText(s string) error {
 	if strings.IndexFunc(s, RefusedInPersonText) >= 0 {
-		return bad("contains a control or bidirectional formatting character")
+		return bad("contains a control, bidirectional formatting or invisible format character")
 	}
 	return nil
 }
@@ -196,7 +209,7 @@ func ValidateDescription(s string) error {
 		return err
 	}
 	if strings.IndexFunc(s, RefusedInDescription) >= 0 {
-		return bad("contains a control character other than line feed and tab, or a bidirectional formatting character")
+		return bad("contains a control character other than line feed and tab, or a bidirectional formatting or invisible format character")
 	}
 	return nil
 }

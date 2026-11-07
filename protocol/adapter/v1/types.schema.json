@@ -74,14 +74,14 @@
       "pattern": "^[a-z0-9][a-z0-9._-]*$"
     },
     "DisplayName": {
-      "description": "A display name: 1 to 128 characters, none of them a control character, a line or paragraph separator or a bidirectional formatting control. A name that has one is refused, not cleaned.",
+      "description": "A display name: 1 to 128 characters, none of them a control character, a line or paragraph separator, a bidirectional formatting control or an invisible format character (the zero width space, the word joiner, the byte order mark, a tag character). A name that has one is refused, not cleaned.",
       "type": "string", "minLength": 1, "maxLength": 128,
-      "pattern": "^[^\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]*$"
+      "pattern": "^[^\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\udb40\udc00-\udb40\udc7f]*$"
     },
     "Description": {
-      "description": "The description of an endpoint: 1 to 1024 characters. It may span lines and be indented, so a line feed and a tab are allowed; no other control character, no line or paragraph separator and no bidirectional formatting control is, which is the rule of a display name apart from those two. A description that has one is refused, not cleaned.",
+      "description": "The description of an endpoint: 1 to 1024 characters. It may span lines and be indented, so a line feed and a tab are allowed; no other control character, no line or paragraph separator, no bidirectional formatting control and no invisible format character is, which is the rule of a display name apart from those two. A description that has one is refused, not cleaned.",
       "type": "string", "minLength": 1, "maxLength": 1024,
-      "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]*$"
+      "pattern": "^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\udb40\udc00-\udb40\udc7f]*$"
     },
     "SemVer": {
       "description": "A Semantic Versioning 2.0.0 version whose major, minor and patch have at most nine digits.",

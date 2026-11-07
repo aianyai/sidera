@@ -25,6 +25,8 @@ func TestEndpointTextIsBoundedAsTheRegistrationIs(t *testing.T) {
 		{"a description one character over", "n", strings.Repeat("€", adapterproto.MaxDescription+1)},
 		{"a display name with a line break", "two\nlines", ""},
 		{"a display name with a right-to-left override", "gpj.\u202Etxt", ""},
+		{"a display name with a zero width space", "B\u200bro", ""},
+		{"a description with a tag character", "n", "reads\U000e0041"},
 		{"a description with lines and an indent", "n", "Reads:\n\tmessages\n\tfiles"},
 		{"a description with a carriage return", "n", "two\r\nlines"},
 		{"a description with a vertical tab", "n", "two\vlines"},

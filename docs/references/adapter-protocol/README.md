@@ -481,8 +481,14 @@ of copying the number.
 
 A display name also holds no character that a terminal acts on or that reorders
 text: no control character (U+0000 to U+001F, U+007F to U+009F), no line or
-paragraph separator (U+2028, U+2029) and no bidirectional formatting control
-(U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069). A name that has one
+paragraph separator (U+2028, U+2029), no bidirectional formatting control
+(U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and no invisible format
+character (the zero width space U+200B, the word joiner and invisible operators U+2060
+to U+2064, the deprecated format characters U+206A to U+206F, the byte order mark U+FEFF
+and the tag characters U+E0000 to U+E007F). The invisible ones move nothing, but they make
+two names that look the same differ and hide text from a person, which a model that reads
+the same text still reads; the zero width joiner and non-joiner (U+200D, U+200C) stay
+legal, because they join emoji and spell words of Persian and Indic scripts. A name that has one
 is refused with `-32602`; it is never cleaned, because the node cannot know what
 the adapter meant. The rule is the `DisplayName` definition of the schema (a
 length and a pattern) and `adapterproto.ValidateDisplayName` in Go, which is the
@@ -494,7 +500,8 @@ it may span several lines and be indented, so a line feed (U+000A) and a horizon
 (U+0009) are legal in it, and every other character a display name refuses is refused
 there too, with `-32602` and never cleaned. That is every other control character (the
 carriage return, ESC, the rest of U+0000 to U+001F, DEL and U+0080 to U+009F),
-the line and paragraph separators, and the bidirectional formatting controls. Its length is
+the line and paragraph separators, the bidirectional formatting controls and the invisible
+format characters. Its length is
 1 to `MaxDescription`. The reason: a description is shown to agents and may be shown to a
 person, in a command, a page or a log line, and a terminal acts on a control character in
 it and a reordering character changes what the person reads; a line feed and a tab only lay
@@ -621,7 +628,7 @@ what they took away:
   that is no longer a known code is refused by validation like any other unknown one;
   an adapter that reads a record whose form it does not know answers `record_unreadable`.
 
-Two rules were **tightened** in place, and each is a change that can refuse what was
+Three rules were **tightened** in place, and each is a change that can refuse what was
 valid. The first: a `display_name` with a control or bidirectional formatting character, which
 `endpoint.register` accepted before, is refused with `-32602`, and so is a `description`
 with one other than the line feed and the tab it may hold. It is done in place because no
@@ -637,6 +644,17 @@ reach other nodes and their terminals through the directory, and refusing them w
 enter keeps one bad probe from making the node's whole directory answer impossible to encode
 for every node that asks. It is done in place for the same reason, and the runtimes the
 adapters in this repository report are plain names and versions.
+
+The third: the invisible format characters (U+200B, U+2060 to U+2064, U+206A to U+206F, U+FEFF
+and U+E0000 to U+E007F) join the class that a display name, a description, a profile text and
+the name and version of a probed runtime refuse. They do not move the cursor, but they make two
+names that look the same differ and hide text from a reader, a model reading a tool result
+included. A text that holds one is refused where it enters, with `-32602` for a registration
+and a probe result and as an invalid answer for a directory or peers answer, and it is never
+cleaned. It is done in place for the same reason as the others, and the adapters in this
+repository register plain names and descriptions. The node also reads its own endpoint
+records under the rule: a stored name or description that holds one of these characters makes
+the record damaged (see the storage reference).
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,

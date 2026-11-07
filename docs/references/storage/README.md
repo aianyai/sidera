@@ -1148,11 +1148,13 @@ description are what the adapter registered the endpoint under and are held to t
 bounds of that protocol (`adapterproto.MaxDisplayName` and
 `adapterproto.MaxDescription`, counted in characters, valid UTF-8) and to
 `adapterproto.ValidateOptionalDisplayName` and `ValidateOptionalDescription`, which
-also refuse control and bidirectional formatting characters (a description keeps line
-feed and tab): a record the protocol could not have
+also refuse control, bidirectional formatting and invisible format characters (a
+description keeps line feed and tab): a record the protocol could not have
 registered is refused when it is written and when it is read. A record written
-before the name or the description was held to that rule and carrying such a
-character is therefore a damaged body: the node still starts, the scan entry
+before the name or the description was held to that rule, or before the rule
+covered the invisible format characters (the zero width space, the word joiner,
+the byte order mark, the tag characters), and carrying such a
+character is therefore a damaged body, also after an upgrade that widened the rule: the node still starts, the scan entry
 settles the file like any other damaged endpoint record (the file is removed, the
 owner has an alert of kind `corrupt_record`, which here does not mean the disk is
 damaged). The endpoint

@@ -128,7 +128,9 @@ Delivery blocked:
   writes it.
   It is encoded with `SetEscapeHTML(false)`: non-ASCII text is emitted as is,
   except the characters of `adapterproto.RefusedInPersonText` (the C0 and C1
-  controls, DEL, U+2028 and U+2029, and the bidirectional formatting controls),
+  controls, DEL, U+2028 and U+2029, the bidirectional formatting controls and
+  the invisible format characters: the zero width space, the word joiner, the byte
+  order mark and the tag characters, which are written as a surrogate pair),
   which are written as `\uXXXX` so a terminal that shows the page never acts on
   them. Only the bytes change; a JSON reader decodes the same strings.
 - The budget is checked against the encoded output, in the unit of the budget.
