@@ -56,6 +56,15 @@ func renderMe(s *termout.Stream, r agentapi.MeResult) string {
 	return s.Block(append(fields, termout.Field{Label: "Frontends", Value: frontends}))
 }
 
+// renderProbe is `probe`: the node accepted the token, and the preset and front end it
+// belongs to.
+func renderProbe(s *termout.Stream, r agentapi.ProbeResult) string {
+	return s.OK("The node is reachable.\n" + s.Block([]termout.Field{
+		{Label: "Preset", Value: r.Preset},
+		{Label: "Front end", Value: string(r.Frontend)},
+	}))
+}
+
 // renderDeclared is `declare`: what the declaration is now.
 func renderDeclared(s *termout.Stream, r agentapi.DeclareResult) string {
 	return s.OK("Declaration updated.\n" + s.Block(declarationFields(r.Declaration)))

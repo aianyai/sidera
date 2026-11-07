@@ -425,7 +425,7 @@ sidera adapter install <packages>/claude     # if this machine has Claude Code
 sidera adapter enable claude
 ```
 
-Expected from `enable`: `enabled, probing in progress; see sidera adapter list`.
+Expected from `enable`: ``Enabled instance <name>.`` followed by a line that says probing is in progress and to run `sidera adapter list` for the result.
 
 Check, after a few seconds:
 

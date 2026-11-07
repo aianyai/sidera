@@ -97,17 +97,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 		return err
 	}
 	if plan.method == "adapters.remove" && plan.force {
-		fmt.Fprintf(c.Stderr, "warning: the client setup of %[1]s was not checked, and whatever it installed in the client, if anything, is still there. To clean it up by hand, see \"Cleaning up an adapter's client by hand\" in the adapters guide.\n", plan.params["instance"])
-	}
-	if !c.json {
-		switch plan.method {
-		case "adapters.enable":
-			_, err := fmt.Fprintln(c.Stdout, "enabled, probing in progress; see sidera adapter list")
-			return err
-		case "network.listen.set":
-			_, err := fmt.Fprintln(c.Stdout, "restart the daemon for the new listen addresses to take effect")
-			return err
-		}
+		fmt.Fprint(c.errOut, forcedRemovalWarning(c.errOut, plan.params["instance"].(string)))
 	}
 	return nil
 }

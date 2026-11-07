@@ -1032,12 +1032,14 @@ func TestManagementUnknownOutcomeResendsOnlyTheFrozenRequest(t *testing.T) {
 					t.Fatalf("unknown again: %d %q %q", code, out, diag)
 				}
 			} else {
-				replayed := "replayed true"
+				// The response keeps its metadata; the human text says the request had been carried
+				// out before and leaves the identifier out.
 				if mode.json {
-					replayed = `"replayed":true`
-				}
-				if code != 0 || !strings.Contains(out, replayed) || !strings.Contains(out, request.OperationID) {
-					t.Fatalf("replayed response metadata: %d %q", code, out)
+					if code != 0 || !strings.Contains(out, `"replayed":true`) || !strings.Contains(out, request.OperationID) {
+						t.Fatalf("replayed response metadata: %d %q", code, out)
+					}
+				} else if code != 0 || !strings.Contains(out, "nothing changed this time") || strings.Contains(out, request.OperationID) {
+					t.Fatalf("replayed human output: %d %q", code, out)
 				}
 			}
 		})
@@ -1214,7 +1216,7 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 		}
 	}
 	code, out, diag = runHome(t, home, "adapter", "enable", "cli-adapter", "--instance", "cli-instance")
-	if code != 0 || diag != "" || !strings.Contains(out, "enabled, probing in progress; see sidera adapter list") || !strings.Contains(out, "operation_id ") {
+	if code != 0 || diag != "" || !strings.Contains(out, "Enabled instance cli-instance.") || !strings.Contains(out, "Run `sidera adapter list` to see the probe result.") || strings.Contains(out, "operation_id") {
 		t.Fatalf("human adapter enable: %d %q %q", code, out, diag)
 	}
 	code, out, diag = runHome(t, home, "daemon", "stop", "--json")

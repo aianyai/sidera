@@ -80,10 +80,14 @@ and its bound values. A local value stays attached, including a body spelled
   for a single resend after an unknown outcome (`callResending`); the commands `network address set|remove`
   and `network listen set` have three words, which `commandPath` discovers.
 - `manage_output.go`: `managementOutput`, which writes the answer of a management command: the
-  complete response with `--json`, the layout of the command when it only reads, and otherwise
-  the generic listing (`managementResult`, sorted `key value` lines and tables with a column for
-  each key), which the changes still use until each has a layout of its own. `statusWithHome` adds
-  `home`, the directory the command resolved, to a node status, which the daemon does not report.
+  complete response with `--json`, otherwise the layout of the command's method in `humanLayouts`.
+  A method without a layout is an error that names it, never a dump of the answer, and
+  `TestEveryManagementCommandHasALayout` walks the commands to find one added without. `read` and
+  `change` make a layout from a function over the type that reads the answer; `change` adds the line
+  that says a replayed request changed nothing this time. `managementResult` and the helpers under it
+  (`humanFields`, `humanList`, `humanValue`) remain for one caller that is being restyled and are to be removed with it.
+  `statusWithHome` adds `home`, the directory the command resolved, to a node status, which the
+  daemon does not report.
 - `manage_read_output.go`: the layouts of the management commands that only read (`status`,
   `node show`, `network show`, `preset list`, `adapter list`, `endpoint list`, `alerts list`), in the
   convention of `agent_output.go`. Each has a type that reads the daemon's answer, which is the one
@@ -91,6 +95,12 @@ and its bound values. A local value stays attached, including a body spelled
   field in one of these answers is given its human form here, or deliberately left to `--json`
   and listed in the comment at the top of the file: a type that does not name the field drops it
   from the human output without a sound, and no command falls back to printing the answer as JSON.
+- `manage_change_output.go`: the layouts of the management commands that change something, in the
+  same convention: the first line says what was done, under it come only the facts the owner needs
+  from the answer, the last line says what to run next. A new field in an answer is given its human
+  form here, or left to `--json`, and a type that does not name it drops it without a sound. The
+  operation identifier and the replay flag are never printed here (`--json` has them); `change` adds
+  the replay line. A new change command is added to `humanLayouts`.
 - `trust.go`: `trust request` (the answer printed with its code first, then the client-side wait
   that polls `trust.list`; a refusal by the target is an error of category `refused`, a wait that
   ends otherwise is a plain failure, exit 1) and the human `trust list`. The other `trust`

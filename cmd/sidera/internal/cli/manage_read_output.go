@@ -234,44 +234,62 @@ func endpointSummary(v statusView) string {
 	return fmt.Sprintf("%d (%s)", len(v.Endpoints), strings.Join(parts, ", "))
 }
 
+// nodeSettings are the settings of the node as the daemon writes them, in `node show` and in
+// the answer of `node set`.
+type nodeSettings struct {
+	ReplyPermission      bool  `json:"reply_permission"`
+	NodeQueueLimit       int64 `json:"node_queue_limit"`
+	DiskReserveBytes     int64 `json:"disk_reserve_bytes"`
+	NodePromptTurns      int64 `json:"node_prompt_turns"`
+	ArchiveRetentionDays int64 `json:"archive_retention_days"`
+	LogTotalBytes        int64 `json:"log_total_bytes"`
+	EndpointDefaults     struct {
+		MaxQueueS    int64 `json:"max_queue_s"`
+		BacklogLimit int64 `json:"backlog_limit"`
+	} `json:"endpoint_defaults"`
+}
+
 // nodeView is the answer of `node show`.
 type nodeView struct {
-	Node     string `json:"node"`
-	Version  uint64 `json:"version"`
-	Settings struct {
-		ReplyPermission      bool  `json:"reply_permission"`
-		NodeQueueLimit       int64 `json:"node_queue_limit"`
-		DiskReserveBytes     int64 `json:"disk_reserve_bytes"`
-		NodePromptTurns      int64 `json:"node_prompt_turns"`
-		ArchiveRetentionDays int64 `json:"archive_retention_days"`
-		LogTotalBytes        int64 `json:"log_total_bytes"`
-		EndpointDefaults     struct {
-			MaxQueueS    int64 `json:"max_queue_s"`
-			BacklogLimit int64 `json:"backlog_limit"`
-		} `json:"endpoint_defaults"`
-	} `json:"settings"`
+	Node     string       `json:"node"`
+	Version  uint64       `json:"version"`
+	Settings nodeSettings `json:"settings"`
+}
+
+// namedField is a line of a block with the name that `node set` takes the setting by. A name
+// can have more than one line: the defaults of the endpoints are two.
+type namedField struct {
+	name string
+	termout.Field
+}
+
+// fields are the settings, each under a label that says what it is, with its unit, in the
+// order `node show` lists them.
+func (st nodeSettings) fields() []namedField {
+	replies := "refused"
+	if st.ReplyPermission {
+		replies = "allowed"
+	}
+	return []namedField{
+		{"reply_permission", termout.Field{Label: "Unsolicited replies", Value: replies}},
+		{"node_queue_limit", termout.Field{Label: "Delivery limit", Value: plural(st.NodeQueueLimit, "unfinished delivery", "unfinished deliveries")}},
+		{"disk_reserve_bytes", termout.Field{Label: "Disk reserve", Value: termout.Bytes(st.DiskReserveBytes) + " (new work is refused when less is free)"}},
+		{"node_prompt_turns", termout.Field{Label: "Concurrent prompt turns", Value: fmt.Sprint(st.NodePromptTurns)}},
+		{"archive_retention_days", termout.Field{Label: "Archive kept for", Value: plural(st.ArchiveRetentionDays, "day", "days")}},
+		{"log_total_bytes", termout.Field{Label: "Log space", Value: termout.Bytes(st.LogTotalBytes) + " at most"}},
+		{"endpoint_defaults", termout.Field{Label: "Endpoint queue time", Value: termout.Duration(time.Duration(st.EndpointDefaults.MaxQueueS)*time.Second) + " at most"}},
+		{"endpoint_defaults", termout.Field{Label: "Endpoint backlog", Value: plural(st.EndpointDefaults.BacklogLimit, "message", "messages") + " at most"}},
+	}
 }
 
 // renderNodeSettings is `node show`: each setting under a label that says what it is, with
 // its unit. The names that `node set` takes are in --json.
 func renderNodeSettings(s *termout.Stream, v nodeView) string {
-	st := v.Settings
-	replies := "refused"
-	if st.ReplyPermission {
-		replies = "allowed"
+	fields := []termout.Field{{Label: "Node", Value: v.Node}}
+	for _, f := range v.Settings.fields() {
+		fields = append(fields, f.Field)
 	}
-	return s.Block([]termout.Field{
-		{Label: "Node", Value: v.Node},
-		{Label: "Unsolicited replies", Value: replies},
-		{Label: "Delivery limit", Value: plural(st.NodeQueueLimit, "unfinished delivery", "unfinished deliveries")},
-		{Label: "Disk reserve", Value: termout.Bytes(st.DiskReserveBytes) + " (new work is refused when less is free)"},
-		{Label: "Concurrent prompt turns", Value: fmt.Sprint(st.NodePromptTurns)},
-		{Label: "Archive kept for", Value: plural(st.ArchiveRetentionDays, "day", "days")},
-		{Label: "Log space", Value: termout.Bytes(st.LogTotalBytes) + " at most"},
-		{Label: "Endpoint queue time", Value: termout.Duration(time.Duration(st.EndpointDefaults.MaxQueueS)*time.Second) + " at most"},
-		{Label: "Endpoint backlog", Value: plural(st.EndpointDefaults.BacklogLimit, "message", "messages") + " at most"},
-		versionNote("Settings", v.Version),
-	})
+	return s.Block(append(fields, versionNote("Settings", v.Version)))
 }
 
 // networkView is the answer of `network show`.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -86,6 +87,96 @@ var presetsAnswer = `{"version":2,"presets":[
 
 var nodeAnswer = `{"node":"` + testNode + `","version":3,"settings":{"reply_permission":true,"node_queue_limit":10000,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":200}}}`
 
+// The management change commands decode the answer of the daemon too. A change's answer is
+// the envelope the daemon writes: the operation, whether it is a replay, and the result.
+const (
+	testOperation = "0123456789abcdef0123456789abcdef"
+	testPairing   = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+)
+
+func envelope(result string, replayed bool) []byte {
+	return []byte(fmt.Sprintf(`{"operation_id":%q,"replayed":%t,"result":%s}`, testOperation, replayed, result))
+}
+
+// changes are the answers of the change commands for one representative request each: the
+// method, the params the command sent and the result.
+var changes = []struct {
+	name, method string
+	params       map[string]any
+	result       string
+	// want is what the text says, squashed, on a stream that is not decorated.
+	want []string
+}{
+	{"adapter enable", "adapters.enable", nil, `{"instance":"console","enabled":true,"version":5}`,
+		[]string{"Enabled instance console. Probing in progress. Run `sidera adapter list` to see the probe result."}},
+	{"adapter disable", "adapters.disable", nil, `{"instance":"console","enabled":false,"version":6}`, []string{"Disabled instance console."}},
+	{"adapter config of an enabled instance", "adapters.config", nil, `{"instance":"work","enabled":true,"version":7}`,
+		[]string{"Replaced the configuration of instance work. The instance restarts to take the new configuration."}},
+	{"adapter config of a disabled instance", "adapters.config", nil, `{"instance":"work","enabled":false,"version":7}`,
+		[]string{"Replaced the configuration of instance work."}},
+	{"adapter remove", "adapters.remove", nil, `{"instance":"work","removed":true,"version":8}`, []string{"Removed instance work."}},
+	{"adapter install", "adapters.install", nil, `{"adapter":{"id":"claude","version":"0.15.0"}}`,
+		[]string{"Installed adapter claude 0.15.0. Run `sidera adapter enable claude` to make an instance of it."}},
+	{"adapter install replacing", "adapters.install", nil, `{"adapter":{"id":"claude","version":"0.15.0"},"replaced":true}`,
+		[]string{"Installed adapter claude 0.15.0, replacing the package that was installed."}},
+	{"adapter install of the installed package", "adapters.install", nil, `{"adapter":{"id":"claude","version":"0.15.0"},"already_current":true}`,
+		[]string{"Adapter claude 0.15.0 is already installed; nothing was replaced."}},
+	{"preset add", "presets.add", nil, `{"name":"light","version":3}`, []string{"Added preset light."}},
+	{"preset remove", "presets.remove", nil, `{"name":"light","version":4}`, []string{"Removed preset light."}},
+	// Only the settings the request named are shown, with their units; the endpoint defaults are two lines of one name.
+	{"node set", "node.set", map[string]any{"settings": map[string]any{"node_queue_limit": 20001, "endpoint_defaults": map[string]any{"backlog_limit": 5}}},
+		`{"settings":{"reply_permission":true,"node_queue_limit":20001,"disk_reserve_bytes":268435456,"node_prompt_turns":8,"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":5}},"version":4}`,
+		[]string{"Changed the settings of the node. Delivery limit 20001 unfinished deliveries Endpoint queue time 30 min at most Endpoint backlog 5 messages at most"}},
+	{"endpoint set", "endpoints.set", nil, `{"endpoint":"` + testAddress + `","settings":{"max_queue_s":1800,"backlog_limit":200},"version":9}`,
+		[]string{"Changed the settings of the endpoint. Endpoint " + testAddress + " Queue time 30 min at most Backlog 200 messages at most"}},
+	{"endpoint set back to the defaults", "endpoints.set", nil, `{"endpoint":"` + testAddress + `","settings":{},"version":10}`,
+		[]string{"Settings all follow the node's defaults"}},
+	{"endpoint close", "endpoints.close", nil, `{"endpoint":"` + testAddress + `","outcome":"closed"}`, []string{"Closed the endpoint. Endpoint " + testAddress}},
+	{"endpoint close of a session", "endpoints.close", nil, `{"endpoint":"` + testAddress + `","outcome":"closing"}`,
+		[]string{"Closing the endpoint; its session is still being released."}},
+	{"endpoint close twice", "endpoints.close", nil, `{"endpoint":"` + testAddress + `","outcome":"already_closed"}`, []string{"The endpoint was closed already."}},
+	{"alerts ack", "alerts.ack", nil, `{"alert":"` + testAlert + `","acknowledged":true}`, []string{"Acknowledged alert " + testAlert + "."}},
+	{"network address set", "network.address.set", nil, `{"node":"` + testNodeB + `","addresses":["` + testContact + `","` + testQuic + `"],"version":6}`,
+		[]string{"Replaced the addresses kept for the node. Node " + testNodeB + " Addresses " + testContact + " " + testQuic}},
+	{"network address remove", "network.address.remove", nil, `{"node":"` + testNodeB + `","version":7}`,
+		[]string{"Removed the addresses kept for the node. Node " + testNodeB}},
+	{"network listen set", "network.listen.set", nil, `{"listen":["/ip4/0.0.0.0/tcp/7745"],"version":8,"restart_required":true}`,
+		[]string{"Replaced the addresses the node listens on. Listen /ip4/0.0.0.0/tcp/7745 Restart the daemon (`sidera daemon restart`) for the new listen addresses to take effect."}},
+	{"trust expect", "trust.expect", nil, `{"node":"` + testNodeB + `","expires_at":"2026-11-07T02:10:00Z"}`,
+		[]string{"Now expecting a pairing with the node. Node " + testNodeB + " Expires 2026-11-07 02:10 UTC (in 10 min)"}},
+	{"trust forget", "trust.forget", nil, `{"node":"` + testNodeB + `","forgotten":true}`,
+		[]string{"Deleted the expectation for the node. Node " + testNodeB}},
+	{"trust reject", "trust.reject", nil, `{"pairing_id":"` + testPairing + `","node":"` + testNodeB + `","status":"rejected"}`,
+		[]string{"Ended the pairing request. Pairing " + testPairing + " Node " + testNodeB + " Status rejected"}},
+	{"trust remove", "trust.remove", nil, `{"node":"` + testNodeB + `","revoked_credentials":["d1","d2"]}`,
+		[]string{"Removed the node from this node's trust. The other node is not told. Node " + testNodeB + " Credentials revoked 2"}},
+	{"trust clear", "trust.clear", nil, `{"node":"` + testNodeB + `","new_pairing_required":true}`,
+		[]string{"Took the node back into this node's trust. Node " + testNodeB + " Its revoked credentials stay revoked: it is trusted again only after a new pairing."}},
+	{"identity confirm-backup", "identity.confirm_backup", nil, `{"confirmed_at":"2026-11-07T01:55:00Z"}`,
+		[]string{"Confirmed that the self-revocation statement is kept outside this device. Confirmed at 2026-11-07 01:55 UTC"}},
+	{"identity retire", "identity.retire", nil, `{"node":"` + testNode + `","retired":true,"stopping":true}`,
+		[]string{"Retired the identity of this node. The daemon is stopping. Node " + testNode}},
+	{"clock clear-rollback", "clock.clear_rollback", nil, `{"cleared":true,"high_water":"2026-11-07T02:00:00Z","now":"2026-11-07T02:00:00Z"}`,
+		[]string{"Accepted the current clock; the pause is lifted. Clock 2026-11-07 02:00 UTC (now)"}},
+	{"clock clear-rollback without a pause", "clock.clear_rollback", nil, `{"cleared":false,"high_water":"2026-11-07T02:00:00Z","now":"2026-11-07T02:00:00Z"}`,
+		[]string{"The clock was not paused; nothing changed."}},
+	{"daemon stop", "daemon.stop", nil, `{"stopping":true}`, []string{"Daemon is stopping."}},
+}
+
+// layoutOf is the text of a change or read answer on a stream, as the command writes it.
+func layoutOf(t testing.TB, s *termout.Stream, method string, params map[string]any, raw []byte) string {
+	t.Helper()
+	render, ok := humanLayouts[method]
+	if !ok {
+		t.Fatalf("no layout for %s", method)
+	}
+	text, err := render(s, request{now: time.Date(2026, 11, 7, 2, 0, 0, 0, time.UTC), params: params}, raw)
+	if err != nil {
+		t.Fatalf("%s: %v", method, err)
+	}
+	return text
+}
+
 // streams are the three states of an output: plain (a pipe), decorated (a terminal that
 // takes no color) and colored.
 var streams = []struct {
@@ -116,7 +207,7 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 		Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionRuntimeAuth},
 		Presets:    []adapterproto.PresetAvailability{{Name: "default", Available: true}, {Name: "slow", Available: false}},
 	}}
-	return map[string]func(*termout.Stream) string{
+	outs := map[string]func(*termout.Stream) string{
 		"me": func(s *termout.Stream) string {
 			return renderMe(s, agentapi.MeResult{
 				Address: testAddress, Node: testNode, Kind: "session", DisplayName: "Name of creator",
@@ -180,6 +271,18 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 			})
 		},
 	}
+	for _, tc := range changes {
+		outs["change: "+tc.name] = func(s *termout.Stream) string {
+			return layoutOf(t, s, tc.method, tc.params, envelope(tc.result, false))
+		}
+	}
+	outs["change: replayed"] = func(s *termout.Stream) string {
+		return layoutOf(t, s, "adapters.enable", nil, envelope(`{"instance":"console","enabled":true,"version":5}`, true))
+	}
+	outs["probe"] = func(s *termout.Stream) string {
+		return renderProbe(s, agentapi.ProbeResult{OK: true, Preset: "light", Frontend: "cli"})
+	}
+	return outs
 }
 
 // An identifier is never shortened, and it comes whole on every state of the stream.
@@ -197,6 +300,14 @@ func TestIdentifiersAreComplete(t *testing.T) {
 		"endpoint list": {testAddress, testRuntime},
 		"alerts list":   {testAlert, testMessage},
 		"node show":     {testNode},
+		// The identifiers a change names are whole, each on a line of its own.
+		"change: endpoint close":      {testAddress},
+		"change: endpoint set":        {testAddress},
+		"change: network address set": {testNodeB, testContact, testQuic},
+		"change: trust expect":        {testNodeB},
+		"change: trust reject":        {testPairing, testNodeB},
+		"change: identity retire":     {testNode},
+		"change: alerts ack":          {testAlert},
 	}
 	for name, render := range outputs(t) {
 		for _, st := range streams {
@@ -488,5 +599,87 @@ func TestManagementReadsEscapeForeignText(t *testing.T) {
 		if stripped := escapeSequence.ReplaceAllString(out, ""); strings.ContainsAny(stripped, "\x1b\x07\u202e") {
 			t.Errorf("%s: foreign control characters reached the output:\n%q", name, out)
 		}
+	}
+}
+
+// What each change command says, for the facts an owner needs from it. The text is squashed
+// and taken from a stream that is not decorated, which is the text of every state.
+func TestManagementChangesShowTheirFacts(t *testing.T) {
+	for _, tc := range changes {
+		t.Run(tc.name, func(t *testing.T) {
+			out := squash(layoutOf(t, newStream(false, false), tc.method, tc.params, envelope(tc.result, false)))
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("%q is missing from\n%s", w, out)
+				}
+			}
+		})
+	}
+}
+
+// The operation identifier and the replay flag are for --json: a change says what it did. A
+// request that had been carried out before says so, once, under the result.
+func TestManagementChangesLeaveOutTheOperationAndSayReplay(t *testing.T) {
+	for _, tc := range changes {
+		for _, replayed := range []bool{false, true} {
+			out := layoutOf(t, newStream(false, false), tc.method, tc.params, envelope(tc.result, replayed))
+			if strings.Contains(out, testOperation) || strings.Contains(out, "operation_id") || strings.Contains(out, "replayed") {
+				t.Errorf("%s: the operation or the flag is printed:\n%s", tc.name, out)
+			}
+			if got := strings.Count(out, replayNote); got != btoi(replayed) {
+				t.Errorf("%s (replayed %t): the replay note is printed %d times:\n%s", tc.name, replayed, got, out)
+			}
+			if replayed && !strings.HasSuffix(out, replayNote+"\n") {
+				t.Errorf("%s: the replay note is not the last line:\n%s", tc.name, out)
+			}
+		}
+	}
+	// On a decorated stream the note is a warning, so a person sees that this run did nothing.
+	out := layoutOf(t, newStream(true, true), "adapters.enable", nil, envelope(`{"instance":"console","enabled":true,"version":5}`, true))
+	if !strings.Contains(out, "\x1b[33m!\x1b[0m "+replayNote) {
+		t.Errorf("the replay note is not a yellow warning:\n%q", out)
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// A command whose method has no layout would print nothing it understands; every command that
+// reaches managementOutput must have one. The commands handled before that point, which print
+// by their own code, are the exceptions. help lists every command, so a command that is added
+// to managementPlan and not given a layout is found here.
+func TestEveryManagementCommandHasALayout(t *testing.T) {
+	printsItself := map[string]bool{"daemon.restart": true, "trust.request": true, "trust.list": true, "identity.export_revocation": true}
+	seen := 0
+	for _, name := range helpOrder {
+		c := command{Config: Config{Getenv: func(string) string { return "" }}}
+		args := strings.Fields(name)
+		c.arguments = arguments(args)
+		// A plan comes back with its method even when the arguments are wrong for it, as here.
+		plan, _ := c.managementPlan(args)
+		if plan.method == "" || printsItself[plan.method] {
+			continue
+		}
+		seen++
+		if _, ok := humanLayouts[plan.method]; !ok {
+			t.Errorf("%q sends %s, which has no human layout", name, plan.method)
+		}
+	}
+	if seen < 30 {
+		t.Errorf("only %d commands were checked: the walk no longer finds the management commands", seen)
+	}
+}
+
+func TestForcedRemovalWarningIsAWarningOnTheErrorStream(t *testing.T) {
+	plain := forcedRemovalWarning(newStream(false, false), "work")
+	if !strings.HasPrefix(plain, "The client setup of work was not checked") || !strings.Contains(plain, "adapters guide.\n") {
+		t.Errorf("plain:\n%s", plain)
+	}
+	if colored := forcedRemovalWarning(newStream(true, true), "work"); !strings.HasPrefix(colored, "\x1b[33m!\x1b[0m The client setup") {
+		t.Errorf("colored:\n%q", colored)
 	}
 }

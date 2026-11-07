@@ -268,12 +268,15 @@ release before 0.12.0 are upgraded with these steps.
 
    What `install` prints says what it did to the adapter:
 
-   - `replaced true`: an installed package of this adapter was replaced, either by
-     another version (for example 0.1.0 to 0.8.0) or by the same version with other
-     contents (a rebuild). The instances that run restart.
-   - `already_current true`: the package is the one installed, same version and
-     same contents; nothing was changed.
-   - neither: the adapter was not installed before.
+   - `Installed adapter <id> <version>, replacing the package that was installed.`: an
+     installed package of this adapter was replaced, either by another version (for
+     example 0.1.0 to 0.8.0) or by the same version with other contents (a rebuild).
+     The instances that run restart.
+   - `Adapter <id> <version> is already installed; nothing was replaced.`: the package
+     is the one installed, same version and same contents; nothing was changed.
+   - `Installed adapter <id> <version>.`: the adapter was not installed before.
+
+   With `--json` the same is `replaced true` and `already_current true`, and neither for a new adapter.
 
 5. Check: `sidera adapter list` (probes `passed`, except Codex as the notes above
    say), then check the connections. A restarted daemon dials the nodes it holds an

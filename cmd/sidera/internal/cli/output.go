@@ -31,7 +31,7 @@ func (c *command) result(v any) error {
 	case adapterproto.MessageStatusResult:
 		text = renderStatus(c.out, time.Now(), out)
 	case agentapi.ProbeResult:
-		text = fmt.Sprintf("reachable %s %s\n", out.Preset, out.Frontend)
+		text = renderProbe(c.out, out)
 	default:
 		return fmt.Errorf("cli: unsupported human result %T", v)
 	}

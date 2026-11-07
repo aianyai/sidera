@@ -39,12 +39,12 @@ arguments, purpose and one example.
 | `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed; one row per part: `OUTCOME`, `PART`, `MESSAGE`; an outcome that is not an acknowledgement (`refused_no_handout`, `refused_lease`, `too_late`) is yellow on a colored stream. |
 | `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply (see [Human output](#human-output) for how a reply reads). Node status carries one field the daemon does not send: `home`, the data directory this command resolved and reached, so the owner can confirm which node a command talks to. |
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
-| `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
+| `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`; the human form says `The node is reachable.` and gives the `Preset` and `Front end`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
 | `setup …` | Not a command. Any form of it (`setup`, `setup controller`, with any flags) is a usage error, exit 2, whose message says it is not a command and that `sidera adapter setup <instance>` sets up the client of an adapter instance (Claude Code, Codex, Hermes). It reads no argument and needs no node. |
 | `version` | Print `sidera <version> (commit <commit>, go<version>)`, with `modified` after the commit when the build's checkout had uncommitted changes; with `--json`, the object `{"version", "distribution", "commit", "modified", "go_version"}` (`commit` is left out when the build carries none, and `distribution` when the build states none; the programs of a release archive report `archive`). It needs no running node and takes no arguments. A release build reports the release version; a build without it reports `0.0.0-dev` (see [`internal/release`](../../../internal/release/README.md)). |
 | `update [--check] [--version <version>] [--yes]` | Bring this installation to a release: the programs next to the running one, the running daemon and the installed adapters, doing only the steps that are missing. See [Updating](#updating). |
-| `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
+| `daemon stop` | Ask the running daemon to shut down after returning the accepted result; the human form is `Daemon is stopping.` |
 | `daemon restart [--expect-version <version>] [--wait <duration>]` | Ask the running daemon to shut down and start the program again as it was started, then wait for the new daemon (default `--wait 2m`, `0` returns once the restart is accepted). See [Restarting the daemon](#restarting-the-daemon). |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. The human list is a table of `SINCE`, `KIND`, `STATE` (`open` or `acknowledged`), `ID` (whole, as `alerts ack` takes it) and `DETAIL`, with the alert's subject under it as `about <subject>`; the detail and subject are shown escaped. |
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. The human list is a table of `NAME`, `LOCAL SOURCES` (`allow` or `deny`), `DESCRIPTION` and `ADAPTER SETTINGS` (one line for each adapter the preset configures, with the names of its settings; the values are in `--json`), followed by the collection's version. |
@@ -54,8 +54,8 @@ arguments, purpose and one example.
 | `adapter setup <instance> [--check \| --remove \| --refresh] [--yes] [-- <adapter arguments>]` | Run the setup of the instance's adapter, which brings the client the adapter drives (its MCP registration, permissions, Skill) in line with the instance; see [Adapter setup](#adapter-setup). |
 | `adapter config <instance> --config <file> [--expected-version <n>]` | Replace the whole configuration of an instance that exists, enabled or not; `-` reads stdin. A running instance is restarted to take it. |
 | `endpoint list [--instance <name>]` / `endpoint close <addr> [--allow-attached]` | Read endpoints, including closed ones (`origin` says `created` or `attached` for a session), or close an endpoint. The human list is a table of `KIND` (a session also says `created` or `attached`), `INSTANCE`, `STATE` (`draining` is added in brackets), `QUEUED` and the whole `ADDRESS`. An attached session, which a person is using, is closed only with `--allow-attached`; without it the command fails with `refused/attached_close_not_allowed`. |
-| `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings. |
-| `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. The human form names each setting by what it is and gives its unit (`Disk reserve 268.4 MB`, `Archive kept for 30 days`) and the settings version for `--expected-version`; the names `node set` takes are in `--json`. |
+| `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings; the human form gives the endpoint and the queue time and backlog it now has of its own (`all follow the node's defaults` when none). |
+| `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. The human form names each setting by what it is and gives its unit (`Disk reserve 268.4 MB`, `Archive kept for 30 days`) and the settings version for `--expected-version`; the names `node set` takes are in `--json`. After `node set` the human form shows only the settings the command named, worded the same way. |
 | `network show` | Show where the node listens, the addresses another machine reaches it at, the command that enters them there, the addresses kept for other nodes and which of them are connected (see [Network commands](#network-commands)). |
 | `network address set <node> <multiaddr> ... [--expected-version <n>]` / `network address remove <node> [--expected-version <n>]` | Replace the addresses kept for a node, or remove them; effective at once. |
 | `network listen set <multiaddr> ... [--expected-version <n>]` | Replace the addresses the node listens on; the daemon has to be restarted (`daemon restart`). |
@@ -289,7 +289,7 @@ refusal names `--force`: `adapter remove <instance> --force` skips the check, so
 instance whose setup cannot run is not stuck. It removes the instance as usual and, once that has succeeded, prints on
 standard error a warning that the client setup of the instance was not checked, that
 whatever it installed in the client is still there, and where the guide describes the manual
-cleanup ("Cleaning up an adapter's client by hand"). An instance or adapter the daemon does not know, a daemon without
+cleanup ("Cleaning up an adapter's client by hand"), as a `!` line on a decorated stream. An instance or adapter the daemon does not know, a daemon without
 `adapters.setup_info` and an adapter without setup are not checked, and the removal goes on as
 before.
 
@@ -322,8 +322,9 @@ remove` the node id; `network listen set` one or more multiaddrs (an empty liste
 list is possible only by hand or through the management interface, so a mistaken
 command cannot silently stop the node from listening). Each is a versioned change of
 `network.json`, read from `network.show` when `--expected-version` is omitted. A
-listen change prints, in human form, that the daemon must be restarted for it to take
-effect. Refusals are in the words of every change: a multiaddr that breaks the rules
+listen change says, in human form, that the daemon must be restarted for it to take
+effect (``Restart the daemon (`sidera daemon restart`) for the new listen addresses to take effect.``), because the answer
+carries `restart_required`. Refusals are in the words of every change: a multiaddr that breaks the rules
 of an address, or the rule that ties addresses to the certificate held for the node
 (while none is held one address must end in `/p2p/<peer id>`; once one is held every
 `/p2p/` must be its peer), is `invalid_argument/config_invalid` (exit 3) with the path
@@ -402,8 +403,8 @@ either way. With `--json` the answer is printed as soon as it
 arrives and the wait changes only the exit code.
 
 Enabling an adapter returns before background startup and probing finish. Human
-output says `enabled, probing in progress; see sidera adapter list`; that list
-reports the probe outcome. JSON keeps the complete management response.
+output says ``Enabled instance <name>.`` and, under it, that probing is in progress and that
+`sidera adapter list` reports the probe outcome. JSON keeps the complete management response.
 
 The identity export first uses the management interface. Only
 `daemon_not_running` permits the offline path through `keys.ReadSelfRevocation`
@@ -509,7 +510,10 @@ keys' sorted order. The CLI adds `home` itself because the daemon does not repor
 directory and the command already holds the one it resolved. What the human form leaves to
 `--json`: the start identifier of the daemon, the seconds a certificate has left, the deliveries
 of the states that are zero, and the address and kind of each endpoint (`endpoint list` has them).
-Human management changes also print their operation identifier and replay flag.
+Human management changes print neither their operation identifier nor the replay flag: they say what was
+done (see [Human output](#human-output)), and a request that had been carried out before under the same
+operation says so in a `!` line and changed nothing this time. `--json` keeps both fields, and the error of
+an outcome that is not known (exit 10) still names the operation, which is the one case where a person needs it.
 
 The [Agent interface](../agent-interface/README.md#errors-deadlines-and-clients)
 and `apiwire` own category codes: success is 0, unexpected failure 1, usage 2,
@@ -564,7 +568,7 @@ and so gets output that is not decorated; `--color always` asks for the decorati
 Windows a colored console has virtual terminal processing switched on first; a console that
 refuses leaves the stream decorated and not colored.
 
-**Layout.** These are the rules every command's human output is to follow; the agent commands and the management commands that only read follow them today, the others do not yet. The same words and shapes in all three states of a stream:
+**Layout.** These are the rules every command's human output is to follow; the agent commands and the management commands follow them, except `init`, `update`, `adapter setup`, `daemon restart`, `identity export-revocation`, `trust list` and `trust request`, which still print their own forms. The same words and shapes in all three states of a stream:
 
 - A command that changes something opens with a line that says what was done (`Message
   accepted for delivery.`, `Declaration updated.`), preceded by `✓` on a decorated stream; a
@@ -592,7 +596,7 @@ refuses leaves the stream decorated and not colored.
   reasons and conditions, and actions such as `message.send` and `session.create`. The
   `ACCEPTS` column of `directory` lists the action names of the endpoint, comma and space
   between them.
-- A time is UTC with how far it is from now (`2026-11-07 01:40 UTC (3 min ago)`), except in the tables of `alerts list` and `adapter list`, which write the UTC time alone; a span is
+- A time is UTC with how far it is from now (`2026-11-07 01:40 UTC (3 min ago)`), except in the tables of `alerts list` and `adapter list` and the `Confirmed at` line of `identity confirm-backup`, which write the UTC time alone; a span is
   `20 s`; the relative part is dimmed on a colored stream and written on every stream.
 - `me` and `declare` write the declaration as `Receiving` (`accepting` or `paused`), `Senders`
   (`anyone`, `only the senders on the list`, `nobody`, or `anyone (the sender list is saved and
@@ -619,7 +623,24 @@ refuses leaves the stream decorated and not colored.
   `!` line under the last column of the row. The values of a preset's configuration, which can be
   long instructions, are in `--json`; the table names its keys. A new field in the answer of one of
   these commands is given its human form, or deliberately left to `--json`, when it is added.
-- `probe` keeps its one-line form. The other management commands keep theirs until they are moved over.
+- Every management command that changes something follows the same shape. The first line says what
+  was done (`Enabled instance console.`, `Daemon is stopping.`, `Added preset light.`); under it
+  come only the facts the owner needs: the settings `node set` named, with the labels and units of
+  `node show`; the addresses `network address set` and `network listen set` now hold; the outcome of an
+  `endpoint close` (closed, still closing because the session of an endpoint the node made is being
+  released, or closed already); how many credentials `trust remove` revoked; whether `adapter install`
+  installed a new adapter, replaced the package that was installed or found it installed already. An
+  identifier that is long (a node, an endpoint, a pairing) is a line of a block; the names an owner
+  chose and the short identifier of an alert are in the sentence. The last line says what to run next
+  where there is a next step: ``Run `sidera adapter list` to see the probe result.`` after an enable,
+  ``Run `sidera adapter enable <adapter>` to make an instance of it.`` after the install of a new adapter, and
+  ``Restart the daemon (`sidera daemon restart`) for the new listen addresses to take effect.`` after a
+  listen change. The operation identifier and the replay flag are left to `--json`; a request that had
+  been carried out already under the same operation adds `This request had already been carried out under
+  the same operation; nothing changed this time.` (marked `!`) below the result, which shows the state as it is.
+  A method that has no layout cannot be printed: the command fails and names the method, and a test walks
+  every management command to find one that was added without. `probe` says `The node is reachable.` with
+  the `Preset` and `Front end` it belongs to.
 - The agent commands do not sanitize what they print: the names and descriptions they can show
   are checked where they enter the node, and the rest are identifiers and members of fixed sets.
   The management reads sanitize the text no source checks with `SanitizeLine`: the detail an adapter
