@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -77,7 +78,7 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 			return errors.Join(writeErr, closeErr)
 		}
 	}
-	if _, err = fmt.Fprintf(c.Stderr, "Keep this self-revocation outside this device, then run `sidera identity confirm-backup %s`.\n", response.Result.Digest); err != nil {
+	if _, err = io.WriteString(c.errOut, renderExportReminder(c.errOut, response.Result.Digest)); err != nil {
 		return err
 	}
 	if c.json && output != nil {

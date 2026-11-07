@@ -152,12 +152,12 @@ func TestWaitingForAPairing(t *testing.T) {
 // one says none.
 func TestTrustListIsPrintedInSections(t *testing.T) {
 	var out bytes.Buffer
-	c := command{Config: Config{Stdout: nopCloser{&out}}}
+	c := command{Config: Config{Stdout: nopCloser{&out}}, out: plain(&out)}
 	empty := `{"result":{"trusted":[],"expectations":[],"incoming":[],"outgoing":[],"locally_revoked":[]}}`
 	if err := c.trustList([]byte(empty)); err != nil {
 		t.Fatal(err)
 	}
-	if want := "trusted\n  none\nexpectations\n  none\nincoming\n  none\noutgoing\n  none\nlocally_revoked\n  none\n"; out.String() != want {
+	if want := "Trusted nodes\nNo node is trusted.\n\nExpectations\nNo node is expected.\n\nIncoming requests\nNo request is waiting for this node.\n\nOutgoing requests\nThis node has made no request.\n\nRevoked here\nNo node is revoked here.\n"; out.String() != want {
 		t.Errorf("an empty view:\n%s\nwant\n%s", out.String(), want)
 	}
 
@@ -171,27 +171,19 @@ func TestTrustListIsPrintedInSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"n1  true  2026-10-24T09:00:00Z  never  c1",
-		"n2  2026-10-24T10:00:00Z",
-		"p1  n3  awaiting_target  111 222  true  2026-10-24T09:05:00Z",
-		"p2  n4  withdrawn  333 444  declined",
-		"  n5\n",
+		"CONNECTION CREATED VALID UNTIL CREDENTIAL NODE", "connected 2026-10-24 09:00 UTC never c1 n1",
+		"EXPIRES NODE", "2026-10-24 10:00 UTC n2",
+		"STATUS CODE EXPECTATION EXPIRES PAIRING NODE", "awaiting_target 111 222 expected 2026-10-24 09:05 UTC p1 n3",
+		"STATUS CODE REASON PAIRING NODE", "withdrawn 333 444 declined p2 n4",
+		"Revoked here NODE n5",
 	} {
-		if !strings.Contains(squeeze(out.String()), want) {
+		if !strings.Contains(squash(out.String()), want) {
 			t.Errorf("the list does not have %q:\n%s", want, out.String())
 		}
 	}
-	if strings.Contains(out.String(), "none") {
-		t.Errorf("a section with entries says none:\n%s", out.String())
+	if strings.Contains(out.String(), "No node") || strings.Contains(out.String(), "made no request") {
+		t.Errorf("a section with entries says it is empty:\n%s", out.String())
 	}
-}
-
-// squeeze makes the runs of spaces that align columns two spaces wide.
-func squeeze(s string) string {
-	for strings.Contains(s, "   ") {
-		s = strings.ReplaceAll(s, "   ", "  ")
-	}
-	return s
 }
 
 type nopCloser struct{ io.Writer }
@@ -204,7 +196,7 @@ func (nopCloser) Close() error { return nil }
 // request, and with no wait the command ends there.
 func TestTheAnswerToARequestForAPairing(t *testing.T) {
 	var out bytes.Buffer
-	c := command{Config: Config{Stdout: nopCloser{&out}}}
+	c := command{Config: Config{Stdout: nopCloser{&out}}, out: plain(&out)}
 	err := c.awaitPairing(context.Background(), nil,
 		[]byte(`{"operation_id":"00000000000000000000000000000001","replayed":false,"result":{"pairing_id":"","node":"n1","status":"refused","code":"","refusal":"busy"}}`), time.Minute)
 	if code := apiwire.FromError(err).Category.ExitCode(); code != 7 || out.Len() != 0 {
@@ -217,7 +209,7 @@ func TestTheAnswerToARequestForAPairing(t *testing.T) {
 	}
 }
 
-// `paired with` is said when the pairing is complete, whether the answer showed it
+// `Paired with` is said when the pairing is complete, whether the answer showed it
 // or the wait ended on it, and never for a command that did not wait or that did
 // not see the pairing complete.
 func TestPairedWithIsSaidWhenThePairingIsComplete(t *testing.T) {
@@ -241,12 +233,12 @@ func TestPairedWithIsSaidWhenThePairingIsComplete(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			c := command{Config: Config{Stdout: nopCloser{&out}}}
+			c := command{Config: Config{Stdout: nopCloser{&out}}, out: plain(&out)}
 			if err := c.awaitPairing(context.Background(), reads(tc.view), answer(tc.status), tc.wait); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Contains(out.String(), "paired with n1\n"); got != tc.want {
-				t.Errorf("printed %q, want `paired with n1` %v", out.String(), tc.want)
+			if got := strings.Contains(out.String(), "Paired with n1.\n"); got != tc.want {
+				t.Errorf("printed %q, want `Paired with n1.` %v", out.String(), tc.want)
 			}
 		})
 	}

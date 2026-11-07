@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,7 +43,7 @@ func (c *command) programPath() (string, error) {
 func (c *command) warnIfTemporary(exe, whatWontLast string) {
 	for _, dir := range []string{os.TempDir(), c.Getenv("GOTMPDIR")} {
 		if rel, err := filepath.Rel(dir, exe); dir != "" && err == nil && filepath.IsLocal(rel) {
-			fmt.Fprintf(c.Stderr, "warning: this program runs from %s, a temporary directory, so %s will not last. Run the command from an installed sidera.\n", exe, whatWontLast)
+			io.WriteString(c.errOut, c.errOut.Warn(fmt.Sprintf("This program runs from %s, a temporary directory, so %s will not last.\nRun the command from an installed sidera.", exe, whatWontLast))+"\n")
 			return
 		}
 	}

@@ -162,17 +162,17 @@ func TestConfirmUpdate(t *testing.T) {
 		{"--yes does not ask", "", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &command{Config: Config{Stdin: io.NopCloser(strings.NewReader(tc.input))}}
 			var out bytes.Buffer
-			got, err := c.confirmUpdate(&out, plan, tc.yes)
+			c := &command{Config: Config{Stdin: io.NopCloser(strings.NewReader(tc.input))}, errOut: plain(&out)}
+			got, err := c.confirmUpdate(plan, tc.yes)
 			if err != nil || got != tc.want {
 				t.Fatalf("confirmUpdate = %v, %v; want %v", got, err, tc.want)
 			}
 			if asked := strings.Contains(out.String(), "Update? [y/N]"); asked != tc.asked {
 				t.Errorf("asked = %v, want %v", asked, tc.asked)
 			}
-			for _, line := range []string{"current 0.11.0", "target 0.12.0", "release https://example.test/releases/tag/v0.12.0", "replace /bin/sidera", "restart daemon (running 0.11.0)", "install adapters claude", "codex", "faulted adapters, installed again relay", "install them again by hand) chat", "refresh the client setup"} {
-				if !strings.Contains(out.String(), line) {
+			for _, line := range []string{"Update sidera 0.11.0 to 0.12.0", "Page https://example.test/releases/tag/v0.12.0", "replace /bin/sidera", "Daemon restart (running 0.11.0)", "install: claude", "install again (the package cannot run): relay", "leave as they are (not in this release): codex", "install by hand (the package cannot run and is not in this release): chat", "refresh what adapters recorded"} {
+				if !strings.Contains(squash(out.String()), line) {
 					t.Errorf("the plan does not show %q:\n%s", line, out.String())
 				}
 			}
@@ -190,12 +190,12 @@ func TestPrintUpdate(t *testing.T) {
 	}
 	t.Run("human run", func(t *testing.T) {
 		var out bytes.Buffer
-		c := &command{Config: Config{Stdout: nopWriteCloser{&out}}}
+		c := commandOn(&out)
 		if err := c.printUpdate(rep, nil); err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"program updated /bin/sidera", "daemon restarted version 0.12.0", "adapter claude version 0.12.0 replaced true", "adapter codex skipped", "adapter relay was faulted, installed again version 0.12.0", "removed at the next daemon start", ".old"} {
-			if !strings.Contains(out.String(), want) {
+		for _, want := range []string{"Updated to 0.12.0.", "Programs replaced /bin/sidera", "Daemon restarted, running 0.12.0", "claude 0.12.0 replaced", "codex skipped: the release has no package of this adapter", "relay 0.12.0 was faulted, installed again and replaced", "removed at the next daemon start", ".old"} {
+			if !strings.Contains(squash(out.String()), want) {
 				t.Errorf("missing %q in\n%s", want, out.String())
 			}
 		}
@@ -205,20 +205,21 @@ func TestPrintUpdate(t *testing.T) {
 	})
 	t.Run("human check", func(t *testing.T) {
 		var out bytes.Buffer
-		c := &command{Config: Config{Stdout: nopWriteCloser{&out}}}
+		c := commandOn(&out)
 		check := update.Verdict{Release: update.Release{Current: "0.11.0", Target: "0.12.0", Admitted: true, Floor: "0.8.0"}, UpdateAvailable: true}
 		if err := c.printCheck(check); err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"update_available true", "admitted true", "floor 0.8.0"} {
-			if !strings.Contains(out.String(), want) {
+		for _, want := range []string{"An update is available: 0.11.0 to 0.12.0", "Floor 0.8.0", "Run `sidera update` to apply it."} {
+			if !strings.Contains(squash(out.String()), want) {
 				t.Errorf("missing %q in\n%s", want, out.String())
 			}
 		}
 	})
 	t.Run("json with a failure", func(t *testing.T) {
 		var out bytes.Buffer
-		c := &command{Config: Config{Stdout: nopWriteCloser{&out}}, json: true}
+		c := commandOn(&out)
+		c.json = true
 		if err := c.printUpdate(rep, errors.New("restart the daemon: boom")); err != nil {
 			t.Fatal(err)
 		}
@@ -237,7 +238,8 @@ func TestPrintUpdate(t *testing.T) {
 	// if it had found them as they are.
 	t.Run("json check", func(t *testing.T) {
 		var out bytes.Buffer
-		c := &command{Config: Config{Stdout: nopWriteCloser{&out}}, json: true}
+		c := commandOn(&out)
+		c.json = true
 		check := update.Verdict{Release: update.Release{Current: "0.11.0", Target: "0.12.0", Admitted: true}, UpdateAvailable: true}
 		if err := c.printCheck(check); err != nil {
 			t.Fatal(err)
@@ -255,14 +257,31 @@ func TestPrintUpdate(t *testing.T) {
 			}
 		}
 	})
+	// With no daemon the run can still replace the programs, or find them current. The
+	// headline says which; it must not claim an update that did not happen.
 	t.Run("no daemon", func(t *testing.T) {
-		var out bytes.Buffer
-		c := &command{Config: Config{Stdout: nopWriteCloser{&out}}}
-		if err := c.printUpdate(update.Report{Release: rep.Release}, nil); err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out.String(), "daemon not running") || strings.Contains(out.String(), "already_current") {
-			t.Errorf("report:\n%s", out.String())
+		for name, tc := range map[string]struct {
+			program update.ProgramReport
+			want    string
+			not     string
+		}{
+			"programs current":  {update.ProgramReport{}, "The programs are already at 0.12.0 and the daemon is not running.", "Updated"},
+			"programs replaced": {update.ProgramReport{Updated: true, Replaced: []string{"/bin/sidera"}}, "Updated the programs to 0.12.0.", "already"},
+			"programs restored": {update.ProgramReport{Restored: []string{"/bin/sidera"}}, "Updated the programs to 0.12.0.", "already"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				var out bytes.Buffer
+				c := commandOn(&out)
+				if err := c.printUpdate(update.Report{Release: rep.Release, Program: tc.program}, nil); err != nil {
+					t.Fatal(err)
+				}
+				if first, _, _ := strings.Cut(out.String(), "\n"); !strings.Contains(first, tc.want) || strings.Contains(first, tc.not) {
+					t.Errorf("the headline is %q, want %q without %q", first, tc.want, tc.not)
+				}
+				if !strings.Contains(out.String(), "not running") || strings.Contains(out.String(), "up to date") {
+					t.Errorf("report:\n%s", out.String())
+				}
+			})
 		}
 	})
 }
@@ -457,16 +476,16 @@ func TestPrintUpdateSetup(t *testing.T) {
 		},
 	}
 	var out bytes.Buffer
-	c := &command{Config: Config{Stdout: nopWriteCloser{&out}}}
+	c := commandOn(&out)
 	if err := c.printUpdate(rep, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"setup work refreshed\n", "setup work item skill done\n", "setup idle none\n",
-		"setup moved drift mcp missing gone\n", "setup moved fix sidera adapter setup moved\n",
-		"setup chat skipped the adapter declares no setup\n", "setup stuck error 1 item(s) failed\n", "setup stuck item p failed boom\n",
+		"work refreshed", "skill done", "idle has no recorded setup",
+		"moved has drifted from its setup", "mcp missing: gone", "Run `sidera adapter setup moved` to settle the setup of moved.",
+		"chat skipped: the adapter declares no setup", "stuck failed: 1 item(s) failed", "p failed: boom",
 	} {
-		if !strings.Contains(out.String(), want) {
+		if !strings.Contains(squash(out.String()), want) {
 			t.Errorf("missing %q in\n%s", want, out.String())
 		}
 	}

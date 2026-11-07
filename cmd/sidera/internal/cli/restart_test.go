@@ -229,7 +229,7 @@ func TestRestartingTheDaemon(t *testing.T) {
 	})
 }
 
-// The human output is the key value lines of the other commands: the answer first,
+// The human output follows the layout of the other commands: the answer first,
 // so that it shows while the daemon is restarting, then what the wait found, then
 // the operation. The JSON is one object, written when the wait is over.
 func TestRestartOutput(t *testing.T) {
@@ -243,7 +243,7 @@ func TestRestartOutput(t *testing.T) {
 	run := func(t *testing.T, json bool, wait time.Duration) string {
 		t.Helper()
 		var out bytes.Buffer
-		c := command{Config: Config{Stdout: nopCloser{&out}}, json: json}
+		c := command{Config: Config{Stdout: nopCloser{&out}}, out: plain(&out), json: json}
 		err := c.restartCommand(context.Background(), node(), bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
 			restartRequest{Wait: wait, Home: "/home/x", Sleep: func(context.Context, time.Duration) error { return nil }})
 		if err != nil {
@@ -252,10 +252,10 @@ func TestRestartOutput(t *testing.T) {
 		return out.String()
 	}
 
-	if got, want := run(t, false, time.Minute), "restarting true\nprogram /opt/sidera\nversion 1.2.3\nprevious_start_id old\nrunning true\nstart_id new\noperation_id "+id+"\nreplayed false\n"; got != want {
+	if got, want := run(t, false, time.Minute), "Restarting the daemon.\n  Program  /opt/sidera\n  Version  1.2.3\nThe daemon is running again, version 1.2.3.\n"; got != want {
 		t.Errorf("human output:\n%s\nwant\n%s", got, want)
 	}
-	if got, want := run(t, false, 0), "restarting true\nprogram /opt/sidera\nversion 1.2.3\nprevious_start_id old\noperation_id "+id+"\nreplayed false\n"; got != want {
+	if got, want := run(t, false, 0), "Restarting the daemon.\n  Program  /opt/sidera\n  Version  1.2.3\nThe daemon accepted the restart and is starting again.\n  Run `sidera status` to see when it runs.\n"; got != want {
 		t.Errorf("human output without a wait:\n%s\nwant\n%s", got, want)
 	}
 	if got, want := run(t, true, time.Minute), `{"operation_id":"`+id+`","replayed":false,"result":{"restarting":true,"program":"/opt/sidera","version":"1.2.3","previous_start_id":"old","running":true,"start_id":"new"}}`+"\n"; got != want {

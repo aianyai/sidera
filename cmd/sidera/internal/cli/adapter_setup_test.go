@@ -166,13 +166,13 @@ func (r *setupRig) run(mode setupMode, answers string, yes bool) (asked, report 
 		r.t.Fatal(err)
 	}
 	var questions bytes.Buffer
-	res, applied, err := runSetup(context.Background(), s, mode, setupDialog{out: &questions, answers: bufio.NewReader(strings.NewReader(answers)), yes: yes})
+	res, applied, err := runSetup(context.Background(), s, mode, setupDialog{out: plain(&questions), answers: bufio.NewReader(strings.NewReader(answers)), yes: yes})
 	if err != nil {
 		return questions.String(), "", err
 	}
 	var out bytes.Buffer
-	c := &command{Config: Config{Stdout: nopWriteCloser{&out}}}
-	if err := c.printSetup("work", res, applied); err != nil {
+	c := commandOn(&out)
+	if err := c.printSetup(mode, "work", res, applied, setupEnv{homeIsDefault: true}); err != nil {
 		r.t.Fatal(err)
 	}
 	return questions.String(), out.String(), setupVerdict("work", res)
@@ -225,7 +225,7 @@ func TestAdapterSetupAsksItemByItem(t *testing.T) {
 				if got := r.exists(paths[id]); got != want {
 					t.Errorf("file %s exists = %v, want %v", id, got, want)
 				}
-				if got := strings.Contains(report, "item "+id+" done"); got != want {
+				if got := hasRow(report, id+" done"); got != want {
 					t.Errorf("report says %s done = %v, want %v:\n%s", id, got, want, report)
 				}
 			}
@@ -253,12 +253,12 @@ func TestAdapterSetupAppliesNothingWhenNothingIsAccepted(t *testing.T) {
 	r := newRig(t, clientA)
 	_, report, verdict := r.run(modeSetup, "n\n", false)
 	// Only to remember the decline: nothing is accepted, so nothing is done.
-	if verdict != nil || r.exec.ops() != "plan apply" || !strings.Contains(report, "nothing applied") || r.exists(filepath.Join(r.client, "a")) {
+	if verdict != nil || r.exec.ops() != "plan apply" || !strings.Contains(report, "Nothing was applied") || r.exists(filepath.Join(r.client, "a")) {
 		t.Errorf("verdict %v, ops %q, report %q", verdict, r.exec.ops(), report)
 	}
 	r = newRig(t) // nothing wanted at all
 	_, report, verdict = r.run(modeSetup, "", true)
-	if verdict != nil || r.exec.ops() != "plan" || !strings.Contains(report, "nothing to do") {
+	if verdict != nil || r.exec.ops() != "plan" || !strings.Contains(report, "Nothing to do") {
 		t.Errorf("verdict %v, ops %q, report %q", verdict, r.exec.ops(), report)
 	}
 }
@@ -349,32 +349,32 @@ func TestAdapterSetupRemoveDefaultsToYes(t *testing.T) {
 func TestAdapterSetupCheckAndRefresh(t *testing.T) {
 	// An adapter with nothing wanted has no record and no drift. One that wants
 	// something and has no record says what setup would have to make, and that is drift.
-	if _, report, err := newRig(t).run(modeCheck, "", false); err != nil || !strings.Contains(report, "status none") || !strings.Contains(report, "recorded false") {
+	if _, report, err := newRig(t).run(modeCheck, "", false); err != nil || !strings.Contains(report, "has no recorded setup") || !strings.Contains(squash(report), "Recorded no") {
 		t.Errorf("check with nothing wanted: %v\n%s", err, report)
 	}
 	r := newRig(t, clientA, ownO)
-	if _, report, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(report, "status drift") || !strings.Contains(report, "recorded false") ||
-		!strings.Contains(report, "drift a needs_setup") || !strings.Contains(report, "drift o needs_setup") {
+	if _, report, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(report, "has drifted from its setup") || !strings.Contains(squash(report), "Recorded no") ||
+		!hasRow(report, "a needs_setup") || !hasRow(report, "o needs_setup") {
 		t.Errorf("check before setup: %v\n%s", err, report)
 	}
-	if _, report, err := r.run(modeRefresh, "", false); err != nil || !strings.Contains(report, "status none") {
+	if _, report, err := r.run(modeRefresh, "", false); err != nil || !strings.Contains(report, "has no recorded setup") {
 		t.Errorf("refresh before setup: %v\n%s", err, report)
 	}
 	if _, _, err := r.run(modeSetup, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, report, err := r.run(modeCheck, "", false); err != nil || !strings.Contains(report, "status ok") || !strings.Contains(report, "recorded true") {
+	if _, report, err := r.run(modeCheck, "", false); err != nil || !strings.Contains(report, "is as recorded") || !strings.Contains(squash(report), "Recorded yes") {
 		t.Errorf("clean check: %v\n%s", err, report)
 	}
 
 	// The adapter now writes other content: stale, and refresh brings it up to date
 	// without a question.
 	r.script.Items = []fakeadapter.SetupItem{{ID: "a", Consent: true, Content: "A2"}, ownO}
-	if _, report, err := r.run(modeCheck, "", false); err == nil || !strings.Contains(report, "drift a stale") {
+	if _, report, err := r.run(modeCheck, "", false); err == nil || !hasRow(report, "a stale") {
 		t.Errorf("stale check: %v\n%s", err, report)
 	}
 	asked, report, err := r.run(modeRefresh, "", false)
-	if err != nil || asked != "" || !strings.Contains(report, "status refreshed") || !strings.Contains(report, "item a done") {
+	if err != nil || asked != "" || !strings.Contains(report, "Refreshed the setup") || !hasRow(report, "a done") {
 		t.Errorf("refresh: %v, asked %q\n%s", err, asked, report)
 	}
 	if got, _ := os.ReadFile(filepath.Join(r.client, "a")); string(got) != "A2" {
@@ -387,7 +387,7 @@ func TestAdapterSetupCheckAndRefresh(t *testing.T) {
 	}
 	r.script.Items[0].Content = "A3"
 	for _, mode := range []setupMode{modeCheck, modeRefresh} {
-		if _, report, err := r.run(mode, "", false); err == nil || !strings.Contains(report, "drift a changed") {
+		if _, report, err := r.run(mode, "", false); err == nil || !hasRow(report, "a changed") {
 			t.Errorf("mode %d on an edited file: %v\n%s", mode, err, report)
 		}
 	}
@@ -399,7 +399,7 @@ func TestAdapterSetupCheckAndRefresh(t *testing.T) {
 	if err := os.Remove(filepath.Join(r.client, "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, report, err := r.run(modeRefresh, "", false); err == nil || !strings.Contains(report, "drift a missing") {
+	if _, report, err := r.run(modeRefresh, "", false); err == nil || !hasRow(report, "a missing") {
 		t.Errorf("refresh of a removed file: %v\n%s", err, report)
 	}
 	if r.exists(filepath.Join(r.client, "a")) {
@@ -408,7 +408,7 @@ func TestAdapterSetupCheckAndRefresh(t *testing.T) {
 
 	// An item the adapter now wants and no record has needs setup, never made by refresh.
 	r.script.Items = append(r.script.Items, clientB)
-	if _, report, err := r.run(modeRefresh, "", false); err == nil || !strings.Contains(report, "drift b needs_setup") || r.exists(filepath.Join(r.client, "b")) {
+	if _, report, err := r.run(modeRefresh, "", false); err == nil || !hasRow(report, "b needs_setup") || r.exists(filepath.Join(r.client, "b")) {
 		t.Errorf("refresh with a new item: %v\n%s", err, report)
 	}
 }
@@ -419,7 +419,7 @@ func TestAdapterSetupFailuresAreExitOne(t *testing.T) {
 		r.script.Fail = []string{"b"}
 		_, report, err := r.run(modeSetup, "", true)
 		var f *failure
-		if !errors.As(err, &f) || !strings.Contains(f.message, "1 item(s) failed") || !strings.Contains(report, "item a done") || !strings.Contains(report, "item b failed scripted to fail") {
+		if !errors.As(err, &f) || !strings.Contains(f.message, "1 item(s) failed") || !hasRow(report, "a done") || !hasRow(report, "b failed scripted to fail") {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -456,7 +456,7 @@ func TestAdapterSetupFailuresAreExitOne(t *testing.T) {
 	t.Run("a member the program adds is ignored", func(t *testing.T) {
 		r := newRig(t)
 		r.exec.raw = `{"version":1,"op":"plan","status":"ok","future":{"x":1},"items":[]}`
-		if _, report, err := r.run(modeSetup, "", true); err != nil || !strings.Contains(report, "nothing to do") {
+		if _, report, err := r.run(modeSetup, "", true); err != nil || !strings.Contains(report, "Nothing to do") {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -471,7 +471,7 @@ func TestAdapterSetupShowsNotes(t *testing.T) {
 		r := newRig(t, clientA)
 		r.script.Notes = []string{note}
 		asked, report, err := r.run(modeSetup, "y\n", false)
-		if err != nil || strings.Index(asked, "note: "+note) < 0 || strings.Index(asked, "note: "+note) > strings.Index(asked, "write a? [Y/n]") {
+		if err != nil || strings.Index(asked, "Note: "+note) < 0 || strings.Index(asked, "Note: "+note) > strings.Index(asked, "write a? [Y/n]") {
 			t.Errorf("err %v, questions:\n%s", err, asked)
 		}
 		if strings.Contains(report, note) {
@@ -482,7 +482,7 @@ func TestAdapterSetupShowsNotes(t *testing.T) {
 		r := newRig(t)
 		r.script.Notes = []string{note}
 		asked, report, err := r.run(modeSetup, "", true)
-		if err != nil || !strings.Contains(asked, "note: "+note) || !strings.Contains(report, "nothing to do") {
+		if err != nil || !strings.Contains(asked, "Note: "+note) || !strings.Contains(report, "Nothing to do") {
 			t.Errorf("err %v, questions:\n%s\nreport:\n%s", err, asked, report)
 		}
 	})
@@ -491,14 +491,14 @@ func TestAdapterSetupShowsNotes(t *testing.T) {
 		r.script.Notes = []string{note}
 		_, report, err := r.run(modeCheck, "", false)
 		var f *failure
-		if !errors.As(err, &f) || strings.Index(report, "drift a") < 0 || strings.Index(report, "note "+note) < strings.Index(report, "drift a") {
+		if !errors.As(err, &f) || strings.Index(report, "Note: "+note) < strings.Index(report, "a has no record") {
 			t.Errorf("err %v\n%s", err, report)
 		}
 		if _, _, err := r.run(modeSetup, "", true); err != nil {
 			t.Fatal(err)
 		}
 		_, report, err = r.run(modeCheck, "", false)
-		if err != nil || !strings.Contains(report, "status ok") || !strings.Contains(report, "note "+note) {
+		if err != nil || !strings.Contains(report, "is as recorded") || !strings.Contains(report, "Note: "+note) {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -510,13 +510,14 @@ func TestAdapterSetupShowsNotes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, applied, err := runSetup(context.Background(), s, mode, setupDialog{out: &bytes.Buffer{}, yes: true})
+			res, applied, err := runSetup(context.Background(), s, mode, setupDialog{out: plain(&bytes.Buffer{}), yes: true})
 			if err != nil {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			c := &command{Config: Config{Stdout: nopWriteCloser{&out}}, json: true}
-			if err := c.printSetup("work", res, applied); err != nil {
+			c := commandOn(&out)
+			c.json = true
+			if err := c.printSetup(mode, "work", res, applied, setupEnv{}); err != nil {
 				t.Fatal(err)
 			}
 			var got struct{ Notes []string }
@@ -533,13 +534,14 @@ func TestAdapterSetupJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, applied, err := runSetup(context.Background(), s, modeSetup, setupDialog{out: &bytes.Buffer{}, yes: true})
+	res, applied, err := runSetup(context.Background(), s, modeSetup, setupDialog{out: plain(&bytes.Buffer{}), yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	c := &command{Config: Config{Stdout: nopWriteCloser{&out}}, json: true}
-	if err := c.printSetup("work", res, applied); err != nil {
+	c := commandOn(&out)
+	c.json = true
+	if err := c.printSetup(modeSetup, "work", res, applied, setupEnv{}); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any
@@ -590,6 +592,9 @@ func TestExecSetup(t *testing.T) {
 		case "fail":
 			fmt.Fprint(os.Stderr, strings.Repeat("x", 5000)+"the reason")
 			os.Exit(3)
+		case "escape":
+			fmt.Fprint(os.Stderr, "\x1b]0;pwned\x07\u202ereason")
+			os.Exit(3)
 		}
 		os.Exit(0)
 	}
@@ -603,6 +608,11 @@ func TestExecSetup(t *testing.T) {
 	_, err := run("fail")
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.HasSuffix(err.Error(), "the reason") || len(err.Error()) > 2200 {
 		t.Errorf("fail = %v", err)
+	}
+	// What a setup program or the client it drives wrote is shown as visible escapes.
+	_, err = run("escape")
+	if err == nil || !strings.HasSuffix(err.Error(), `\x1b]0;pwned\x07\u202ereason`) {
+		t.Errorf("escape = %v", err)
 	}
 	if _, err := (execSetup{}).Run(context.Background(), []string{filepath.Join(t.TempDir(), "nothing")}, nil); err == nil {
 		t.Error("a program that is not there ran")
@@ -718,9 +728,9 @@ func TestAdapterSetupHonoursRequires(t *testing.T) {
 		report  string // in the report
 		verdict string // in the failure; empty for none
 	}{
-		{"required item declined", nil, "n\n", "c", "plan apply", "left alone: write b (it needs a, which is not going ahead)", "item c done", ""},
-		{"required item accepted", nil, "y\n", "abc", "plan apply apply", "", "item b done", ""},
-		{"required item failed", []string{"a"}, "y\n", "c", "plan apply", "", "item b skipped left alone: it needs a, which did not complete", "1 item(s) failed"},
+		{"required item declined", nil, "n\n", "c", "plan apply", "Left alone: write b (it needs a, which is not going ahead)", "c done", ""},
+		{"required item accepted", nil, "y\n", "abc", "plan apply apply", "", "b done", ""},
+		{"required item failed", []string{"a"}, "y\n", "c", "plan apply", "", "b skipped left alone: it needs a, which did not complete", "1 item(s) failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, clientA, ownDependent, ownPlain)
@@ -737,7 +747,7 @@ func TestAdapterSetupHonoursRequires(t *testing.T) {
 					t.Errorf("b was sent to the adapter: %v", req.Accepted)
 				}
 			}
-			if !strings.Contains(asked, tc.prompt) || !strings.Contains(report, tc.report) {
+			if !strings.Contains(asked, tc.prompt) || !hasRow(report, tc.report) {
 				t.Errorf("questions:\n%s\nreport:\n%s", asked, report)
 			}
 			if tc.prompt != "" && strings.Contains(asked, "write b? [Y/n]") {
@@ -758,7 +768,7 @@ func TestAdapterSetupHonoursRequires(t *testing.T) {
 		r.exec.requests = nil
 		r.script.Fail = []string{"a"} // the undo of a fails
 		_, report, err := r.run(modeRemove, "", true)
-		if err == nil || !strings.Contains(report, "item b skipped left alone") || !r.exists(filepath.Join(r.state, "setup", "files", "b")) {
+		if err == nil || !hasRow(report, "b skipped left alone:") || !r.exists(filepath.Join(r.state, "setup", "files", "b")) {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -799,7 +809,7 @@ func TestAdapterSetupLeavesAloneWhatNothingDependsOn(t *testing.T) {
 		if got := files(r); got != "" {
 			t.Errorf("files made = %q, want none", got)
 		}
-		for _, want := range []string{"left alone: write s", "left alone: write t", "declined: write s"} {
+		for _, want := range []string{"Left alone: write s", "Left alone: write t", "Declined: write s"} {
 			if !strings.Contains(asked, want) {
 				t.Errorf("the dialogue does not say %q:\n%s", want, asked)
 			}
@@ -853,7 +863,7 @@ func TestAdapterSetupShowsWhatALaterReleaseAdds(t *testing.T) {
 		r := newRig(t)
 		r.exec.byOp = map[adaptersetup.Op]string{"check": `{"version":1,"op":"check","status":"drift","recorded":true,"drift":[{"id":"a","kind":"k","target":"t","problem":"moved","summary":"a moved"}]}`}
 		_, report, err := r.run(modeCheck, "", false)
-		if err == nil || !strings.Contains(report, "drift a moved a moved") {
+		if err == nil || !hasRow(report, "a moved a moved") {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -861,7 +871,7 @@ func TestAdapterSetupShowsWhatALaterReleaseAdds(t *testing.T) {
 		r := newRig(t)
 		r.exec.byOp = map[adaptersetup.Op]string{"plan": `{"version":1,"op":"plan","status":"ok","items":[{"id":"a","kind":"k","target":"t","action":"teleport","summary":"teleport a","consent":true}]}`}
 		asked, _, err := r.run(modeSetup, "n\n", false)
-		if err != nil || !strings.Contains(asked, "teleport teleport a") {
+		if err != nil || !strings.Contains(asked, "teleport a? [Y/n]") {
 			t.Errorf("err %v\n%s", err, asked)
 		}
 	})
@@ -870,7 +880,7 @@ func TestAdapterSetupShowsWhatALaterReleaseAdds(t *testing.T) {
 		r.exec.byOp = map[adaptersetup.Op]string{"apply": `{"version":1,"op":"apply","status":"ok","outcomes":[{"id":"a","kind":"k","target":"t","status":"pending","message":"queued"}]}`}
 		_, report, err := r.run(modeSetup, "y\n", false)
 		var f *failure
-		if !errors.As(err, &f) || !strings.Contains(f.message, "1 item(s) failed") || !strings.Contains(report, `item a failed (its status "pending" is not known to this program) queued`) {
+		if !errors.As(err, &f) || !strings.Contains(f.message, "1 item(s) failed") || !hasRow(report, `a failed (its status "pending" is not known to this program) queued`) {
 			t.Errorf("err %v\n%s", err, report)
 		}
 	})
@@ -931,7 +941,7 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a]" {
 			t.Errorf("declined sent = %v, want [a]", got)
 		}
-		if !strings.Contains(asked, "declined: write a") || !strings.Contains(asked, "not reported again") {
+		if !strings.Contains(asked, "Declined: write a") || !strings.Contains(asked, "do not report it again") {
 			t.Errorf("the dialogue does not say what was declined:\n%s", asked)
 		}
 		for _, mode := range []setupMode{modeCheck, modeRefresh} {
@@ -941,7 +951,7 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 		}
 		// A new item that nobody declined is still reported, the declined one is not.
 		r.script.Items = append(r.script.Items, fakeadapter.SetupItem{ID: "n", Consent: true, Content: "N"})
-		if _, report, err := r.run(modeRefresh, "", false); err == nil || !strings.Contains(report, "drift n needs_setup") || strings.Contains(report, "drift a") {
+		if _, report, err := r.run(modeRefresh, "", false); err == nil || !hasRow(report, "n needs_setup") || hasRow(report, "a needs_setup") {
 			t.Errorf("refresh with a new item: %v\n%s", err, report)
 		}
 		// The plan of a setup run by hand lists it again; accepting it records it and
@@ -961,7 +971,7 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, mode := range []setupMode{modeCheck, modeRefresh} {
-			if _, report, err := r.run(mode, "", false); err != nil || !strings.Contains(report, "status none") || !strings.Contains(report, "recorded false") {
+			if _, report, err := r.run(mode, "", false); err != nil || !strings.Contains(report, "has no recorded setup") || !strings.Contains(squash(report), "Recorded no") {
 				t.Errorf("mode %d: %v\n%s", mode, err, report)
 			}
 		}
@@ -996,7 +1006,7 @@ func TestAdapterSetupRemembersWhatWasDeclined(t *testing.T) {
 	t.Run("an item left alone because its required item was declined is declined too", func(t *testing.T) {
 		r := newRig(t, clientA, clientDependent)
 		asked, _, err := r.run(modeSetup, "n\n", false)
-		if err != nil || !strings.Contains(asked, "left alone: write d") || !strings.Contains(asked, "declined: write d") {
+		if err != nil || !strings.Contains(asked, "Left alone: write d") || !strings.Contains(asked, "Declined: write d") {
 			t.Fatalf("%v\n%s", err, asked)
 		}
 		if got := lastApply(r).Declined; fmt.Sprint(got) != "[a d]" {
@@ -1050,11 +1060,11 @@ func TestAdapterSetupRemoveUnfinishedSaysHowToLeave(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, _, err := runSetup(context.Background(), s, modeRemove, setupDialog{out: &bytes.Buffer{}, yes: true})
+			res, _, err := runSetup(context.Background(), s, modeRemove, setupDialog{out: plain(&bytes.Buffer{}), yes: true})
 			if err != nil {
 				t.Fatal(err)
 			}
-			hint := unfinishedRemovalHint("work", res)
+			hint := unfinishedRemovalHint(plain(&bytes.Buffer{}), "work", res)
 			if !tc.wantHint {
 				if hint != "" {
 					t.Errorf("hint %q for a removal that finished", hint)
@@ -1068,4 +1078,16 @@ func TestAdapterSetupRemoveUnfinishedSaysHowToLeave(t *testing.T) {
 			}
 		})
 	}
+}
+
+// hasRow says whether the report has a line of a table that starts with these words, in this
+// order, whatever the padding between them.
+func hasRow(report, words string) bool {
+	want := strings.Fields(words)
+	for _, line := range strings.Split(report, "\n") {
+		if got := strings.Fields(line); len(got) >= len(want) && slices.Equal(got[:len(want)], want) {
+			return true
+		}
+	}
+	return false
 }

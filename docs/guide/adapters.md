@@ -98,8 +98,8 @@ there is touched later: if you delete something it installed, a refresh does not
 back, and `--check` tells you it is gone. `--refresh` brings what setup recorded up to date
 without asking, for a program that has no person to ask. Words after `--` are passed to the
 adapter for the options it has of its own. An adapter that has no setup says so. An adapter may
-also have advice for you that setup does not do for you: it is shown as `note:` lines before
-the questions, and by `--check` as `note` lines after the drift; a note never makes
+also have advice for you that setup does not do for you: it is shown as `Note:` lines before
+the questions, and by `--check` as `Note:` lines after the drift; a note never makes
 `--check` fail.
 
 Before you remove an instance whose setup has recorded something, undo it with

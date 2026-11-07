@@ -189,14 +189,14 @@ type restartJSON struct {
 	} `json:"result"`
 }
 
-// restartCommand is `daemon restart`: the answer is printed as soon as the daemon
-// has given it, so that it shows while the daemon restarts, then what the wait saw.
-// With --json one object is written when the wait is over.
+// restartCommand is `daemon restart`: what is being started is printed as soon as the
+// daemon has accepted the restart, so that it shows while the daemon restarts, then what the
+// wait saw. With --json one object is written when the wait is over.
 func (c *command) restartCommand(ctx context.Context, node caller, random io.Reader, req restartRequest) error {
 	var announce func(restartResult) error
 	if !c.json {
 		announce = func(r restartResult) error {
-			_, err := fmt.Fprintf(c.Stdout, "restarting %t\nprogram %s\nversion %s\nprevious_start_id %s\n", r.Restarting, r.Program, r.Version, r.PreviousStartID)
+			_, err := io.WriteString(c.out, renderRestarting(c.out, r))
 			return err
 		}
 	}
@@ -211,11 +211,6 @@ func (c *command) restartCommand(ctx context.Context, node caller, random io.Rea
 		out.Result.PreviousStartID, out.Result.Running, out.Result.StartID = res.PreviousStartID, res.Running, res.StartID
 		return c.encode(out)
 	}
-	if res.Running {
-		if _, err := fmt.Fprintf(c.Stdout, "running true\nstart_id %s\n", res.StartID); err != nil {
-			return err
-		}
-	}
-	_, err = fmt.Fprintf(c.Stdout, "operation_id %s\nreplayed %t\n", res.OperationID, res.Replayed)
+	_, err = io.WriteString(c.out, renderRestarted(c.out, res, res.Running))
 	return err
 }

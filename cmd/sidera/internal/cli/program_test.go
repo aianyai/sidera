@@ -78,7 +78,7 @@ func TestWarnIfTemporary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var errs bytes.Buffer
-			c := &command{Config: Config{Stderr: &errs, Getenv: func(string) string { return "" }}}
+			c := &command{Config: Config{Stderr: &errs, Getenv: func(string) string { return "" }}, errOut: plain(&errs)}
 			c.warnIfTemporary(tc.exe, "the path kept in a client's configuration")
 			if got := strings.Contains(errs.String(), "will not last"); got != tc.warn {
 				t.Errorf("warned = %v (stderr %q), want %v", got, errs.String(), tc.warn)

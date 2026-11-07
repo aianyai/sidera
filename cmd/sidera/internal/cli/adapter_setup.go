@@ -159,8 +159,9 @@ func (execSetup) Run(ctx context.Context, argv []string, request []byte) ([]byte
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			message = fmt.Sprintf("did not finish within %s", setupCallTimeout)
 		}
+		// The tail is the program's own or the client's, and nothing checks it.
 		if tail := strings.TrimSpace(stderr.String()); tail != "" {
-			message += "; its standard error ends: " + tail
+			message += "; its standard error ends: " + termout.SanitizeText(tail)
 		}
 		return nil, errors.New(message)
 	}
@@ -187,7 +188,7 @@ func (w *tailWriter) String() string { return string(w.buf) }
 // error, so that standard output carries only the report), the answers come from one
 // reader.
 type setupDialog struct {
-	out     io.Writer
+	out     *termout.Stream
 	answers *bufio.Reader
 	// yes accepts every item without asking.
 	yes bool
@@ -204,14 +205,7 @@ type setupDialog struct {
 // and the ones left alone for either reason above. The person decided against the
 // whole chain, so none of it is reported again. None under --yes.
 func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted []string, declined []adaptersetup.Item, err error) {
-	fmt.Fprintln(d.out, heading)
-	for _, it := range items {
-		note := ""
-		if !it.Consent {
-			note = " (no question: it stays inside the adapter's own state)"
-		}
-		fmt.Fprintf(d.out, "  %s %s [%s %s]%s\n", it.Action, it.Summary, it.Kind, it.Target, note)
-	}
+	io.WriteString(d.out, renderSetupPlan(d.out, heading, items))
 	// An item goes ahead only after the items it requires, so the questions are asked
 	// in the listing's order; whether an item that needs no consent is wanted depends
 	// on the items after it, so that is settled in a second pass, from the end.
@@ -219,11 +213,11 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 	goingIDs := map[string]bool{}
 	for i, it := range items {
 		if missing := slices.IndexFunc(it.Requires, func(id string) bool { return !goingIDs[id] }); missing >= 0 {
-			fmt.Fprintf(d.out, "left alone: %s (it needs %s, which is not going ahead)\n", it.Summary, it.Requires[missing])
+			io.WriteString(d.out, renderLeftAlone(d.out, it, "it needs "+it.Requires[missing]+", which is not going ahead"))
 			continue
 		}
 		if it.Consent && !d.yes {
-			ok, err := askDefaultYes(d.out, d.answers, it.Summary+"?")
+			ok, err := askDefaultYes(d.out, d.answers, itemSummary(it)+"?")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -243,7 +237,7 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 			continue
 		}
 		if !slices.ContainsFunc(items, func(other adaptersetup.Item) bool { return requiredBy(other) && goingIDs[other.ID] }) {
-			fmt.Fprintf(d.out, "left alone: %s (nothing that needs it is going ahead)\n", it.Summary)
+			io.WriteString(d.out, renderLeftAlone(d.out, it, "nothing that needs it is going ahead"))
 			going[i], goingIDs[it.ID] = false, false
 		}
 	}
@@ -261,14 +255,14 @@ func (d setupDialog) choose(heading string, items []adaptersetup.Item) (accepted
 // showNotes says what the adapter advises that is not an item to ask about.
 func (d setupDialog) showNotes(notes []string) {
 	for _, n := range notes {
-		fmt.Fprintf(d.out, "note: %s\n", n)
+		io.WriteString(d.out, renderSetupNote(d.out, n))
 	}
 }
 
 // reportDeclined says what the adapter will remember of the answers.
 func (d setupDialog) reportDeclined(instance string, declined []adaptersetup.Item) {
 	for _, it := range declined {
-		fmt.Fprintf(d.out, "declined: %s (not reported again by update or --check; `sidera adapter setup %s` offers it again)\n", it.Summary, instance)
+		io.WriteString(d.out, renderDeclined(d.out, instance, it))
 	}
 }
 
@@ -415,43 +409,12 @@ type setupJSON struct {
 	adaptersetup.Result
 }
 
-// printSetup writes the report on standard output: `key value` lines, or one JSON
-// object with --json.
-func (c *command) printSetup(instance string, res adaptersetup.Result, applied bool) error {
+// printSetup writes the report on standard output, or one JSON object with --json.
+func (c *command) printSetup(mode setupMode, instance string, res adaptersetup.Result, applied bool, env setupEnv) error {
 	if c.json {
 		return c.encode(setupJSON{Instance: instance, Result: res})
 	}
-	var b strings.Builder
-	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
-	line("instance %s", instance)
-	line("status %s", res.Status)
-	if res.Recorded != nil {
-		line("recorded %t", *res.Recorded)
-	}
-	if (res.Op == adaptersetup.OpPlan || res.Op == adaptersetup.OpRemove) && !applied {
-		if len(res.Items) == 0 {
-			line("nothing to do")
-		} else {
-			line("nothing applied")
-		}
-	}
-	for _, o := range res.Outcomes {
-		status, message := outcomeWords(o)
-		if message != "" {
-			line("item %s %s %s", o.ID, status, message)
-		} else {
-			line("item %s %s", o.ID, status)
-		}
-	}
-	for _, d := range res.Drift {
-		line("drift %s %s %s", d.ID, d.Problem, d.Summary)
-	}
-	if res.Op == adaptersetup.OpCheck { // a plan's notes were shown with its questions
-		for _, n := range res.Notes {
-			line("note %s", strings.Join(strings.Fields(n), " "))
-		}
-	}
-	_, err := io.WriteString(c.Stdout, b.String())
+	_, err := io.WriteString(c.out, renderSetupReport(c.out, mode, instance, res, applied, setupFixCommand(env, instance)))
 	return err
 }
 
@@ -490,10 +453,12 @@ func setupFailure(res adaptersetup.Result) string {
 // person edited. No rerun helps then, and `adapter remove` refuses an instance with a
 // recorded setup, so the way out has to be named here: --force removes the instance
 // without undoing what is left, which stays in the client until it is cleaned up by hand.
-func unfinishedRemovalHint(instance string, res adaptersetup.Result) string {
+func unfinishedRemovalHint(s *termout.Stream, instance string, res adaptersetup.Result) string {
 	for _, o := range res.Outcomes {
 		if o.Status != adaptersetup.OutcomeDone {
-			return fmt.Sprintf("hint: items that cannot be undone (the client program is no longer installed, or the item changed since setup) stay as they are: `sidera adapter remove %s --force` removes the instance anyway, and the items not undone stay in the client (see \"Cleaning up an adapter's client by hand\" in the adapters guide for what to clean up)\n", instance)
+			return s.Warn("Items that cannot be undone stay as they are: the client program is no longer installed, or the item changed since setup.\n"+
+				"Run "+s.Command("sidera adapter remove "+instance+" --force")+" to remove the instance anyway; the items not undone then stay in the client.\n"+
+				"The adapters guide, \"Cleaning up an adapter's client by hand\", lists what to clean up.") + "\n"
 		}
 	}
 	return ""
@@ -572,16 +537,16 @@ func (c *command) adapterSetup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	d := setupDialog{out: c.Stderr, answers: bufio.NewReader(c.Stdin), yes: o.yes}
+	d := setupDialog{out: c.errOut, answers: bufio.NewReader(c.Stdin), yes: o.yes}
 	res, applied, err := runSetup(ctx, s, mode, d)
 	if err != nil {
 		return err
 	}
-	if err := c.printSetup(p[0], res, applied); err != nil {
+	if err := c.printSetup(mode, p[0], res, applied, env); err != nil {
 		return err
 	}
 	if mode == modeRemove && applied {
-		io.WriteString(c.Stderr, unfinishedRemovalHint(p[0], res))
+		io.WriteString(c.errOut, unfinishedRemovalHint(c.errOut, p[0], res))
 	}
 	return setupVerdict(p[0], res)
 }

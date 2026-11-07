@@ -25,8 +25,11 @@ with the node's keys and default settings. It prints the node id:
 
 ```
 Back up your self-revocation outside this device.
-node <node-id-a>
-home /home/me/.sidera
+
+Initialized this node.
+  Node  <node-id-a>
+  Home  /home/me/.sidera
+
 Run `sidera identity export-revocation` to export it.
 ```
 
@@ -371,7 +374,7 @@ sidera trust request <node-id-b> --wait 60s
 
 It prints `Verification code: <code>`, which is only informational when both
 sides expect each other, and then waits. When trust is complete it prints
-`paired with <node-id-b>`. A pairing can take up to a minute.
+`Paired with <node-id-b>.` A pairing can take up to a minute.
 
 If you ran the request before B had entered its expectation, B holds a request
 that waits. Run `sidera trust list` on B for its `pairing_id`, end it with
@@ -381,7 +384,7 @@ and ask again from A.
 Check on both machines:
 
 ```sh
-sidera trust list     # the other node is listed under `trusted`
+sidera trust list     # the other node is listed under `Trusted nodes`
 sidera network show   # the other node is listed under Known nodes as connected
 ```
 

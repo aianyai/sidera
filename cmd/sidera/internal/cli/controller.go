@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io"
 	"os"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/controller"
@@ -53,7 +53,8 @@ func (c *command) attachController(ctx context.Context, home string, agent *agen
 	}
 	agent.SetToken(att.Token)
 	if att.Wake.State != "ready" {
-		fmt.Fprintln(c.Stderr, controller.Notice(att.Wake))
+		// The notice is advice: a standard error that cannot be written does not fail the command.
+		io.WriteString(c.errOut, renderControllerNotice(c.errOut, controller.Notice(att.Wake)))
 	}
 	return nil
 }

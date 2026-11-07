@@ -293,8 +293,11 @@ Expected output, with your own ids:
 
 ```
 Back up your self-revocation outside this device.
-node <node-id>
-home <home>
+
+Initialized this node.
+  Node  <node-id>
+  Home  <home>
+
 Run `sidera identity export-revocation` to export it.
 ```
 
@@ -640,7 +643,7 @@ Pair only with the node ids your owner named. Both machines must run steps 7 and
    ```
 
    Expected: `Verification code: <code>` (informational when both sides expect each
-   other), then `paired with <other-node-id>`. It can take up to a minute.
+   other), then `Paired with <other-node-id>.` It can take up to a minute.
 
 3. Check on both machines:
 
@@ -649,14 +652,14 @@ Pair only with the node ids your owner named. Both machines must run steps 7 and
    sidera network show
    ```
 
-   Expected: `<other-node-id>` under `trusted` in `trust list`.
+   Expected: `<other-node-id>` under `Trusted nodes` in `trust list`.
    `connected` in `network show` can be `false` until one side sends.
 
 If it fails:
 
 - A refusal or a timeout: check that the other side entered `trust expect` for you
-  and that its daemon runs. Run `sidera trust list`; an entry under `incoming` or
-  `outgoing` has a `pairing_id`. End it with `sidera trust reject <pairing_id>`,
+  and that its daemon runs. Run `sidera trust list`; an entry under `Incoming requests` or
+  `Outgoing requests` has a `PAIRING`. End it with `sidera trust reject <pairing_id>`,
   re-enter both expectations and send the request again.
 - `unavailable/node_unreachable`: the address is wrong or the port is blocked.
   Check step 7.

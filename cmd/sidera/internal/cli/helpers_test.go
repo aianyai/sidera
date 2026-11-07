@@ -6,7 +6,18 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/aianyai/sidera/sdk/go/termout"
 )
+
+// plain is a stream that writes to w with no decoration and no color, as a pipe gets.
+func plain(w io.Writer) *termout.Stream { return termout.New(w, false, false, 80) }
+
+// commandOn is a command whose standard output is out, for the tests of the layouts that
+// a command writes.
+func commandOn(out io.Writer) *command {
+	return &command{Config: Config{Stdout: nopWriteCloser{out}}, out: plain(out)}
+}
 
 // nopWriteCloser is a standard output the tests can read and that closes to nothing.
 // It is in no platform's file: the tests of every platform use it.

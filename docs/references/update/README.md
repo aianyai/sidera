@@ -28,6 +28,11 @@ as for every command. The programs do not belong to a data directory, so another
 same machine needs `sidera update --home <directory>` too, which then only restarts its
 daemon and installs its adapters.
 
+The plan and the question go to standard error and the report to standard output, both in the
+layout of [the command-line reference](../command-line/README.md#updating); the words of an
+adapter's setup program in the report are shown as visible escapes where they carry control
+characters, since no source checks them.
+
 `--check` downloads `checksums.txt` and its signature (about a kilobyte), verifies them and
 writes nothing. It always exits 0 once it has read a release it can believe; `--json` gives
 `update_available` (the target is newer than the running program), `admitted` (the signed
@@ -74,7 +79,7 @@ cut short by a crash, a power cut or Ctrl-C is finished by running again:
    refreshed is finished by the next. An instance with no record answers `none`, and an
    adapter that declares no setup is `skipped`. It asks nothing of the owner: a refresh
    rewrites only recorded items that still exist and never creates one (the plan shows it
-   as one line, "refresh the client setup that adapters recorded"). Its report is one
+   as one line of the plan, under `Setup`, "refresh what adapters recorded in their clients, where it is out of date"). Its report is one
    entry per instance, with a status that is the contract's own (`refreshed`, `none`,
    `drift`) plus the two this step decides (`skipped`, `error`):
 

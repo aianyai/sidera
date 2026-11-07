@@ -664,7 +664,7 @@ func TestInitPrintsIdentityAndBackupInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init: %v %s", err, out)
 	}
-	if !strings.HasPrefix(string(out), "Back up your self-revocation outside this device.") || !strings.Contains(string(out), "home "+home+"\n") || !strings.Contains(string(out), "sidera identity export-revocation") {
+	if !strings.HasPrefix(string(out), "Back up your self-revocation outside this device.") || !strings.Contains(string(out), "Home  "+home+"\n") || !strings.Contains(string(out), "sidera identity export-revocation") {
 		t.Fatalf("init output: %q", out)
 	}
 	for _, jsonMode := range []bool{false, true} {
@@ -1305,7 +1305,7 @@ func TestAdapterSetupRunsTheAdaptersProgram(t *testing.T) {
 	// The words after -- reach the adapter, and the files its configuration names are
 	// written, so the configuration reached it through the daemon.
 	out, diag := mustRun(0, "adapter", "setup", "work", "--yes", "--", "--note", "n")
-	if !strings.Contains(out, "item a done") || !strings.Contains(out, "item o done") || !strings.Contains(diag, "(options: --note n)") {
+	if rows := strings.Join(strings.Fields(out), " "); !strings.Contains(rows, "a done") || !strings.Contains(rows, "o done") || !strings.Contains(diag, "(options: --note n)") {
 		t.Errorf("setup: stdout %q, stderr %q", out, diag)
 	}
 	if read(filepath.Join(clientDir, "a")) != "v1" || read(filepath.Join(stateDir, "setup", "files", "o")) != "own" {

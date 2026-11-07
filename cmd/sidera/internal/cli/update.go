@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/update"
 	"github.com/aianyai/sidera/cmd/sidera/internal/update/fetch"
@@ -88,10 +87,10 @@ type updateRequest struct {
 }
 
 // runUpdate runs or checks and writes the outcome: the report on standard output, in
-// the CLI's `key value` lines or as one JSON object, and the plan, the question and
+// the layout of the restyled commands or as one JSON object, and the plan, the question and
 // the steps on standard error, so that what a script reads is only the report.
 func (c *command) runUpdate(ctx context.Context, cfg update.Config, req updateRequest) error {
-	cfg.Step = func(step string) { fmt.Fprintln(c.Stderr, step) }
+	cfg.Step = func(step string) { fmt.Fprintln(c.errOut, step) }
 	if req.check {
 		verdict, err := update.Check(ctx, cfg, req.want)
 		if err != nil {
@@ -99,7 +98,7 @@ func (c *command) runUpdate(ctx context.Context, cfg update.Config, req updateRe
 		}
 		return c.printCheck(verdict)
 	}
-	cfg.Confirm = func(p update.Plan) (bool, error) { return c.confirmUpdate(c.Stderr, p, req.yes) }
+	cfg.Confirm = func(p update.Plan) (bool, error) { return c.confirmUpdate(p, req.yes) }
 	rep, err := update.Run(ctx, cfg, req.want)
 	if err == nil || rep.Acted() {
 		if printErr := c.printUpdate(rep, err); printErr != nil {
@@ -112,37 +111,16 @@ func (c *command) runUpdate(ctx context.Context, cfg update.Config, req updateRe
 	return nil
 }
 
-// confirmUpdate shows what is about to happen and, unless yes, asks.
-func (c *command) confirmUpdate(out io.Writer, p update.Plan, yes bool) (bool, error) {
-	fmt.Fprintf(out, "current %s\ntarget %s\nrelease %s\n", p.Current, p.Target, p.ReleaseURL)
-	if len(p.Replace) > 0 {
-		fmt.Fprintf(out, "replace %s\n", strings.Join(p.Replace, ", "))
-	}
-	switch {
-	case p.Restart:
-		fmt.Fprintf(out, "restart daemon (running %s)\n", p.DaemonVersion)
-	case !p.Daemon:
-		fmt.Fprintln(out, "daemon not running: it is not restarted, the adapters are not installed and their setup is not refreshed; run sidera update again once it runs")
-	}
-	if len(p.Adapters) > 0 {
-		fmt.Fprintf(out, "install adapters %s\n", strings.Join(p.Adapters, ", "))
-	}
-	if len(p.Missing) > 0 {
-		fmt.Fprintf(out, "not in this release (left as they are) %s\n", strings.Join(p.Missing, ", "))
-	}
-	if len(p.Faulted) > 0 {
-		fmt.Fprintf(out, "faulted adapters, installed again %s\n", strings.Join(p.Faulted, ", "))
-	}
-	if len(p.FaultedMissing) > 0 {
-		fmt.Fprintf(out, "faulted adapters not in this release (install them again by hand) %s\n", strings.Join(p.FaultedMissing, ", "))
-	}
-	if p.RefreshSetup {
-		fmt.Fprintln(out, "refresh the client setup that adapters recorded, where it is out of date")
+// confirmUpdate shows what is about to happen and, unless yes, asks. The plan and the
+// question go to standard error.
+func (c *command) confirmUpdate(p update.Plan, yes bool) (bool, error) {
+	if _, err := io.WriteString(c.errOut, renderUpdatePlan(c.errOut, p)); err != nil {
+		return false, err
 	}
 	if yes {
 		return true, nil
 	}
-	return askDefaultNo(out, bufio.NewReader(c.Stdin), "Update?")
+	return askDefaultNo(c.errOut, bufio.NewReader(c.Stdin), "Update?")
 }
 
 // updateOutcome is what --json writes: the report, and why the run failed when it did.
@@ -157,26 +135,8 @@ func (c *command) printCheck(v update.Verdict) error {
 	if c.json {
 		return c.encode(v)
 	}
-	var b strings.Builder
-	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
-	releaseLines(line, v.Release)
-	line("update_available %t", v.UpdateAvailable)
-	line("admitted %t", v.Admitted)
-	if v.Refusal != "" {
-		line("refusal %s", v.Refusal)
-	}
-	_, err := io.WriteString(c.Stdout, b.String())
+	_, err := io.WriteString(c.out, renderUpdateCheck(c.out, v))
 	return err
-}
-
-// releaseLines writes the lines every report starts with.
-func releaseLines(line func(string, ...any), r update.Release) {
-	line("current %s", r.Current)
-	line("target %s", r.Target)
-	line("release %s", r.ReleaseURL)
-	if r.Floor != "" {
-		line("floor %s", r.Floor)
-	}
 }
 
 func (c *command) printUpdate(rep update.Report, runErr error) error {
@@ -187,79 +147,8 @@ func (c *command) printUpdate(rep update.Report, runErr error) error {
 		}
 		return c.encode(out)
 	}
-	var b strings.Builder
-	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
-	releaseLines(line, rep.Release)
-	if rep.AlreadyCurrent {
-		line("already_current true")
-	}
-	if len(rep.Program.Restored) > 0 {
-		line("program restored %s", strings.Join(rep.Program.Restored, ", "))
-	}
-	if rep.Program.Updated {
-		line("program updated %s", strings.Join(rep.Program.Replaced, ", "))
-		if rep.Program.ConsoleMissing {
-			line("sidera-adapter-console not found next to the program: it was not installed")
-		}
-		line("program previous versions kept as <name>.old, to go back to; the next update that replaces the programs removes them")
-	}
-	if len(rep.Program.Left) > 0 {
-		line("program left %s (a running process still uses them; the next update removes them)", strings.Join(rep.Program.Left, ", "))
-	}
-	switch {
-	case rep.Daemon.Restarted:
-		line("daemon restarted version %s", rep.Daemon.Version)
-	case rep.Daemon.Running:
-		line("daemon running version %s", rep.Daemon.Previous)
-	default:
-		line("daemon not running: it was not restarted and the adapters were not looked at; start it, then run sidera update again")
-	}
-	replaced := false
-	for _, a := range rep.Adapters {
-		switch {
-		case a.Error != "":
-			line("adapter %s failed %s", a.ID, a.Error)
-		case a.Skipped != "":
-			line("adapter %s skipped %s", a.ID, a.Skipped)
-		case a.Faulted:
-			line("adapter %s was faulted, installed again version %s replaced %t", a.ID, a.Version, a.Replaced)
-			replaced = replaced || a.Replaced
-		default:
-			line("adapter %s version %s replaced %t", a.ID, a.Version, a.Replaced)
-			replaced = replaced || a.Replaced
-		}
-	}
-	if replaced {
-		line("adapters the old version directories of replaced adapters are removed at the next daemon start")
-	}
-	for _, st := range rep.Setup {
-		printSetupReport(line, st)
-	}
-	_, err := io.WriteString(c.Stdout, b.String())
+	_, err := io.WriteString(c.out, renderUpdateReport(c.out, rep, runErr != nil))
 	return err
-}
-
-// printSetupReport writes what became of the client setup of one instance, in the
-// lines `adapter setup` uses for items and drift.
-func printSetupReport(line func(string, ...any), st update.SetupReport) {
-	if st.Message != "" {
-		line("setup %s %s %s", st.Instance, st.Status, st.Message)
-	} else {
-		line("setup %s %s", st.Instance, st.Status)
-	}
-	for _, it := range st.Items {
-		if it.Message != "" {
-			line("setup %s item %s %s %s", st.Instance, it.ID, it.Status, it.Message)
-		} else {
-			line("setup %s item %s %s", st.Instance, it.ID, it.Status)
-		}
-	}
-	for _, d := range st.Drift {
-		line("setup %s drift %s %s %s", st.Instance, d.ID, d.Problem, d.Summary)
-	}
-	if st.Fix != "" {
-		line("setup %s fix %s", st.Instance, st.Fix)
-	}
 }
 
 // lazyClient opens the management client at its first call, so that a run that
@@ -454,13 +343,7 @@ func (n *managementNode) RefreshSetup(ctx context.Context, instance string) (upd
 	return rep, nil
 }
 
-// setupFix is the command that settles the drift of an instance's setup, as a person
-// types it: a node whose data directory is not the default is named by --home, as the
-// command a client starts for the MCP server names it.
+// setupFix is the command that settles the drift of an instance's setup.
 func (n *managementNode) setupFix(instance string) string {
-	words := []string{"sidera"}
-	if !n.setupEnv.homeIsDefault {
-		words = append(words, "--home", shellWord(runtime.GOOS, n.setupEnv.home))
-	}
-	return strings.Join(append(words, "adapter", "setup", instance), " ")
+	return setupFixCommand(n.setupEnv, instance)
 }

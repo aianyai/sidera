@@ -10,7 +10,7 @@ Run these on each node:
 
 ```sh
 sidera adapter list      # the probe result of each enabled instance, and a `!` line under it for what its adapter reports as unavailable (see the notes)
-sidera trust list        # the nodes you paired with are under `trusted`
+sidera trust list        # the nodes you paired with are under `Trusted nodes`
 sidera network show      # where this node listens, the command that enters it on another machine, and the known nodes with their connection
 sidera alerts list       # normally empty
 sidera status            # reminders first, then the daemon, `Home` (the data directory), deliveries, disk and alerts
@@ -88,7 +88,8 @@ sidera update            # shows what it will do and asks
 
 It downloads the release, checks it against the signing key built into the program
 (`--check` does only that part, and exits 0 once it has read a release it can believe, 1 when
-it cannot; with `--json` it says
+it cannot; it says whether an update is available and
+whether this program may apply it, and with `--json` it says
 `update_available` and `admitted`; it looks at the release and this program only, not at
 the daemon or the adapters, which `sidera update` without `--check` finishes), unpacks the archive for this platform, runs the
 unpacked program to see that it is the release, and asks `Update? [y/N]` (`--yes` skips the
@@ -114,12 +115,12 @@ is made every time:
    your agent client (the Skill, the registration of the `sidera` server), so that it
    follows the new release. It asks you nothing, rewrites only what `sidera adapter
    setup` recorded and that is still there, and never puts back what you removed. The
-   report has a `setup` line for each instance: `refreshed`, `none` (nothing was ever set
-   up), `drift` (something is gone, was edited or cannot work; the line names the
-   command, `sidera adapter setup <instance>`, that asks before it changes anything),
-   `skipped` (the adapter has no setup, or its package cannot be loaded or is not installed;
-   the adapter line says which) or `error` (the refresh failed; `sidera update`
-   then exits 1, and running it again retries). The refresh is made by the program that
+   report has a `Setup` entry for each instance: `refreshed`, `has no recorded setup`
+   (nothing was ever set up), `has drifted from its setup` (something is gone, was edited or
+   cannot work; a line under the report names the command, `sidera adapter setup <instance>`,
+   that asks before it changes anything), `skipped` (the adapter has no setup, or its package
+   cannot be loaded or is not installed; the adapter line says which) or `failed` (the refresh
+   failed; `sidera update` then exits 1, and running it again retries). The refresh is made by the program that
    runs the update, and 0.15 is the first release in which adapters have a setup, so there is
    nothing recorded to refresh yet: after the upgrade to 0.15 run `sidera adapter setup
    <instance>` once for each instance whose adapter has a setup; later updates refresh it.
@@ -669,8 +670,8 @@ Claude, `cwd` for Codex). Check with `sidera preset list` on the target node.
 **After a restart, peers show `not connected`.** Nothing is wrong yet: send a
 message in either direction, as in step 5 of the upgrade.
 
-**A pairing is stuck.** `sidera trust list` shows requests under `incoming` and
-`outgoing`. End one with `sidera trust reject <pairing_id>`, check that both sides
+**A pairing is stuck.** `sidera trust list` shows requests under `Incoming requests` and
+`Outgoing requests`. End one with `sidera trust reject <pairing_id>`, check that both sides
 entered `trust expect` for each other less than 60 minutes ago, and ask again. If
 you removed a node with `trust remove` and take it back with `trust clear`, the
 other node still holds its credential and refuses the new pairing until its owner

@@ -18,7 +18,7 @@ Global flags (`--home`, `--json`, `--color`, `--help`) are removed before dispat
 sets `command.color`, and `readGlobals` builds the `out` and `errOut` `termout.Stream`s from it and the
 environment, once per run and even when a flag is wrong, since the error is reported through them. They
 are what a command's human output is written through (`Stdout` and `Stderr` stay the raw writers); the
-agent commands and the management commands that only read write through them and the others move over as their output is restyled. Command discovery registers the local
+agent commands, the management commands and the operations (`update`, `adapter setup`, `daemon restart`, `init`, `identity export-revocation`, `trust list`, `trust request` and the controller notice) write through them. Command discovery registers the local
 flags once; global scanning reads their arity through `FlagSet.Lookup` and the
 standard-library `IsBoolFlag` convention, then local parsing uses that same set
 and its bound values. A local value stays attached, including a body spelled
@@ -46,6 +46,19 @@ and its bound values. A local value stays attached, including a body spelled
   it is added. Text from outside that no source validates goes through `termout.SanitizeLine`
   before it is printed; the fields printed today are identifiers, enumerations and names checked
   where they enter the node.
+- `ops_output.go`, `update_output.go`, `adapter_setup_output.go`: the layouts of the operations, in the
+  convention of `agent_output.go`: `daemon restart`, `init`, the instruction of `identity export-revocation`,
+  `trust list`, `trust request` and the controller notice (`ops_output.go`); the plan, the verdict of `--check` and
+  the report of `update`; the plan, the questions, the notes and the report of `adapter setup`. The
+  words an adapter's setup program writes are two kinds. The ids, the status of an outcome and the
+  problem of a difference are shown as they are, because `adaptersetup.Result.Validate` (which
+  `setupSession.call` applies) holds them to single words. The free text (the summary and target of
+  an item, a message, a note, the summary of a difference) and the cause in the controller notice are
+  not validated, so these layouts show them through `termout.SanitizeLine`, and `execSetup` shows the
+  end of the standard error it quotes through `termout.SanitizeText` (the line breaks of a tail
+  stay); a new place that prints such text does the same. An item of a setup
+  plan is written by its summary alone: the adapter's `action` is the verb of that summary, and
+  its `kind` is for `--json`.
 - `local.go`: initialization (with its `--port` flag, judged by
   `config.ValidatePort`) and foreground daemon composition, including the daemon's
   `Relauncher`: it refuses a restart when `LaunchErr` is set or `launch.Restartable`
@@ -58,7 +71,7 @@ and its bound values. A local value stays attached, including a body spelled
 - `update.go`: `update`. It builds the run's configuration from the process (the built-in
   key, the real GitHub client, the user cache directory, the program as it was started),
   asks the confirmation (the plan to standard error, the answer from stdin), writes the
-  report, and implements the run's `Node` over the management client, opened at its first
+  report (layouts in `update_output.go`), and implements the run's `Node` over the management client, opened at its first
   call so that a run that stops early never needs the data directory. It reads the answers
   loosely. A run without `--yes` needs a terminal on stdin, which `termout.IsTerminal` says.
 - `adapter_setup.go`: `adapter setup`. `openSetupSession` asks the daemon (`adapters.setup_info`) how the
@@ -66,7 +79,7 @@ and its bound values. A local value stays attached, including a body spelled
   runs the program (`execSetup`: argv exec'd directly, request on stdin, result on stdout, the tail of
   stderr quoted when it fails, five minutes at most) and checks the result with `Result.Validate`;
   `runSetup` is the modes (plan or remove, ask, apply; check; refresh) over a session, `setupDialog`
-  the questions, written to stderr and read from one reader, and `applyInStages` the one place that
+  the questions, written to the standard-error stream and read from one reader, and `applyInStages` the one place that
   honours an item's `requires` once the questions are answered (an item whose required item did not
   complete is not sent to the adapter). The executor and the dialog are the seams the
   tests use; the same session is what `update` refreshes the setups with (`managementNode.RefreshSetup` in

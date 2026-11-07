@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/launch"
@@ -60,7 +61,7 @@ func (c *command) local(ctx context.Context, args []string) error {
 				BackupRequired bool   `json:"backup_required"`
 			}{r.Node.String(), r.Home, r.SelfRevocationPath, true})
 		}
-		_, err = fmt.Fprintf(c.Stdout, "Back up your self-revocation outside this device.\nnode %s\nhome %s\nRun `sidera identity export-revocation` to export it.\n", r.Node.String(), r.Home)
+		_, err = io.WriteString(c.out, renderInitialized(c.out, r.Node.String(), r.Home))
 		return err
 	}
 	host, err := adapterhost.New(adapterhost.Config{Launcher: adapterhost.ExecLauncher{}, Clock: clk})

@@ -106,7 +106,7 @@ adapter (`not_found/instance_unknown`), an adapter that does not take attached s
 (`refused/attach_unsupported`), a native session Sidera created
 (`refused/native_session_created`) and several instances to choose from
 (`invalid_argument/instance_required`). When the answer says the adapter cannot wake the
-session, one line on stderr says why and that `recv` with a wait inside a turn is the way to collect replies.
+session, one notice on stderr (a `!` line, wrapped, with the adapter's words for the cause shown through `SanitizeLine`) says why and that `recv` with a wait inside a turn is the way to collect replies.
 A command attaches once per run and nothing repeats it between commands. Every attachment
 carries the wake keys, so the node can wake a session that only uses commands, and it
 keeps the endpoint for a queue time after the last command (30 minutes by default, never
@@ -157,13 +157,17 @@ does not mend it. `--wait` is a duration (`30s`, `2m`); a bare number or a negat
 one is usage error 2 before anything is sent, and the time waited is counted as the
 intervals slept (200 ms), as for `trust request`.
 
-The human output is the `key value` lines of the other changes: `restarting`, `program`
-(the path that is started), `version` (what the program reported when the daemon ran
-it before accepting) and `previous_start_id`, printed as soon as the daemon has
-answered; then, once the wait has seen the new daemon, `running true` and its `start_id`;
-last `operation_id` and `replayed`. With `--json` one object is written when the wait is
-over: `{"operation_id","replayed","result":{"restarting","program","version","previous_start_id","running"?,"start_id"?}}`,
-the last two left out when `--wait` is `0`.
+The human output follows [Human output](#human-output). As soon as the daemon has answered, the
+command writes `Restarting the daemon.` with the `Program` that is started and the `Version`
+it reported to the check before the daemon accepted; once the wait has seen the new daemon it
+ends with `The daemon is running again, version <version>.` (marked `✓` on a decorated stream),
+and with `--wait 0` with `The daemon accepted the restart and is starting again.` and the
+command that shows when it runs. The operation identifier and the replay flag are not written;
+a request the daemon had already carried out under the same operation adds a `!` line saying that
+the daemon was not restarted again. The start identifiers are for `--json`, which writes one
+object when the wait is over:
+`{"operation_id","replayed","result":{"restarting","program","version","previous_start_id","running"?,"start_id"?}}`,
+the last two left out when `--wait` is `0`. All of it is on standard output.
 
 The daemon refuses before it shuts anything down, with `refused/restart_unavailable`
 (exit 7: it was not told how it was started, or what is started would not outlive it on
@@ -194,23 +198,41 @@ release it can believe, whether or not an update is available or admitted, and e
 it cannot reach or believe a release.
 
 The plan, the question and the progress go to standard error, so that standard output is
-the report. The human report is `key value` lines: before the question `current`, `target`,
-`release` (the page of the release), `replace`, `restart daemon`, `install adapters`,
-`faulted adapters, installed again`, `faulted adapters not in this release (install them
-again by hand)` and, while a daemon runs, `refresh the client setup that adapters recorded,
-where it is out of date`; after the run `program updated` (the paths), `daemon restarted version` or
-`daemon running version` or a note that none runs, one `adapter <id> version <v> replaced
-<bool>` (or `skipped`, or `failed`; `was faulted, installed again` for an adapter whose
-package could not run) per installed adapter, and a note that the `.old` programs are the
-way back and that the old version directories of replaced adapters are removed at the next
-daemon start, and one `setup <instance> <status>` line per adapter instance (`refreshed`,
-`none`, `drift`, `skipped` or `error`, with the reason after `skipped` and `error`),
-followed by `setup <instance> item <id> <status>` for each item the refresh did, `setup
-<instance> drift <id> <problem> <summary>` for each difference it found and, for drift,
-`setup <instance> fix sidera adapter setup <instance>` (with `--home` before `adapter` when the data directory is not the default). An `error` is exit 1, drift is not. A check looks at the release and the running program only (not the daemon, the adapters
-or their setup): it prints `current`, `target`, `release`, `floor`, `update_available`,
-`admitted` and, when a run would stop, `refusal`, and with `--json` it is one object of
-exactly those members. A run with `--json` is one object: `current`, `target`, `release`,
+the report; both are written through the standard-error and standard-output streams of
+[Human output](#human-output). Before the question the plan is a title (`Update sidera
+<current> to <target>`) over a block: the release `Page`; `Programs` to replace, one path to a
+line; the `Daemon` and the version it runs when it is to be restarted, or that none runs and so
+the adapters are not installed and their setup is not refreshed; the `Adapters` to install, to
+install again because their package cannot run, to leave as they are because the release has
+no package of them, and those that have to be installed by hand; and, while a daemon runs, the
+`Setup` the run refreshes. `Update? [y/N]` follows, with its text and its default unchanged.
+
+The report opens with what became of the run (`Updated to <target>.`, `Already up to date at
+<target>.`, `Updated the programs to <target>.` when no daemon ran and the programs were replaced
+or restored, `The programs are already at <target> and the daemon is not running.` when none ran
+and nothing was done, or a `!` line that the update stopped before it finished, when the run fails after
+it acted; the error follows on standard error) over a block: `Programs` (restored, replaced or
+left, one path to a line), `Daemon` (restarted and the version it runs, still running, or not
+running), `Adapters` (one line each: installed and replaced or already current, installed again
+after a fault, skipped with the reason, or failed with the error) and `Setup` (one entry for
+each instance: `refreshed`, with the items it rewrote, `has no recorded setup`, `has drifted
+from its setup` with its differences, `skipped` or `failed` with the reason). Lines after the
+block say that the previous programs are kept as `<name>.old` and that the old version
+directories of replaced adapters go at the next daemon start, that the daemon is to be started
+and `sidera update` run again when none ran, and, for each instance with drift, the command that
+settles it (with `--home` before `adapter` when the data directory is not the default). An
+`error` entry is exit 1, drift is not. What the adapter's setup program wrote (a message, an
+item's message, a difference's summary) is shown through `termout.SanitizeLine`.
+
+`--check` writes a block: whether an update is available and, if it is, that this program may
+apply it (`✓`), or that it cannot and why (the refusal, marked `!`), or that the running
+program is current; the `Running` version, the `Target`, the release `Page` and the `Floor`
+the release signs, and the command that applies the update. A check looks at the release and
+the running program only (not the daemon, the adapters or their setup). It exits 0 once it has
+read a release it can believe, whether or not an update is available or admitted, and exits 1
+when it cannot reach or believe a release.
+
+A run with `--json` is one object: `current`, `target`, `release`,
 `admitted`, `floor`, `already_current` (never true while no daemon runs, nor when a refresh rewrote an item or failed), `program`
 (`updated`, `replaced`, `console_missing`, `restored`, `left`), `daemon` (`running`,
 `previous_version`, `restarted`, `version`), `adapters` (each with `faulted` when its
@@ -218,7 +240,8 @@ package could not run) and `setup` (per instance: `instance`, `adapter`, `status
 `message`, `items` as `{id, status, message}`, `drift` as `{id, problem, summary}` and
 `fix`, the last four only when they have something to say), and `error` when the run failed after it had done something (the
 exit code is then 1; a failure before anything was done prints the error on standard error
-only).
+only). A check with `--json` is one object of exactly `current`, `target`, `release`, `floor`,
+`update_available`, `admitted` and, when a run would stop, `refusal`.
 
 ### Adapter setup
 
@@ -235,7 +258,7 @@ in place, so a client's configuration that names it stays valid across an update
 link that a package manager repoints keeps leading to the current version; only when how
 the program was launched is not known, `os.Executable` made absolute. `update` and
 `adapter setup` use the same path. A program in a temporary directory is warned about
-on standard error in the modes that write the path into a client's
+on standard error (as a `!` line) in the modes that write the path into a client's
 configuration (plain setup and `--refresh`). `home` is the data directory the command
 resolved, and `home_is_default` says whether it is the platform default. An adapter that
 declares no setup is a usage error (2): `the adapter of <instance> has no setup`. A daemon
@@ -248,7 +271,7 @@ usage error, 2):
 | Invocation | What it does | Exit |
 | ---------- | ------------ | ---- |
 | `adapter setup <instance>` | Runs `plan`, shows the items on standard error, asks `<summary>? [Y/n]` for each item that needs consent (Enter, `y` and `yes` accept; `n` and `no` decline; any other text and the end of the input decline), then runs `apply` with the ids of the accepted items and of every item that needs none. Nothing accepted and nothing that needs no consent means no `apply`, unless something was declined: then one `apply` with no accepted ids hands the declines over; an empty plan is `nothing to do`. The items answered no, the ones left alone because an item they require was declined and the ones that need no consent and that only declined items require (none under `--yes`), go in `declined` of the `apply`; the adapter remembers them so that `--check` and `update` do not report them again, and the dialogue says `declined: <summary>`; running the command again offers them again. An item that `requires` an item that was declined is not asked about and not applied, and the listing says `left alone`; so is an item that needs no consent when items require it and none of them is going ahead, so declining every item leaves nothing recorded; an item whose required item did not complete is applied in a later call only if it did, and is otherwise reported `skipped` with the reason | 0; 1 when an item failed |
-| `--remove` | The same with `remove`, then `apply` with `undo`: asks for each recorded item the setup would undo. When an item failed or was left alone, standard error ends with a hint: items that cannot be undone (the client program is no longer installed, or the item changed since setup) stay, `adapter remove <instance> --force` removes the instance anyway and leaves them in the client, and the guide's "Cleaning up an adapter's client by hand" lists what to clean up. The refusal of `adapter remove` for a recorded setup (below) still points to `--remove` alone | as above |
+| `--remove` | The same with `remove`, then `apply` with `undo`: asks for each recorded item the setup would undo. When an item failed or was left alone, standard error ends with a `!` hint: items that cannot be undone (the client program is no longer installed, or the item changed since setup) stay, `adapter remove <instance> --force` removes the instance anyway and leaves them in the client, and the guide's "Cleaning up an adapter's client by hand" lists what to clean up. The refusal of `adapter remove` for a recorded setup (below) still points to `--remove` alone | as above |
 | `--check` | Runs `check` and reports; changes nothing | 0 with no drift, 1 with drift. An adapter with nothing to set up and no record is `none`, not drift; one that wants something and has no record reports it as drift (`needs_setup`) |
 | `--refresh` | Runs `refresh`: brings the recorded items that still exist up to date, asks nothing. It is the mode `sidera update` uses after it installs the adapters | 0, or 1 when something failed or has drifted |
 | `--yes` | With the first two modes: accepts every item without asking | |
@@ -262,21 +285,43 @@ per item; anything but `y` or `yes` is a no, and so is the end of the input. The
 the first `--` are the adapter's own arguments, in `options` of the request as typed
 (flag-looking words included).
 
-The plan and the questions go to standard error; standard output is the report, `key value`
-lines: `instance`, `status`, `recorded` (check and refresh), `nothing to do` or `nothing
-applied`, one `item <id> <status> [<message>]` per outcome and one `drift <id> <problem>
-<summary>` per difference, then (check only) one `note <text>` per note of the adapter, which is
-advice and changes neither the status nor the exit; a plan's notes are shown on standard error
-as `note: <text>` before the questions, also when the plan has nothing to ask. With `--json` it is one object: `instance` and the members of the
-program's last result (`version`, `op`, `status`, `recorded`, `items`, `outcomes`, `drift`, `notes`).
+The plan, the questions and the notes go to standard error; standard output is the report.
+The plan is a bold heading (`Setup of <instance> would:`) over one entry for each item: the
+item's `summary`, which the adapter writes as an instruction and which already holds the verb
+(so the item's `action` is not written a second time), wrapped, and under it, dimmed, the
+`target` when the summary does not name it and `(no question: it stays inside the adapter's own
+state)` for an item that needs no consent. The item's `kind` is for `--json`. The question for
+each item that needs consent is its summary and `? [Y/n]`, unchanged. An item that is not asked
+nor done is a `!` line `Left alone: <summary> (<why>)`; what the adapter will remember of a no
+is `Declined: <summary>` with the command that offers it again; a plan's notes are `Note: <text>`
+lines before the questions, also when the plan has nothing to ask.
+
+The report opens with what became of the mode (`Set up <instance>.`, `Removed the setup of
+<instance>.`, `The setup of <instance> did not complete.` as `✗`, `Nothing to do for
+<instance>.`, `Nothing was applied for <instance>.` when everything was declined; for a check
+or a refresh that the setup is as recorded, is up to date, has no record, or has drifted as
+`!`). Under it: `Recorded` (yes or no, for a check and a refresh), a table of the outcomes
+(`ITEM`, `RESULT`, `MESSAGE`, a skipped result yellow and a failed one red on a colored
+stream) and a table of the differences (`ITEM`, `PROBLEM`, `DETAIL`) followed by one line that
+names the command that settles them, and, after a check, the adapter's notes as `Note:` lines.
+Notes advise and change neither the verdict nor the exit. With `--json` it is one object:
+`instance` and the members of the program's last result (`version`, `op`, `status`,
+`recorded`, `items`, `outcomes`, `drift`, `notes`).
 The last result is that of `apply` when items were applied and otherwise that of `plan` or
-`remove`. A setup program that exits non-zero, writes something that is not a result, or a
+`remove`. What the adapter's setup program writes is shown in two ways. The ids of items,
+outcomes and differences, the status of an outcome and the problem of a difference are
+validated: each must be a single word (see the adapter-setup reference), so they are printed as
+they are. The free text (the summary and target of an item, a message, a note, the summary of a
+difference) goes through `termout.SanitizeLine` before it is shown or asked, and the end of the
+standard error of a failed program or client, which is quoted in the failure, goes through
+`termout.SanitizeText` (its line breaks stay). A setup program that exits non-zero, writes something that is not a result, or a
 result of another version, with a `status` this program does not know, or without `recorded`
 for a check or refresh, is a failure (1) that names the instance and the program and, for an
 exit, quotes the end of its standard error (the last 2 KiB). A value of `action`, `problem`
-or an outcome's status that a later release added is not refused: it is shown as it is
-(the last as a failure, with the adapter's message, and counted in the verdict), so that an
-old program can run the setup of an adapter that `update` has just installed.
+or an outcome's status that a later release added is not refused: an unknown `action` has no
+effect on what is shown, since the summary carries it; an unknown `problem` is shown as it is,
+and an unknown outcome status is shown as a failure, with the adapter's message, and counted in
+the verdict), so that an old program can run the setup of an adapter that `update` has just installed.
 
 `adapter remove <instance>` asks the same setup first: when the adapter declares a setup and
 its `check` says a record exists, the removal is refused (exit 1) and the message says to run
@@ -369,9 +414,13 @@ taken back with `trust clear` is refused by that node (`refused/pairing_refused`
 for as long as it still holds the credential, so its owner has to remove the node too
 (`trust remove`, then `trust clear`) before the pairing can be made again.
 
-`trust list` prints five sections (`trusted`, `expectations`, `incoming`, `outgoing`,
-`locally_revoked`), one line for each entry, and `none` for an empty section; times
-are written as the interface gives them.
+`trust list` prints five sections, each a bold title over a table, or one sentence that says it
+is empty: `Trusted nodes` (`CONNECTION`, `CREATED`, `VALID UNTIL` as `never` for a credential that
+does not expire, `CREDENTIAL`, `NODE`), `Expectations` (`EXPIRES`, `NODE`), `Incoming requests`
+(`STATUS`, `CODE`, `EXPECTATION` as `expected` or `not expected`, `EXPIRES`, `PAIRING`, `NODE`),
+`Outgoing requests` (`STATUS`, `CODE`, `REASON`, `PAIRING`, `NODE`) and `Revoked here` (`NODE`).
+Times are UTC to the minute. The pairing identifier, which `trust reject` takes, and the node are
+written whole. `--json` has the interface's own members and times.
 
 Two nodes pair by the owner of each entering an expectation for the other, so the order
 is: each side runs `trust expect <the other node>` first, then one side runs `trust
@@ -385,14 +434,15 @@ this node started that waits for an expectation on its own side.
 which can take most of a minute. A refusal by the target is a successful answer with
 `status` `refused`; the command turns it into the error `refused/pairing_refused`
 (exit 7, with `details.node` and `details.refusal`) and prints no code. Otherwise it
-prints, first and on a line of its own, `Verification code: <code>`, which is
-informational, then two lines that say trust is complete when both nodes expect each
-other and that a request that is stuck is cancelled with `sidera trust reject
-<pairing_id>`, then the fields of the answer. `--wait` is
+prints, first and on a line of its own, `Verification code: <code>` (bold on a colored stream,
+the code as the node gives it, such as `482 019`: it is read aloud), then `Pairing requested.`
+with the `Node`, `Pairing` and `Status` of the answer, then two lines that say trust is complete
+when both nodes expect each other and that a request that is stuck is cancelled with `sidera trust
+reject <pairing_id>`; a replayed request adds a `!` line that nothing was sent again. `--wait` is
 the client's alone and is not sent: unless it is `0` (or the answer is already
 `complete`), the command then reads `trust.list` at once and every 500 ms until the
 node is trusted or the outgoing request with the answer's `pairing_id` is `complete`,
-and prints `paired with <node>`. The time waited is counted as the intervals slept.
+and prints `Paired with <node>.` (marked `✓`). The time waited is counted as the intervals slept.
 A request that ends otherwise (its state is `rejected`, `expired`, `cancelled`,
 `unknown`, `gave_up`, `withdrawing` or `withdrawn`) stops the wait, and a wait that runs out
 ends the command, each with exit code 1 and a message that names the node, the pairing
@@ -410,8 +460,11 @@ The identity export first uses the management interface. Only
 `daemon_not_running` permits the offline path through `keys.ReadSelfRevocation`
 and `keys.FormatRevocationExport`; peer-check failures and unknown outcomes are
 reported without an offline read. Without `--out`, human export writes the
-armored statement to stdout. Both modes print the digest and offline-backup instructions to stderr;
-JSON export has the same `result` shape online and offline.
+armored statement to stdout. Both modes print the offline-backup instruction to stderr, as a `!`
+line that says to keep the statement outside this device and to run `sidera identity
+confirm-backup <digest>` with the digest written whole; only that instruction is styled, the
+armor and the digest on standard output are exactly the bytes a script redirects. JSON export has
+the same `result` shape online and offline.
 
 Before reporting an export, `keys.ParseRevocationExport` verifies the armor and
 the CLI compares the verified record digest with the response's digest. Invalid
@@ -498,8 +551,9 @@ The human output of the agent commands (`me`, `peers`, `directory`, `declare`, `
 output](#human-output). `send`, `reply` and `control` say that the message was accepted for
 delivery, which is not that it was delivered, and name `sidera status <message-id>` as the
 way to see the delivery or, for `control`, the reply; a replayed request is said to be one.
-Scripts use `--json`. Initialization puts the offline-backup reminder first; JSON init
-returns `node`, `home`, `self_revocation` and `backup_required:true`.
+Scripts use `--json`. Human initialization puts the offline-backup reminder first, as a `!` line, then says that the
+node was initialized with its `Node` and `Home` as a block, and ends with the command that exports
+the self-revocation; JSON init returns `node`, `home`, `self_revocation` and `backup_required:true`.
 Human node status prints outstanding reminders first, each as a `!` warning, then the
 facts of the node as a block: `Node`, `Daemon` (state, version, when it started), `Home`,
 `Certificate`, `Clock`, `Deliveries`, `Delivery states` (the states that are not zero),
@@ -529,10 +583,10 @@ The decoration and color rules below are implemented once, by the SDK package
 [`termout`](../../../sdk/go/termout/README.md). `sidera` builds its standard output and its
 standard error as two `termout` streams, once per run, and each stream decides for itself.
 The agent commands (`me`, `peers`, `directory`, `declare`, `send`, `reply`, `control`,
-`status <message-id>` and `ack`) and the management commands that only read (`status`,
-`node show`, `network show`, `preset list`, `adapter list`, `endpoint list` and `alerts list`)
-write through them and follow the layout below. The other commands still use their own forms and
-move over as their output is restyled.
+`status <message-id>` and `ack`), the management commands, whether they read or change something,
+and the operations `update`, `adapter setup`, `daemon restart`, `init`, `identity
+export-revocation` (its instruction on standard error), `trust list`, `trust request` and the
+notice of a controller session write through them and follow the layout below.
 
 **Decorated** means that lines may carry markers (`✓` done, `!` attention, `✗` failure). A stream
 is decorated when it is a terminal, or when it is colored. It is not decorated when it is a pipe
@@ -568,7 +622,7 @@ and so gets output that is not decorated; `--color always` asks for the decorati
 Windows a colored console has virtual terminal processing switched on first; a console that
 refuses leaves the stream decorated and not colored.
 
-**Layout.** These are the rules every command's human output is to follow; the agent commands and the management commands follow them, except `init`, `update`, `adapter setup`, `daemon restart`, `identity export-revocation`, `trust list` and `trust request`, which still print their own forms. The same words and shapes in all three states of a stream:
+**Layout.** These are the rules every command's human output follows; the agent commands, the management commands and the operations all follow them. The same words and shapes in all three states of a stream:
 
 - A command that changes something opens with a line that says what was done (`Message
   accepted for delivery.`, `Declaration updated.`), preceded by `✓` on a decorated stream; a
@@ -596,7 +650,7 @@ refuses leaves the stream decorated and not colored.
   reasons and conditions, and actions such as `message.send` and `session.create`. The
   `ACCEPTS` column of `directory` lists the action names of the endpoint, comma and space
   between them.
-- A time is UTC with how far it is from now (`2026-11-07 01:40 UTC (3 min ago)`), except in the tables of `alerts list` and `adapter list` and the `Confirmed at` line of `identity confirm-backup`, which write the UTC time alone; a span is
+- A time is UTC with how far it is from now (`2026-11-07 01:40 UTC (3 min ago)`), except in the tables of `alerts list`, `adapter list` and `trust list` and the `Confirmed at` line of `identity confirm-backup`, which write the UTC time alone; a span is
   `20 s`; the relative part is dimmed on a colored stream and written on every stream.
 - `me` and `declare` write the declaration as `Receiving` (`accepting` or `paused`), `Senders`
   (`anyone`, `only the senders on the list`, `nobody`, or `anyone (the sender list is saved and
@@ -647,6 +701,12 @@ refuses leaves the stream decorated and not colored.
   reports with an availability condition, an alert's subject and detail (which can quote what a
   peer sent), and a preset's description and the names of its settings. A command that prints text which no source checks passes
   it through `SanitizeLine` first.
+- The operations sanitize what an adapter writes: the free text of a setup program (the summary and
+  target of an item, a message, a note, the summary of a difference, shown in `adapter setup` and
+  in the refresh of `update`; its ids and status words are validated as single words instead), the
+  end of the standard error of a failed setup program or client,
+  and the cause in the notice of a controller session that the node cannot wake (shown as a `!`
+  line on standard error). Their other text is made by the program, the daemon or a signed release.
 
 **Text the program did not write itself** has to be sanitized before it is shown, because escape
 sequences in it can clear the screen, rewrite lines, set the window title or write to the
@@ -654,9 +714,9 @@ clipboard. `termout` provides the sanitizer (`SanitizeLine` for a field of a lin
 for a message body, which keeps its line breaks and tabs): control characters (including DEL and
 U+0080 to U+009F), the line and paragraph separators, the bidirectional formatting characters, the
 invisible format characters that carry hidden text (tag characters, zero-width space, word joiner and
-the like) and bytes that are not UTF-8 are shown as visible escapes (`\x1b`, `\u202e`). So far the
+the like) and bytes that are not UTF-8 are shown as visible escapes (`\x1b`, `\u202e`). The
 console client shows the body of a received message through it (see
-[adapter-console](../adapter-console/README.md)).
+[adapter-console](../adapter-console/README.md)), and the operations above show what an adapter wrote through it.
 
 ## Conventions of every program
 

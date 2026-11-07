@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -88,6 +86,12 @@ func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (
 	if err := decodeResult(raw, &answer); err != nil {
 		return err
 	}
+	var envelope struct {
+		Replayed bool `json:"replayed"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return apiwire.OutcomeUnknown("")
+	}
 	if answer.Status == "refused" {
 		e := apiwire.New(apiwire.CategoryRefused, "pairing_refused", fmt.Sprintf("%s refused the request for a pairing (%s)", answer.Node, answer.Refusal))
 		e.Details = map[string]any{"node": answer.Node, "refusal": answer.Refusal}
@@ -98,10 +102,7 @@ func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (
 			return err
 		}
 	} else {
-		if _, err := fmt.Fprintf(c.Stdout, "Verification code: %s\nThe code is for information: trust is complete when both nodes expect each other (`sidera trust expect`).\nTo cancel a request that is stuck, run `sidera trust reject %s`.\n", answer.Code, answer.PairingID); err != nil {
-			return err
-		}
-		if err := c.managementResult(raw); err != nil {
+		if _, err := io.WriteString(c.out, renderPairingRequested(c.out, answer, envelope.Replayed)); err != nil {
 			return err
 		}
 	}
@@ -115,7 +116,7 @@ func (c *command) awaitPairing(ctx context.Context, poll func(context.Context) (
 	if c.json || !complete {
 		return nil
 	}
-	_, err := fmt.Fprintf(c.Stdout, "paired with %s\n", answer.Node)
+	_, err := io.WriteString(c.out, renderPaired(c.out, answer.Node))
 	return err
 }
 
@@ -196,57 +197,12 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// trustList prints the view of trust in sections, one line for each entry; an
-// empty section says none.
+// trustList prints the view of trust in sections (layouts in ops_output.go).
 func (c *command) trustList(raw []byte) error {
 	var view trustView
 	if err := decodeResult(raw, &view); err != nil {
 		return err
 	}
-	w := tabwriter.NewWriter(c.Stdout, 0, 2, 2, ' ', 0)
-	var rows [][]string
-	for _, t := range view.Trusted {
-		rows = append(rows, []string{t.Node, fmt.Sprint(t.Connected), t.CreatedAt, orNever(t.NotAfter), t.Credential})
-	}
-	section(w, "trusted", []string{"NODE", "CONNECTED", "CREATED_AT", "NOT_AFTER", "CREDENTIAL"}, rows)
-	rows = nil
-	for _, e := range view.Expectations {
-		rows = append(rows, []string{e.Node, e.ExpiresAt})
-	}
-	section(w, "expectations", []string{"NODE", "EXPIRES_AT"}, rows)
-	rows = nil
-	for _, i := range view.Incoming {
-		rows = append(rows, []string{i.PairingID, i.Node, i.Status, i.Code, fmt.Sprint(i.Expected), i.ExpiresAt})
-	}
-	section(w, "incoming", []string{"PAIRING_ID", "NODE", "STATUS", "CODE", "EXPECTED", "EXPIRES_AT"}, rows)
-	rows = nil
-	for _, o := range view.Outgoing {
-		rows = append(rows, []string{o.PairingID, o.Node, o.Status, o.Code, o.Reason})
-	}
-	section(w, "outgoing", []string{"PAIRING_ID", "NODE", "STATUS", "CODE", "REASON"}, rows)
-	rows = nil
-	for _, n := range view.LocallyRevoked {
-		rows = append(rows, []string{n})
-	}
-	section(w, "locally_revoked", []string{"NODE"}, rows)
-	return w.Flush()
-}
-
-func orNever(t string) string {
-	if t == "" {
-		return "never"
-	}
-	return t
-}
-
-func section(w io.Writer, title string, header []string, rows [][]string) {
-	fmt.Fprintln(w, title)
-	if len(rows) == 0 {
-		fmt.Fprintln(w, "  none")
-		return
-	}
-	fmt.Fprintln(w, "  "+strings.Join(header, "\t"))
-	for _, row := range rows {
-		fmt.Fprintln(w, "  "+strings.Join(row, "\t"))
-	}
+	_, err := io.WriteString(c.out, renderTrust(c.out, view))
+	return err
 }

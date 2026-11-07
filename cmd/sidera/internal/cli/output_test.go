@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/update"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/termout"
 )
 
@@ -198,6 +200,47 @@ var (
 	markerPrefix = regexp.MustCompile(`(?m)^( *)(✓|!|✗) `)
 )
 
+// The operations' fixtures. Their node and pairing identifiers are real lengths.
+var (
+	updatePlan = update.Plan{
+		Current: "0.14.0", Target: "0.15.0", ReleaseURL: "https://github.com/aianyai/sidera/releases/tag/v0.15.0",
+		Replace: []string{"/usr/local/bin/sidera", "/usr/local/bin/sidera-adapter-claude"}, Daemon: true, Restart: true, DaemonVersion: "0.14.0",
+		Adapters: []string{"claude", "codex"}, Missing: []string{"console"}, Faulted: []string{"relay"}, FaultedMissing: []string{"chat"}, RefreshSetup: true,
+	}
+	restarted     = restartResult{Restarting: true, Program: "/usr/local/bin/sidera", Version: "0.15.0"}
+	updateRelease = update.Release{Current: "0.14.0", Target: "0.15.0", ReleaseURL: "https://github.com/aianyai/sidera/releases/tag/v0.15.0", Admitted: true, Floor: "0.12.0"}
+	updateReport  = update.Report{
+		Release: updateRelease,
+		Program: update.ProgramReport{Updated: true, Replaced: []string{"/usr/local/bin/sidera", "/usr/local/bin/sidera-adapter-claude"}},
+		Daemon:  update.DaemonReport{Running: true, Restarted: true, Version: "0.15.0"},
+		Adapters: []update.AdapterReport{{ID: "claude", Version: "0.15.0", Replaced: true}, {ID: "codex", Skipped: "the release has no package of this adapter"},
+			{ID: "relay", Version: "0.15.0", Replaced: true, Faulted: true}},
+		Setup: []update.SetupReport{
+			{Instance: "work", Adapter: "claude", Status: update.SetupRefreshed, Items: []update.SetupItem{{ID: "mcp", Status: "done", Message: "registered again"}}},
+			{Instance: "hermes-main", Adapter: "hermes", Status: update.SetupDrift, Fix: "sidera adapter setup hermes-main",
+				Drift: []update.SetupDifference{{ID: "skill", Problem: "missing", Summary: "the Skill file is gone"}}},
+			{Instance: "chat", Adapter: "console", Status: update.SetupSkipped, Message: "the adapter declares no setup"},
+		},
+	}
+
+	setupItems = []adaptersetup.Item{
+		{ID: "src", Kind: "source", Target: "/Users/me/.sidera/adapter-state/work/plugin", Action: adaptersetup.ActionCreate, Summary: "write the Sidera plugin in the adapter's state directory"},
+		{ID: "mp", Kind: "marketplace", Target: "/Users/me/.sidera/adapter-state/work/plugin", Action: adaptersetup.ActionCreate, Consent: true, Requires: []string{"src"},
+			Summary: "add the marketplace sidera, which holds the Sidera plugin, to Claude Code from /Users/me/.sidera/adapter-state/work/plugin"},
+	}
+	setupResult = adaptersetup.Result{Version: adaptersetup.Version, Op: adaptersetup.OpApply, Status: adaptersetup.StatusOK, Outcomes: []adaptersetup.Outcome{
+		{ID: "src", Status: adaptersetup.OutcomeDone},
+		{ID: "mp", Status: adaptersetup.OutcomeSkipped, Message: "Claude Code already has it"},
+		{ID: "plugin", Status: adaptersetup.OutcomeFailed, Message: "claude exited with status 1"},
+	}}
+	recordedNo  = false
+	driftResult = adaptersetup.Result{Version: adaptersetup.Version, Op: adaptersetup.OpCheck, Status: adaptersetup.StatusDrift, Recorded: &recordedNo,
+		Drift: []adaptersetup.Drift{{ID: "src", Problem: adaptersetup.ProblemNeedsSetup, Summary: "src has no record; run setup"}, {ID: "mp", Problem: adaptersetup.ProblemNeedsSetup, Summary: "mp has no record; run setup"}},
+		Notes: []string{"enable the kanban toolset in config.yaml"}}
+
+	pairing = pairingAnswer{PairingID: "0123456789abcdef0123456789abcdef", Node: testNodeB, Status: "awaiting_target", Code: "482 019"}
+)
+
 // outputs are the human outputs of the agent commands for one representative result each,
 // as a function of the stream they are written on.
 func outputs(t testing.TB) map[string]func(*termout.Stream) string {
@@ -207,6 +250,9 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 		Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionRuntimeAuth},
 		Presets:    []adapterproto.PresetAvailability{{Name: "default", Available: true}, {Name: "slow", Available: false}},
 	}}
+	trusts := answer[trustView](t, `{"trusted":[{"node":"`+testNodeB+`","credential":"cred1abc","created_at":"2026-10-24T09:00:00Z","not_after":"2027-10-24T09:00:00Z","connected":true}],
+"expectations":[{"node":"`+testNode+`","expires_at":"2026-10-24T10:00:00Z"}],"incoming":[],
+"outgoing":[{"pairing_id":"0123456789abcdef0123456789abcdef","node":"`+testNodeB+`","status":"withdrawn","code":"333 444","reason":"declined"}],"locally_revoked":["`+testNodeB+`x"]}`)
 	outs := map[string]func(*termout.Stream) string{
 		"me": func(s *termout.Stream) string {
 			return renderMe(s, agentapi.MeResult{
@@ -264,6 +310,30 @@ func outputs(t testing.TB) map[string]func(*termout.Stream) string {
 		"alerts list": func(s *termout.Stream) string {
 			return renderAlerts(s, answer[alertsView](t, alertsAnswer), false)
 		},
+		"update plan": func(s *termout.Stream) string { return renderUpdatePlan(s, updatePlan) },
+		"update check": func(s *termout.Stream) string {
+			return renderUpdateCheck(s, update.Verdict{Release: updateRelease, UpdateAvailable: true})
+		},
+		"update check refused": func(s *termout.Stream) string {
+			return renderUpdateCheck(s, update.Verdict{Release: updateRelease, UpdateAvailable: true, Refusal: "release 0.15.0 needs a program of 0.12.0 or later to update to it"})
+		},
+		"update report": func(s *termout.Stream) string { return renderUpdateReport(s, updateReport, false) },
+		"setup plan":    func(s *termout.Stream) string { return renderSetupPlan(s, "Setup of work would:", setupItems) },
+		"setup report":  func(s *termout.Stream) string { return renderSetupReport(s, modeSetup, "work", setupResult, true, "") },
+		"setup drift": func(s *termout.Stream) string {
+			return renderSetupReport(s, modeCheck, "work", driftResult, false, "sidera adapter setup work")
+		},
+		"restarting":         func(s *termout.Stream) string { return renderRestarting(s, restarted) },
+		"restarted":          func(s *termout.Stream) string { return renderRestarted(s, restarted, true) },
+		"restarted replayed": func(s *termout.Stream) string { return renderRestarted(s, restartResult{Replayed: true}, false) },
+		"init":               func(s *termout.Stream) string { return renderInitialized(s, testNode, "/Users/me/.sidera") },
+		"export reminder":    func(s *termout.Stream) string { return renderExportReminder(s, testMessage) },
+		"trust list":         func(s *termout.Stream) string { return renderTrust(s, trusts) },
+		"trust request":      func(s *termout.Stream) string { return renderPairingRequested(s, pairing, true) },
+		"trust paired":       func(s *termout.Stream) string { return renderPaired(s, testNodeB) },
+		"controller notice": func(s *termout.Stream) string {
+			return renderControllerNotice(s, "Sidera: this session is attached as a controller, but the node cannot wake it (runtime_auth: claude is not logged in). Collect replies with sidera recv.")
+		},
 		"status": func(s *termout.Stream) string {
 			return renderStatus(s, now, adapterproto.MessageStatusResult{
 				Recipients:   []adapterproto.RecipientStatus{{To: adapterproto.Address(testRuntime), State: adapterproto.DeliveryDelivered}},
@@ -308,6 +378,17 @@ func TestIdentifiersAreComplete(t *testing.T) {
 		"change: trust reject":        {testPairing, testNodeB},
 		"change: identity retire":     {testNode},
 		"change: alerts ack":          {testAlert},
+		// The paths the update replaces, the address of every part of a plan and the pairing
+		// and node identifiers, which the commands that follow take.
+		"update plan":     {"https://github.com/aianyai/sidera/releases/tag/v0.15.0", "/usr/local/bin/sidera-adapter-claude"},
+		"update report":   {"/usr/local/bin/sidera-adapter-claude", "sidera adapter setup hermes-main"},
+		"setup plan":      {"/Users/me/.sidera/adapter-state/work/plugin"},
+		"restarting":      {"/usr/local/bin/sidera"},
+		"init":            {testNode, "/Users/me/.sidera"},
+		"export reminder": {"sidera identity confirm-backup " + testMessage},
+		"trust list":      {testNode, testNodeB, testNodeB + "x", "0123456789abcdef0123456789abcdef", "cred1abc"},
+		"trust request":   {testNodeB, "0123456789abcdef0123456789abcdef", "Verification code: 482 019", "sidera trust reject 0123456789abcdef0123456789abcdef"},
+		"trust paired":    {testNodeB},
 	}
 	for name, render := range outputs(t) {
 		for _, st := range streams {
@@ -473,6 +554,9 @@ func TestEmptyResultsAreSentences(t *testing.T) {
 			"No adapters are installed.\n\nInstances version  4 (for --expected-version)\n"},
 		"no peers": {renderNetwork(s, answer[networkView](t, `{"node":"`+testNode+`","peer_id":"`+testPeerID+`","version":1,"listen":{"configured":[],"actual":[]},"contact":"","peers":[]}`)),
 			"Node               " + testNode + "\nPeer ID            " + testPeerID + "\nListen configured  none\nListening now      none\nReachable at       none\nNetwork version    1 (for --expected-version)\n\nNo other nodes are known.\n"},
+		"trust":                {renderTrust(s, trustView{}), "Trusted nodes\nNo node is trusted.\n\nExpectations\nNo node is expected.\n\nIncoming requests\nNo request is waiting for this node.\n\nOutgoing requests\nThis node has made no request.\n\nRevoked here\nNo node is revoked here.\n"},
+		"setup with no items":  {renderSetupReport(s, modeSetup, "work", adaptersetup.Result{Op: adaptersetup.OpPlan, Status: adaptersetup.StatusOK}, false, ""), "Nothing to do for work.\n"},
+		"setup with no answer": {renderSetupReport(s, modeRemove, "work", adaptersetup.Result{Op: adaptersetup.OpRemove, Status: adaptersetup.StatusOK, Items: setupItems}, false, ""), "Nothing was applied for work.\n"},
 		"peers": {renderPeers(s, agentapi.PeersResult{Nodes: []agentapi.Peer{{Node: testNode, Self: true, Trust: "self", Connected: true}}}),
 			"TRUST  CONNECTION  NODE\nself   connected   " + testNode + "\n\nNo other node is trusted directly.\n"},
 	} {
@@ -681,5 +765,40 @@ func TestForcedRemovalWarningIsAWarningOnTheErrorStream(t *testing.T) {
 	}
 	if colored := forcedRemovalWarning(newStream(true, true), "work"); !strings.HasPrefix(colored, "\x1b[33m!\x1b[0m The client setup") {
 		t.Errorf("colored:\n%q", colored)
+	}
+}
+
+// Text that the program did not write and that no source checks reaches the output as visible
+// escapes and never as the bytes a terminal acts on: what an adapter's setup program says
+// (the summary and target of an item, a message, a note, the summary of a difference), the
+// words of the refresh in the report of `update`, and the cause in the notice of a controller.
+func TestOperationsEscapeForeignText(t *testing.T) {
+	const shown = `\x1b]0;pwned\x07\u202etxt`
+	const evil = "\x1b]0;pwned\x07\u202etxt"
+	s := newStream(true, true)
+	item := adaptersetup.Item{ID: "a", Kind: "k", Target: evil, Summary: evil, Consent: true}
+	check := adaptersetup.Result{Op: adaptersetup.OpCheck, Status: adaptersetup.StatusDrift, Recorded: &recordedNo,
+		Drift: []adaptersetup.Drift{{ID: "a", Problem: "missing", Summary: evil}}, Notes: []string{evil}}
+	applied := adaptersetup.Result{Op: adaptersetup.OpApply, Status: adaptersetup.StatusOK,
+		Outcomes: []adaptersetup.Outcome{{ID: "a", Status: adaptersetup.OutcomeSkipped, Message: evil}}}
+	refresh := update.Report{Setup: []update.SetupReport{{Instance: "w", Status: update.SetupError, Message: evil,
+		Items: []update.SetupItem{{ID: "a", Status: "failed", Message: evil}}, Drift: []update.SetupDifference{{ID: "b", Problem: "missing", Summary: evil}}}}}
+	for name, out := range map[string]string{
+		"item summary and target": renderSetupPlan(s, "Setup of w would:", []adaptersetup.Item{item}),
+		"left alone":              renderLeftAlone(s, item, "why"),
+		"declined":                renderDeclined(s, "w", item),
+		"outcome message":         renderSetupReport(s, modeSetup, "w", applied, true, ""),
+		"drift summary and note":  renderSetupReport(s, modeCheck, "w", check, false, "sidera adapter setup w"),
+		"note of a plan":          renderSetupNote(s, evil),
+		"refresh in update":       renderUpdateReport(s, refresh, false),
+		"controller notice":       renderControllerNotice(s, "Sidera: the node cannot wake it ("+evil+")."),
+	} {
+		if !strings.Contains(out, shown) {
+			t.Errorf("%s: the escaped text %q is not in\n%q", name, shown, out)
+		}
+		// The colored stream writes its own sequences; the text's must not be among them.
+		if stripped := escapeSequence.ReplaceAllString(out, ""); strings.ContainsAny(stripped, "\x1b\x07\u202e") {
+			t.Errorf("%s: foreign control characters reached the output:\n%q", name, out)
+		}
 	}
 }

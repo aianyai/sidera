@@ -76,14 +76,18 @@ id, with different meaning, and a mistake would delete what it should create.
 An item is `{id, kind, target, action, summary, consent, requires?}`. The `id` is unique in a
 result and stable from the `plan` to the `apply` that follows, because the adapter
 recomputes what the id means when it applies; an id it no longer lists is answered
-`skipped`. It is a word (see Results). `kind` and `target` are the adapter's words for what and where, and the CLI
-only shows them. `action` is `create`, `update`, `remove` or `adopt` (take something
+`skipped`. It is a word (see Results). `kind` and `target` are the adapter's words for what and where; the CLI shows `target`
+under the item when the `summary` does not already name it, and leaves `kind` and `action` to
+`--json`, since the summary is the instruction and holds the verb. `action` is `create`, `update`, `remove` or `adopt` (take something
 that was already there, and that setup did not make, into the record). `remove`
 is what a `remove` listing says of every recorded item; a plan may also list it for
 something setup did not make that stands in the way of what it wants (an earlier
 installation of the same thing), and such an item always has `consent: true`, which
 the result check enforces: nothing is removed from a person's client without asking. `summary` is one
-phrase written as an instruction, which the CLI shows and asks as a question.
+phrase written as an instruction, which the CLI shows and asks as a question. It is shown alone,
+so it has to stand by itself: it names what is done and, when the person has to know it, where.
+Nothing validates it, so the CLI shows it, like every message, note and difference summary of a
+result, as visible escapes where it carries control characters.
 
 `consent` says whether the CLI asks. An item with `consent: false` is one the adapter
 may do without asking: a file inside its own state directory, which nothing but the
