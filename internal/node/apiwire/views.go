@@ -5,18 +5,6 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// PeerProfileOf is a node's profile as the adapter protocol writes it. It is
-// [NodeProfile] under the protocol's own type, which the SDK cannot take from here:
-// the two have the same members, so that an agent and an adapter read one
-// description of a node. A node with no profile is nil.
-func PeerProfileOf(p *NodeProfile) *adapterproto.PeerProfile {
-	if p == nil {
-		return nil
-	}
-	out := adapterproto.PeerProfile(*p)
-	return &out
-}
-
 // DirectoryAdapter is the adapter behind a directory entry as the Agent interface
 // and the adapter protocol write it, in the one shape both share; nil when the
 // entry has none.

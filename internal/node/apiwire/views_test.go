@@ -11,7 +11,7 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-func TestPeerProfileIsTheNodeProfileInProtocolWords(t *testing.T) {
+func TestPeerProfileIsTheEnginesProfileInProtocolWords(t *testing.T) {
 	asOf := time.Date(2026, 11, 7, 2, 0, 5, 0, time.UTC)
 	for _, tc := range []struct {
 		name string
@@ -29,7 +29,7 @@ func TestPeerProfileIsTheNodeProfileInProtocolWords(t *testing.T) {
 		{"only the time", &engine.ProfileView{AsOf: asOf}, &adapterproto.PeerProfile{AsOf: asOf.Unix()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := apiwire.PeerProfileOf(apiwire.NodeProfileOf(tc.in)); !reflect.DeepEqual(got, tc.want) {
+			if got := apiwire.PeerProfileOf(tc.in); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("PeerProfileOf = %+v, want %+v", got, tc.want)
 			}
 		})

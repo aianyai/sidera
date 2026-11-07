@@ -11,7 +11,6 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/update"
 	"github.com/aianyai/sidera/internal/node/agentapi"
-	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
 	"github.com/aianyai/sidera/sdk/go/termout"
@@ -432,7 +431,7 @@ func TestSharedLayoutsAreCalledWithSideraCommands(t *testing.T) {
 	}{
 		{"peers", func(c *command) error {
 			return c.result(agentapi.PeersResult{Nodes: []agentapi.Peer{
-				{Node: testNode, Self: true, Trust: "self", Connected: true, Profile: &apiwire.NodeProfile{
+				{Node: testNode, Self: true, Trust: "self", Connected: true, Profile: &adapterproto.PeerProfile{
 					Name: "imac", HostName: "imac-1", Platform: "darwin/arm64", System: "macOS 27.0.1", SideraVersion: "0.17.0", AsOf: 1}},
 				{Node: testNodeB, Trust: "direct"},
 			}})

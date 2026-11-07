@@ -107,10 +107,9 @@ fetched the one of a peer. An agent picks a node by `name`, `host_name` and `sys
 and addresses it by `node`. The profile of a peer is held in memory only and fetched
 when a connection to it comes up, so `profile` is absent for a node this node has not been
 connected to since the daemon started, and always present for the node itself. The shape is
-`apiwire.NodeProfile`, made from the engine's view by `apiwire.NodeProfileOf`; the management
-reads of the trust list and the network have the same object, and the adapter protocol's
-`endpoint.peers` the same members as `adapterproto.PeerProfile`, which the SDK defines
-because it cannot import `apiwire`.
+`adapterproto.PeerProfile` (which the SDK defines because it cannot import `apiwire`), made
+from the engine's view by `apiwire.PeerProfileOf`; the management reads of the trust list
+and the network and the adapter protocol's `endpoint.peers` give the same object.
 
 **Directory.** `limit` is 1 through 256, default 100. Entries contain `address`,
 `kind`, `display_name`, `description` and `accepts` (action names such as

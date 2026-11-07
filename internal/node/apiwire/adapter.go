@@ -181,7 +181,7 @@ func (a adapterEngine) EndpointPeers(ctx context.Context, instance string, p ada
 	for i, n := range nodes {
 		res.Nodes[i] = adapterproto.PeerNode{
 			Node: n.Node.String(), Self: n.Trust == engine.PeerTrustSelf,
-			Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected, Profile: PeerProfileOf(NodeProfileOf(n.Profile)),
+			Trust: adapterproto.PeerTrust(n.Trust), Connected: n.Connected, Profile: PeerProfileOf(n.Profile),
 		}
 	}
 	return res, nil

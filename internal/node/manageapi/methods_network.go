@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The version of every method here is that of network.json: network.show gives it
@@ -61,7 +62,7 @@ var networkShow = &method{
 				CertificateHeld bool     `json:"certificate_held"`
 				Connected       bool     `json:"connected"`
 				// Profile is what the node says about itself; left out when none is known.
-				Profile *apiwire.NodeProfile `json:"profile,omitempty"`
+				Profile *adapterproto.PeerProfile `json:"profile,omitempty"`
 			}
 			out := struct {
 				Node    string     `json:"node"`
@@ -77,7 +78,7 @@ var networkShow = &method{
 				Peers:   []peerJSON{},
 			}
 			for _, p := range v.Peers {
-				out.Peers = append(out.Peers, peerJSON{p.Node.String(), nonNil(p.Addresses), p.CertificateHeld, p.Connected, apiwire.NodeProfileOf(p.Profile)})
+				out.Peers = append(out.Peers, peerJSON{p.Node.String(), nonNil(p.Addresses), p.CertificateHeld, p.Connected, apiwire.PeerProfileOf(p.Profile)})
 			}
 			return out, nil
 		}}, nil

@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/pairing"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The owner's methods on trust: entering and forgetting an expectation, asking a
@@ -256,7 +257,7 @@ func trustListResult(v engine.TrustView) any {
 		NotAfter   string `json:"not_after,omitempty"`
 		Connected  bool   `json:"connected"`
 		// Profile is what the node says about itself; left out when none is known.
-		Profile *apiwire.NodeProfile `json:"profile,omitempty"`
+		Profile *adapterproto.PeerProfile `json:"profile,omitempty"`
 	}
 	type expectation struct {
 		Node      string `json:"node"`
@@ -285,7 +286,7 @@ func trustListResult(v engine.TrustView) any {
 		LocallyRevoked []string      `json:"locally_revoked"`
 	}{[]trusted{}, []expectation{}, []incoming{}, []outgoing{}, []string{}}
 	for _, t := range v.Trusted {
-		row := trusted{Node: t.Node.String(), Credential: t.Credential.String(), CreatedAt: timeText(t.CreatedAt), Connected: t.Connected, Profile: apiwire.NodeProfileOf(t.Profile)}
+		row := trusted{Node: t.Node.String(), Credential: t.Credential.String(), CreatedAt: timeText(t.CreatedAt), Connected: t.Connected, Profile: apiwire.PeerProfileOf(t.Profile)}
 		if !t.NotAfter.IsZero() {
 			row.NotAfter = timeText(t.NotAfter)
 		}

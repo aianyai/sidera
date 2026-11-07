@@ -175,11 +175,11 @@ type DirectoryResult struct {
 // facts; it is absent for a node the daemon has not
 // been connected to since it started.
 type Peer struct {
-	Node      string               `json:"node"`
-	Self      bool                 `json:"self"`
-	Trust     string               `json:"trust"`
-	Connected bool                 `json:"connected"`
-	Profile   *apiwire.NodeProfile `json:"profile,omitempty"`
+	Node      string                    `json:"node"`
+	Self      bool                      `json:"self"`
+	Trust     string                    `json:"trust"`
+	Connected bool                      `json:"connected"`
+	Profile   *adapterproto.PeerProfile `json:"profile,omitempty"`
 }
 
 // PeersResult lists the nodes visible to the authenticated endpoint.
@@ -271,7 +271,7 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 		}
 		out := PeersResult{Nodes: make([]Peer, len(nodes))}
 		for i, node := range nodes {
-			out.Nodes[i] = Peer{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected, Profile: apiwire.NodeProfileOf(node.Profile)}
+			out.Nodes[i] = Peer{Node: node.Node.String(), Self: node.Trust == engine.PeerTrustSelf, Trust: string(node.Trust), Connected: node.Connected, Profile: apiwire.PeerProfileOf(node.Profile)}
 		}
 		return out, nil
 	case "me":
