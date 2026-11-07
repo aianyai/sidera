@@ -22,7 +22,7 @@ width).
 | `Wrap`, `Stream.TextWidth` | Prose |
 | `SanitizeLine`, `SanitizeText` | Text from outside the program |
 | `Stream.Time`, `Timestamp`, `Duration`, `Bytes` | Written forms of values |
-| `ShellWord(goos, word)` | A word of a command the program tells the reader to run, quoted for the shell of the given platform: single quotes unless the word is plain, always double quotes on Windows (single quotes are part of the word in `cmd`) |
+| `ShellWord(goos, word)` | A word of a command the program tells the reader to run, quoted for the shell of the given platform: a plain word is left bare; otherwise single quotes, or double quotes on Windows (single quotes are part of the word in `cmd`). The plain set on Windows is narrower, so a word is bare there only when both `cmd` and PowerShell take it as it is: letters, digits and `_ + : . / \ -` |
 
 ## Rules
 

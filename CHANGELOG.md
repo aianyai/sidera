@@ -226,6 +226,10 @@ and node-to-node protocols do not change, and nothing a node stores needs a migr
 
 ### Fixed
 
+- **On Windows, the commands the output tells you to run no longer put a plain word in double
+  quotes.** A hint such as the command for the next page of `directory` read `--cursor "c-2"`;
+  it now reads `--cursor c-2` as on the other platforms. A word with a space, a `%`, a comma, an
+  `=` or a leading `@`, or any other character a Windows shell treats specially, is still quoted.
 - **`serve` of the console and Hermes programs takes no argument.** `sidera-adapter-console serve
   --help` started the adapter and waited on standard input; any argument after `serve` is now a
   usage error (exit 2).

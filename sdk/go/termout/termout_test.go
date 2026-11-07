@@ -580,7 +580,16 @@ func stripANSI(s string) string {
 // The quoting follows the platform whose shell the command is pasted into.
 func TestShellWord(t *testing.T) {
 	for _, tc := range []struct{ goos, in, want string }{
-		{"windows", `C:\Users\ivea\sidera\bin\sidera.exe`, `"C:\Users\ivea\sidera\bin\sidera.exe"`},
+		{"windows", "c-2", "c-2"},
+		{"windows", `C:\Users\ivea\sidera\bin\sidera.exe`, `C:\Users\ivea\sidera\bin\sidera.exe`},
+		{"windows", "work+1.x/y_z:9", "work+1.x/y_z:9"},
+		{"windows", "", `""`},
+		{"windows", "50%", `"50%"`},
+		{"windows", "a,b", `"a,b"`},
+		{"windows", "a=b", `"a=b"`},
+		{"windows", "@work", `"@work"`},
+		{"windows", "a@b", `"a@b"`},
+		{"windows", "a b", `"a b"`},
 		{"windows", `C:\Users\a b\sidera\bin\sidera.exe`, `"C:\Users\a b\sidera\bin\sidera.exe"`},
 		{"windows", `C:\Users\O'Neil (work) & co\sidera.exe`, `"C:\Users\O'Neil (work) & co\sidera.exe"`},
 		{"linux", "/home/a/.local/bin/sidera", "/home/a/.local/bin/sidera"},
