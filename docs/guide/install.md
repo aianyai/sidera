@@ -197,6 +197,9 @@ run `sidera adapter setup <instance>` once for each Claude Code, Codex and Herme
 instance: until then the update has nothing recorded to refresh. The procedure, the
 refusals and how to go back are in [Upgrade](operations.md#upgrade); what the setup does is
 in [Setting up an adapter's client](adapters.md#setting-up-an-adapters-client).
+After an upgrade to 0.17, restart the Claude Code and Codex sessions that were running when
+you upgraded: they keep the `sidera mcp` of the earlier release, which cannot read the new
+`peers` and `directory` results (see [Upgrade](operations.md#upgrade)).
 
 ## Build from source
 

@@ -84,6 +84,15 @@ manual step on existing nodes, they say so. Let the work that agents are doing o
 the node finish first: the node is out of reach while its daemon is stopped, and the
 adapters restart.
 
+After the upgrade, restart the Claude Code and Codex sessions that were running when you
+upgraded. A session keeps the `sidera mcp` program of the release it was started with, and
+the program of 0.16 or earlier cannot read the new members of the `peers` and `directory`
+results: those two tools fail with `outcome_unknown` in such a session until it is
+restarted, while its other tools keep working. `sidera peers` and `sidera directory` from a
+shell, and every session started after the upgrade, work at once. From 0.17 on a program
+ignores members that a later release adds, so later upgrades do not need this restart for
+that reason.
+
 ### With `sidera update`
 
 For a node installed from a release archive, `sidera update` does the whole upgrade:

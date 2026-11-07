@@ -137,8 +137,9 @@ that starts sessions), not a console and not an existing session.
 
 1. Find it. `sidera directory --node <node-id>` lists the node's endpoints. Take
    the address of the one whose `kind` is `runtime` and whose `accepts` list has
-   `session.create`. Its name (the `NAME` column; `display_name` in JSON and MCP)
-   names the adapter, such as `codex`.
+   `session.create`. The `ADAPTER` column (`adapter` in JSON and MCP) names the adapter
+   and the runtime that serve it, such as `codex 0.17.0 · codex 0.166.0`: take the entry
+   whose adapter is the one you want (`adapter.id` is `codex`).
 2. Create the session with a preset that exists on that node, and put the task in
    the first message:
 

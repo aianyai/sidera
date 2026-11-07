@@ -438,7 +438,7 @@ reason, as is a missing required one; every problem is listed at once.
 | `aliases` | The names a card may address, one entry each: `<name>=<address>;modes=<mode>[,<mode>];presets=<preset>[,<preset>]`. The modes are `new_session` (start a session on that runtime endpoint with one of the presets listed) and `message` (send to that address). Presets go with `new_session` and only with it. Required, at least one. |
 | `creator_profiles` | If set, only cards created by these Hermes profiles are served. |
 | `no_reply_timeout` | How long a card waits for the other side: 24h. |
-| `hermes_path`, `kanban_home`, `display_name` | The `hermes` program (default `hermes`), the `HERMES_KANBAN_HOME` if you set one, and the name in the directory. |
+| `hermes_path`, `kanban_home`, `display_name` | The `hermes` program (default `hermes`), the `HERMES_KANBAN_HOME` if you set one, and the name in the directory (default `Hermes`; it may not hold control or invisible characters, and an instance whose `display_name` breaks the rules does not start, with the problem named). |
 
 The other settings (how long a claim, a remote session and a conversation's endpoint are
 kept, the polling interval and the caps) are listed with their defaults in

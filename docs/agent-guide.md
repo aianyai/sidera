@@ -246,7 +246,10 @@ Choose A (release archive) or B (source).
    later from an earlier release, nothing is recorded to refresh yet: ask your owner, then
    run `sidera adapter setup <instance>` once for each Claude Code, Codex and Hermes
    instance on the node (item 11 of "Ask your owner before" for what it changes in Claude
-   Code and Codex; [Hermes](guide/adapters.md#hermes) for the profiles).
+   Code and Codex; [Hermes](guide/adapters.md#hermes) for the profiles). An upgrade from a
+   release before 0.17 also leaves running Claude Code and Codex sessions with the earlier
+   `sidera mcp`, whose `peers` and `directory` tools then fail with `outcome_unknown`: tell
+   your owner to restart those sessions (including your own).
 
 ### B. Build from source
 

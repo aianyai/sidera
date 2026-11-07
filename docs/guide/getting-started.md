@@ -393,6 +393,13 @@ connection is opened when a message or request needs one. If a node you entered 
 listed with addresses you meant to leave out, enter the node again with only the right ones;
 `sidera network show` is the check.
 
+Each node is shown to the others by its host name. To give one a name that tells the
+machines apart in `trust list`, `network show` and the agents' `peers`, run
+`sidera node set name=<name>` on it; `sidera node set name=` takes the name away again, and
+`sidera node show` says which of the two applies. The other nodes see a new name after
+their next connection to this node, for instance after `sidera daemon restart`; nothing is
+pushed.
+
 ## 7. Start the first cross-machine session (A)
 
 You start sessions from your **console**, `sidera-adapter-console`. It sends from
