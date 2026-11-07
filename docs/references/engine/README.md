@@ -156,17 +156,26 @@ decision of addressing, trust or policy reads it.
   judge; membership alone is not enough, because a member can be trusted by
   inheritance only.
 - *Fetching.* The network tells the engine (`MemberConnected`) each time a
-  connection to a node becomes a member's. When the node is trusted directly and no
-  fetch from it is under way, a worker of the engine (`spawn`, under the engine's
-  context) asks it through `Network.FetchProfile`, and the answer returns to the loop
-  as a command. The record is kept only if it names the node it was fetched from,
-  verifies against the network key certificate this node holds for that node, and
+  connection to a node becomes a member's. When the node is trusted directly, a
+  worker of the engine (`spawn`, under the engine's context) asks it through
+  `Network.FetchProfile`, and the answer returns to the loop as a command. The
+  record is kept only if it names the node it was fetched from, verifies against
+  the network key certificate this node holds for that node, and
   `publication.ProfileReplaces` says it is later than the one held (or none is
-  held). Nothing is retried and nothing polls: a failed fetch is logged, a node that
-  does not serve the protocol (an earlier release) is logged once at debug level and
-  has no profile, and the next connection asks again. A connection to a restarted
-  or upgraded node is a new connection, which is how a new version, a new system
-  version or a new name arrives.
+  held). Two cases ask without a new connection, because the news of a connection
+  comes once and the fetch it started may not have served it. A connection that
+  comes up while a fetch from the node is under way is noted, and when that fetch
+  ends one more is made if a member connection to the node is still up: the fetch
+  under way may have been on a connection that died with a restarted node. And when
+  the trust records change, every node now trusted directly that this node holds no
+  profile of, asks nothing of and has a member connection up to is asked: a node
+  reached by inheritance on a live connection and then paired directly would never
+  be asked otherwise. Nothing else is retried and nothing polls: a failed fetch is
+  logged, a node that does not serve the protocol (an earlier release) is logged at
+  debug level and has no profile, and is asked again on the next connection and on
+  each change of the trust records that finds it without one. A
+  connection to a restarted or upgraded node is a new connection, which is how a new
+  version, a new system version or a new name arrives.
 - *Holding.* The profiles fetched are held in memory by the loop, one per node, with
   the time they were fetched. They go with the trust in the node: the records are
   dropped for every node that is no longer trusted directly when the trust records
@@ -2176,7 +2185,7 @@ reproducible).
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
 | After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
 | The node profile is made from the owner's name or the host name, the machine and the version, is issued again only when its content changes and always strictly later, leaves out a field that breaks its rules, and is answered only to a node trusted directly | `profile.go` (`refreshProfile`, `Profile`) | `TestTheProfileStatesTheMachineTheVersionAndTheOwnersNameOrElseTheHostName`, `TestAProfileIsIssuedAgainOnlyWhenItsContentChanges`, `TestAValueTheMachineGivesThatBreaksTheRulesIsLeftOutOfTheProfile`, `TestOnlyANodeTrustedDirectlyMayAskForTheProfile` |
-| A peer's profile is fetched when a connection to it comes up, and kept only when it is the peer's own, verified against the certificate held for it, and newer; a failed fetch or a peer that does not serve the protocol leaves none; trust ending drops it | `profile.go` (`fetchProfile`, `profileFetched`, `verifyProfile`, `pruneProfiles`) | `TestTheProfileOfAPeerIsFetchedWhenAConnectionComesUpAndKeptWhenNewer`, `TestAProfileThatIsNotThePeersOwnIsNotKept`, `TestAPeerWithoutAProfileIsStillListed`, `TestTheProfileOfANodeNoLongerTrustedIsDropped` |
+| A peer's profile is fetched when a connection to it comes up, and kept only when it is the peer's own, verified against the certificate held for it, and newer; a failed fetch or a peer that does not serve the protocol leaves none; trust ending drops it; a connection that comes up during a fetch, and direct trust gained on a live connection, are asked too | `profile.go` (`fetchProfile`, `profileFetched`, `fetchMissingProfiles`, `verifyProfile`, `pruneProfiles`) | `TestTheProfileOfAPeerIsFetchedWhenAConnectionComesUpAndKeptWhenNewer`, `TestAProfileThatIsNotThePeersOwnIsNotKept`, `TestAPeerWithoutAProfileIsStillListed`, `TestTheProfileOfANodeNoLongerTrustedIsDropped`, `TestAConnectionThatComesUpDuringAFetchIsAskedWhenThatFetchEnds`, `TestANodeTrustedDirectlyOnAConnectionThatIsUpIsAsked` |
 | An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
 | A session nobody controls is one alert for the control record of its creation, however often the node starts | `alerts.go` (`raiseAlertOnce`), `create.go` (`alertUncontrolled`) | `TestAnUncontrolledCreationIsToldOnceAcrossRestarts` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |

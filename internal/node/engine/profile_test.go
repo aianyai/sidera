@@ -391,3 +391,95 @@ func TestTheOwnersViewsCarryTheProfileOfAPeer(t *testing.T) {
 		}
 	}
 }
+
+// waitProfilesAsked waits until the node was asked for the profile of the peer at
+// least count times in all, and then until the engine has taken in every answer.
+func (n *profileNode) waitProfilesAsked(t *testing.T, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for n.net.profilesAsked(n.peer.node) < count {
+		if time.Now().After(deadline) {
+			t.Fatalf("the peer was asked %d times, want %d", n.net.profilesAsked(n.peer.node), count)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := n.e.Quiesce(context.Background(), engine.Expect{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A connection that comes up while a fetch from the node is under way is not lost
+// with that fetch: the fetch under way can be on a connection that has died with
+// the node it went to, and nothing else would ask again.
+func TestAConnectionThatComesUpDuringAFetchIsAskedWhenThatFetchEnds(t *testing.T) {
+	n := newProfileNode(t, imac)
+	n.net.connected = map[ident.NodeID]bool{n.peer.node: true}
+	good := n.peer.profileIssuedAt(1, t0.Add(time.Minute), "inuc")
+	inFlight, release := make(chan struct{}), make(chan struct{})
+	n.net.servesProfile(n.peer.node, func() (record.Record, error) {
+		close(inFlight)
+		<-release
+		return record.Record{}, transport.ErrTimeout // the connection it was on died
+	})
+	n.e.MemberConnected(context.Background(), n.peer.node)
+	<-inFlight
+	n.net.servesProfile(n.peer.node, func() (record.Record, error) { return good, nil })
+	n.e.MemberConnected(context.Background(), n.peer.node) // the new connection
+	close(release)
+	n.waitProfilesAsked(t, 2)
+	if v := n.peerView(t); v.Profile == nil || v.Profile.Name != "inuc" {
+		t.Fatalf("profile after the second fetch = %+v", v.Profile)
+	}
+	if got := n.net.profilesAsked(n.peer.node); got != 2 {
+		t.Errorf("the peer was asked %d times, want 2", got)
+	}
+}
+
+// A node that becomes trusted directly while a connection to it is up is asked at
+// once, since the news of that connection came when it was not trusted and does not
+// come again. A node whose connection is down waits for the connection.
+func TestANodeTrustedDirectlyOnAConnectionThatIsUpIsAsked(t *testing.T) {
+	n := newProfileNode(t, imac)
+	late := newPeerNode(t, 2)
+	down := newPeerNode(t, 3)
+	rec := late.profileIssuedAt(1, t0.Add(time.Minute), "late")
+	n.net.connected = map[ident.NodeID]bool{late.node: true}
+	n.net.servesProfile(late.node, func() (record.Record, error) { return rec, nil })
+	n.net.servesProfile(down.node, func() (record.Record, error) { return rec, nil })
+	for _, p := range []peerNode{late, down} {
+		cert := p.certificate(1)
+		cred := p.credentialWith(n.r.keys.IdentitySigner(), false)
+		if err := loopErr(t, n.e, func(l engine.LoopSide) error { return l.InstallCredential(cred.Record, &cert) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for n.net.profilesAsked(late.node) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the node trusted on a live connection was not asked")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := n.e.Quiesce(context.Background(), engine.Expect{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.net.profilesAsked(down.node); got != 0 {
+		t.Errorf("a node with no connection was asked %d times", got)
+	}
+	if got := n.net.profilesAsked(late.node); got != 1 {
+		t.Errorf("the node was asked %d times, want 1", got)
+	}
+	// Installing another credential changes trust again and must not ask for what
+	// is already held.
+	other := newPeerNode(t, 4)
+	cert, cred := other.certificate(1), other.credentialWith(n.r.keys.IdentitySigner(), false)
+	if err := loopErr(t, n.e, func(l engine.LoopSide) error { return l.InstallCredential(cred.Record, &cert) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.e.Quiesce(context.Background(), engine.Expect{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := n.net.profilesAsked(late.node); got != 1 {
+		t.Errorf("a node whose profile is held was asked again: %d times", got)
+	}
+}

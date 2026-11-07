@@ -167,12 +167,14 @@ func (e *Engine) trustOf(node ident.NodeID, now time.Time) trust.Outcome {
 }
 
 // trustChanged is what every change of the trust records ends with: the view is
-// made again from the records and the network is told. It is the one place either
-// is done.
+// made again from the records, the profiles held follow the trust, and the network
+// is told. It is the one place any of it is done.
 func (e *Engine) trustChanged() {
 	e.trust.rebuild(e.d.Node)
-	e.pruneProfiles(e.d.Clock.Now())
+	now := e.d.Clock.Now()
+	e.pruneProfiles(now)
 	e.publishMembership()
+	e.fetchMissingProfiles(now)
 }
 
 // ---------------------------------------------------------------------------

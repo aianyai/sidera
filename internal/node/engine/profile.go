@@ -17,7 +17,8 @@ import (
 // The node profile is what a node says about itself so that people and agents
 // can tell nodes apart: a name, the machine and the version of Sidera it runs. It
 // is a signed record the node issues for itself, answers to the nodes it trusts
-// directly, and fetches from them once a connection to each comes up. Nothing in
+// directly, and fetches from them when a connection to each comes up and when a node
+// becomes trusted directly on a connection that is already up. Nothing in
 // it is a fact of addressing, trust or policy.
 
 // profileState is what the loop holds of profiles. It is touched by the loop
@@ -30,10 +31,16 @@ type profileState struct {
 	peers map[ident.NodeID]heldProfile
 	// fetching are the nodes a worker is fetching a profile from now.
 	fetching map[ident.NodeID]struct{}
+	// again are the nodes a connection came up to while a fetch from them was under
+	// way. The fetch under way may be on a connection that has since died, so one
+	// more is made when it ends.
+	again map[ident.NodeID]struct{}
 }
 
 func newProfileState() *profileState {
-	return &profileState{peers: map[ident.NodeID]heldProfile{}, fetching: map[ident.NodeID]struct{}{}}
+	return &profileState{
+		peers: map[ident.NodeID]heldProfile{}, fetching: map[ident.NodeID]struct{}{}, again: map[ident.NodeID]struct{}{},
+	}
 }
 
 // ownProfile is the profile this node issued, signed.
@@ -196,16 +203,24 @@ func (e *Engine) MemberConnected(ctx context.Context, node ident.NodeID) {
 	_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
 }
 
-// fetchProfile starts the fetch of a node's profile, once per connection that
-// comes up: not for a node that is not trusted directly, not while a fetch from
-// the node is under way, and not without a network.
+// fetchProfile starts the fetch of a node's profile when a connection to it comes
+// up: not for a node that is not trusted directly and not without a network. While
+// a fetch from the node is under way the connection is noted, and the fetch ends
+// with one more (profileFetched).
 func (e *Engine) fetchProfile(node ident.NodeID, now time.Time) {
 	if e.net == nil || e.trustOf(node, now) != trust.AllowedDirect {
 		return
 	}
 	if _, busy := e.profiles.fetching[node]; busy {
+		e.profiles.again[node] = struct{}{}
 		return
 	}
+	e.startProfileFetch(node)
+}
+
+// startProfileFetch hands the fetch of a node's profile to a worker. The caller
+// has found the node trusted directly, the network present and no fetch under way.
+func (e *Engine) startProfileFetch(node ident.NodeID) {
 	e.profiles.fetching[node] = struct{}{}
 	if !e.spawn(func(ctx context.Context) {
 		c := &cmdProfileFetched{call: newCall[struct{}](), node: node}
@@ -229,13 +244,20 @@ func (c *cmdProfileFetched) fail(err error) { c.call.fail(err) }
 func (c *cmdProfileFetched) run(e *Engine, now time.Time) {
 	delete(e.profiles.fetching, c.node)
 	e.profileFetched(now, c)
+	if _, again := e.profiles.again[c.node]; again {
+		delete(e.profiles.again, c.node)
+		if e.net.Connected(c.node) {
+			e.fetchProfile(c.node, now)
+		}
+	}
 	c.done(struct{}{}, nil)
 }
 
 // profileFetched judges the answer of a fetch and keeps the profile when it is the
 // node's own, signed by the key this node accepts for it, and newer than the one
-// held. A failure is logged and nothing is retried: the next connection to the
-// node fetches again.
+// held. A failure is logged and not retried here: the next connection to the node,
+// or the next change of the trust records that finds the node without a profile,
+// fetches again.
 func (e *Engine) profileFetched(now time.Time, c *cmdProfileFetched) {
 	switch {
 	case c.err != nil:
@@ -279,6 +301,28 @@ func (e *Engine) pruneProfiles(now time.Time) {
 	for node := range e.profiles.peers {
 		if e.trustOf(node, now) != trust.AllowedDirect {
 			delete(e.profiles.peers, node)
+		}
+	}
+}
+
+// fetchMissingProfiles asks the nodes this node trusts directly that it holds no
+// profile of, has no fetch under way to, and has a member connection up to. The
+// news of that connection (MemberConnected) came once, when the node may not yet
+// have been trusted directly, and does not come again. It runs whenever the trust
+// records change.
+func (e *Engine) fetchMissingProfiles(now time.Time) {
+	if e.net == nil {
+		return
+	}
+	for _, h := range e.trust.credentials {
+		node := h.cred.Payload().A
+		if node == e.d.Node {
+			node = h.cred.Payload().B
+		}
+		_, held := e.profiles.peers[node]
+		_, busy := e.profiles.fetching[node]
+		if !held && !busy && e.net.Connected(node) && e.trustOf(node, now) == trust.AllowedDirect {
+			e.startProfileFetch(node)
 		}
 	}
 }
