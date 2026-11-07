@@ -80,16 +80,21 @@ func operationIDText(id admin.OperationID) string {
 	return hex.EncodeToString(id[:])
 }
 
-// Validate the outer envelope only: method results remain the caller's JSON.
-// Missing metadata cannot silently confirm a change or hide a replay.
+// decodeResponse validates the outer envelope of an answer of success only: method
+// results remain the caller's JSON. Missing metadata cannot silently confirm a
+// change or hide a replay. Members of the envelope that this client does not know
+// are ignored, as in every answer of success. An envelope that cannot be read is
+// not an unknown outcome: the daemon answered that the request succeeded, so the
+// caller is told the program cannot read the answer, with the identifier of a
+// change.
 func decodeResponse(raw []byte, id admin.OperationID) error {
-	unknown := func() error { return apiwire.OutcomeUnknown(operationIDText(id)) }
+	unreadable := func() error { return apiwire.AnswerUnreadable(!id.IsZero(), operationIDText(id)) }
 	if id.IsZero() {
 		var response struct {
 			Result json.RawMessage `json:"result"`
 		}
-		if err := strictjson.Decode(raw, &response); err != nil {
-			return unknown()
+		if err := strictjson.DecodeTolerant(raw, &response); err != nil {
+			return unreadable()
 		}
 	} else {
 		var response struct {
@@ -97,8 +102,8 @@ func decodeResponse(raw []byte, id admin.OperationID) error {
 			Replayed    bool            `json:"replayed"`
 			Result      json.RawMessage `json:"result"`
 		}
-		if err := strictjson.Decode(raw, &response); err != nil || response.OperationID != operationIDText(id) {
-			return unknown()
+		if err := strictjson.DecodeTolerant(raw, &response); err != nil || response.OperationID != operationIDText(id) {
+			return unreadable()
 		}
 	}
 	return nil

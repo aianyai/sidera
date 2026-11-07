@@ -94,6 +94,9 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 	token := c.endpointToken()
 	timeout := 60 * time.Second
 	var decode func([]byte) (any, error)
+	// changes is set for the methods that change state, so that an answer that
+	// cannot be read says the change was accepted.
+	changes := false
 	switch method {
 	case "probe":
 		token = c.cfg.ProbeToken
@@ -101,16 +104,19 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 	case "me":
 		decode = clientDecode[MeResult]
 	case "declare":
+		changes = true
 		decode = clientDecode[DeclareResult]
 	case "peers":
 		decode = clientDecode[PeersResult]
 	case "directory":
 		decode = clientDecode[DirectoryResult]
 	case "send", "reply":
+		changes = true
 		decode = clientDecode[SendResult]
 	case "recv":
 		decode = clientDecodePage
 	case "ack":
+		changes = true
 		decode = clientDecode[AckResult]
 		switch request := in.(type) {
 		case AckRequest:
@@ -121,6 +127,7 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 	case "status":
 		decode = clientDecode[adapterproto.MessageStatusResult]
 	case "control":
+		changes = true
 		decode = clientDecode[ControlResult]
 	default:
 		return nil, &apiwire.Error{Category: apiwire.CategoryNotFound, Code: "method_unknown", Message: "the Agent method is not known"}
@@ -146,45 +153,34 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decode(raw)
+	// The node answered success; a result that is not readable is a program that
+	// does not understand the node, not an outcome that is unknown.
+	result, err := decode(raw)
+	if err != nil {
+		return nil, apiwire.AnswerUnreadable(changes, "")
+	}
+	return result, nil
 }
 
+// clientDecode reads the result of a method. A member the client does not know is
+// ignored, at any depth, because a client outlives the daemon it started with: a
+// daemon that is updated under a long-running session adds members to a result, and
+// the session must keep reading it. Everything the client does know is read as
+// strictly as any document.
 func clientDecode[T any](raw []byte) (any, error) {
 	var out T
-	if err := strictjson.Decode(raw, &out); err != nil {
-		return nil, apiwire.OutcomeUnknown("")
+	if err := strictjson.DecodeTolerant(raw, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
 
-// clientDecodePage checks a page of recv and returns it unchanged. It reads a
-// page as RecvPage except in one respect: a message on the page may carry members
-// this version does not know. The client of a long-running agent session outlives
-// the daemon, which is updated under it, so a page of a newer daemon must not be
-// refused whole, with every message queued behind it, for a member that only adds
-// to a message. Everything else stays strict: the other members of the page, and
-// the known members of a message, are decoded as every response is.
+// clientDecodePage checks a page of recv and returns it unchanged.
 func clientDecodePage(raw []byte) (any, error) {
-	if _, err := clientDecode[clientPage](raw); err != nil {
+	if _, err := clientDecode[adapterproto.RecvPage](raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
-}
-
-// clientPage is adapterproto.RecvPage with messages that tolerate unknown members.
-type clientPage struct {
-	Lease    adapterproto.LeaseRef `json:"lease"`
-	Messages []openPageMessage     `json:"messages"`
-	More     int                   `json:"more"`
-}
-
-// openPageMessage is adapterproto.PageMessage that ignores the members it has no
-// field for.
-type openPageMessage adapterproto.PageMessage
-
-func (m *openPageMessage) UnmarshalJSON(data []byte) error {
-	type plain openPageMessage
-	return strictjson.DecodeOpen(data, (*plain)(m))
 }
 
 func clientResult[T any](c *Client, ctx context.Context, method string, in any) (T, error) {

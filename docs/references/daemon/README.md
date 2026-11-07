@@ -505,11 +505,17 @@ retains its presence even when zero. Nil params are omitted. Method and params
 validation remain with the server's table. Ordinary calls have a 60-second timeout;
 `adapters.install` has five minutes, also bounded by the caller's context.
 
-The client strictly checks the successful response envelope and, for a change,
-requires the same operation identifier and the presence of `replayed`. It returns
+The client checks the successful response envelope and, for a change,
+requires the same operation identifier and the presence of `replayed`; a member of
+the envelope it does not know is ignored, as in every successful answer of the
+node (a client may be older than the daemon it talks to, so a later release can add
+a member to an answer, but never one that a caller must understand to act correctly:
+that becomes a new method). It returns
 the complete unchanged `json.RawMessage`, including the metadata, for the caller
-to print or interpret. A malformed success, incomplete answer or malformed error
-answer has an unknown outcome. Every unknown outcome for a request with an
+to print or interpret. A success whose envelope cannot be read is
+`internal/answer_unreadable`, with the operation identifier of a change in
+`details.operation_id`; an incomplete answer or an error answer the client cannot
+read has an unknown outcome. Every unknown outcome for a request with an
 identifier retains it in `details.operation_id`; server codes and details such as
 `storage_fatal` are preserved. The client performs no resend. The caller owns the
 one operation identifier, version and exact request to retain for a resend, since

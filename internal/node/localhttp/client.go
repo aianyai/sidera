@@ -109,8 +109,11 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 		return nil, apiwire.OutcomeUnknown("")
 	}
 	if resp.StatusCode != http.StatusOK {
+		// The daemon did not say success, so an error body this client cannot read
+		// leaves it not knowing whether the request took effect. A member it does not
+		// know is ignored: a later daemon may add one to an error as to any answer.
 		var answer apiwire.Body
-		if err := strictjson.Decode(raw, &answer); err != nil {
+		if err := strictjson.DecodeTolerant(raw, &answer); err != nil {
 			return nil, apiwire.OutcomeUnknown("")
 		}
 		return nil, &answer.Error

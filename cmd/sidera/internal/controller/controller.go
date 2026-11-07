@@ -168,8 +168,12 @@ func Attach(ctx context.Context, m Manager, req Request) (Attachment, error) {
 	var out struct {
 		Result Attachment `json:"result"`
 	}
-	if err := strictjson.Decode(raw, &out); err != nil || out.Result.Token.Validate() != nil {
-		return Attachment{}, apiwire.OutcomeUnknown("")
+	// The node answered success. A member this program does not know is ignored, as
+	// a long-running session must keep working under a node updated after it
+	// started; an answer it cannot read is said so, and the attachment, which a
+	// repeat finds again, is not asked for twice.
+	if err := strictjson.DecodeTolerant(raw, &out); err != nil || out.Result.Token.Validate() != nil {
+		return Attachment{}, apiwire.AnswerUnreadable(true, "")
 	}
 	return out.Result, nil
 }

@@ -136,29 +136,64 @@ func TestClientErrorsRetainUnknownOperation(t *testing.T) {
 	}
 }
 
-func TestClientMalformedAnswersAreUnknown(t *testing.T) {
+// The daemon answered 200 and the client cannot read the envelope: the node said
+// the request succeeded, so the outcome is not unknown. The identifier of a change
+// stays in the details.
+func TestClientUnreadableSuccessAnswers(t *testing.T) {
 	var id admin.OperationID
 	id[15] = 1
-	for _, body := range []string{
-		``, `{`, `null`, `[]`, `{}`, `{"result":{}} {}`, `{"result":{},"result":{}}`,
-		`{"result":{"value":"\ud800"}}`, "{\"result\":{\"value\":\"\xff\"}}",
-		`{"result":{},"extra":1}`, `{"operation_id":"","result":{}}`, `{"error":{"category":"internal","code":"internal","message":"failed"}}`,
-		`{"operation_id":"00000000000000000000000000000002","replayed":false,"result":{}}`,
-		`{"operation_id":"00000000000000000000000000000001","result":{}}`,
-		`{"operation_id":"00000000000000000000000000000001","replayed":null,"result":{}}`,
-		`{"operation_id":"00000000000000000000000000000001","replayed":false}`,
-	} {
-		for _, operation := range []admin.OperationID{{}, id} {
+	bodies := func(change bool) []string {
+		all := []string{
+			``, `{`, `null`, `[]`, `{}`, `{"result":{}} {}`, `{"result":{},"result":{}}`,
+			`{"result":{"value":"\ud800"}}`, "{\"result\":{\"value\":\"\xff\"}}",
+			`{"error":{"category":"internal","code":"internal","message":"failed"}}`,
+		}
+		if change {
+			// Only a change checks the identifier and the replay flag of its answer.
+			all = append(all,
+				`{"operation_id":"","result":{}}`,
+				`{"operation_id":"00000000000000000000000000000002","replayed":false,"result":{}}`,
+				`{"operation_id":"00000000000000000000000000000001","result":{}}`,
+				`{"operation_id":"00000000000000000000000000000001","replayed":null,"result":{}}`,
+				`{"operation_id":"00000000000000000000000000000001","replayed":false}`,
+				`{"operation_id":"00000000000000000000000000000001","replayed":false,"replayed":true,"result":{}}`,
+			)
+		}
+		return all
+	}
+	for _, operation := range []admin.OperationID{{}, id} {
+		for _, body := range bodies(!operation.IsZero()) {
 			var calls atomic.Int32
 			c := managementClient(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1); io.WriteString(w, body) })
 			got, err := c.Call(context.Background(), "node.set", Request{OperationID: operation})
 			e := apiwire.FromError(err)
-			if got != nil || e == nil || e.Category != apiwire.CategoryOutcomeUnknown || (operation == id && e.Details["operation_id"] != opID(1)) {
+			if got != nil || e == nil || e.Category != apiwire.CategoryInternal || e.Code != apiwire.CodeAnswerUnreadable || (operation == id && e.Details["operation_id"] != opID(1)) {
 				t.Errorf("body %q, id %x: Call = %s, %v", body, operation, got, err)
 			}
 			if calls.Load() != 1 {
-				t.Fatal("malformed response caused resend")
+				t.Fatal("unreadable response caused resend")
 			}
+		}
+	}
+}
+
+// A member of the envelope that this client does not know is ignored, as a member of
+// any successful answer is: a later daemon may add one, and the client must still
+// read what it has.
+func TestClientIgnoresUnknownMembersOfTheEnvelope(t *testing.T) {
+	var id admin.OperationID
+	id[15] = 1
+	for _, tc := range []struct {
+		id   admin.OperationID
+		body string
+	}{
+		{admin.OperationID{}, `{"result":{},"future":{"a":[1]}}`},
+		{id, `{"operation_id":"00000000000000000000000000000001","replayed":false,"result":{},"future":1}`},
+	} {
+		c := managementClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.body) })
+		got, err := c.Call(context.Background(), "node.set", Request{OperationID: tc.id})
+		if err != nil || string(got) != tc.body {
+			t.Errorf("body %q: Call = %s, %v; want the answer unchanged", tc.body, got, err)
 		}
 	}
 }
@@ -211,7 +246,7 @@ func FuzzClientResponse(f *testing.F) {
 				if !json.Valid(body) {
 					t.Fatal("successful response was invalid")
 				}
-			} else if e := apiwire.FromError(err); e.Category != apiwire.CategoryOutcomeUnknown || (operation == id && e.Details["operation_id"] != opID(1)) {
+			} else if e := apiwire.FromError(err); e.Code != apiwire.CodeAnswerUnreadable || (operation == id && e.Details["operation_id"] != opID(1)) {
 				t.Fatalf("invalid response: %v", err)
 			}
 		}

@@ -126,6 +126,55 @@ func TestClientDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
+// The error a newer daemon reports may carry members this client does not know; the
+// category and code it has are still read, and acted on. An error body the client
+// cannot read at all, from an answer that is not a success, tells nothing about
+// whether the request took effect, so it stays an unknown outcome.
+func TestClientReadsAnErrorBodyThatANewerDaemonExtended(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantCode   string // empty: an unknown outcome
+	}{
+		{"an unknown member of the body", `{"error":{"category":"refused","code":"too_large","message":"m"},"future":1}`, "too_large"},
+		{"an unknown member of the error", `{"error":{"category":"refused","code":"too_large","message":"m","future":{"a":[1]}}}`, "too_large"},
+		{"details", `{"error":{"category":"refused","code":"too_large","message":"m","details":{"a":{"b":1}}}}`, "too_large"},
+		{"no code", `{"error":{"category":"refused","message":"m"}}`, ""},
+		{"not an object", `[]`, ""},
+		{"not JSON", `<html>`, ""},
+		{"a repeated member", `{"error":{"category":"refused","code":"a","code":"b","message":"m"}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := socketHome(t)
+			addr, err := ipc.Locate(home, ipc.KindManage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, err := ipc.Listen(addr, held{}, ipc.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				io.WriteString(w, tc.body)
+			})}
+			done := make(chan error, 1)
+			go func() { done <- s.Serve(l) }()
+			t.Cleanup(func() { s.Close(); <-done })
+			_, err = localClient(t, home).Call(context.Background(), localhttp.Request{Method: "known", Body: struct{}{}, Timeout: 10 * time.Second})
+			e := apiwire.FromError(err)
+			if tc.wantCode == "" {
+				if e.Code != apiwire.CodeOutcomeUnknown {
+					t.Fatalf("Call: %v; want outcome_unknown", err)
+				}
+				return
+			}
+			if e.Category != apiwire.CategoryRefused || e.Code != tc.wantCode {
+				t.Fatalf("Call: %v; want refused/%s", err, tc.wantCode)
+			}
+		})
+	}
+}
+
 func FuzzClientRequestDocuments(f *testing.F) {
 	for _, seed := range []string{`{}`, `{"body":"<>&"}`, `{"body":"\ud800"}`, `{"body":1,"body":2}`, "bad\xff"} {
 		f.Add(seed)

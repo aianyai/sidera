@@ -70,8 +70,10 @@ Calls use the supplied timeout, also bounded by the caller's context. A failure
 before writing is mapped through `apiwire`, except that a transport failure `apiwire` has
 no words for (a connection lost, such as a kept-alive one the daemon closed while shutting
 down) is `outcome_unknown` like a written request without a complete answer, so that the
-callers that wait or send again act on it instead of reporting an internal error. Complete non-200 answers decode as `apiwire.Body`;
-malformed error answers have unknown outcomes. Success returns the original
+callers that wait or send again act on it instead of reporting an internal error. Complete non-200 answers decode as `apiwire.Body` with
+`strictjson.DecodeTolerant`, so an error a later daemon extended is still read;
+an error answer that cannot be read has an unknown outcome, because the daemon did
+not say success and nothing tells whether the request took effect. Success returns the original
 response bytes for the facade to validate, without a response size limit or
 re-encoding. `Close` releases idle connections; contexts own in-flight calls.
 

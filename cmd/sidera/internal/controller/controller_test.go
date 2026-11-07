@@ -184,6 +184,34 @@ func TestAttachSendsTheRequestAndReturnsTheToken(t *testing.T) {
 	}
 }
 
+// answers is a Manager that gives one fixed answer.
+type answers string
+
+func (a answers) Call(context.Context, string, manageapi.Request) (json.RawMessage, error) {
+	return json.RawMessage(a), nil
+}
+
+// A session outlives the daemon it attached to; a later daemon may add members to
+// the result of the attachment, which this program ignores. A result it cannot read
+// is the program's failure, said as such, and the request is not repeated.
+func TestAttachReadsAResultThatALaterNodeExtended(t *testing.T) {
+	const result = `"endpoint":"n/e","instance":"claude","token":"` + tokenA + `","wake":{"state":"ready"}`
+	att, err := controller.Attach(context.Background(), answers(`{"result":{`+result+`,"future":1},"future":{"a":[1]}}`), controller.Request{Adapter: "claude", NativeRef: "s"})
+	if err != nil || string(att.Token) != tokenA || att.Endpoint != "n/e" {
+		t.Fatalf("%+v, %v; want the attachment read with the unknown members ignored", att, err)
+	}
+	for name, answer := range map[string]string{
+		"a token that is not one":    `{"result":{"endpoint":"n/e","instance":"claude","token":"x","wake":{"state":"ready"}}}`,
+		"a member of the wrong type": `{"result":{"endpoint":7,"instance":"claude","token":"` + tokenA + `","wake":{"state":"ready"}}}`,
+		"no result":                  `{}`,
+	} {
+		_, err := controller.Attach(context.Background(), answers(answer), controller.Request{Adapter: "claude", NativeRef: "s"})
+		if e := apiwire.FromError(err); e.Category != apiwire.CategoryInternal || e.Code != apiwire.CodeAnswerUnreadable {
+			t.Errorf("%s: %v; want internal/answer_unreadable", name, err)
+		}
+	}
+}
+
 func TestAttachRefusalsAreWordedForTheCaller(t *testing.T) {
 	for code, want := range map[string]string{
 		"instance_unknown":       "sidera adapter enable claude",

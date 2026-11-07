@@ -88,8 +88,14 @@ explicit `[]`, rejected by the server without acknowledgement. This encoding
 leaves the server's request type and presence rules unchanged.
 
 Successful `Call` results have these concrete Go types. Every response is
-strictly decoded before success, except that a message of a `recv` page may carry
-members the client does not know; `recv` returns its original bytes after that check. An incomplete or invalid response is `outcome_unknown` for both APIs.
+decoded before success with `strictjson.DecodeTolerant`: members the client does not
+know are ignored at any depth, and every member it does know is checked as strictly
+as a request; `recv` returns its original bytes after that check. A result added to
+by a later daemon is therefore still read; what a caller must understand is never added
+to an existing result but made a new method. A written request with no complete
+answer is `outcome_unknown`; a complete answer of success that cannot be read is
+`internal/answer_unreadable`, which for `send`, `reply`, `ack`, `declare` and
+`control` (the table in `call`) also says the change was accepted. Requests stay strict.
 
 | Method | Concrete result |
 | --- | --- |

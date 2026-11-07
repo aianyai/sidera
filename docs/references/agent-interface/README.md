@@ -290,8 +290,9 @@ replace invalid bytes, changing message content or merging distinct idempotency
 keys. Ordinary calls have a 60-second deadline; receives have
 `min(requested wait_s, manifest.MaxRecvWaitSeconds) + 30` seconds, bounded also by
 the caller's context. The protocol's maximum is 120 seconds. A written request
-without a complete, valid answer is `outcome_unknown`; the caller cannot assume
-it had no effect. A connection lost before the request was written, such as a
+without a complete answer is `outcome_unknown`; the caller cannot assume
+it had no effect. A complete answer of success that the client cannot read is
+`internal/answer_unreadable`: the node said what happened. A connection lost before the request was written, such as a
 kept-alive one that the daemon closed while shutting down, is `outcome_unknown`
 too, not `internal`. If the request was not written, an ended caller context maps
 to `unavailable/request_canceled` or `unavailable/request_timeout` through
@@ -309,7 +310,7 @@ reads the original object's exact `wait_s` as int64 after safe encoding. Missing
 or unreadable values use zero for the budget; server validation remains
 authoritative. Unknown method names return `not_found/method_unknown` locally,
 before building a URL. `Call` and typed methods share credential selection,
-deadlines and strict successful-result decoding.
+deadlines and successful-result decoding, which ignores members it does not know.
 
 Struct encoding follows its JSON tags. Existing typed optional scalar fields
 still use zero for omission, including an empty typed control body. Callers
@@ -321,15 +322,23 @@ the latter without confirming any messages. Otherwise, omitting an explicitly
 empty list would silently acknowledge the whole page. The server's request DTOs
 and strict presence rules are unchanged.
 
-`Call` returns the following concrete Go result types after complete strict
-decoding. `recv` is validated as a page but returned as the original `[]byte`,
-including its newline. Invalid successful responses have `outcome_unknown`. The one
-leniency is in the page of `recv`: a message on it may carry members this version
-does not know, which the check ignores (the bytes returned still hold them), so that a
-member a later daemon adds to a message does not make an earlier client refuse the
-page and every message queued behind it. The members it does know, a repeated member
-of a message, and every other member of the page are checked as strictly as in any
-other response.
+`Call` returns the following concrete Go result types after complete decoding. `recv` is validated as a page but returned as the original `[]byte`,
+including its newline. A successful response that cannot be read is
+`internal/answer_unreadable`, not `outcome_unknown`.
+
+A client ignores the members of a successful result that it does not know, in every
+object at any depth (a page of `recv` too, which is returned as it came, unknown
+members included). A session started by one release outlives the daemon it started
+with, and a daemon updated under it may add a member to a result; the older client
+must keep reading what it understands, instead of refusing the result and, for a page,
+every message queued behind it. Only requests are strict. The members a client does
+know are checked as strictly as in any response: a wrong type, `null`, a missing
+required member, a repeated member and invalid text still make the result unreadable.
+One value keeps its own strict rules: the control reply inside the result of
+`status`, a type of the adapter protocol that decodes itself. What a caller must understand to act correctly is never added to an existing result:
+it becomes a new method, which an older client does not call, as the setup of an
+adapter instance returns the whole command to run instead of a member the caller would
+have to honour.
 
 | Method | Concrete Go result |
 | --- | --- |

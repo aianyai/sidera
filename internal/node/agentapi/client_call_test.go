@@ -85,17 +85,21 @@ func TestCallSelectsTheCredentialAndValidatesEveryResultType(t *testing.T) {
 				t.Fatalf("recv bytes: %q; want %q", raw, tc.answer)
 			}
 			_, err = c.Call(context.Background(), tc.method, map[string]any{"incomplete": true})
-			if e := apiwire.FromError(err); e == nil || e.Category != apiwire.CategoryOutcomeUnknown || e.Code != apiwire.CodeOutcomeUnknown {
-				t.Fatalf("incomplete result: %v; want outcome_unknown", err)
+			if e := apiwire.FromError(err); e == nil || e.Category != apiwire.CategoryInternal || e.Code != apiwire.CodeAnswerUnreadable {
+				t.Fatalf("a successful answer that lacks the members of the result: %v; want internal/answer_unreadable", err)
 			}
 		})
 	}
 }
 
-// A message on a page may carry members this client does not know, and the page is
-// returned as it came; anything else that is wrong with a page is still refused.
-func TestCallToleratesUnknownMembersOfAPageMessageOnly(t *testing.T) {
+// A client reads the answer of a node that is newer than itself: a member it does
+// not know is ignored in a successful result at any depth, a page of recv
+// included, which is returned as it came. The page rows that were refused before
+// (an unknown member of the page, of a part) are accepted on purpose: one rule
+// reads every result.
+func TestCallIgnoresUnknownMembersOfASuccessfulResult(t *testing.T) {
 	const lease = `"lease":"11111111111111111111111111111111"`
+	declaration := `{"paused":false,"refuse_multi_recipient":false,"restrict_senders":false,"accept_from":[],"hidden_from_directory":false`
 	message := func(extra string) string {
 		return `{"id":"m1","from":"node/ep","body":"hello"` + extra + `}`
 	}
@@ -103,32 +107,78 @@ func TestCallToleratesUnknownMembersOfAPageMessageOnly(t *testing.T) {
 		return "{" + lease + `,"messages":[` + messages + `],"more":0` + extra + "}\n"
 	}
 	for _, tc := range []struct {
-		name, answer string
-		ok           bool
+		name, method, answer string
 	}{
-		{"a known page", page(message(""), ""), true},
-		{"an unknown member of a message", page(message(`,"future":{"a":[1]}`), ""), true},
-		{"an unknown member of every message", page(message(`,"future":1`)+","+message(`,"other":"x"`), ""), true},
-		{"an unknown member of the page", page(message(""), `,"future":1`), false},
-		{"an unknown member of a part", page(message(`,"part":{"index":1,"total":2,"label":"part 1/2","future":1,"next":{"msg":"m1","part":2}}`), ""), false},
-		{"a repeated member of a message", page(message(`,"body":"again"`), ""), false},
-		{"a repeated unknown member of a message", page(message(`,"future":1,"future":2`), ""), false},
-		{"a message without a body", page(`{"id":"m1","from":"node/ep"}`, ""), false},
-		{"a known member of the wrong type", page(message(`,"possibly_duplicate":"yes"`), ""), false},
-		{"a message that is not an object", page(`"m1"`, ""), false},
-		{"a page without messages", "{" + lease + `,"more":0}`, false},
+		{"me, the result", "me", `{"address":"a","node":"n","kind":"session","display_name":"s","declaration":` + declaration + `},"frontends":{},"future":[1]}`},
+		{"me, the declaration", "me", `{"address":"a","node":"n","kind":"session","display_name":"s","declaration":` + declaration + `,"future":1},"frontends":{}}`},
+		{"me, a front end and its budget", "me", `{"address":"a","node":"n","kind":"session","display_name":"s","declaration":` + declaration + `},"frontends":{"cli":{"recv_wait_max_s":5,"future":1,"budget":{"unit":"chars","limit":9,"future":2}}}}`},
+		{"declare, the declaration", "declare", `{"declaration":` + declaration + `,"future":1}}`},
+		{"peers, the result", "peers", `{"nodes":[],"future":1}`},
+		{"peers, a node", "peers", `{"nodes":[{"node":"n","self":true,"trust":"self","connected":true,"future":1}]}`},
+		{"peers, a profile", "peers", `{"nodes":[{"node":"n","self":true,"trust":"self","connected":true,"profile":{"name":"n","as_of":1,"future":{"a":[1]}}}]}`},
+		{"directory, the result", "directory", `{"endpoints":[],"next_cursor":"","future":1}`},
+		{"directory, an entry", "directory", `{"endpoints":[{"address":"a","kind":"session","display_name":"s","description":"","accepts":[],"future":1}],"next_cursor":""}`},
+		{"directory, an adapter", "directory", `{"endpoints":[{"address":"a","kind":"session","display_name":"s","description":"","accepts":[],"adapter":{"instance":"i","id":"x","future":1}}],"next_cursor":""}`},
+		{"send, the result", "send", `{"message_id":"m1","to":["a"],"replayed":false,"future":1}`},
+		{"reply, the result", "reply", `{"message_id":"m1","to":["a"],"replayed":false,"future":1}`},
+		{"ack, the result", "ack", `{"items":[],"future":1}`},
+		{"status, the result", "status", `{"recipients":[],"future":1}`},
+		{"control, the result", "control", `{"message_id":"m1","to":"a","replayed":false,"future":1}`},
+		{"probe, the result", "probe", `{"ok":true,"preset":"default","frontend":"cli","future":1}`},
+		{"recv, a message", "recv", page(message(`,"future":{"a":[1]}`), "")},
+		{"recv, every message", "recv", page(message(`,"future":1`)+","+message(`,"other":"x"`), "")},
+		{"recv, the page", "recv", page(message(""), `,"future":1`)},
+		{"recv, a part", "recv", page(message(`,"part":{"index":1,"total":2,"label":"part 1/2","future":1,"next":{"msg":"m1","part":2}}`), "")},
+		{"recv, the pointer to the next part", "recv", page(message(`,"part":{"index":1,"total":2,"label":"part 1/2","next":{"msg":"m1","part":2,"future":1}}`), "")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := responseClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.answer) })
-			got, err := c.Call(context.Background(), "recv", json.RawMessage(`{}`))
-			if tc.ok {
-				if raw, isBytes := got.([]byte); err != nil || !isBytes || string(raw) != tc.answer {
-					t.Fatalf("Call: %q, %v; want the page as it came", got, err)
-				}
-				return
+			got, err := c.Call(context.Background(), tc.method, json.RawMessage(`{}`))
+			if err != nil {
+				t.Fatalf("Call: %v; want the unknown member ignored", err)
 			}
-			if e := apiwire.FromError(err); e == nil || e.Code != apiwire.CodeOutcomeUnknown {
-				t.Fatalf("Call: %v; want outcome_unknown", err)
+			if raw, isBytes := got.([]byte); isBytes != (tc.method == "recv") || (isBytes && string(raw) != tc.answer) {
+				t.Fatalf("Call returned %T %q; for recv, want the page as it came", got, got)
+			}
+		})
+	}
+}
+
+// What a client does not understand of a successful answer is not an unknown
+// outcome, whatever the cause: a known member of the wrong type, a repeated member,
+// a member a page message needs. It says so in words that name the program as the
+// likely cause, and for a method that changes state also that the change was
+// accepted. A request whose answer was cut off stays outcome_unknown, which
+// TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried holds.
+func TestCallReportsAnUnreadableSuccessfulAnswer(t *testing.T) {
+	const lease = `"lease":"11111111111111111111111111111111"`
+	for _, tc := range []struct {
+		name, method, answer string
+		changes              bool
+	}{
+		{"me, a known member of the wrong type", "me", `{"address":1,"node":"n","kind":"s","display_name":"s","declaration":{},"frontends":{}}`, false},
+		{"peers, a known member of the wrong type", "peers", `{"nodes":[{"node":"n","self":"yes","trust":"self","connected":true}]}`, false},
+		{"peers, a wrong type below an unknown member's neighbour", "peers", `{"nodes":[{"node":"n","self":true,"trust":"self","connected":true,"profile":{"name":3,"as_of":1}}],"future":1}`, false},
+		{"directory, a repeated member", "directory", `{"endpoints":[],"next_cursor":"","next_cursor":""}`, false},
+		{"status, null for a known member", "status", `{"recipients":null}`, false},
+		{"send", "send", `{"message_id":7,"to":["a"],"replayed":false}`, true},
+		{"reply", "reply", `{"message_id":"m1","to":"a","replayed":false}`, true},
+		{"ack", "ack", `{"items":{}}`, true},
+		{"declare", "declare", `{"declaration":[]}`, true},
+		{"control", "control", `{"to":"a","replayed":false}`, true},
+		{"recv, a message without a body", "recv", "{" + lease + `,"messages":[{"id":"m1","from":"n/e"}],"more":0}`, false},
+		{"recv, a repeated member of a message", "recv", "{" + lease + `,"messages":[{"id":"m1","from":"n/e","body":"a","body":"b"}],"more":0}`, false},
+		{"recv, a page without messages", "recv", "{" + lease + `,"more":0}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := responseClient(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, tc.answer) })
+			_, err := c.Call(context.Background(), tc.method, json.RawMessage(`{}`))
+			e := apiwire.FromError(err)
+			if e == nil || e.Category != apiwire.CategoryInternal || e.Code != apiwire.CodeAnswerUnreadable {
+				t.Fatalf("Call: %v; want internal/answer_unreadable", err)
+			}
+			if told := strings.Contains(e.Message, "the change was accepted"); told != tc.changes {
+				t.Fatalf("message %q: says the change was accepted = %v, want %v", e.Message, told, tc.changes)
 			}
 		})
 	}

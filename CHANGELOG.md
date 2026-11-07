@@ -38,6 +38,16 @@ protocol has a version of its own.
 
 ### Changed
 
+- **Clients read results that a later release added members to.** From this release on, the agent
+  tools, the `sidera` commands and the attachment of a session ignore members of a successful answer
+  that they do not know, so a session started after this release keeps working after the next
+  upgrade without being restarted for that reason. Requests are as strict as before.
+- **An answer that a program cannot read is reported as `internal/answer_unreadable`.** It used to be
+  `outcome_unknown`, which tells the caller to send the request again. The node had answered that the
+  request succeeded, so the new error says so, says the program is probably older than the node and
+  should be updated or the session restarted, and for a change (send, reply, ack, declare, control and
+  the owner's changes) says that it was accepted and where to see it. It exits
+  with code 1. `outcome_unknown` stays for a request that was written and got no complete answer.
 - **Restart the agent sessions that were running when you upgrade.** A Claude Code or Codex session
   started before the upgrade keeps the `sidera mcp` of the earlier release, and that program cannot
   read the new members of the `peers` and `directory` results: those two tools fail with

@@ -95,7 +95,9 @@ header is not, so the failure reaches the caller. The category is the one that
 callers already wait on or send again with the same operation identifier (the
 restart wait, the resend of a management change). An incomplete response body or malformed error
 answer also has an unknown outcome. A complete non-200 response is decoded as
-`apiwire.Body`. A 200 response returns the exact bytes for domain validation.
+`apiwire.Body`, ignoring members it does not know; one that cannot be read leaves the
+outcome unknown, since the daemon did not say it succeeded and nothing tells whether
+the request took effect. A 200 response returns the exact bytes for domain validation.
 The request-body limit does not limit responses: clients read the complete
 answer, including receive pages. Closing a client releases idle connections;
 in-flight calls remain owned by their contexts.

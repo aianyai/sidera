@@ -145,12 +145,15 @@ reflection boundary.
 
 `Call` has a 60-second timeout, extended to five minutes for `adapters.install`,
 and the caller's context may end it earlier. Successful responses are strictly
-checked as read or change envelopes; a change must answer with the same operation
+checked as read or change envelopes, ignoring envelope members the client does not
+know (a later daemon may add one); a change must answer with the same operation
 identifier and a `replayed` boolean. The complete `json.RawMessage`, including
 those fields and its original whitespace, is returned for the caller's output.
 Method-specific results remain JSON for the caller to interpret.
 
-A damaged or incomplete response is `outcome_unknown`. An unknown outcome carries
+An incomplete response is `outcome_unknown`; a complete one whose envelope cannot
+be read is `internal/answer_unreadable`, with the operation identifier of a change in
+`details.operation_id`: the daemon said the request succeeded. An unknown outcome carries
 the request's operation identifier in `details.operation_id`, whether detected
 locally or reported by the server; a server reason such as `storage_fatal` is
 retained. The client never resends. A caller that resends retains one identifier,
