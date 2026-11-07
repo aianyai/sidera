@@ -73,9 +73,11 @@ func ValidatePresetName(s string) error {
 //     formatting controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
 //     U+2069), which break or reorder lines of text;
 //   - the invisible format characters that draw nothing: the zero width space
-//     (U+200B), the word joiner and the invisible operators (U+2060 to U+2064),
-//     the deprecated format characters (U+206A to U+206F), the byte order mark
-//     used as a zero width no-break space (U+FEFF) and the tag characters
+//     (U+200B), the whole block from the word joiner to the deprecated format
+//     characters (U+2060 to U+206F: the word joiner, the invisible operators,
+//     the isolates, the deprecated format characters and U+2065, which is
+//     unassigned and which Unicode lists as default-ignorable), the byte order
+//     mark used as a zero width no-break space (U+FEFF) and the tag characters
 //     (U+E0000 to U+E007F, an invisible copy of ASCII);
 //   - the other characters that draw nothing or a blank in place of a letter: the
 //     combining grapheme joiner (U+034F), the Hangul fillers (U+115F, U+1160,
@@ -98,7 +100,7 @@ func ValidatePresetName(s string) error {
 var personTextRefused = [...][2]rune{
 	{0x0000, 0x001F}, {0x007F, 0x009F}, {0x034F, 0x034F}, {0x061C, 0x061C},
 	{0x115F, 0x1160}, {0x17B4, 0x17B5}, {0x200B, 0x200B}, {0x200E, 0x200F},
-	{0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F}, {0x3164, 0x3164},
+	{0x2028, 0x202E}, {0x2060, 0x206F}, {0x3164, 0x3164},
 	{0xFEFF, 0xFEFF}, {0xFFA0, 0xFFA0}, {0xFFF0, 0xFFF8}, {0x1BCA0, 0x1BCA3},
 	{0x1D173, 0x1D17A}, {0xE0000, 0xE00FF}, {0xE01F0, 0xE0FFF},
 }

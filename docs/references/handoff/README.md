@@ -150,7 +150,7 @@ checks that the model saw it before acknowledging for the agent.
   controls and U+2028 and U+2029, which Go's encoder escapes, and also DEL (U+007F),
   the controls U+0080 to U+009F, the bidirectional formatting controls
   (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and the characters that draw
-  nothing (U+200B, U+2060 to U+2064, U+206A to U+206F, U+FEFF, U+034F, the Hangul fillers,
+  nothing (U+200B, U+2060 to U+206F, U+FEFF, U+034F, the Hangul fillers,
   the format controls of shorthand and music, the reserved default-ignorable ranges and the
   tag characters U+E0000 to U+E00FF; what lies beyond U+FFFF is written as a pair of escapes
   for the two UTF-16 units; the table is `personTextRefused` in `adapterproto`). Variation

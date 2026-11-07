@@ -39,14 +39,15 @@ func TestDisplayNameRule(t *testing.T) {
 		{"empty", "", false, false, false},
 	}
 	// Each range (U+2028 to U+202E joins the two separators and the embedding
-	// controls, U+2066 to U+206F the isolates and the deprecated format
-	// characters) is refused at both ends and in the middle; the character on
+	// controls, U+2060 to U+206F the word joiner, the invisible operators, the
+	// isolates and the deprecated format characters, and the unassigned U+2065
+	// between them) is refused at both ends and in the middle; the character on
 	// either side of it is a name like any other. Beside the invisible
 	// characters, U+200C and U+200D (which spell Persian and Indic words and join
 	// emoji), U+00AD and U+180E stay accepted.
 	for _, r := range []struct{ first, last rune }{
 		{0x0000, 0x001F}, {0x007F, 0x009F}, {0x061C, 0x061C}, {0x200B, 0x200B}, {0x200E, 0x200F},
-		{0x2028, 0x202E}, {0x2060, 0x2064}, {0x2066, 0x206F}, {0xFEFF, 0xFEFF}, {0xE0000, 0xE00FF},
+		{0x2028, 0x202E}, {0x2060, 0x206F}, {0xFEFF, 0xFEFF}, {0xE0000, 0xE00FF},
 		// The characters that fill a place with nothing: the combining grapheme
 		// joiner, the Hangul and Khmer fillers, the shorthand and musical format
 		// controls, and the reserved default-ignorable ranges.
@@ -71,6 +72,8 @@ func TestDisplayNameRule(t *testing.T) {
 		row{"a name with a C1 control sequence introducer", "name\u009b2J", false, false, false},
 		row{"a name with a next line", "two\u0085lines", false, false, false},
 		row{"a name with an isolate", "name\u2066txt", false, false, false},
+		// Unassigned, and listed by Unicode as default-ignorable like its neighbours.
+		row{"a name with the unassigned code point between the operators and the isolates", "name\u2065txt", false, false, false},
 		row{"a name with a DEL", "name\x7f", false, false, false},
 		row{"a name with a zero width space", "name\u200bname", false, false, false},
 		row{"a name with a byte order mark", "\ufeffname", false, false, false},
@@ -247,6 +250,15 @@ func TestPatternsFollowThePredicates(t *testing.T) {
 			// Between two letters, so that a variation selector has its base and a
 			// blank has a visible neighbour: only the class itself decides.
 			in := "a" + string(r) + "b"
+			// A character alone is judged by the rules of a whole text, which the
+			// predicate does not know (a blank has nothing to see, a variation
+			// selector has no base), so pattern and validator are compared with each
+			// other: this guards the table of blanks, the rule for a selector at the
+			// start and the merging of the classes into the pattern.
+			alone := string(r)
+			if got, want := re.MatchString(alone), c.validate(alone) == nil; got != want {
+				t.Fatalf("%s: U+%04X alone is accepted by the pattern %v, by the validator %v", c.definition, r, got, want)
+			}
 			if got := !re.MatchString(in); got != c.refused(r) {
 				t.Fatalf("%s: U+%04X is refused by the pattern %v, by the predicate %v", c.definition, r, got, c.refused(r))
 			}

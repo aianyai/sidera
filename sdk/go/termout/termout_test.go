@@ -444,6 +444,7 @@ func TestSanitize(t *testing.T) {
 		{"embeddings and override", "\u202a\u202b\u202c\u202d\u202e", `\u202a\u202b\u202c\u202d\u202e`, `\u202a\u202b\u202c\u202d\u202e`},
 		{"isolates", "\u2066\u2067\u2068\u2069", `\u2066\u2067\u2068\u2069`, `\u2066\u2067\u2068\u2069`},
 		{"zero width space and no-break mark", "a\u200bb\ufeffc", `a\u200bb\ufeffc`, `a\u200bb\ufeffc`},
+		{"the unassigned code point inside the block of invisible operators", "a\u2065b", `a\u2065b`, `a\u2065b`},
 		{"invisible operators and word joiner", "\u2060\u2061\u2062\u2063\u2064", `\u2060\u2061\u2062\u2063\u2064`, `\u2060\u2061\u2062\u2063\u2064`},
 		{"deprecated format characters", "\u206a\u206b\u206c\u206d\u206e\u206f", `\u206a\u206b\u206c\u206d\u206e\u206f`, `\u206a\u206b\u206c\u206d\u206e\u206f`},
 		{"tag characters carry hidden text", "ok\U000e0001\U000e0069\U000e007f", `ok\U000e0001\U000e0069\U000e007f`, `ok\U000e0001\U000e0069\U000e007f`},
@@ -464,7 +465,7 @@ func TestSanitize(t *testing.T) {
 		{"emoji and joined emoji", "😀 👨\u200d👩\u200d👧", "😀 👨\u200d👩\u200d👧", "😀 👨\u200d👩\u200d👧"},
 		{"accents and combining marks", "e\u0301 é ñ", "e\u0301 é ñ", "e\u0301 é ñ"},
 		{"a real replacement character", "a\ufffdb", "a\ufffdb", "a\ufffdb"},
-		{"neighbours of the classes", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2065\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100"},
+		{"neighbours of the classes", "\u00a0\u2027\u202f\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100", "\u00a0\u2027\u202f\u2070\u205f\u200c\u200d\ufe0f\U000dffff\U000e0100"},
 		{"backslashes are not doubled", `C:\dir\n`, `C:\dir\n`, `C:\dir\n`},
 		{"empty", "", "", ""},
 	} {

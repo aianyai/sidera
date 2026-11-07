@@ -483,8 +483,9 @@ A display name also holds no character that a terminal acts on or that reorders
 text: no control character (U+0000 to U+001F, U+007F to U+009F), no line or
 paragraph separator (U+2028, U+2029), no bidirectional formatting control
 (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) and no character that draws
-nothing: the zero width space U+200B, the word joiner and invisible operators U+2060
-to U+2064, the deprecated format characters U+206A to U+206F, the byte order mark U+FEFF,
+nothing: the zero width space U+200B, the block from the word joiner to the
+deprecated format characters, U+2060 to U+206F (which includes the unassigned U+2065, listed by
+Unicode as default-ignorable), the byte order mark U+FEFF,
 the tag characters U+E0000 to U+E007F, the combining grapheme joiner U+034F, the Hangul
 fillers (U+115F, U+1160, U+3164, U+FFA0), the withdrawn Khmer vowels U+17B4 and U+17B5,
 the shorthand format controls U+1BCA0 to U+1BCA3, the musical format controls U+1D173 to
@@ -666,7 +667,7 @@ enter keeps one bad probe from making the node's whole directory answer impossib
 for every node that asks. It is done in place for the same reason, and the runtimes the
 adapters in this repository report are plain names and versions.
 
-The third: the invisible format characters (U+200B, U+2060 to U+2064, U+206A to U+206F, U+FEFF
+The third: the invisible format characters (U+200B, U+2060 to U+206F, U+FEFF
 and U+E0000 to U+E007F) join the class that a display name, a description, a profile text and
 the name and version of a probed runtime refuse. They do not move the cursor, but they make two
 names that look the same differ and hide text from a reader, a model reading a tool result

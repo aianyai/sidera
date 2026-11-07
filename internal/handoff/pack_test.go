@@ -389,6 +389,7 @@ func TestPackEscapesWhatATerminalActsOn(t *testing.T) {
 		{"the last isolate", "a\u2069b", `\u2069`},
 		{"the zero width space", "a\u200bb", `\u200b`},
 		{"the first invisible operator", "a\u2060b", `\u2060`},
+		{"the unassigned code point among them", "a\u2065b", `\u2065`},
 		{"the last deprecated format character", "a\u206fb", `\u206f`},
 		{"the byte order mark", "a\ufeffb", `\ufeff`},
 		{"a tag character, written as a surrogate pair", "a\U000e0041b", `\udb40\udc41`},
@@ -418,10 +419,10 @@ func TestPackEscapesWhatATerminalActsOn(t *testing.T) {
 	}
 
 	t.Run("text next to the escaped ranges stays as it is", func(t *testing.T) {
-		// Each of U+00A0, U+061B, U+2010, U+200C, U+2065 and U+2070 lies right beside a
+		// Each of U+00A0, U+061B, U+2010, U+200C and U+2070 lies right beside a
 		// refused range (or, U+200C, the zero width non-joiner, beside a refused
 		// character) and is not refused.
-		body := "\u00a0 \u061b \u2010 \u200c \u2065 \u2070 你好 😀 <&>"
+		body := "\u00a0 \u061b \u2010 \u200c \u2070 你好 😀 <&>"
 		p, err := Pack([]Message{msg(t, "m1", body)}, testLease, DefaultBudget(), WriteFeedbackMember)
 		if err != nil {
 			t.Fatal(err)
