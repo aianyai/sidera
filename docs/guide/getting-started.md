@@ -388,9 +388,9 @@ sidera trust list     # the other node is listed under `Trusted nodes`
 sidera network show   # the other node is listed under Known nodes as connected
 ```
 
-`connected` can read `false` until one side sends something: a connection is
-opened when a message or request needs one. If a node you entered is listed with
-addresses you meant to leave out, enter the node again with only the right ones;
+`network show` can say `not connected` for it until one side sends something: a
+connection is opened when a message or request needs one. If a node you entered is
+listed with addresses you meant to leave out, enter the node again with only the right ones;
 `sidera network show` is the check.
 
 ## 7. Start the first cross-machine session (A)

@@ -303,7 +303,7 @@ Run `sidera identity export-revocation` to export it.
 
 To use another port (step 1.3), run `sidera init --port <n>` instead; for a second
 node (step 1.4) set its `SIDERA_HOME` first. Record the
-`node <node-id>` value: it is this machine's identity. Check: `ls ~/.sidera` (Windows:
+`Node` value: it is this machine's identity. Check: `ls ~/.sidera` (Windows:
 `dir $env:LOCALAPPDATA\Sidera`; for a second node, its `SIDERA_HOME`) shows the
 directory. If `init` says the directory is already initialized, a node exists:
 stop (see step 1.4). `init` never overwrites.
@@ -653,7 +653,7 @@ Pair only with the node ids your owner named. Both machines must run steps 7 and
    ```
 
    Expected: `<other-node-id>` under `Trusted nodes` in `trust list`.
-   `connected` in `network show` can be `false` until one side sends.
+   `network show` can say `not connected` for it until one side sends.
 
 If it fails:
 
