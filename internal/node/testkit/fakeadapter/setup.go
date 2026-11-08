@@ -12,6 +12,7 @@ import (
 
 	"github.com/aianyai/sidera/sdk/go/adapterkit"
 	"github.com/aianyai/sidera/sdk/go/adaptersetup"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // SetupVersion is the version the fake setup records its items with.
@@ -24,6 +25,13 @@ const (
 	KindClientFile = "client_file"
 	KindOwnFile    = "own_file"
 )
+
+// SetupField declares the key "setup" of the instance configuration for a manifest
+// whose values the daemon checks. No field type holds an object, so a script that
+// goes through the daemon is written as the JSON text of a SetupConfig in this
+// string; a script that does not (one handed to the setup directly) may be the
+// object itself.
+var SetupField = manifest.Field{Key: "setup", Type: manifest.FieldString, Title: "Setup script"}
 
 // SetupConfig is what the fake setup reads from the instance configuration, under
 // the key "setup": a script for the setup of a test, in the form of files to keep.
@@ -72,6 +80,10 @@ type fakeSetup struct {
 func load(req adaptersetup.Request) (*fakeSetup, error) {
 	f := &fakeSetup{req: req, items: map[string]SetupItem{}}
 	if raw, ok := req.Config["setup"]; ok {
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			raw = json.RawMessage(text)
+		}
 		if err := json.Unmarshal(raw, &f.cfg); err != nil {
 			return nil, fmt.Errorf("the setup script of the instance configuration: %w", err)
 		}
