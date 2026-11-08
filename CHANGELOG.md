@@ -55,9 +55,12 @@ protocol has a version of its own.
   the session across restarts and resumes, and a session whose requester chose nothing follows its
   preset as before. List only efforts the model supports: how Codex reacts to one it does not support
   is not known. A preset's `model` must now be a valid model name (letters, digits and `._:/@+[]-`).
-
 - **`sidera-adapter-console new` can choose the model and effort of the new session.** `--model <name>` and
   `--effort <low|medium|high|xhigh|max>` are sent with the creation and apply within what the preset allows.
+- **A Hermes card can choose the model and effort of a new session.** A `new_session` card may carry `model`
+  and `effort`, which the Sidera Skill tells the agent to give only when a task needs a stronger or cheaper
+  model than the preset's own. The target node's preset decides which choices it allows. `sidera update` and
+  `sidera adapter setup` refresh the Skill.
 
 ### Changed
 

@@ -60,6 +60,10 @@ type Envelope struct {
 	To      string `json:"to,omitempty"`
 	Mode    string `json:"mode"`
 	Preset  string `json:"preset,omitempty"`
+	// Model and Effort choose the model and the reasoning effort of a new session;
+	// the target preset says which it allows.
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 	ReplyTo string `json:"reply_to,omitempty"`
 	Task    string `json:"task"`
 }
@@ -71,7 +75,7 @@ func Decode(body string) (Envelope, error) {
 	dec.DisallowUnknownFields()
 	var e Envelope
 	if err := dec.Decode(&e); err != nil {
-		return Envelope{}, invalid("the card body is not one JSON object with the members sidera, to, mode, preset, reply_to and task, of the types the Skill gives")
+		return Envelope{}, invalid("the card body is not one JSON object with the members sidera, to, mode, preset, model, effort, reply_to and task, of the types the Skill gives")
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return Envelope{}, invalid("the card body has more than one JSON value")
@@ -92,6 +96,10 @@ type Request struct {
 	Address adapterproto.Address
 	// Preset is the preset of a new session.
 	Preset string
+	// Model and Effort are the model and the effort the card chose for a new
+	// session; empty takes the preset's own.
+	Model  string
+	Effort adapterproto.Effort
 	// ReplyTo is the id of the request card a reply answers.
 	ReplyTo string
 	Task    string
@@ -104,7 +112,7 @@ func (e Envelope) Validate(aliases config.Aliases, hasParents bool) (Request, er
 	if strings.TrimSpace(e.Task) == "" {
 		return Request{}, invalid(`"task" is empty`)
 	}
-	r := Request{Mode: e.Mode, Preset: e.Preset, ReplyTo: e.ReplyTo, Task: e.Task}
+	r := Request{Mode: e.Mode, Preset: e.Preset, Model: e.Model, Effort: adapterproto.Effort(e.Effort), ReplyTo: e.ReplyTo, Task: e.Task}
 	switch e.Mode {
 	case ModeReply:
 		return e.validateReply(r)
@@ -117,6 +125,9 @@ func (e Envelope) Validate(aliases config.Aliases, hasParents bool) (Request, er
 	}
 	if e.Mode == ModeMessage && e.Preset != "" {
 		return Request{}, invalid(`"preset" belongs to mode "new_session"`)
+	}
+	if err := e.checkChoice(); err != nil {
+		return Request{}, err
 	}
 	if e.To == "" {
 		if e.Mode == ModeNewSession || !hasParents {
@@ -147,7 +158,33 @@ func (e Envelope) validateReply(r Request) (Request, error) {
 	case e.Preset != "":
 		return Request{}, invalid(`"preset" belongs to mode "new_session"`)
 	}
+	if err := e.checkChoice(); err != nil {
+		return Request{}, err
+	}
 	return r, nil
+}
+
+// checkChoice checks the model and the effort of the card. They choose the model
+// of a new session, so only that mode takes them, and their syntax is the
+// protocol's own, the one every requester is held to. The reason names the member
+// and not its value, which a card the agent wrote from remote text may hold.
+func (e Envelope) checkChoice() error {
+	if e.Mode != ModeNewSession {
+		switch {
+		case e.Model != "":
+			return invalid(`"model" belongs to mode "new_session"`)
+		case e.Effort != "":
+			return invalid(`"effort" belongs to mode "new_session"`)
+		}
+		return nil
+	}
+	if e.Model != "" && adapterproto.ValidateModelName(e.Model) != nil {
+		return invalid(`"model" is not a model name: it is 1 to %d letters, digits and . _ : / @ + [ ] -, starting with a letter or digit`, adapterproto.MaxModelNameLen)
+	}
+	if e.Effort != "" && !adapterproto.Effort(e.Effort).Valid() {
+		return invalid(`"effort" must be one of %v`, adapterproto.Efforts())
+	}
+	return nil
 }
 
 // CheckCreator applies the optional list of profiles whose cards are served; an

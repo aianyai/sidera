@@ -40,7 +40,14 @@ Create a card with `kanban_create`:
 {"sidera": 1, "to": "<name>", "mode": "new_session", "preset": "<preset>", "task": "<text for the other agent>"}
 ```
 
-Leave `preset` out for `mode` `message`. `task` is never empty. The other agent sees
+Leave `preset` out for `mode` `message`. A `new_session` card may also give `model` (the
+model name as the other agent's runtime names it) and `effort` (`low`, `medium`, `high`,
+`xhigh` or `max`) to choose the model and the reasoning effort of the new session. Give
+them only when the task calls for a stronger or cheaper model than the preset's own, such
+as a hard problem or a trivial lookup, and leave them out otherwise: the preset's own are
+used. They are for `new_session` only, and a card with them in any other mode is refused.
+The other node's owner decides which models a preset allows, so a choice outside that is
+refused and the reason comes back on the card. `task` is never empty. The other agent sees
 only `task`, not your conversation, so write everything it needs. Ask it to reply once,
 when it has the final result, and not to send progress messages: the first reply
 completes the card, and a later one reaches you as a new message.

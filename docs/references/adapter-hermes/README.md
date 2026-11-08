@@ -76,17 +76,27 @@ The body is one JSON object, decoded strictly (no unknown member, one value, ver
 
 ```json
 {"sidera": 1, "to": "<alias>", "mode": "new_session" | "message" | "reply",
- "preset": "<preset>", "reply_to": "<request card id>", "task": "<the text for the peer>"}
+ "preset": "<preset>", "model": "<model>", "effort": "<effort>",
+ "reply_to": "<request card id>", "task": "<the text for the peer>"}
 ```
+
+The card version stays 1 with `model` and `effort`: the card format is shipped in the
+same package as the Skill that writes it, and an adapter without the two members decodes
+strictly, so it refuses a card that has them and writes the reason on the card. The choice
+is never dropped silently.
 
 | Mode | Rules |
 | ---- | ----- |
-| `new_session` | `to` and `preset` required; the alias allows `new_session` and that preset. Starts a session on the alias's runtime endpoint; the task is its first message. |
-| `message` | `to` required, the alias allows `message`, no `preset`. A card that continues earlier cards (it has parents) may leave `to` out and goes to the peer of its parent. |
-| `reply` | `reply_to` required, no `to`, no `preset`. Answers a request someone sent to this node, back to its sender. |
+| `new_session` | `to` and `preset` required; the alias allows `new_session` and that preset. Starts a session on the alias's runtime endpoint; the task is its first message. `model` and `effort` may choose the model and the reasoning effort of the session. |
+| `message` | `to` required, the alias allows `message`, no `preset`, no `model`, no `effort`. A card that continues earlier cards (it has parents) may leave `to` out and goes to the peer of its parent. |
+| `reply` | `reply_to` required, no `to`, no `preset`, no `model`, no `effort`. Answers a request someone sent to this node, back to its sender. |
 
-`reply_to` belongs only to `reply`, `preset` only to `new_session`, `task` is never
-empty. A card that fails a rule is invalid, and the reason (`card.InvalidError`) is
+`reply_to` belongs only to `reply`, `preset`, `model` and `effort` only to `new_session`,
+`task` is never empty. `model` and `effort` are checked with the adapter protocol's own
+rules for a session's model choice (`adapterproto.ValidateModelName`, `Effort.Valid`), the
+syntax every requester is held to; whether the target preset allows them is for the target
+node to say, and a refusal comes back as the failure of the session creation.
+The reason on a card names the member and never its value. A card that fails a rule is invalid, and the reason (`card.InvalidError`) is
 written to the card so its creator can fix it. If `creator_profiles` is set, a card
 from any other profile is invalid too, a `reply` included, since a reply makes the
 node send a message.
@@ -96,7 +106,10 @@ node send a message.
 Any process of the same operating system user can write the board, so a card is an
 untrusted request. What a card can make this node do is bounded by the alias table:
 it names an alias and never an address, and only the modes and presets listed for
-that alias. The creator list narrows who the agents are, but it is reliable only for
+that alias. The alias table does not limit the model: a card may choose any model name
+and effort the protocol accepts, and the preset it names on the target node decides which
+of them the session gets, through the allowlist its owner wrote there. So the owner
+controls the model where the session runs, and a card cannot get past it. The creator list narrows who the agents are, but it is reliable only for
 cards the Hermes agent made with its own tool, which fills in the creator itself;
 the command line accepts any creator. It is a second line of defense, not a
 boundary.
@@ -484,7 +497,8 @@ sent with the key `<card>:<attempt>` (`lane.IdempotencyKey`). The key is built f
 persisted number, so a send repeated after a crash is the same message to the node and
 cannot create a second remote session; a number written only after the send would give
 the repeat a new key. A `new_session` card sends `session.create` with the preset and
-the task as body to the alias's address; a `message` card sends the task to the
+the task as body to the alias's address, with the `model` and `effort` of the card when
+it has them; a `message` card sends the task to the
 alias's address. A follow-up (the card has parents and names no alias) goes to the
 peer of its parent from the parent's endpoint (`lane.RouteFollowUp`), because a remote
 session answers only the endpoint that created it. A card whose peer is already
@@ -802,6 +816,9 @@ The body tells the agent:
   created without it lands where the adapter never looks;
 - who it can reach: every alias with its modes and presets, never an address, since a
   card names an alias and an address in a prompt only invites its use;
+- when to choose a model: a `new_session` card may give `model` and `effort`, only when
+  the task calls for a stronger or cheaper model than the preset's own, and no other mode
+  takes them;
 - how to delegate: `kanban_create` with the assignee `sidera` (or `sidera:<alias>`),
   the JSON envelope as the body, and an `idempotency_key` that is the same on every
   retry of one delegation; that the task is the only thing the peer sees; and that the

@@ -443,7 +443,8 @@ func (f *laneFlows) send(ctx context.Context, id string, attempt int) {
 		IdempotencyKey: lane.IdempotencyKey(id, attempt)}
 	if c.Mode == card.ModeNewSession {
 		out.To = req.Address
-		out.Control = &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{Preset: req.Preset}}
+		out.Control = &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{
+			Preset: req.Preset, Model: req.Model, Effort: req.Effort}}
 	}
 	mid, err := f.env.Send(ctx, out)
 	switch {

@@ -441,7 +441,7 @@ func TestNewSessionLifecycle(t *testing.T) {
 	d := &daemon{directAccess: true}
 	d.serve("orphan", adapterproto.PageMessage{ID: "m1", From: "nodeb/sess-1", Body: "done"}, sentOnce(d), false)
 	h := start(t, options{d: d, lane: true, flows: LaneFlows(nil), now: clk.now})
-	addCard(t, h, "t_1", sessionCard)
+	addCard(t, h, "t_1", strings.Replace(sessionCard, `"task"`, `"model":"opus","effort":"high","task"`, 1))
 
 	until(t, "the card to be done", func() bool { return boardCard(h, "t_1").Status == "done" })
 	d.mu.Lock()
@@ -450,6 +450,9 @@ func TestNewSessionLifecycle(t *testing.T) {
 	if first.Control == nil || first.Control.Signal != adapterproto.SignalSessionCreate || first.Control.Params.Preset != "default" ||
 		first.To[0] != "nodeb/claude" || first.Body != "hello" {
 		t.Errorf("first send %+v, want session.create for the preset to the alias with the task", first)
+	}
+	if p := first.Control.Params; p.Model != "opus" || p.Effort != adapterproto.EffortHigh {
+		t.Errorf("session.create parameters %+v, want the model and the effort of the card", p)
 	}
 	if _, open := h.app.env.State.View().Sessions["nodeb/sess-1"]; !open {
 		t.Fatal("the session the control reply named is not recorded as open")
