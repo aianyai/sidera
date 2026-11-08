@@ -137,7 +137,10 @@ By default the node has one instance, `Instance`, and every accessor without a n
   given 100 ms of real time at most, because the numbers the engine holds do not follow
   an adapter that sends while it is asked. Only the latest launch is asked, so a process
   that is hung or abandoned never makes the fixture wait for ever once the host has
-  started another. An instance whose latest process has ended is still asked, and its connection's counts
+  started another. A launch whose connection the host has closed is not asked either, even
+  while it is the latest: a process told to survive lives on and keeps the requests it
+  hung on, but a hung process answers nothing, a cancellation included, so those requests
+  never settle and the host has none in flight on that connection to match them. An instance whose latest process has ended is still asked, and its connection's counts
   stay where the process left them, so the fixture's quiet does not return while any
   instance's adapter is away: a test that keeps one away waits with the engine's own
   `Quiesce` until the host has started another.

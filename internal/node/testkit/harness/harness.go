@@ -1069,10 +1069,14 @@ func (h *H) addRuntimeQuiet(instance string, rt *fakeruntime.Runtime) {
 	h.addQuiet("the runtime of "+instance+" has a turn whose actions are not finished", rt.Activity)
 }
 
-// latestAdapterStats is what the latest process of the instance reports of itself.
+// latestAdapterStats is what the latest process of the instance reports of itself,
+// unless the host has let go of its connection. A process told to survive then
+// lives on and still holds the requests it was hung on, but a hung process
+// answers nothing, a cancellation included, so those requests can never settle
+// and the host has nothing in flight on that connection to compare them with.
 func (h *H) latestAdapterStats(instance string) (fakeadapter.StatsReply, bool) {
 	ls := h.launcher.Launches(instance)
-	if len(ls) == 0 {
+	if len(ls) == 0 || ls[len(ls)-1].released.Load() {
 		return fakeadapter.StatsReply{}, false
 	}
 	st, err := ls[len(ls)-1].Controller().Stats(h.ctx)

@@ -810,7 +810,9 @@ coverage dimensions.
   The quiet check adds the fakes' own numbers: with a host, the engine is asked against the
   notifications the latest launch has sent and the requests it holds, made again each
   round, and the fixture waits for that launch to have no request of its own that is not
-  answered. With a runtime it also waits for the runtime to have no turn whose actions are
+  answered. A launch whose connection the host has closed is not asked: a process told to
+  survive keeps the requests it hung on, a hung process answers nothing (a cancellation
+  included), and the host has nothing in flight on that connection to match them. With a runtime it also waits for the runtime to have no turn whose actions are
   not finished, and counts how often such a turn began or finished: what a turn does after
   its start (a receive through the engine, the report of what the model read, its end)
   runs in a goroutine of the runtime that nothing else shows while it is on its way, so a

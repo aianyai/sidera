@@ -356,6 +356,11 @@ type AdapterLaunch struct {
 	endReq  chan struct{} // closed by End
 	done    chan struct{} // closed when the process has really ended
 
+	// released is set when the host has closed its end of the connection to this
+	// process. A process that was told to survive lives on, but nothing it holds
+	// or sends can reach the host any more.
+	released atomic.Bool
+
 	streamOnce sync.Once
 	in         io.Reader
 	out        io.WriteCloser
@@ -529,6 +534,7 @@ type hostReader struct {
 func (r *hostReader) Read(b []byte) (int, error) { return r.pr.Read(b) }
 
 func (r *hostReader) Close() error {
+	r.l.released.Store(true)
 	err := r.pr.Close()
 	if c, ok := r.inner.(io.Closer); ok && !r.l.survive.Load() {
 		_ = c.Close()
