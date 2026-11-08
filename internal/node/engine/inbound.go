@@ -16,6 +16,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/reply"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The engine is the handler of every transport: what arrives for this node comes
@@ -157,7 +158,7 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 	if err != nil {
 		return transport.Receipt{}, invalidArgument("envelope", err)
 	}
-	if (env.Model != "" || env.Effort != "") && !features.Has(transport.FeatureModelChoice) {
+	if adapterproto.ChoosesModel(env.Model, env.Effort) && !features.Has(transport.FeatureModelChoice) {
 		// Only a sender that offers an identifier that does not carry the choice
 		// can send one this way: a sender checks what the target serves before it
 		// sends a choice, so this is a defect of the sender, and it fails loudly.

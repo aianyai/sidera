@@ -372,7 +372,7 @@ func (e *Engine) createRefusal(env envelope.Envelope, from transport.Origin, st 
 	if a == nil || !a.online || e.d.Adapters == nil {
 		return adapterreg.DaemonCreateAdapterOffline, true
 	}
-	if choosesModel(env.Model, env.Effort) && !a.adm.TakesModelChoice(env.Effort) {
+	if adapterproto.ChoosesModel(env.Model, env.Effort) && !a.adm.TakesModelChoice(env.Effort) {
 		return adapterreg.DaemonCreateModelChoiceUnsupported, true
 	}
 	if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {

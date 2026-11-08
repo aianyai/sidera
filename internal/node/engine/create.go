@@ -178,7 +178,7 @@ func (e *Engine) startCreate(now time.Time, key store.TargetKey) {
 		e.log.Error("a creation names a session endpoint the node does not hold", "record", key.String())
 		return
 	}
-	if choosesModel(c.Model, c.Effort) && !e.adapters[instance].adm.TakesModelChoice(c.Effort) {
+	if adapterproto.ChoosesModel(c.Model, c.Effort) && !e.adapters[instance].adm.TakesModelChoice(c.Effort) {
 		// The creation was accepted for an adapter that took the choice, and the
 		// instance now runs a version that does not (a downgrade). No request is sent
 		// that the adapter would not understand. A creation no call was made for ends
@@ -347,12 +347,6 @@ func (e *Engine) settleOrRetry(now time.Time, c store.CtlRecord, reply adapterpr
 			e.sched.set(schedKey{schedCreateRetry, c.Key.String()}, now.Add(e.p.RetryBackoff))
 		}
 	}
-}
-
-// choosesModel reports whether a creation chooses a model or an effort, which
-// only an adapter that declared model_choice can take.
-func choosesModel(model string, effort adapterproto.Effort) bool {
-	return model != "" || effort != ""
 }
 
 // lateCreate deals with the result of a call that comes after its intent was

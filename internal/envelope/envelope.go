@@ -270,7 +270,7 @@ func (e Envelope) toWire() (envelopeWire, error) {
 		w.Seq = append(w.Seq, seqWire{Endpoint: ep.Bytes(), Seq: n})
 	}
 	slices.SortFunc(w.Seq, func(a, b seqWire) int { return bytes.Compare(a.Endpoint, b.Endpoint) })
-	if e.Preset != "" || e.Model != "" || e.Effort != "" {
+	if e.Preset != "" || adapterproto.ChoosesModel(e.Model, e.Effort) {
 		w.Params = &paramsWire{Preset: e.Preset, Model: e.Model, Effort: string(e.Effort)}
 	}
 	return w, nil
@@ -457,18 +457,10 @@ func fromWireParams(e *Envelope, w envelopeWire) error {
 		return fmt.Errorf("%w: preset: %w", ErrParams, err)
 	}
 	e.Preset = w.Params.Preset
-	if w.Params.Model != "" {
-		if err := adapterproto.ValidateModelName(w.Params.Model); err != nil {
-			return fmt.Errorf("%w: model: %w", ErrParams, err)
-		}
-		e.Model = w.Params.Model
+	if err := adapterproto.ValidateModelChoice(w.Params.Model, adapterproto.Effort(w.Params.Effort)); err != nil {
+		return fmt.Errorf("%w: %w", ErrParams, err)
 	}
-	if w.Params.Effort != "" {
-		if !adapterproto.Effort(w.Params.Effort).Valid() {
-			return fmt.Errorf("%w: effort: %q is not on the scale", ErrParams, w.Params.Effort)
-		}
-		e.Effort = adapterproto.Effort(w.Params.Effort)
-	}
+	e.Model, e.Effort = w.Params.Model, adapterproto.Effort(w.Params.Effort)
 	return nil
 }
 
@@ -627,7 +619,7 @@ func (e Envelope) Digest() delivery.BodyDigest {
 	// nothing, and a retry that crosses an upgrade would then be a conflict.
 	// The framing is injective in the number of fields, so the two shapes never
 	// collide.
-	if e.Model != "" || e.Effort != "" {
+	if adapterproto.ChoosesModel(e.Model, e.Effort) {
 		fields = append(fields, []byte(e.Model), []byte(e.Effort))
 	}
 	return delivery.BodyDigest(sha256.Sum256(frame.Frame(requestDomain, fields...)))

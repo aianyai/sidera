@@ -54,8 +54,22 @@ func validEffortList(efforts_ []Effort) error {
 // compareEffort orders efforts along the scale.
 func compareEffort(a, b Effort) int { return slices.Index(efforts, a) - slices.Index(efforts, b) }
 
-// checkChoice checks the model and the effort a requester chose; either may be
-// absent.
+// ChoosesModel reports whether a request chooses a model or an effort: a
+// choice of either is a choice, which only a runtime that declared model_choice
+// can take. It is the one home of the rule, for every record that carries the pair.
+func ChoosesModel(model string, effort Effort) bool { return model != "" || effort != "" }
+
+// ValidateModelChoice checks the model and the effort a requester chose; either
+// may be empty, which is choosing nothing of it. It is the one home of the rule
+// for everything that carries the pair, whatever its encoding.
+func ValidateModelChoice(model string, effort Effort) error {
+	var c checker
+	checkChoice(&c, model, effort)
+	return c.err
+}
+
+// checkChoice is ValidateModelChoice for the Validate method of a message, which
+// collects the first failure of its fields.
 func checkChoice(c *checker, model string, effort Effort) {
 	if model != "" {
 		c.field("model", ValidateModelName(model))

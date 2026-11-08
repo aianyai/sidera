@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/reply"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The outbound side: what the node does after it accepted a message, until every
@@ -249,7 +250,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 // needsOf are the features a record's envelope cannot be sent without: a choice
 // of the model or the effort of a new session needs a protocol that carries it.
 func needsOf(env store.OutEnvelope) transport.Features {
-	if env.Model != "" || env.Effort != "" {
+	if adapterproto.ChoosesModel(env.Model, env.Effort) {
 		return transport.FeatureModelChoice
 	}
 	return 0

@@ -185,3 +185,32 @@ func TestMaxAllowedModels(t *testing.T) {
 		t.Errorf("MaxAllowedModels = %d, want 16", adapterproto.MaxAllowedModels)
 	}
 }
+
+// The choice of a model and an effort, each optional, is judged in one place for
+// every record that carries the pair.
+func TestModelChoiceRules(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		model  string
+		effort adapterproto.Effort
+		valid  bool
+		chosen bool
+	}{
+		{"nothing chosen", "", "", true, false},
+		{"a model", "sonnet[1m]", "", true, true},
+		{"an effort", "", adapterproto.EffortHigh, true, true},
+		{"both", "opus", adapterproto.EffortLow, true, true},
+		{"a model that is not a name", "a b", "", false, true},
+		{"an effort that is not on the scale", "", "ultracode", false, true},
+		{"a good model beside a bad effort", "opus", "Low", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := adapterproto.ValidateModelChoice(tc.model, tc.effort); (err == nil) != tc.valid {
+				t.Errorf("ValidateModelChoice(%q, %q) = %v, want valid=%v", tc.model, tc.effort, err, tc.valid)
+			}
+			if got := adapterproto.ChoosesModel(tc.model, tc.effort); got != tc.chosen {
+				t.Errorf("ChoosesModel(%q, %q) = %v, want %v", tc.model, tc.effort, got, tc.chosen)
+			}
+		})
+	}
+}

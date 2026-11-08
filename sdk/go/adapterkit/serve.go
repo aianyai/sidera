@@ -162,7 +162,7 @@ func declaresModelChoice(c adapterproto.Capabilities) bool {
 // an effort reaches only an application that declared model_choice, so it is
 // refused here as session.attach is, before the application sees it.
 func (s *server) createSession(ctx context.Context, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
-	if (p.Model != "" || p.Effort != "") && !declaresModelChoice(s.cfg.Capabilities) {
+	if adapterproto.ChoosesModel(p.Model, p.Effort) && !declaresModelChoice(s.cfg.Capabilities) {
 		return adapterproto.SessionCreateResult{}, notDeclared(adapterproto.MethodSessionCreate + " with a model or an effort")
 	}
 	return s.cfg.App.CreateSession(ctx, p)
