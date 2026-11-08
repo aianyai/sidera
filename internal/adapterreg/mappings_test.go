@@ -444,7 +444,7 @@ func TestPromptOutcomeOnAttemptConflictIsUnknown(t *testing.T) {
 func TestCreateReplyMapsEveryCreateFailure(t *testing.T) {
 	want := map[string]adapterproto.ControlCreateReason{
 		"preset_unknown": 1, "preset_invalid": 2, "runtime_auth": 4, "native_unavailable": 5,
-		"dependency_missing": 5, "native_error": 6, "control_unknown": 9,
+		"dependency_missing": 5, "native_error": 6, "control_unknown": 9, "model_choice_not_allowed": 11,
 	}
 	listed := adapterproto.EnumTables()["CreateFailure"]
 	if len(listed) != len(want) {

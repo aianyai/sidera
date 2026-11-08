@@ -74,10 +74,16 @@ func TestRejectReasonNames(t *testing.T) {
 		RejectEndpointClosed: "endpoint_closed", RejectEndpointDeclined: "endpoint_declined", RejectTooLarge: "too_large",
 		RejectExpired: "expired", RejectBacklogExpired: "backlog_expired", RejectSecondCheckFailed: "second_check_failed",
 		RejectMalformed: "malformed", RejectDeadlineOutOfRange: "deadline_out_of_range", RejectBacklogFull: "backlog_full",
+		RejectNodeUnsupported: "node_unsupported",
 	}
 	for r, want := range names {
 		if got := r.String(); got != want {
 			t.Errorf("reason %d is %q, want %q", r, got, want)
+		}
+	}
+	for r := range names {
+		if got, want := r.FromTarget(), r != RejectNodeUnsupported; got != want {
+			t.Errorf("reason %s: FromTarget = %v, want %v", r, got, want)
 		}
 	}
 	if got := RejectReason(len(names)).String(); got != "invalid" {

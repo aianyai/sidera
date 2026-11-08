@@ -24,6 +24,12 @@ const (
 	ConfigKeyPattern = `^[a-z][a-z0-9_]{0,63}$`
 	// EnvNamePattern is the name of an environment variable the adapter injects.
 	EnvNamePattern = `^[A-Za-z_][A-Za-z0-9_]*$`
+	// ModelNamePattern is the name of a model as a runtime spells it: an alias, a
+	// full id, a cloud provider's id or an ARN. Its length is at most
+	// MaxModelNameLen. It holds no blank, control or non-ASCII character and no
+	// shell metacharacter, so a name reaches an argv, a log and a terminal as it
+	// is. It is read alike by RE2 and by ECMAScript with the u flag.
+	ModelNamePattern = `^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]*$`
 	// reasonWordPattern is a short snake_case word.
 	reasonWordPattern = `^[a-z][a-z0-9_]*$`
 )
@@ -31,9 +37,13 @@ const (
 // MaxPresetNameLen bounds the length of a preset name.
 const MaxPresetNameLen = 64
 
+// MaxModelNameLen bounds the length of a model name.
+const MaxModelNameLen = 128
+
 var (
 	adapterIDRE  = regexp.MustCompile(AdapterIDPattern)
 	presetNameRE = regexp.MustCompile(PresetNamePattern)
+	modelNameRE  = regexp.MustCompile(ModelNamePattern)
 	configKeyRE  = regexp.MustCompile(ConfigKeyPattern)
 	envNameRE    = regexp.MustCompile(EnvNamePattern)
 	reasonWordRE = regexp.MustCompile(reasonWordPattern)
@@ -50,6 +60,7 @@ func Patterns() map[string]string {
 		"PresetName":  PresetNamePattern,
 		"DisplayName": PersonTextPattern(),
 		"Description": DescriptionPattern(),
+		"ModelName":   ModelNamePattern,
 		"ConfigKey":   ConfigKeyPattern,
 		"EnvName":     EnvNamePattern,
 		"ReasonWord":  reasonWordPattern,
@@ -63,6 +74,15 @@ func ValidatePresetName(s string) error {
 		return err
 	}
 	return matches(presetNameRE, s)
+}
+
+// ValidateModelName checks the syntax of a model name. This package is the one
+// home of the syntax: every message that names a model applies it.
+func ValidateModelName(s string) error {
+	if err := strLen(s, 1, MaxModelNameLen); err != nil {
+		return err
+	}
+	return matches(modelNameRE, s)
 }
 
 // personTextRefused are the code points that text shown to a person never

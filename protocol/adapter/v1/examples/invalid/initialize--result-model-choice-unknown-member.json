@@ -1,0 +1,36 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "initialize",
+  "note": "model_choice is a closed object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 1,
+      "adapter": {
+        "id": "example",
+        "version": "0.3.1"
+      },
+      "capabilities": {
+        "runtime": {
+          "interrupt": true,
+          "ack_on_behalf": false,
+          "server_requests": false,
+          "frontends": [
+            "cli"
+          ],
+          "model_choice": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "x_extra": 1
+          }
+        }
+      }
+    }
+  }
+}

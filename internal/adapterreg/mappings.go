@@ -232,6 +232,8 @@ func CreateReply(r adapterproto.SessionCreateResult, session adapterproto.Endpoi
 			reason = adapterproto.CreateReasonNativeError
 		case adapterproto.CreateFailControlUnknown:
 			reason = adapterproto.CreateReasonControlUnknown
+		case adapterproto.CreateFailModelChoiceNotAllowed:
+			reason = adapterproto.CreateReasonModelChoiceNotAllowed
 		default:
 			return adapterproto.ControlCreateReply{}, false, unmapped("creation failure", string(r.Reason))
 		}

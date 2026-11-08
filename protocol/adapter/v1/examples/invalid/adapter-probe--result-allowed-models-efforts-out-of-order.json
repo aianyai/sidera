@@ -1,0 +1,79 @@
+{
+  "expect": "go",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "efforts not in the order of the scale",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "result": {
+      "runtime": {
+        "name": "example-runtime",
+        "version": "2.1.307"
+      },
+      "auth": "valid",
+      "dependencies": [
+        {
+          "name": "example-runtime",
+          "state": "ok"
+        },
+        {
+          "name": "systemd-run",
+          "state": "ok"
+        }
+      ],
+      "presets": [
+        {
+          "name": "default",
+          "usable": true,
+          "model": "sonnet",
+          "effort": "medium",
+          "allowed_models": [
+            {
+              "model": "haiku",
+              "efforts": [
+                "medium",
+                "low"
+              ]
+            },
+            {
+              "model": "opus",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            {
+              "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+              "efforts": [
+                "high"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "review.readonly",
+          "usable": true
+        }
+      ],
+      "tool_probes": [
+        {
+          "preset": "default",
+          "frontend": "cli",
+          "outcome": "ran",
+          "method": "sandboxed"
+        },
+        {
+          "preset": "default",
+          "frontend": "mcp",
+          "outcome": "ran",
+          "method": "unsandboxed",
+          "detail": "the sandbox does not cover the MCP server"
+        }
+      ]
+    }
+  }
+}

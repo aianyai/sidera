@@ -45,6 +45,11 @@ type SessionCreateParams struct {
 	Preset          string      `json:"preset"`
 	FirstPrompt     FirstPrompt `json:"first_prompt"`
 	ToolAccess      ToolAccess  `json:"tool_access"`
+	// Model and Effort are the model and reasoning effort the requester chose for
+	// the session, absent when it chose none. They are sent only to an adapter
+	// that declared model_choice, which checks them against the preset.
+	Model  string `json:"model,omitempty"`
+	Effort Effort `json:"effort,omitempty"`
 	// Checkpoint is the stored state of the attempt, when an earlier try left one.
 	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
 }
@@ -58,6 +63,7 @@ func (p SessionCreateParams) Validate() error {
 	c.field("preset", ValidatePresetName(p.Preset))
 	c.field("first_prompt", p.FirstPrompt.Validate())
 	c.field("tool_access", p.ToolAccess.Validate())
+	checkChoice(&c, p.Model, p.Effort)
 	if p.Checkpoint != nil {
 		c.field("checkpoint", validCheckpoint(p.Checkpoint))
 	}

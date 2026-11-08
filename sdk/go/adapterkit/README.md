@@ -58,6 +58,10 @@ through `termout`:
   an `adapter.start` that lists an attached session is answered `1003`, unless the
   runtime in `Config.Capabilities` declares `attach`. Nothing of attached sessions
   reaches an application that did not declare it.
+- **A model or an effort needs `model_choice` declared.** A `session.create` whose
+  parameters carry a `model` or an `effort` is answered `1003` without calling the
+  application unless the runtime in `Config.Capabilities` declares `model_choice`. An
+  application that did not declare it never sees a choice, whatever the daemon sends.
 - **`Start` and `Probe` have a deadline.** Their context ends 2 seconds short of
   `adapterproto.HandshakeLimit` after the request arrived, because the daemon ends the
   connection of an adapter that has not answered by then. An application that has more

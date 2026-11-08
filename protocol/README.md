@@ -88,6 +88,8 @@ that matches `adapterproto.ErrBeyondSchema` (`manifest.ErrBeyondSchema`).
 - On a page, a part label reads `part index/total`, `index` is not beyond `total`,
   `next` is present exactly on every part but the last, names the same message
   and points at part `index + 1`.
+- The efforts of a `model_choice` declaration and of a model in an allowlist are in the order of the scale
+  (`low`, `medium`, `high`, `xhigh`, `max`); an allowlist is sorted by model with no model twice.
 - In a status reply `conditions` ascend and `presets` are sorted by name with no
   name twice.
 - In a manifest: a field

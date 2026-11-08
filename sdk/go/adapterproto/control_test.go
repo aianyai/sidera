@@ -35,7 +35,7 @@ func TestControlEnumCodes(t *testing.T) {
 	check("create outcome", names(func(i uint8) bool { return adapterproto.ControlCreateOutcome(i).Valid() }, func(i uint8) string { return adapterproto.ControlCreateOutcome(i).String() }),
 		map[string]uint8{"created": 1, "unconfirmed": 2, "failed": 3})
 	check("create reason", names(func(i uint8) bool { return adapterproto.ControlCreateReason(i).Valid() }, func(i uint8) string { return adapterproto.ControlCreateReason(i).String() }),
-		map[string]uint8{"preset_unknown": 1, "preset_unavailable": 2, "adapter_offline": 3, "runtime_auth": 4, "native_unavailable": 5, "native_error": 6, "ready_timeout": 7, "adapter_lost": 8, "control_unknown": 9, "node_endpoint_limit": 10})
+		map[string]uint8{"preset_unknown": 1, "preset_unavailable": 2, "adapter_offline": 3, "runtime_auth": 4, "native_unavailable": 5, "native_error": 6, "ready_timeout": 7, "adapter_lost": 8, "control_unknown": 9, "node_endpoint_limit": 10, "model_choice_not_allowed": 11})
 	check("close outcome", names(func(i uint8) bool { return adapterproto.ControlCloseOutcome(i).Valid() }, func(i uint8) string { return adapterproto.ControlCloseOutcome(i).String() }),
 		map[string]uint8{"closed": 1, "close_unconfirmed": 2, "unsupported": 3})
 	check("close reason", names(func(i uint8) bool { return adapterproto.ControlCloseReason(i).Valid() }, func(i uint8) string { return adapterproto.ControlCloseReason(i).String() }),
@@ -50,7 +50,7 @@ func TestControlEnumCodes(t *testing.T) {
 		map[string]uint8{"adapter_offline": 1, "runtime_auth": 2, "native_unavailable": 3, "server_request_rejected": 4, "control_unknown": 5, "version_untested": 6})
 	// The constants carry those numbers.
 	if adapterproto.CreateReplyCreated != 1 || adapterproto.CreateReplyUnconfirmed != 2 || adapterproto.CreateReplyFailed != 3 ||
-		adapterproto.CreateReasonReadyTimeout != 7 || adapterproto.CreateReasonAdapterLost != 8 || adapterproto.CreateReasonControlUnknown != 9 || adapterproto.CreateReasonNodeEndpointLimit != 10 ||
+		adapterproto.CreateReasonReadyTimeout != 7 || adapterproto.CreateReasonAdapterLost != 8 || adapterproto.CreateReasonControlUnknown != 9 || adapterproto.CreateReasonNodeEndpointLimit != 10 || adapterproto.CreateReasonModelChoiceNotAllowed != 11 ||
 		adapterproto.CloseReplyUnsupported != 3 || adapterproto.InterruptReplyUnsupported != 5 || adapterproto.ActivityUnknown != 3 ||
 		adapterproto.ControlConditionControlUnknown != 5 || adapterproto.ControlConditionObsoleteVersionUntested != 6 {
 		t.Error("a control constant moved")

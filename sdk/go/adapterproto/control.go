@@ -67,7 +67,7 @@ func (v *ControlCreateOutcome) UnmarshalText(b []byte) error {
 	return createOutcomeText.unmarshal(b, v)
 }
 
-// ControlCreateReason says why a creation failed (values 1 to 6, 9 and 10) or is
+// ControlCreateReason says why a creation failed (values 1 to 6 and 9 to 11) or is
 // unconfirmed (7 and 8). The values are persisted in signed records: a new one
 // takes the next number, whichever group it belongs to.
 type ControlCreateReason uint8
@@ -91,11 +91,16 @@ const (
 	// CreateReasonNodeEndpointLimit: the signal was accepted, but the node had
 	// no room for another endpoint. No session was created.
 	CreateReasonNodeEndpointLimit
+	// CreateReasonModelChoiceNotAllowed: the signal chose a model or an effort the
+	// preset does not allow, or one the runtime's adapter does not take. The preset
+	// itself is usable: asking for no choice creates a session.
+	CreateReasonModelChoiceNotAllowed
 )
 
 var createReasonText = enumText[ControlCreateReason]{[]string{
 	"preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error",
 	"ready_timeout", "adapter_lost", "control_unknown", "node_endpoint_limit",
+	"model_choice_not_allowed",
 }}
 
 func (v ControlCreateReason) String() string                { return createReasonText.name(v) }
@@ -105,7 +110,7 @@ func (v *ControlCreateReason) UnmarshalText(b []byte) error { return createReaso
 
 // FailureReason reports whether the reason belongs to a failed creation.
 func (v ControlCreateReason) FailureReason() bool {
-	return v >= CreateReasonPresetUnknown && v <= CreateReasonNativeError || v == CreateReasonControlUnknown || v == CreateReasonNodeEndpointLimit
+	return v >= CreateReasonPresetUnknown && v <= CreateReasonNativeError || v == CreateReasonControlUnknown || v == CreateReasonNodeEndpointLimit || v == CreateReasonModelChoiceNotAllowed
 }
 
 // UnconfirmedReason reports whether the reason belongs to an unconfirmed creation.
@@ -326,14 +331,26 @@ func (v ControlCondition) Valid() bool                   { return conditionText.
 func (v ControlCondition) MarshalText() ([]byte, error)  { return conditionText.marshal(v) }
 func (v *ControlCondition) UnmarshalText(b []byte) error { return conditionText.unmarshal(b, v) }
 
-// PresetAvailability is whether one preset can be used now.
+// PresetAvailability is whether one preset can be used now, and what a requester
+// may choose with it.
 type PresetAvailability struct {
 	Name      string `json:"name"`
 	Available bool   `json:"available"`
+	// Model and Effort are the preset's own defaults, absent when it sets none.
+	Model  string `json:"model,omitempty"`
+	Effort Effort `json:"effort,omitempty"`
+	// AllowedModels are the models a requester may choose and the efforts of each;
+	// absent when the preset allows no choice.
+	AllowedModels []ModelAllowance `json:"allowed_models,omitempty"`
 }
 
-// Validate checks the name.
-func (p PresetAvailability) Validate() error { return at("name", ValidatePresetName(p.Name)) }
+// Validate checks the name and what the preset says about the model choice.
+func (p PresetAvailability) Validate() error {
+	var c checker
+	c.field("name", ValidatePresetName(p.Name))
+	checkPresetChoice(&c, p.Model, p.Effort, p.AllowedModels)
+	return c.err
+}
 
 // ControlStatusReply is the reply to control.endpoint.status, which has no
 // parameters. The daemon answers it alone, from what it has observed, without

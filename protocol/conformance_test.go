@@ -448,6 +448,7 @@ func TestPatternsRefuseATrailingNewline(t *testing.T) {
 		"ConfigKey":   "project_dir",
 		"EnvName":     "SIDERA_TOKEN",
 		"ReasonWord":  "too_many_recipients",
+		"ModelName":   "claude-opus-4-6[1m]",
 		"SemVer":      "2.1.307-rc.1+build.5",
 	}
 	s := schemas(t)

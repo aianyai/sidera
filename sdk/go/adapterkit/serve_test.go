@@ -461,6 +461,54 @@ func TestAttachMethodsNeedTheAttachCapability(t *testing.T) {
 	}
 }
 
+// A session.create that chooses a model or an effort reaches only an application
+// that declared model_choice; one that chooses nothing is served either way.
+func TestModelChoiceNeedsTheModelChoiceCapability(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name     string
+		declared bool
+		model    string
+		effort   adapterproto.Effort
+		wantCode int
+	}{
+		{"declared, a model and an effort", true, "opus", adapterproto.EffortHigh, 0},
+		{"declared, nothing chosen", true, "", "", 0},
+		{"undeclared, nothing chosen", false, "", "", 0},
+		{"undeclared, a model", false, "opus", "", adapterproto.CodeCapabilityNotDeclared},
+		{"undeclared, an effort", false, "", adapterproto.EffortHigh, adapterproto.CodeCapabilityNotDeclared},
+		{"undeclared, both", false, "opus", adapterproto.EffortHigh, adapterproto.CodeCapabilityNotDeclared},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps := runtimeCaps()
+			if tc.declared {
+				caps.Runtime.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: adapterproto.Efforts()}
+			}
+			app := &stub{}
+			s := serveOn(t, config(app, caps))
+			if err := s.initialize(filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".lock")); err != nil {
+				t.Fatal(err)
+			}
+			p := createParams()
+			p.Model, p.Effort = tc.model, tc.effort
+			var res adapterproto.SessionCreateResult
+			err := s.call(adapterproto.MethodSessionCreate, p, &res)
+			if tc.wantCode == 0 {
+				if err != nil || len(app.created) != 1 || app.created[0].Model != tc.model || app.created[0].Effort != tc.effort {
+					t.Fatalf("session.create = %v; the application saw %+v", err, app.created)
+				}
+				return
+			}
+			if got := codeOf(t, err); got != tc.wantCode {
+				t.Errorf("session.create: code %d, want %d", got, tc.wantCode)
+			}
+			if len(app.created) != 0 {
+				t.Error("a model choice reached an application that did not declare it")
+			}
+		})
+	}
+}
+
 // An adapter.start that lists an attached session is refused for an adapter that
 // did not declare attach, before the application sees it; one without an attached
 // entry is served as before.

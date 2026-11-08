@@ -197,9 +197,13 @@ const (
 	// process may remain; the adapter does not touch it and the daemon notifies
 	// the local owner.
 	CreateFailControlUnknown CreateFailure = "control_unknown"
+	// CreateFailModelChoiceNotAllowed: the model, the effort or their combination
+	// that session.create chose is not in the preset's allowlist, or the preset has
+	// no allowlist. Only an adapter that declared model_choice answers it.
+	CreateFailModelChoiceNotAllowed CreateFailure = "model_choice_not_allowed"
 )
 
-var createFailures = []CreateFailure{CreateFailPresetUnknown, CreateFailPresetInvalid, CreateFailRuntimeAuth, CreateFailNativeUnavailable, CreateFailDependencyMissing, CreateFailNativeError, CreateFailControlUnknown}
+var createFailures = []CreateFailure{CreateFailPresetUnknown, CreateFailPresetInvalid, CreateFailRuntimeAuth, CreateFailNativeUnavailable, CreateFailDependencyMissing, CreateFailNativeError, CreateFailControlUnknown, CreateFailModelChoiceNotAllowed}
 
 // Valid reports whether f is a known failure.
 func (f CreateFailure) Valid() bool { return slices.Contains(createFailures, f) }
@@ -535,16 +539,43 @@ const (
 	RejectMalformed          RejectReason = "malformed"
 	RejectDeadlineOutOfRange RejectReason = "deadline_out_of_range"
 	RejectBacklogFull        RejectReason = "backlog_full"
+	// RejectNodeUnsupported: the target node runs a version that cannot take what
+	// the message carries (a model or effort chosen for a new session). The
+	// sender's own node refuses the message without sending it, so unlike every
+	// other reason it is never the target's verdict.
+	RejectNodeUnsupported RejectReason = "node_unsupported"
 )
 
 var rejectReasons = []RejectReason{
 	RejectUnauthorized, RejectEndpointMissing, RejectEndpointClosed, RejectEndpointDeclined, RejectTooLarge,
 	RejectExpired, RejectBacklogExpired, RejectSecondCheckFailed, RejectMalformed, RejectDeadlineOutOfRange,
-	RejectBacklogFull,
+	RejectBacklogFull, RejectNodeUnsupported,
 }
 
 // Valid reports whether r is a known reason.
 func (r RejectReason) Valid() bool { return slices.Contains(rejectReasons, r) }
+
+// Effort is the reasoning effort of a session, on a scale that every runtime
+// with the choice shares. A runtime that supports fewer levels declares which in
+// its model_choice capability.
+type Effort string
+
+const (
+	EffortLow    Effort = "low"
+	EffortMedium Effort = "medium"
+	EffortHigh   Effort = "high"
+	EffortXHigh  Effort = "xhigh"
+	EffortMax    Effort = "max"
+)
+
+// efforts is the scale, lowest first. Lists of efforts are kept in this order.
+var efforts = []Effort{EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+
+// Efforts returns the scale, lowest effort first.
+func Efforts() []Effort { return slices.Clone(efforts) }
+
+// Valid reports whether e is on the scale.
+func (e Effort) Valid() bool { return slices.Contains(efforts, e) }
 
 // ControlSignal names a control signal a message can carry. The names are those
 // of the authorization actions of the same meaning.
@@ -674,5 +705,6 @@ func EnumTables() map[string][]string {
 		"EndpointAction":        strs(endpointActions),
 		"DirectoryOutcome":      strs(directoryOutcomes),
 		"PeerTrust":             strs(peerTrusts),
+		"Effort":                strs(efforts),
 	}
 }

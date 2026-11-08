@@ -161,6 +161,12 @@ type RuntimeCapabilities struct {
 	// turn semantics. It is optional: an adapter that does not implement them
 	// leaves it out, and an explicit false is accepted.
 	Attach bool `json:"attach,omitempty"`
+	// ModelChoice: the adapter takes a model and an effort in session.create,
+	// checks them against the preset's allowlist, answers
+	// model_choice_not_allowed when they are not allowed, keeps the choice with
+	// the session, and reports each preset's defaults and allowlist when probed.
+	// It is optional: an adapter that leaves it out is never sent a choice.
+	ModelChoice *ModelChoiceCapability `json:"model_choice,omitempty"`
 }
 
 // UnmarshalJSON decodes the declaration strictly, except that members it has no
@@ -178,6 +184,9 @@ func (r RuntimeCapabilities) Validate() error {
 		c.field("frontends"+index(i), enumOK(f, frontends))
 	}
 	c.field("frontends", unique(r.Frontends))
+	if r.ModelChoice != nil {
+		c.field("model_choice", r.ModelChoice.Validate())
+	}
 	return c.err
 }
 
@@ -664,11 +673,19 @@ func (d Dependency) Validate() error {
 	return c.err
 }
 
-// PresetStatus is whether a preset can be used right now.
+// PresetStatus is whether a preset can be used right now. The adapter reports
+// the model, the effort and the allowlist only as far as it resolved the preset
+// without a problem, and only when it declared model_choice.
 type PresetStatus struct {
 	Name     string   `json:"name"`
 	Usable   bool     `json:"usable"`
 	Problems []string `json:"problems,omitempty"`
+	// Model and Effort are the preset's own defaults, absent when it sets none.
+	Model  string `json:"model,omitempty"`
+	Effort Effort `json:"effort,omitempty"`
+	// AllowedModels are the models a requester may choose and the efforts of each;
+	// absent when the preset allows no choice.
+	AllowedModels []ModelAllowance `json:"allowed_models,omitempty"`
 }
 
 // Validate checks the entry.
@@ -679,6 +696,7 @@ func (p PresetStatus) Validate() error {
 	for i, s := range p.Problems {
 		c.field("problems"+index(i), strLen(s, 1, MaxDetailLen))
 	}
+	checkPresetChoice(&c, p.Model, p.Effort, p.AllowedModels)
 	return c.err
 }
 

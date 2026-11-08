@@ -360,9 +360,9 @@ only says the request was not understood or not allowed.
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | `intent?` (`restart`, `stop` or `retire`), sent only to an adapter that declared `shutdown_intent` | none |
 | `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions` (an entry of an attached session has `attached`, `wake?` and no `preset` or `tool_access`), `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
-| `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets`, `tool_probes` |
+| `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets` (`name`, `usable`, `problems?`, and with `model_choice` declared `model?`, `effort?`, `allowed_models?`), `tool_probes` |
 | `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
-| `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created (with `first_turn_ended?`), failed or indeterminate, with the fields each needs |
+| `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `model?`, `effort?`, `checkpoint?` | `outcome` created (with `first_turn_ended?`), failed or indeterminate, with the fields each needs |
 | `session.attach` | D to A | request | `endpoint`, `native_ref`, `wake?` | `outcome` attached, not_found or failed, `reason` with a failure, `detail?` |
 | `session.detached` | D to A | notification | `endpoint` | |
 | `checkpoint.put` | A to D | request | `scope` (attempt or session), `id`, `state` (object, at most 16 KiB compact) | none; answered once the state is durable |
@@ -583,7 +583,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Ten
+reader of an earlier shape is deployed that the change could break. Eleven
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -634,7 +634,27 @@ have sent to a new version:
   `directory` calls fail until it is replaced; only direct endpoints call the methods, and the
   only adapter that does is the console adapter of this repository, which `sidera update`
   replaces with the daemon. The record is kept because rule 3 would otherwise have sent them
-  to a new version.
+  to a new version;
+- the choice of a session's model and effort, behind the runtime capability `model_choice`: the
+  members `model` and `effort` of the `session.create` request and of the `control` parameters
+  of `endpoint.send`, the members `model`, `effort` and `allowed_models` of a preset in the
+  `adapter.probe` result and of a preset in the `endpoint.status` reply, the creation failure
+  `model_choice_not_allowed` (control reply reason 11), and the rejection reason
+  `node_unsupported`. The capability alone would need no new version, but new members of
+  objects that are decoded strictly would. The daemon sends `model` and `effort` in
+  `session.create` only to an adapter that declared the capability, and an older daemon never
+  sees a declaration it would act on, so no deployed adapter meets them; an adapter reports the
+  members of a preset in its probe result only when it declared the capability, so an older
+  daemon, which decodes that result strictly, never meets them either. A requester that sends
+  `model` or `effort` to an older daemon has the call refused as malformed, and an older
+  reader of a control reply refuses reason 11, which only a request that chose a model or an
+  effort can earn. The members of `endpoint.status` reach the console adapter in
+  `endpoint.message_status`, and an older console adapter decodes that result strictly; it is
+  replaced together with the daemon by `sidera update`, as for the `profile` and `adapter`
+  members above. `node_unsupported` is the one rejection reason that no target reports: the
+  sender's own node decides it when the target's node cannot take the message, and it is
+  never signed. The record is kept because rule 3 would otherwise have sent all of it to a
+  new version.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -764,13 +784,36 @@ hold the token; native first-turn events may still precede the result.
 The result is `created`, `failed` or `indeterminate`. `failed` means that no
 session will be attached to the channel for this attempt, and `reason` says why:
 `preset_unknown`, `preset_invalid`, `runtime_auth`, `native_unavailable`,
-`dependency_missing`, `native_error`, or `control_unknown`. With every reason but
-the last, certainly no native session was created. `control_unknown` is for an
+`dependency_missing`, `native_error`, `control_unknown`, or
+`model_choice_not_allowed`. With every reason but `control_unknown`, certainly no
+native session was created. `control_unknown` is for an
 adapter that cannot tell who controls the native session it was creating (two
 processes hold its identifier, a writer other than the adapter does, or a start
 timed out while its process still runs): a native process may remain, the adapter
 leaves it alone and the daemon notifies the local owner when it receives the
 reason.
+
+**Model choice.** A requester may choose the `model` and the `effort` of a new
+session, within what the preset's owner allows; the control signal carries them
+and the daemon passes them on in `session.create`, where both are optional and
+absent means the preset's own. Only an adapter that declared `model_choice` is
+sent them, and the Go SDK's kit answers `1003` to a `session.create` that has
+them when it was not declared. The adapter checks them against the preset's
+allowlist (the daemon reads none of the adapter's preset keys, so the allowlist
+is the adapter's to keep), answers `model_choice_not_allowed` when the model,
+the effort or their combination is not allowed or the preset has no allowlist,
+and keeps the choice with the session, so that it holds for every later turn and
+after a restart. A model name is 1 to 128 characters of
+`[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]*`: it holds no blank, control or non-ASCII
+character, so it reaches an argv, a log and a terminal as it is. An effort is one
+of `low`, `medium`, `high`, `xhigh` and `max`, which is the order of the scale; a
+list of efforts is kept in that order. The same attempt sent again carries the
+same choice, as for every other member. The adapter reports each preset's own
+model and effort and its allowlist (`allowed_models`: at most 16 models, sorted by
+name, each with its efforts) in the `presets` of its probe result, only as far as
+it resolved the preset without a problem; the daemon shows them in the
+`endpoint.status` reply of the runtime so that a requester can see what it may
+choose.
 
 **Reconciliation.** `prompt.reconcile` answers whether an attempt reached the
 runtime. The `grounds.code` belongs to the verdict: `found` goes with
@@ -1135,6 +1178,7 @@ is authoritative.
 | `malformed` | the envelope is not valid |
 | `deadline_out_of_range` | the delivery deadline lies further in the future than the protocol allows |
 | `backlog_full` | the recipient endpoint already held as many queued messages as its backlog limit allows when the message arrived; the rejection is final at intake and nothing was stored |
+| `node_unsupported` | the target node runs a version that cannot take what the message carries (a model or an effort chosen for a new session); the sender's own node refused the message without sending it, so no target reports this reason and no signed record carries it |
 
 ### Why
 
@@ -1169,7 +1213,7 @@ is authoritative.
   once sent is never renamed, removed or reused. Within a released protocol
   version the set of reasons is closed: strict decoding refuses an unknown
   reason, so a reason added after a version is released follows the version rule
-  above and needs a new protocol version (`backlog_full` was added in place, under
+  above and needs a new protocol version (`backlog_full` and `node_unsupported` were added in place, under
   the exception for a version nobody outside this repository implements yet). `backlog_full` is its own reason
   because the sender can act on it, by retrying later or sending elsewhere,
   where `backlog_expired` means a message that was accepted and then waited too
@@ -1276,7 +1320,8 @@ is authoritative.
 An adapter declares what it supports in the result of `initialize`:
 
 ```json
-{"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"], "attach": true},
+{"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"], "attach": true,
+             "model_choice": {"efforts": ["low", "medium", "high", "xhigh", "max"]}},
  "direct": {"max_endpoints": 50, "feedback": true},
  "shutdown_intent": true}
 ```
@@ -1302,7 +1347,12 @@ and says that the adapter implements attached sessions: `session.attach`, the at
 of `adapter.start`, `session.detached`, and their prompt and turn semantics. `shutdown_intent`, a
 member of the declaration itself and also optional, says that the adapter reads the `intent` of
 `shutdown`. `feedback`, a member of `direct` and optional in the same way, says that the
-adapter decodes the member `feedback` of a message on a page. The daemon leaves that member out of
+adapter decodes the member `feedback` of a message on a page. `model_choice`, a member of
+`runtime` and optional in the same way, says that the adapter takes the `model` and the `effort`
+of `session.create`, checks them against the preset, answers `model_choice_not_allowed`, keeps
+the choice with the session and reports each preset's defaults and allowlist when probed; its
+`efforts` are the efforts the runtime can run (at least one, in the order of the scale), and the
+daemon sends a choice that names another to no adapter. The daemon leaves that member out of
 every page it sends an adapter that did not declare it, because an adapter that decodes a page
 strictly would refuse the whole page, and with it every message queued behind a notice. The Go
 SDK's kit declares it for every adapter that declares direct endpoints.
@@ -1422,7 +1472,7 @@ except the observations that are plain calls (marked "call"):
 | the cause `handoff.AssessBlocked` names (`AdapterOffline`, `AuthInvalid`, `ServiceUnavailable`) | `delivery.CauseAdapterOffline`, `CauseRuntimeAuth`, `CauseNativeUnavailable` (`BlockedCause`; `HandoffBlockedCause` is its inverse, for a block known only from the marks on target records) |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
 | a `session.create` the daemon refuses itself, before calling the adapter (`DaemonCreateFailure`): preset unknown, preset closed to local sources, adapter offline, node endpoint limit | control reply failed with `preset_unknown`, `preset_unavailable`, `adapter_offline`, `node_endpoint_limit`, and no session endpoint |
-| `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, the others keep their names); keep reconciling, then unconfirmed |
+| `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, `model_choice_not_allowed` stays `model_choice_not_allowed`, the others keep their names); keep reconciling, then unconfirmed |
 | `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
 | `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
 | `recv.observed` verdict and reason | call: `handoff.CheckBeforeAck` over the observed text and the stored page output; allowed settles every part through `delivery.Record.Ack`. The reasons and the item acknowledgements are named by `AckReason` and `ItemAck` |
@@ -1474,15 +1524,16 @@ absent. A message with a control signal has exactly one recipient (`endpoint.sen
 with `control` takes a single address in `to`): one adapter executes the signal
 and one reply comes back; to act on several endpoints, send one message to each.
 
-`control.session.create` (target: a runtime endpoint). Parameter: the preset name,
-1 to 64 characters of `[a-z0-9][a-z0-9._-]*`. The initial message is the body of
+`control.session.create` (target: a runtime endpoint). Parameters: the preset name,
+1 to 64 characters of `[a-z0-9][a-z0-9._-]*`, and optionally the `model` and the `effort` of
+the new session (see Model choice above). The initial message is the body of
 the carrying message; an empty body means none. Reply:
 
 | Field | Values | Present |
 | ----- | ------ | ------- |
 | `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (no session will be attached to the channel; certainly not created, except for reason 9) | always |
 | `session_endpoint` | the endpoint allocated for the session, as the node of the runtime knows it: the node is not part of it, and a sender on another node completes the address with the node of the runtime it signalled | outcome 1 or 2 |
-| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown, 10 node_endpoint_limit; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
+| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown, 10 node_endpoint_limit, 11 model_choice_not_allowed; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
 
 `control.session.close` (target: a session endpoint), no parameters. Reply
 `outcome`: 1 closed, 2 close_unconfirmed, 3 unsupported; `reason` only with 2:
@@ -1501,7 +1552,7 @@ daemon alone from what it has observed:
 | `activity` | 1 idle, 2 busy, 3 unknown (the adapter is offline and the last report cannot be checked) |
 | `queued` | messages waiting, not counting those paused by authorization |
 | `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown; 6 version_untested is obsolete and reserved for ever (see below) |
-| `presets` | `name`, `available`, sorted by name; runtime endpoints only |
+| `presets` | `name`, `available`, sorted by name; runtime endpoints only. A preset also states, when the adapter declared `model_choice` and reported them, its default `model` and `effort` and `allowed_models`, the models a requester may choose and the efforts of each, sorted by model |
 | `as_of` | Unix seconds, 1 to 253402300799 (9999-12-31T23:59:59Z, the latest time any record carries; the millisecond bound would admit times billions of years away) |
 
 In JSON (the `control_reply` of `endpoint.message_status`) a reply is one object
@@ -1539,6 +1590,13 @@ with `signal` beside its fields, and enums are their names.
   endpoint is returned. It has its own reason because `preset_unavailable` would
   falsely blame a usable preset in the signed reply. The daemon decides the cap,
   so the adapter's native `session.create` failure reasons do not include it.
+- `model_choice_not_allowed` is a failed creation of its own, and not
+  `preset_unavailable`, because the preset is usable: asking for no choice creates a
+  session, and only the model, the effort or their combination was refused. Blaming
+  the preset would send a requester away from one that works, as it would for
+  `node_endpoint_limit`. An adapter answers it as a creation failure with the same name. A reader that
+  predates reason 11 cannot meet it, because only a request that chose a model or an
+  effort can earn it.
 - One reply per signal, with `requested` and `stopped` as values of the same
   field, because a second report later would need a second record; `status`
   answers the question afterwards.

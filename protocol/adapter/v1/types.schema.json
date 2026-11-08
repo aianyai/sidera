@@ -73,6 +73,11 @@
       "type": "string", "minLength": 1, "maxLength": 64,
       "pattern": "^[a-z0-9][a-z0-9._-]*$"
     },
+    "ModelName": {
+      "description": "The name of a model as its runtime spells it: an alias, a full id, a cloud provider's id or an ARN. It holds no blank, control or non-ASCII character.",
+      "type": "string", "minLength": 1, "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\[\\]-]*$"
+    },
     "DisplayName": {
       "description": "A display name: 1 to 128 characters, none of them a control character, a line or paragraph separator, a bidirectional formatting control or a character that draws nothing (the zero width space, the word joiner, the byte order mark, a tag character, a Hangul filler and the like). A variation selector (U+FE00 to U+FE0F, U+E0100 to U+E01EF, U+180B to U+180D, U+180F) may follow any other character, one at a time, and is never first. At least one character is visible: a name of only spaces and invisible characters is refused. A name that breaks a rule is refused, not cleaned.",
       "type": "string", "minLength": 1, "maxLength": 128,
@@ -140,7 +145,7 @@
     "SessionAttachOutcome": { "type": "string", "enum": ["attached", "not_found", "failed"] },
     "SessionAttachFailure": { "type": "string", "enum": ["wake_unavailable", "native_unreachable", "native_error"] },
     "CreateOutcome": { "type": "string", "enum": ["created", "failed", "indeterminate"] },
-    "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error", "control_unknown"] },
+    "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error", "control_unknown", "model_choice_not_allowed"] },
     "CheckpointScope": { "type": "string", "enum": ["attempt", "session"] },
     "PromptStage": { "type": "string", "enum": ["accepted", "persisted", "refused"] },
     "PromptRefusal": { "type": "string", "enum": ["busy", "runtime_auth", "native_unavailable", "session_lost", "control_unknown"] },
@@ -165,7 +170,7 @@
     },
     "RejectReason": {
       "type": "string",
-      "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full"]
+      "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full", "node_unsupported"]
     },
     "ControlSignal": { "type": "string", "enum": ["session.create", "session.close", "session.interrupt", "endpoint.status"] },
     "EndpointKind": { "type": "string", "enum": ["runtime", "session", "direct"] },
@@ -175,6 +180,23 @@
     },
     "DirectoryOutcome": { "type": "string", "enum": ["ok", "unavailable", "refused"] },
     "PeerTrust": { "type": "string", "enum": ["self", "direct"] },
+    "Effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The reasoning effort of a session, on a scale every runtime with the choice shares. A list of efforts is in the order of this table, lowest first." },
+    "EffortList": { "type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/Effort" }, "description": "Go only: the efforts are in the order of the scale." },
+    "ModelAllowance": {
+      "description": "A model a requester may choose and the efforts it may choose with it.",
+      "type": "object",
+      "required": ["model", "efforts"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "$ref": "#/$defs/ModelName" },
+        "efforts": { "$ref": "#/$defs/EffortList" }
+      }
+    },
+    "AllowedModels": {
+      "description": "A preset's allowlist: at most 16 models. Go only: the models are sorted by name with none twice.",
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": { "$ref": "#/$defs/ModelAllowance" }
+    },
     "DirectoryCursor": {
       "description": "An opaque position in a directory listing, made by the node asked. It is good only for the endpoint and the daemon process it was made for, and grants nothing.",
       "type": "string", "minLength": 1, "maxLength": 256
@@ -320,7 +342,14 @@
             "ack_on_behalf": { "type": "boolean" },
             "server_requests": { "type": "boolean" },
             "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/Frontend" } },
-            "attach": { "type": "boolean", "description": "The adapter implements attached sessions: session.attach, the attached entries of adapter.start, session.detached, and their prompt and turn semantics. Optional; absent means false." }
+            "attach": { "type": "boolean", "description": "The adapter implements attached sessions: session.attach, the attached entries of adapter.start, session.detached, and their prompt and turn semantics. Optional; absent means false." },
+            "model_choice": {
+              "description": "The adapter takes a model and an effort in session.create, checks them against the preset's allowlist, answers model_choice_not_allowed when they are not allowed, keeps the choice with the session and reports each preset's defaults and allowlist when probed. Optional; absent means the adapter is never sent a choice. Go only: the efforts are in the order of the scale.",
+              "type": "object",
+              "required": ["efforts"],
+              "additionalProperties": false,
+              "properties": { "efforts": { "$ref": "#/$defs/EffortList" } }
+            }
           }
         },
         "direct": {
@@ -444,7 +473,7 @@
             "signal": { "const": "session.create" },
             "outcome": { "enum": ["created", "unconfirmed", "failed"] },
             "session_endpoint": { "$ref": "#/$defs/EndpointRef" },
-            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost", "control_unknown", "node_endpoint_limit"] }
+            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost", "control_unknown", "node_endpoint_limit", "model_choice_not_allowed"] }
           },
           "oneOf": [
             {
@@ -459,7 +488,7 @@
               "properties": {
                 "outcome": { "const": "failed" },
                 "session_endpoint": false,
-                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "control_unknown", "node_endpoint_limit"] }
+                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "control_unknown", "node_endpoint_limit", "model_choice_not_allowed"] }
               },
               "required": ["reason"]
             }
@@ -519,7 +548,10 @@
                 "additionalProperties": false,
                 "properties": {
                   "name": { "$ref": "#/$defs/PresetName" },
-                  "available": { "type": "boolean" }
+                  "available": { "type": "boolean" },
+                  "model": { "$ref": "#/$defs/ModelName" },
+                  "effort": { "$ref": "#/$defs/Effort" },
+                  "allowed_models": { "$ref": "#/$defs/AllowedModels" }
                 }
               }
             },

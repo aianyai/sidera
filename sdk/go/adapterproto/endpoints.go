@@ -137,10 +137,19 @@ func (r AckResult) Validate() error {
 type ControlParams struct {
 	// Preset is the runtime preset session.create starts.
 	Preset string `json:"preset"`
+	// Model and Effort choose the new session's model and reasoning effort within
+	// what the preset allows; absent takes the preset's own.
+	Model  string `json:"model,omitempty"`
+	Effort Effort `json:"effort,omitempty"`
 }
 
-// Validate checks the preset name.
-func (p ControlParams) Validate() error { return at("preset", ValidatePresetName(p.Preset)) }
+// Validate checks the preset name and, when present, the model and the effort.
+func (p ControlParams) Validate() error {
+	var c checker
+	c.field("preset", ValidatePresetName(p.Preset))
+	checkChoice(&c, p.Model, p.Effort)
+	return c.err
+}
 
 // Control marks a message as a control signal for the target endpoint instead of
 // text for its agent. The body of a session.create message is its initial

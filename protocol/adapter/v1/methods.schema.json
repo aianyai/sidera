@@ -230,7 +230,10 @@
             "properties": {
               "name": { "$ref": "types.schema.json#/$defs/PresetName" },
               "usable": { "type": "boolean" },
-              "problems": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "types.schema.json#/$defs/Detail" } }
+              "problems": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "types.schema.json#/$defs/Detail" } },
+              "model": { "$ref": "types.schema.json#/$defs/ModelName" },
+              "effort": { "$ref": "types.schema.json#/$defs/Effort" },
+              "allowed_models": { "$ref": "types.schema.json#/$defs/AllowedModels" }
             }
           }
         },
@@ -293,6 +296,8 @@
           }
         },
         "tool_access": { "$ref": "types.schema.json#/$defs/ToolAccess" },
+        "model": { "$ref": "types.schema.json#/$defs/ModelName" },
+        "effort": { "$ref": "types.schema.json#/$defs/Effort" },
         "checkpoint": { "$ref": "types.schema.json#/$defs/State" }
       }
     },
@@ -649,7 +654,11 @@
               "type": "object",
               "required": ["preset"],
               "additionalProperties": false,
-              "properties": { "preset": { "$ref": "types.schema.json#/$defs/PresetName" } }
+              "properties": {
+                "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
+                "model": { "$ref": "types.schema.json#/$defs/ModelName" },
+                "effort": { "$ref": "types.schema.json#/$defs/Effort" }
+              }
             }
           },
           "oneOf": [

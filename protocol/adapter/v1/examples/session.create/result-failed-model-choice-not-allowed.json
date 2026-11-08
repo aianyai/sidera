@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 32,
+  "result": {
+    "outcome": "failed",
+    "reason": "model_choice_not_allowed",
+    "detail": "the preset does not allow model opus with effort max"
+  }
+}

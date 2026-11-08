@@ -57,6 +57,11 @@
         "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
         "state": "rejected",
         "reason": "backlog_full"
+      },
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
+        "state": "rejected",
+        "reason": "node_unsupported"
       }
     ]
   }

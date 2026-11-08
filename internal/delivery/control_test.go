@@ -649,7 +649,7 @@ func TestNewRejectedTargetControlRecord(t *testing.T) {
 				t.Errorf("%s: err = %v, want ErrInvalidInput", reason, err)
 			}
 		}
-		if seen != len(intake)+4 { // none, backlog_expired, second_check_failed, backlog_full
+		if seen != len(intake)+5 { // none, backlog_expired, second_check_failed, backlog_full, node_unsupported
 			t.Errorf("the reasons changed (%d known): decide whether the new one is a reason of a control intake", seen)
 		}
 		if _, err := NewRejectedTargetControlRecord(t0, controlAcceptBefore, controlReportBy, RejectReason(200)); !errors.Is(err, ErrInvalidInput) {

@@ -8,6 +8,16 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+### Added
+
+- **The adapter protocol can carry the choice of a session's model and effort.** For adapter authors:
+  an adapter that declares the runtime capability `model_choice` is sent the optional `model` and
+  `effort` of a `session.create`, answers `model_choice_not_allowed` when the preset does not allow them,
+  and reports each preset's default model and effort and its allowed models in the probe result. The
+  control reply to a creation has a new failure reason, `model_choice_not_allowed`, and a message can now
+  be rejected as `node_unsupported` when the target node's version cannot take what it carries. Protocol
+  version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
+
 ## [0.17.0] - 2026-11-07
 
 Nodes describe themselves in 0.17: the name, host name, system and Sidera version of every

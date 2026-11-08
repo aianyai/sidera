@@ -130,7 +130,7 @@ func (s *server) register() {
 	app := s.cfg.App
 	serve(s, adapterproto.MethodAdapterStart, nil, s.start)
 	serve(s, adapterproto.MethodAdapterProbe, nil, s.probe)
-	serve(s, adapterproto.MethodSessionCreate, declaresRuntime, app.CreateSession)
+	serve(s, adapterproto.MethodSessionCreate, declaresRuntime, s.createSession)
 	serve(s, adapterproto.MethodPromptDeliver, declaresRuntime, app.DeliverPrompt)
 	serve(s, adapterproto.MethodPromptReconcile, declaresRuntime, app.Reconcile)
 	serve(s, adapterproto.MethodSessionInterrupt, declaresRuntime, app.Interrupt)
@@ -151,6 +151,22 @@ func declaresRuntime(c adapterproto.Capabilities) bool { return c.Runtime != nil
 
 // declaresAttach is the gate of the methods of attached sessions.
 func declaresAttach(c adapterproto.Capabilities) bool { return c.Runtime != nil && c.Runtime.Attach }
+
+// declaresModelChoice is the gate of a session.create that chooses a model or an
+// effort.
+func declaresModelChoice(c adapterproto.Capabilities) bool {
+	return c.Runtime != nil && c.Runtime.ModelChoice != nil
+}
+
+// createSession passes session.create to the application. A choice of a model or
+// an effort reaches only an application that declared model_choice, so it is
+// refused here as session.attach is, before the application sees it.
+func (s *server) createSession(ctx context.Context, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
+	if (p.Model != "" || p.Effort != "") && !declaresModelChoice(s.cfg.Capabilities) {
+		return adapterproto.SessionCreateResult{}, notDeclared(adapterproto.MethodSessionCreate + " with a model or an effort")
+	}
+	return s.cfg.App.CreateSession(ctx, p)
+}
 
 // start passes adapter.start to the application. Nothing of attached sessions
 // reaches an application that did not declare attach, so an entry of an attached

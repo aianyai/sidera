@@ -420,7 +420,7 @@ func TestCapabilitiesAreOpen(t *testing.T) {
 func TestRejectReasonTable(t *testing.T) {
 	want := []string{
 		"unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired",
-		"backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full",
+		"backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full", "node_unsupported",
 	}
 	got := adapterproto.EnumTables()["RejectReason"]
 	if !reflect.DeepEqual(got, want) {

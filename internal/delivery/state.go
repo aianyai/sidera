@@ -201,6 +201,10 @@ const (
 	// learns at once that the endpoint is not reading and does not wait for a
 	// deadline.
 	RejectBacklogFull
+	// RejectNodeUnsupported: the target node runs a version that cannot take what
+	// the message carries. The sender's own node decides this, before it sends,
+	// so no target ever reports it.
+	RejectNodeUnsupported
 )
 
 // AtControlIntake reports whether a control signal can be refused for this
@@ -217,6 +221,10 @@ func (r RejectReason) AtControlIntake() bool {
 	return false
 }
 
+// FromTarget reports whether the target node can report the reason. Every reason
+// but RejectNodeUnsupported is the target's verdict.
+func (r RejectReason) FromTarget() bool { return r != RejectNodeUnsupported }
+
 var rejectNames = [...]string{
 	RejectNone:               "none",
 	RejectUnauthorized:       "unauthorized",
@@ -230,6 +238,7 @@ var rejectNames = [...]string{
 	RejectMalformed:          "malformed",
 	RejectDeadlineOutOfRange: "deadline_out_of_range",
 	RejectBacklogFull:        "backlog_full",
+	RejectNodeUnsupported:    "node_unsupported",
 }
 
 // known reports whether r is a reason or RejectNone.

@@ -1,0 +1,46 @@
+{
+  "jsonrpc": "2.0",
+  "id": 143,
+  "result": {
+    "recipients": [
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+        "state": "delivered"
+      }
+    ],
+    "control_reply": {
+      "signal": "endpoint.status",
+      "activity": "idle",
+      "queued": 0,
+      "presets": [
+        {
+          "name": "default",
+          "available": true,
+          "model": "sonnet",
+          "effort": "medium",
+          "allowed_models": [
+            {
+              "model": "haiku",
+              "efforts": [
+                "low",
+                "medium"
+              ]
+            },
+            {
+              "model": "opus",
+              "efforts": [
+                "medium",
+                "high"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "review.readonly",
+          "available": false
+        }
+      ],
+      "as_of": 1792713600
+    }
+  }
+}

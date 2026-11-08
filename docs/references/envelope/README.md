@@ -117,12 +117,14 @@ for that reason; once nodes are deployed, a new field is a new type string.
 The reject reason codes are written down in this table, not taken from the
 order of the Go constants of `delivery`, so reordering those never changes what
 a signed report means; a new reason is appended with the next number and a code
-already issued is never reused. Code 11, `backlog_full`, is the rejection of an
+already issued is never reused. The reason `node_unsupported` has no code: the sender's own node
+decides it when the target's version cannot take the message (`RejectReason.FromTarget`
+is false), so no target reports it and no report carries it. Code 11, `backlog_full`, is the rejection of an
 ordinary message that arrived at an endpoint whose queue was at its limit (see
 the [delivery](../delivery/README.md) reference). A node that predates a code
 refuses the report as malformed, so a sender and a target must run versions
 that know the same codes. Tests: `TestStatusReportWireTablesAreIndependentOfGoOrder`
-(fails when a reason has no pinned code) and the `rejected, backlog full` case of
+(fails when a reason a target can report has no pinned code) and the `rejected, backlog full` case of
 `TestGoldenStatusReports`.
 
 `reported_at` is the moment the target recorded the state, not the moment it
