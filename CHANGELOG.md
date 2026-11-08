@@ -64,6 +64,11 @@ protocol has a version of its own.
 - **A Claude Code or Codex preset's `model` must be a valid model name.** It starts with a letter or
   a digit and holds only letters, digits and `._:/@+[]-`; a preset with another is reported as
   unusable instead of its name being passed to the agent.
+- **A node has at most 20 presets.** `sidera preset add` refuses the twenty-first, naming the limit:
+  every preset is listed in the answer to a status request, and the answer has to fit in one message
+  that every node can read, now that it also lists each preset's models. Presets a node already
+  holds beyond the limit are kept and keep working, and the node reports an answer too large to read
+  with an error in its log (see below).
 
 ### Fixed
 

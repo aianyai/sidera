@@ -15,6 +15,28 @@ const (
 	localDeny  = "deny"
 )
 
+// MaxPresets is the most presets a node has. Every preset is told to a requester in
+// the node's answer to endpoint.status, the answer is one signed record, and a
+// record is read only up to record.DefaultMaxInput (64 KiB) bytes, so the presets
+// together must fit in it whatever they say. The largest a preset can be in the
+// answer, from the bounds of the adapter protocol (adapterproto.MaxPresetNameLen,
+// MaxModelNameLen, MaxAllowedModels and the five efforts of the scale):
+//
+//	name 64 + default model 128 + default effort 6 ("medium")
+//	+ 16 allowed models x (128 + the five efforts, 26)
+//	+ the framing of the encoding                      = about 2.8 KB
+//
+// so 23 presets nearly fill the record (64 KiB). Twenty makes the largest reply
+// about 55 KB and leaves about 9.5 KB: room for the rest of the reply (the id of the
+// signal, the conditions, the envelope of the record) and for a bound of the adapter
+// protocol raised a little. TestTheLargestStatusReplyTheLimitOnPresetsAllowsFitsInOneSignedRecord
+// builds that largest reply and fails when a raise of any of the bounds, or of this
+// number, makes it too large to read. AddPreset refuses the preset that would be
+// over the limit; the presets already stored are not checked again, so a node that
+// holds more keeps working, and its status reply is refused when it cannot be read
+// (see the control reply in the engine).
+const MaxPresets = 20
+
 // presetWire is one preset of presets.json, and the document presets.add takes.
 type presetWire struct {
 	LocalSources string                                `json:"local_sources"`

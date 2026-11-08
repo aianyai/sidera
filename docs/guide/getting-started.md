@@ -145,7 +145,9 @@ A **preset** is the recipe for a session: where the agent works, what it may do,
 and which instructions it gets. Another machine asks for a session by preset name,
 and the preset lives on the machine that runs the session. Use the same preset
 names, `light` and `dev`, on every machine, so that agents need not know which
-machine has which.
+machine has which. A machine has at most 20 presets: the answer to a status request
+lists them all, and it has to fit in one message every node can read. Remove one you
+do not use (`sidera preset remove`) before adding a twenty-first.
 
 The `default` preset made by `init` holds no agent settings, so neither adapter
 can start a session with it. Add your own.

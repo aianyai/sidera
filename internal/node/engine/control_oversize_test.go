@@ -23,7 +23,7 @@ import (
 // told the same until the node's presets are fewer.
 func TestAControlReplyNoReaderCouldTakeIsNotCommitted(t *testing.T) {
 	presets := map[string]string{}
-	for i := range 1100 { // more than a reader takes of the status reply
+	for i := range 1100 { // more than a reader takes of the status reply: a node whose presets predate the limit on them
 		presets[fmt.Sprintf("%s%04d", strings.Repeat("p", 60), i)] = `{"local_sources":"allow"}`
 	}
 	h := sessionNode(t, harness.Options{StoredPresets: presets}, "a")

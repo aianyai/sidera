@@ -2,7 +2,9 @@ package config_test
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/authz"
@@ -143,5 +145,31 @@ func TestAPresetIsShownAsTheDocumentThatAddsIt(t *testing.T) {
 	}
 	if got, err := (config.Preset{}).WireJSON(); err == nil {
 		t.Errorf("a preset with no statement about local sources is shown as %s", got)
+	}
+}
+
+// A node has at most MaxPresets presets: the one that would be over is refused as
+// an invalid name, with the limit in the reason, and nothing is written. A node
+// whose file already holds more is not touched by this, so it is not tested here.
+func TestAddPresetOverTheLimitIsRefused(t *testing.T) {
+	rg, c := loaded(t)
+	version := c.Presets().Version
+	for i := 0; len(c.Presets().Items) < config.MaxPresets; i++ {
+		var seen []config.Presets
+		after, err := c.AddPreset(request(byte(10+i), version), fmt.Sprintf("p%d", i), []byte(`{"local_sources": "allow"}`), result(&seen, `{}`))
+		if err != nil {
+			t.Fatalf("preset %d of %d: %v", len(c.Presets().Items)+1, config.MaxPresets, err)
+		}
+		version = after.Version
+	}
+	before := snapshot(t, rg.mem)
+	var seen []config.Presets
+	_, err := c.AddPreset(request(200, version), "one-too-many", []byte(`{"local_sources": "allow"}`), result(&seen, `{}`))
+	ce := changeReason(t, err)
+	if ce.Reason != config.ChangeInvalid || ce.Field != "name" || !strings.Contains(err.Error(), fmt.Sprint(config.MaxPresets)) {
+		t.Errorf("error = %v (%+v), want ChangeInvalid at name that names the limit", err, ce)
+	}
+	if len(seen) != 0 || c.Presets().Version != version || !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
+		t.Error("a refused preset built a result, changed the version or the disk")
 	}
 }

@@ -204,6 +204,18 @@ silently.
 ```
 
 A preset name has the syntax `adapterproto.ValidatePresetName` checks.
+A node has at most `config.MaxPresets` (20) presets, and `preset add` refuses the one
+that would be over (`invalid` at `name`, with the limit in the message). The reason is
+the answer to `endpoint.status`: it lists every preset, with the default model and
+effort and an allowlist of up to 16 models each, in one signed record that a reader
+takes only up to `record.DefaultMaxInput` (64 KiB). From the bounds of the adapter
+protocol the largest preset is about 2.8 KB in the answer, so 23 would nearly fill the
+record; twenty leaves about 9.5 KB for the rest of the reply and for a bound raised a
+little. `TestTheLargestStatusReplyTheLimitOnPresetsAllowsFitsInOneSignedRecord` builds
+the largest possible answer and fails when a raise of any bound, or of the limit,
+makes it too large to read. The presets already stored are not checked again: a node
+that holds more keeps working, and the engine refuses to commit a status answer it
+could not be read in (see its reference). Test: `TestAddPresetOverTheLimitIsRefused`.
 `local_sources` is **required, with no default**, and is exactly `"allow"` or
 `"deny"`: whether an endpoint on this node may start a session with the preset.
 It decodes to `authz.PresetLocalAccess`; a missing field, another word, a
@@ -779,6 +791,7 @@ endpoints and not to others for a reason nobody remembers.
 | `init` | `init.go` |
 | A bad package faults its adapter, one row per way a package is bad; installing over it | `TestABadPackageFaultsItsAdapterAndNotTheNode`, `TestInstallingOverAFaultedAdapterRecoversIt`, `TestAdapterGCWorkSkipsAnAdapterWhosePointerIsBad` |
 | An invalid file refuses startup, one row per file and failure | `TestInvalidFileRefusesStartupAndNamesTheFile`, `TestMissingDirectoryRefusesStartupAndNamesIt`, `TestFirstInvalidFileInFixedOrderIsNamed`, `TestWrongTypeIsNamedByItsPath` |
+| A node has at most `MaxPresets` presets | `TestAddPresetOverTheLimitIsRefused`, `TestTheLargestStatusReplyTheLimitOnPresetsAllowsFitsInOneSignedRecord` |
 | A preset without the statement is invalid | `TestPresetWithoutLocalSourcesIsInvalid`, `TestAddPresetWithoutLocalSourcesIsRefused`, `TestEveryPresetOnDiskMadeTheStatement` |
 | Expected versions, recording the operation | `TestExpectedVersionConflictPerCollection`, `TestVersionedChangeRecordsTheOperation`, `TestStaleVersionIsReportedBeforeAnInvalidValue` |
 | No file is written that its decoder refuses | `TestChangeWithoutOperationIDWritesNothing`, `TestEncodeRefusesAZeroOperationID`, `TestEncodeRefusesVersionZero`, `TestChangeRefusesToWrapTheVersion` |

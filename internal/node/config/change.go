@@ -197,6 +197,9 @@ func (c *Config) AddPreset(req Request, name string, preset []byte, result Resul
 	if _, taken := cur.Items[name]; taken {
 		return Presets{}, &ChangeError{Reason: ChangePresetExists, Field: name}
 	}
+	if len(cur.Items) >= MaxPresets {
+		return Presets{}, invalidChange(invalid("name", fmt.Errorf("a node has at most %d presets", MaxPresets)))
+	}
 	if err := c.checkPresetConfig(p); err != nil {
 		return Presets{}, err
 	}

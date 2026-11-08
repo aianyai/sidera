@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
@@ -217,6 +219,29 @@ func (r *rig) addPreset(name, doc string) {
 	req := configRequest(nextOp(), r.cfg.Presets().Version)
 	if _, err := r.cfg.AddPreset(req, name, []byte(doc), okResult[config.Presets]); err != nil {
 		r.t.Fatalf("AddPreset(%q): %v", name, err)
+	}
+}
+
+// addStoredPresets puts n more presets into the presets file as it would hold them
+// without the limit on their number that `preset add` applies (a file the limit
+// does not check again), and loads the configuration anew.
+func (r *rig) addStoredPresets(prefix string, n int) {
+	r.t.Helper()
+	p := r.cfg.Presets()
+	items := maps.Clone(p.Items)
+	for i := range n {
+		items[fmt.Sprintf("%s%03d", prefix, i)] = config.Preset{LocalSources: authz.PresetLocalAllow}
+	}
+	p.Items = items
+	data, err := p.Encode()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if err := fsx.Replace(r.mem, setupTag, config.PresetsPath, data, fsx.ModePrivate); err != nil {
+		r.t.Fatal(err)
+	}
+	if r.cfg, err = config.Load(r.w); err != nil {
+		r.t.Fatal(err)
 	}
 }
 
@@ -886,20 +911,19 @@ func TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes(t *testing
 	})
 
 	t.Run("at most 256 requests", func(t *testing.T) {
-		r := newRig(t, 10)
-		for i := 0; i < 127; i++ { // with the preset every node starts with, 128
-			r.addPreset(fmt.Sprintf("p%03d", i), `{"local_sources":"allow"}`)
+		probe := func(stored int) ([]adapterproto.ToolProbeRequest, error) {
+			r := newRig(t, 10)
+			r.addStoredPresets("p", stored) // with the preset every node starts with; more than `preset add` allows
+			e := r.start()
+			if err := admitOn(ctx, e, "chat", rt); err != nil {
+				t.Fatal(err)
+			}
+			return e.ProbeTokens(ctx, "chat")
 		}
-		e := r.start()
-		if err := admitOn(ctx, e, "chat", rt); err != nil {
-			t.Fatal(err)
-		}
-		reqs, err := e.ProbeTokens(ctx, "chat")
-		if err != nil || len(reqs) != 256 {
+		if reqs, err := probe(127); err != nil || len(reqs) != 256 { // 128 presets
 			t.Fatalf("%d requests, %v; want exactly 256 to be allowed", len(reqs), err)
 		}
-		r.addPreset("p128", `{"local_sources":"allow"}`)
-		_, err = e.ProbeTokens(ctx, "chat")
+		_, err := probe(128) // 129 presets: 258 requests
 		if err == nil || !strings.Contains(err.Error(), "256") {
 			t.Errorf("258 requests: error %v, want one that says at most 256", err)
 		}
