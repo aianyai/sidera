@@ -790,7 +790,7 @@ coverage dimensions.
   until the earliest of them fires, and only while the host of every instance is idle
   (not working, no request in flight): after an adapter ends the host first waits for the
   process to exit under a timer of its own, and only then arms the restart backoff, so the
-  earliest timer of a host that is still working is not the one a test means to fire. A test that moves the clock to an adapter restart
+  earliest timer of a host that is still working is not the one a test means to fire. The host's report of an adapter that ended is also what makes the timer the backoff: before the host has noticed the end it is idle under its ping interval, which is reported as well, so a caller reads the timer only after the node knows the adapter is gone. A test that moves the clock to an adapter restart
   waits for it and advances by exactly that, never by a guess made on real time, which on
   a slow machine moves the clock once too often. `Set` keeps the remaining time of those
   timers across a set-back, as the fake clock does. The fake adapter runs on pipes in the test process and

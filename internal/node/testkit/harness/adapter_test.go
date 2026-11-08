@@ -388,10 +388,24 @@ func TestAnExtraInstanceHasItsOwnAdapterRuntimeAndEndpoints(t *testing.T) {
 func TestHostTimerDueIsTheRestartBackoffOnceTheHostHasArmedIt(t *testing.T) {
 	h := withAdapter(t)
 	h.AdapterLaunches(harness.Instance)[0].End()
+	// The host has to have told the node that the adapter is gone before its timer
+	// is read: until then it may not have noticed the end, and it is idle in the
+	// park it waits in while the adapter is online, under the ping interval.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		// The first answer is the backoff: the host waits for the process to end
-		// under a timer of its own first, and that one is not reported.
+		v, err := h.Engine().Adapter(context.Background(), harness.Instance)
+		if err == nil && !v.Online {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node still holds the adapter online after its process ended (%v)", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		// The first answer is the backoff: after the report the host waits for the
+		// process to end under a timer of its own, and that one is not reported.
 		if due, ok := h.HostTimerDue(); ok {
 			if due != restartAfter {
 				t.Fatalf("HostTimerDue() = %v, true after the adapter ended, want the backoff in %v", due, restartAfter)

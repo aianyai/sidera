@@ -1001,10 +1001,14 @@ func (h *H) Set(t time.Time) {
 // backoff a moment after it tells the node that the adapter is gone, and before
 // that it waits for the process to end under a timer of its own (the shutdown
 // wait) while it works; only once it is idle is the backoff the timer a test means
-// to fire. A test that moves the clock to the restart waits for this first, and
-// moves the clock by exactly this, which fires the timer and no more. The clock
-// must be moved through Advance and Set: a move made on Clock directly is not
-// followed by a set-back.
+// to fire. That holds only once the host has told the node that the adapter is
+// gone: until then the host may not have noticed the end, and it is idle in the
+// park it waits in while the adapter is online, with its ping interval armed, which
+// is reported as well. A caller reads this only after the node knows the adapter is
+// gone. A test that moves the clock to the restart waits for this then, and moves
+// the clock by exactly this, which fires the timer and no more. The clock must be
+// moved through Advance and Set: a move made on Clock directly is not followed by a
+// set-back.
 func (h *H) HostTimerDue() (time.Duration, bool) {
 	p, err := h.currentProcess()
 	if err != nil || p.host == nil {
