@@ -13,6 +13,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
@@ -308,6 +309,12 @@ func (l LoopSide) ApplyAnswer(name string, node ident.NodeID, reports []record.R
 // of the node's.
 func (l LoopSide) StatusReply(endpoint ident.EndpointID, features transport.Features) *adapterproto.ControlStatusReply {
 	return l.e.statusReply(l.e.d.Clock.Now(), l.e.view.endpoints[endpoint], features)
+}
+
+// ControlReplyPayload is the payload the node would store as its control reply to
+// the signal with the key, for the result.
+func (l LoopSide) ControlReplyPayload(key store.TargetKey, result envelope.ControlResult) ([]byte, error) {
+	return l.e.controlReplyPayload(l.e.d.Clock.Now(), key, result)
 }
 
 type cmdHook struct {

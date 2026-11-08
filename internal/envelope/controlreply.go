@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,6 +75,23 @@ type ControlReply struct {
 	// time it sends it, so every copy has these same fields.
 	IssuedAt time.Time
 	Result   ControlResult
+}
+
+// ErrControlReplyTooLarge says that a control reply, signed, would be more than a
+// reader takes of a record.
+var ErrControlReplyTooLarge = errors.New("the control reply is too large to be read")
+
+// CheckControlReplySize is nil when the payload of a control reply, once the
+// node has signed it, makes a record of at most record.DefaultMaxInput bytes: the
+// bound every reader decodes a record with. The reply is made once and stored,
+// and a sender that cannot read it asks again until its request ends, so a reply
+// no reader can take is refused where it is made, and the store refuses to keep
+// one, with this same check.
+func CheckControlReplySize(payloadLen int) error {
+	if n := record.EncodedLen(ControlReplyType, payloadLen, 1); n > record.DefaultMaxInput {
+		return fmt.Errorf("%w: signed it is %d bytes, at most %d are read", ErrControlReplyTooLarge, n, record.DefaultMaxInput)
+	}
+	return nil
 }
 
 type createWire struct {

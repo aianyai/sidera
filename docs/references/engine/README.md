@@ -1405,6 +1405,14 @@ preset's allowlist is the adapter's to judge, since the keys of its presets are 
 session was created, with no initial-message delivery, and a repeat keeps that answer even
 if room becomes available.
 
+A reply that signed would be more than a reader takes of a record (`record.DefaultMaxInput`)
+is not committed (`envelope.CheckControlReplySize`, asked by `controlReplyPayload` before the
+write and by the store for what it keeps). Nothing is written and the signal gets no receipt:
+the failure is the node's own, so the intake logs it at error with the signal's id and the size,
+and the sender asks again as it does of a node that did not answer. No refusal reason carries it,
+because the sender cannot act on one: only the owner of this node can (fewer presets). Tests:
+`TestAControlReplyNoReaderCouldTakeIsNotCommitted`, `TestTheRefusalOfAControlReplyNamesTheSignalAndTheSize`.
+
 **The creation of a session.** A creation the node does not refuse makes, in `control-intake`,
 the control record with its creation intent and the session endpoint with its token, being
 created and naming the record that makes it; both are on disk before the adapter is called.

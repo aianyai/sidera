@@ -107,13 +107,21 @@ func (e *Engine) signRecordReport(now time.Time, key store.TargetKey, rec delive
 
 // controlReplyPayload is the payload of the control reply of a signal, which the
 // target stores with the signal's deduplication record: the reply is made once, at
-// the moment the result is committed, and signed again each time it is sent.
+// the moment the result is committed, and signed again each time it is sent. A
+// reply that signed would be more than a reader takes of a record is not made: it
+// would be committed and then never be readable, and the sender, which cannot tell
+// that from a node that does not answer, would ask again until its request ends.
+// The error is the node's own failure, which the caller of the signal's intake logs
+// at error with the message and the size.
 func (e *Engine) controlReplyPayload(now time.Time, key store.TargetKey, result envelope.ControlResult) ([]byte, error) {
 	now = now.UTC().Truncate(time.Second) // what a reply can say
 	reply := envelope.ControlReply{Sender: key.SenderNode, Message: key.Message, Recipient: key.Recipient, IssuedAt: now, Result: result}
 	d := envelope.ControlReplyDescriptor(e.d.Node, e.acceptedKey(e.d.Node), now)
 	payload, err := record.EncodePayload(d, reply)
 	if err != nil {
+		return nil, fmt.Errorf("engine: the control reply of %s: %w", key.Message, err)
+	}
+	if err := envelope.CheckControlReplySize(len(payload)); err != nil {
 		return nil, fmt.Errorf("engine: the control reply of %s: %w", key.Message, err)
 	}
 	return payload, nil

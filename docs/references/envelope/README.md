@@ -187,6 +187,17 @@ record and signs it again, with its current network key, each time it sends it a
 evidence or in answer to a pull. The digest excludes signatures, so a reply
 signed again (after a key rotation, say) has the digest it had.
 
+A reply is read as a signed record of at most `record.DefaultMaxInput` bytes, by
+the sender and by every other reader of a record. `CheckControlReplySize` is the
+one rule for whether a payload will fit once signed (`record.EncodedLen` gives the
+size of the record without making it), and it has two users: the target refuses to
+commit a reply that fails it, and the store refuses to write or read a stored
+reply that fails it (below). Without the rule a too-large reply used to be
+committed and stored, and the sender, which could not decode it, asked again until
+its request ended while the target logged nothing: the bound checked on the target
+was the unsigned payload's, and the bound the readers applied was the signed
+record's.
+
 An agent reads the reply in the values of the adapter protocol, not of the signed
 record: `ControlResult.AdapterForm` gives them, so the one place that knows how the
 session endpoint of a creation is written there is this package's (test

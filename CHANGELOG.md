@@ -65,6 +65,15 @@ protocol has a version of its own.
   a digit and holds only letters, digits and `._:/@+[]-`; a preset with another is reported as
   unusable instead of its name being passed to the agent.
 
+### Fixed
+
+- **A status answer too large to be read is no longer kept and then ignored.** When the answer of a
+  node to an `endpoint.status` signal grew past the size every node reads (64 KiB, which a node with
+  hundreds of presets reaches), the node committed and stored it all the same, logged nothing, and the
+  node that had asked kept asking until its request ran out. The node now refuses to make such an
+  answer and logs an error naming the signal and the size, so the owner of that node sees why; the
+  asking node still gets no answer until the presets are fewer.
+
 ## [0.17.0] - 2026-11-07
 
 Nodes describe themselves in 0.17: the name, host name, system and Sidera version of every

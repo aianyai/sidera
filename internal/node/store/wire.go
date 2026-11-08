@@ -434,6 +434,9 @@ func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
 	}
 	j := dedupJSON{Digest: hex.EncodeToString(d.Digest[:]), RetainUntil: ru}
 	if d.HasReply {
+		if err := envelope.CheckControlReplySize(len(d.Reply)); err != nil {
+			return j, err
+		}
 		s := b64(d.Reply)
 		j.Reply = &s
 	} else if len(d.Reply) != 0 {
@@ -453,6 +456,9 @@ func fromDedup(j dedupJSON, key TargetKey) (delivery.DedupRecord, error) {
 		b, err := unb64(*j.Reply)
 		if err != nil {
 			return d, fmt.Errorf("reply: %w", err)
+		}
+		if err := envelope.CheckControlReplySize(len(b)); err != nil {
+			return d, err
 		}
 		d.Reply, d.HasReply = b, true
 		if len(b) == 0 {

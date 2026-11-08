@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -865,4 +866,45 @@ func TestARefusedControlRecordHasNoTraceOfAnExecution(t *testing.T) {
 			t.Errorf("damage = %+v, want a damaged body that says the refusal holds an execution", dmg)
 		}
 	})
+}
+
+// The reply a target stores with a control record is signed again each time it is
+// sent, and a reader takes a signed record of at most record.DefaultMaxInput bytes.
+// A record whose reply would sign to more is refused on the way out and damaged on
+// the way in, as the bytes of a reply that could never be read.
+func TestAControlReplyThatNoReaderCouldTakeIsNotKept(t *testing.T) {
+	atLimit := func(n int) int { // the payload size from which the signed reply is over the limit
+		for ; envelope.CheckControlReplySize(n) == nil; n++ {
+		}
+		return n
+	}(record.DefaultMaxInput - 1000)
+	c := created(t, 1, 5)
+	fits, over := c, c
+	fits.Dedup.Reply, over.Dedup.Reply = make([]byte, atLimit-1), make([]byte, atLimit)
+
+	data, err := store.EncodeRecord(fits)
+	if err != nil {
+		t.Fatalf("EncodeRecord refused the largest reply a reader takes: %v", err)
+	}
+	if data, err := store.EncodeRecord(over); err == nil {
+		t.Fatalf("EncodeRecord wrote a reply one byte over: %d bytes", len(data))
+	}
+
+	head, body, _ := strings.Cut(string(data), "\n")
+	key, err := base64.RawURLEncoding.DecodeString(strings.Fields(head)[5])
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := base64.RawURLEncoding.EncodeToString(fits.Dedup.Reply)
+	edited := strings.Replace(body, stored, base64.RawURLEncoding.EncodeToString(over.Dedup.Reply), 1)
+	if edited == body {
+		t.Fatal("the reply is not in the body of the record")
+	}
+	if _, dmg := store.DecodeRecord(store.CtlDir, nameOf("ctl", string(key)), frameOf("ctl", string(key), body)); dmg != nil {
+		t.Fatalf("the largest reply a reader takes is damaged: %+v", dmg)
+	}
+	_, dmg := store.DecodeRecord(store.CtlDir, nameOf("ctl", string(key)), frameOf("ctl", string(key), edited))
+	if dmg == nil || dmg.Class != store.BodyDamaged || !strings.Contains(dmg.Detail, "too large") {
+		t.Errorf("damage = %+v, want a damaged body that says the reply is too large", dmg)
+	}
 }

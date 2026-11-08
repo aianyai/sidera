@@ -961,6 +961,18 @@ Tests: `TestARefusedControlRecordHasNoTraceOfAnExecution`, the `ctl refused` gol
 the `ctl refused at intake` round trip and the retention row of
 `TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds`.
 
+**The stored reply is bounded by what a reader takes of the signed record.** The
+reply a target stores with a control record is a payload that the node signs again
+each time it sends it, and every reader decodes a signed record of at most
+`record.DefaultMaxInput` bytes. The store holds the payload to that on the way out
+and on the way in with the envelope package's one rule (`envelope.CheckControlReplySize`),
+not to the payload's own size: a reply under the limit unsigned that signs to more
+could be kept and never read, and the sender, which cannot tell it from a node that
+does not answer, asked again until its request ended. A record on disk that fails
+the rule is a damaged body. The engine makes the same check before it commits a
+reply, so the failure is logged where it is made. Test:
+`TestAControlReplyThatNoReaderCouldTakeIsNotKept`.
+
 **The initial message of a creation.** A creation can carry a message for the session it
 makes. It is a delivery to the session endpoint the node allocates, an `in/` record
 whose `derived` field names the runtime endpoint the signal was for and the shape of the
