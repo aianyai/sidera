@@ -1039,6 +1039,13 @@ func TestEnumNamesMatchContractPackages(t *testing.T) {
 			t.Errorf("%s: protocol %v, contract package %v", name, sorted(tables[name]), sorted(want))
 		}
 	}
+	// Which reasons a target can report is a rule the two packages each hold, because
+	// the SDK cannot import the daemon's: they must say the same of every reason.
+	for r := delivery.RejectUnauthorized; r.String() != invalidName; r++ {
+		if got := adapterproto.RejectReason(r.String()).FromTarget(); got != r.FromTarget() {
+			t.Errorf("reason %s: FromTarget is %v in the protocol, %v in the contract package", r, got, r.FromTarget())
+		}
+	}
 	if len(states) != 7 || len(reasons) == 0 {
 		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 states and at least one reason", len(states), len(reasons))
 	}
