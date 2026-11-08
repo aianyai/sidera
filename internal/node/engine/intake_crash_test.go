@@ -247,7 +247,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		taker := newDiskTaker(cov, "deliver")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
-		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "from-nowhere", addrOf(t, h, "a"), "", "a body only the target holds")); err != nil {
+		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "from-nowhere", addrOf(t, h, "a"), "", "a body only the target holds"), 0); err != nil {
 			t.Fatal(err)
 		}
 		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "from-nowhere") })
@@ -274,7 +274,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		taker.h = h
 		msg, report := bodyHeldBySourceAlone(t, h, "a question only the source holds")
 		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
-			forged(t, h, "answer-that-frees-a-body", addrOf(t, h, "a"), msg, "an answer", report)); err != nil {
+			forged(t, h, "answer-that-frees-a-body", addrOf(t, h, "a"), msg, "an answer", report), 0); err != nil {
 			t.Fatal(err)
 		}
 		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "answer-that-frees-a-body") })
@@ -292,7 +292,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 			t.Fatalf("the report of the receipt: %+v, %v", ans, err)
 		}
 		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
-			forged(t, h, "answer-from-nowhere", addrOf(t, h, "a"), msg, "an answer only the target holds", ans.Reports...)); err != nil {
+			forged(t, h, "answer-from-nowhere", addrOf(t, h, "a"), msg, "an answer only the target holds", ans.Reports...), 0); err != nil {
 			t.Fatal(err)
 		}
 		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "answer-from-nowhere") })

@@ -180,7 +180,7 @@ func TestForgedReplyToGetsNoPermission(t *testing.T) {
 
 	// c was never sent the question and says it answers it.
 	aAddr, cAddr := addrOf(t, h, "a"), addrOf(t, h, "c")
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), cAddr.Endpoint, forged(t, h, "forged-1", aAddr, msg, "I answer what I never received"))
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), cAddr.Endpoint, forged(t, h, "forged-1", aAddr, msg, "I answer what I never received"), 0)
 	if err != nil {
 		t.Fatalf("the forged envelope was refused outright: %v", err)
 	}
@@ -311,10 +311,10 @@ func TestAMessageUnderTheIdentifierOfAControlSignalIsAConflict(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a", "b")
 	toAddr := addrOf(t, h, "b")
 	from := endpointOf(t, h, "a")
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forgedControl(t, h, "shared-id", toAddr, envelope.KindEndpointStatus, "")); err != nil {
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forgedControl(t, h, "shared-id", toAddr, envelope.KindEndpointStatus, ""), 0); err != nil {
 		t.Fatalf("the control signal: %v", err)
 	}
-	_, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forged(t, h, "shared-id", toAddr, "", "a message"))
+	_, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forged(t, h, "shared-id", toAddr, "", "a message"), 0)
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonMessageConflict {
 		t.Fatalf("a message under the identifier of a control signal got %v, want a refusal for a conflict", err)
 	}
@@ -606,7 +606,7 @@ func TestAReportIsDatedWithTheMomentTheTargetRecordedTheStateItReports(t *testin
 	t.Run("a pull after the endpoint closed reports the rejection with the time of the closing", func(t *testing.T) {
 		msg := "taken-then-closed"
 		accepted := h.Clock().Now().Truncate(time.Second)
-		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "a").Endpoint, forged(t, h, msg, b, "", "x")); err != nil {
+		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "a").Endpoint, forged(t, h, msg, b, "", "x"), 0); err != nil {
 			t.Fatal(err)
 		}
 		pull := func() envelope.StatusReport {

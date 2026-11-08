@@ -50,9 +50,11 @@ type outWork struct {
 	// name is the source record the work is for; node is the node it goes to.
 	name string
 	node ident.NodeID
-	// sender and data are the sending endpoint and the encoded envelope of a send.
+	// sender and data are the sending endpoint and the encoded envelope of a send,
+	// and needs are the features the envelope cannot do without.
 	sender ident.EndpointID
 	data   []byte
+	needs  transport.Features
 	// message is the message a pull is about, and recipients are the endpoints on
 	// the node whose deliveries of it the pull asks about.
 	message          delivery.MessageID
@@ -178,7 +180,7 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 		switch w.kind {
 		case workSend:
 			var rc transport.Receipt
-			rc, res.err = e.tr.Send(ctx, w.node, w.sender, w.data)
+			rc, res.err = e.tr.Send(ctx, w.node, w.sender, w.data, w.needs)
 			res.reports, res.controlReply = rc.Reports, rc.ControlReply
 		case workPull, workFinalPull:
 			var ans transport.PullAnswer
@@ -237,11 +239,20 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 				e.sched.set(schedKey{schedOutbound, name}, now.Add(e.p.RetryBackoff))
 				continue
 			}
-			w.data, w.sender = data, o.Key.Sender
+			w.data, w.sender, w.needs = data, o.Key.Sender, needsOf(o.Envelope)
 		}
 		st.inflight++
 		e.give(w)
 	}
+}
+
+// needsOf are the features a record's envelope cannot be sent without: a choice
+// of the model or the effort of a new session needs a protocol that carries it.
+func needsOf(env store.OutEnvelope) transport.Features {
+	if env.Model != "" || env.Effort != "" {
+		return transport.FeatureModelChoice
+	}
+	return 0
 }
 
 // outboundWorks says whether the outbound worker carries a source record: it does
@@ -409,6 +420,9 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 		// nothing about the target: it is not told as contact failing, and a start
 		// picks the record up again.
 		return
+	case callErr != nil && errors.Is(callErr, transport.ErrFeatureUnsupported):
+		e.refuseUnsupported(now, w, st)
+		return
 	case callErr != nil:
 		if reason, ok := callReasonOf(callErr); ok && reason == ReasonMessageConflict {
 			e.log.Error("the target holds another request under the identifier of a message; it is not sent again", "message", string(w.message))
@@ -459,6 +473,48 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 	}
 	if st.inflight == 0 {
 		e.afterOutbound(w.name, now)
+	}
+}
+
+// refuseUnsupported ends the deliveries of a record on a node that runs a version
+// that cannot take what the envelope carries (the call was not made, and making
+// it again cannot help until the node is updated) as rejected for
+// delivery.RejectNodeUnsupported. It is the one reason this node decides itself:
+// no target reports it, so it has no wire code. The envelope is not sent again.
+func (e *Engine) refuseUnsupported(now time.Time, w outWork, st *outState) {
+	e.log.Info("the target runs a version that cannot take what the message carries; the message is refused without being sent", "message", string(w.message), "node", w.node.String())
+	c, ok := e.changeSource(now, w.name, w.node)
+	if ok {
+		for _, t := range c.o.Outbound.Deliveries() {
+			if t.Address.Node == w.node {
+				c.refuseUnsupported(t.Address.Endpoint)
+			}
+		}
+		if err := c.commit(); err != nil {
+			e.classify(err) // a fatal error stops the loop after this command
+			if e.fatal == nil {
+				e.log.Warn("the refusal of a message could not be written; it is made again", "message", string(w.message), "error", err.Error())
+				e.sched.set(schedKey{schedOutbound, w.name}, now.Add(e.p.RetryBackoff))
+			}
+			return
+		}
+	}
+	if st.inflight == 0 {
+		e.afterOutbound(w.name, now)
+	}
+}
+
+// refuseUnsupported ends the delivery to recipient as rejected for
+// delivery.RejectNodeUnsupported, by the rule of the envelope package that every
+// change of a delivery goes through.
+func (c *sourceChange) refuseUnsupported(recipient ident.EndpointID) {
+	next, effect, outcome, err := c.o.Outbound.ApplyNodeUnsupported(c.now, c.node, recipient)
+	if err != nil {
+		c.e.log.Error("the refusal of a delivery is refused", "node", c.node.String(), "error", err.Error())
+		return
+	}
+	if effect == envelope.ReportApplied && outcome.Result == delivery.ResultApplied {
+		c.take(next, recipient, []delivery.Outcome{outcome})
 	}
 }
 

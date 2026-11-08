@@ -54,7 +54,7 @@ func TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart
 	to := ident.Address{Node: harness.NodeID(), Endpoint: rt}
 	from := endpointOf(t, h, "a")
 	data := forgedControl(t, h, "create-at-limit", to, envelope.KindSessionCreate, "default")
-	first, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, data)
+	first, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, data, 0)
 	if err != nil || first.ControlReply == nil {
 		t.Fatalf("first receipt = %+v, %v, want the failed creation reply", first, err)
 	}

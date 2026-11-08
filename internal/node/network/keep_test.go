@@ -192,7 +192,7 @@ func TestKeptConnectionComesBackAfterARestart(t *testing.T) {
 			})
 			// The node that dials is the one that cannot be dialed, so the other can
 			// only answer over that connection.
-			if _, err := b.net.Send(ctx5(t), a.id, endpointOf(1), []byte("envelope")); err != nil {
+			if _, err := b.net.Send(ctx5(t), a.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 				t.Fatalf("a call from the node that could not dial: %v", err)
 			}
 		})

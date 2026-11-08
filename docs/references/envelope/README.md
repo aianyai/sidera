@@ -155,6 +155,15 @@ or 8 status, so the key says which signal the reply is for.
 | interrupt (7) | `{1: outcome, 2: reason}` |
 | status (8) | `{1: activity, 2: queued, 3: conditions, 4: presets, 5: as_of}` |
 
+A preset of a status result is `{1: name, 2: available, 3: model, 4: effort,
+5: allowed}`. Keys 3 and 4 are the model and the effort the preset sets (text, as
+in the envelope's `params`), and key 5 lists the models a requester may choose,
+`[{1: model, 2: [effort, ...]}, ...]`, sorted by model with the efforts in the order
+of the scale; each is absent when the preset sets none. They are present only in a
+reply made for a request that travelled on the send protocol that carries a
+model choice (see the [network](../network/README.md) reference), and come from
+what the adapter's last probe resolved of the preset.
+
 The integer codes and the rules between a result's fields are those of the
 adapter protocol (`adapterproto`); there is no second set of codes. A status
 condition that was retired keeps its number reserved: a stored reply that carries the
@@ -223,6 +232,14 @@ the one rule of `ApplyReport`, or of `ApplyNoRecord`, and a caller must not reac
 state of a delivery around the checks of a report. Both methods find and replace the
 delivery in one private function, so the node check and the replacement are written
 once.
+
+`Outbound.ApplyNodeUnsupported(now, node, recipient)` ends the delivery as `rejected` for
+`node_unsupported`: the one rejection that no report carries, because it is the sender's own
+node that decides it, when the node the message is for runs a version that cannot take what the
+message carries and the message was not sent. It goes through the same private function as
+`ApplyNoRecord`, so it finds the delivery, checks its node and replaces it in the one place, and
+the rule that a queued delivery may be rejected is `delivery.Record.Apply`'s. It is separate
+from `ApplyObservation` because it is a rejection, and `ApplyObservation` refuses those.
 
 `Outbound.Deliveries()` lists every delivery the record tracks, the original ones in
 recipient order and then the derived one, so that a caller that goes through all of
@@ -393,6 +410,15 @@ which may still admit it.
   digest), so which readers meet a key is decided by the stream and what the
   sending node knows of the node it sends to, never by the bytes. A signed record is different: a status report is
   passed on and carried as evidence, so a new member of it is a new type string.
+- **The control reply keeps its type string though a preset gained members.** A
+  status reply is made once, when the signal is committed, and stored; the form
+  follows the protocol the request came on. A sender that asks on the protocol that
+  carries the choice is a node that reads the new keys, and one that does not know
+  them never asks on it, so no reader meets keys it does not know, the same reason
+  as for the envelope's `params` and the one that let the node endpoint limit join the
+  creation reasons in place. A reply is read only by the node that sent the
+  signal (a creation's reply may come back to it once more as evidence, still to
+  that node), so unlike a status report it is not passed on to others.
 - **The sending node in reports and replies.** The deduplication key is (sender
   node, message id, recipient endpoint), so a report that named only the id and
   the endpoint would fit every sender that used that id. Naming the sender makes

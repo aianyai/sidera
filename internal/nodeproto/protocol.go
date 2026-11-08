@@ -18,8 +18,15 @@ import (
 // else; the pre-authentication access table lists no protocol of this package,
 // so each falls under "every other protocol", which only members may use.
 const (
-	// ProtocolSend carries one envelope to a recipient's node.
-	ProtocolSend = "/sidera/send/2.0.0"
+	// ProtocolSend carries one envelope to a recipient's node. An envelope sent
+	// under it may choose the model and the effort of a new session, and the
+	// answer to a status request lists what each preset allows.
+	ProtocolSend = "/sidera/send/3.0.0"
+	// PreviousProtocolSend is the send protocol before an envelope could choose a
+	// session's model. It is framed as the current one is; its messages are the
+	// same without the choice. A node serves it so that a node that has not been
+	// upgraded can still send, and asks it of a node that serves no newer one.
+	PreviousProtocolSend = "/sidera/send/2.0.0"
 	// ProtocolPull asks for the current reports of the deliveries of one message.
 	ProtocolPull = "/sidera/pull/2.0.0"
 	// ProtocolDirectory asks for a page of the endpoints a node shows the asker,
@@ -57,7 +64,7 @@ const (
 // the protocol, newest first. The last of a list is the legacy one of the
 // protocol, if it has one.
 var offered = map[string][]string{
-	ProtocolSend:      {ProtocolSend, LegacyProtocolSend},
+	ProtocolSend:      {ProtocolSend, PreviousProtocolSend, LegacyProtocolSend},
 	ProtocolPull:      {ProtocolPull, LegacyProtocolPull},
 	ProtocolDirectory: {ProtocolDirectory, PreviousProtocolDirectory, LegacyProtocolDirectory},
 	ProtocolDialBack:  {ProtocolDialBack},
@@ -69,7 +76,7 @@ var offered = map[string][]string{
 func Protocols() []string {
 	return []string{
 		ProtocolSend, ProtocolPull, ProtocolDirectory, ProtocolDialBack, ProtocolProfile,
-		PreviousProtocolDirectory,
+		PreviousProtocolSend, PreviousProtocolDirectory,
 		LegacyProtocolSend, LegacyProtocolPull, LegacyProtocolDirectory,
 	}
 }
@@ -156,7 +163,7 @@ const (
 func LimitOf(protocol string) (Limit, bool) {
 	records := (MaxRecipients + 1) * record.DefaultMaxInput
 	switch protocol {
-	case ProtocolSend, LegacyProtocolSend:
+	case ProtocolSend, PreviousProtocolSend, LegacyProtocolSend:
 		return Limit{Request: envelope.MaxEncoded() + requestSlack, Answer: records + answerSlack}, true
 	case ProtocolPull, LegacyProtocolPull:
 		return Limit{Request: maxPullRequest, Answer: records + answerSlack}, true

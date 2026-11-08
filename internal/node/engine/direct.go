@@ -56,13 +56,13 @@ func (e *Engine) sendDirect(now time.Time, instance string, p adapterproto.SendP
 		}
 		r := ControlRequest{Signal: p.Control.Signal, Body: m.body, ContentType: m.ctype}
 		if p.Control.Params != nil {
-			r.Preset = p.Control.Params.Preset
+			r.Preset, r.Model, r.Effort = p.Control.Params.Preset, p.Control.Params.Model, p.Control.Params.Effort
 		}
 		m.kind, err = controlKind(r)
 		if err != nil {
 			return SendResult{}, err
 		}
-		m.preset = r.Preset
+		m.preset, m.model, m.effort = r.Preset, r.Model, r.Effort
 	} else if p.ReplyTo != "" {
 		to, err := e.replySender(st.rec.ID, delivery.MessageID(p.ReplyTo))
 		if err != nil {

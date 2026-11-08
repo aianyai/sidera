@@ -24,14 +24,15 @@ var _ transport.Handler = (*Engine)(nil)
 
 type cmdInbound struct {
 	call[transport.Receipt]
-	from   transport.Origin
-	sender ident.EndpointID
-	data   []byte
+	from     transport.Origin
+	sender   ident.EndpointID
+	data     []byte
+	features transport.Features
 }
 
 func (c *cmdInbound) gate() gate { return gateLoopback }
 func (c *cmdInbound) run(e *Engine, now time.Time) {
-	rc, err := e.takeIn(now, c.from, c.sender, c.data)
+	rc, err := e.takeIn(now, c.from, c.sender, c.data, c.features)
 	c.done(rc, e.classifyPeerCall("inbound", c.from, err))
 }
 
@@ -44,11 +45,12 @@ func (c *cmdInbound) run(e *Engine, now time.Time) {
 // body under the same identifier is a conflict and changes nothing), the reply
 // permission the envelope's evidence earns, the check of the endpoint's
 // declarations and, for a source that is not on this node, of the node's rules,
-// and the backlog of the endpoint. The records are on disk before the report is
-// handed out, and a report is signed before anything is written, so a receipt
-// that exists describes records that do.
-func (e *Engine) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, envelope []byte) (transport.Receipt, error) {
-	c := &cmdInbound{call: newCall[transport.Receipt](), from: from, sender: sender, data: envelope}
+// and the backlog of the endpoint. features are what the protocol the request
+// travelled on carries: an envelope that needs one it lacks is invalid. The
+// records are on disk before the report is handed out, and a report is signed
+// before anything is written, so a receipt that exists describes records that do.
+func (e *Engine) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, envelope []byte, features transport.Features) (transport.Receipt, error) {
+	c := &cmdInbound{call: newCall[transport.Receipt](), from: from, sender: sender, data: envelope, features: features}
 	return roundTrip(ctx, e, submitInternal, c, c.call)
 }
 
@@ -144,7 +146,7 @@ type arrival struct {
 	fresh bool
 }
 
-func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.EndpointID, data []byte, features transport.Features) (transport.Receipt, error) {
 	if err := e.canSign(); err != nil {
 		return transport.Receipt{}, err
 	}
@@ -155,9 +157,15 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 	if err != nil {
 		return transport.Receipt{}, invalidArgument("envelope", err)
 	}
+	if (env.Model != "" || env.Effort != "") && !features.Has(transport.FeatureModelChoice) {
+		// Only a sender that offers an identifier that does not carry the choice
+		// can send one this way: a sender checks what the target serves before it
+		// sends a choice, so this is a defect of the sender, and it fails loudly.
+		return transport.Receipt{}, invalidArgument("envelope", errors.New("a model or an effort is chosen on a protocol that does not carry the choice"))
+	}
 	digest := env.Digest()
 	if env.Kind.IsControl() {
-		return e.takeInControl(now, env, from, sender, digest)
+		return e.takeInControl(now, env, from, sender, digest, features)
 	}
 	ref := store.BodyRefOf(env.Body)
 	var arrivals []arrival

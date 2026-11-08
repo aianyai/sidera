@@ -52,7 +52,7 @@ func TestAfterTheIdentityIsRetiredNothingIsSigned(t *testing.T) {
 	if err != nil || res.Ending != engine.EndingStop {
 		t.Fatalf("the retirement: %+v, %v", res, err)
 	}
-	_, err = h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "after", addrOf(t, h, "a"), "", "x"))
+	_, err = h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "after", addrOf(t, h, "a"), "", "x"), 0)
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonIdentityRetired {
 		t.Errorf("an envelope taken in after the retirement: %v; want the refusal for the identity", err)
 	}

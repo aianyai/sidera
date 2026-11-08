@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +125,27 @@ func TestLimits(t *testing.T) {
 	}
 	if got, want := limit(ProtocolSend).Request, envelope.MaxEncoded()+512; got != want {
 		t.Errorf("send request limit %d, want the longest envelope plus 512 = %d", got, want)
+	}
+}
+
+// The send protocol is spoken under three identifiers, the newest first. The
+// 3.0.0 identifier and the 2.0.0 one share their frames and limits, so the node
+// that serves the older one can still be sent to; only the newest carries a
+// model choice, and that is the sender's to offer alone.
+func TestSendProtocolVersions(t *testing.T) {
+	if got, want := Offer(ProtocolSend), []string{"/sidera/send/3.0.0", "/sidera/send/2.0.0", "/sidera/send/1.0.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("offered %v, want %v", got, want)
+	}
+	if IsLegacy(PreviousProtocolSend) || !IsLegacy(LegacyProtocolSend) {
+		t.Error("only the 1.0.0 stream is unframed")
+	}
+	for _, p := range []string{PreviousProtocolSend, LegacyProtocolSend} {
+		if limit(p) != limit(ProtocolSend) {
+			t.Errorf("%s has the limits %+v, want those of %s", p, limit(p), ProtocolSend)
+		}
+		if !slices.Contains(Protocols(), p) {
+			t.Errorf("a node does not list %s among the identifiers it serves", p)
+		}
 	}
 }
 

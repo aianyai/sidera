@@ -409,6 +409,13 @@ delivery to a session: when it is judged and how the verdict is recorded.
   not answered is a failing contact.** Both are read in the one place the answers are
   read (`applyAnswer`, `outResult`) and applied through
   `envelope.Outbound.ApplyObservation`, so the rules stay in the delivery package.
+- **A call the transport does not make because the target cannot take the envelope
+  ends the delivery.** `transport.ErrFeatureUnsupported` from a send is not a failing
+  contact and is not tried again: `outResult` ends the node's deliveries of the record as
+  rejected for `node_unsupported` through `envelope.Outbound.ApplyNodeUnsupported`
+  (`refuseUnsupported`), with the feedback of a rejection. It needs no clock, so it is also
+  applied while the wall clock is in doubt. The send is told what the envelope needs by
+  `needsOf`, from the model and effort the source record keeps.
 - **Feedback is queued by the one place that takes a source record into the view,
   and told by one notice per merged group.** `putOut` replaces a source record in the
   view and queues the items the record holds that the one it replaces did not, so a

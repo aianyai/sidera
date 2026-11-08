@@ -99,7 +99,7 @@ func (a *agent) Control(ctx context.Context, in fakeagent.ControlInput) (fakeage
 	if err != nil {
 		return fakeagent.SendResult{}, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "to: " + err.Error()}
 	}
-	res, err := a.svc.Control(ctx, a.caller, engine.ControlRequest{To: to, Signal: in.Signal, Preset: in.Preset, Body: []byte(in.Body), IdempotencyKey: in.IdemKey})
+	res, err := a.svc.Control(ctx, a.caller, engine.ControlRequest{To: to, Signal: in.Signal, Preset: in.Preset, Model: in.Model, Effort: in.Effort, Body: []byte(in.Body), IdempotencyKey: in.IdemKey})
 	return sendResult(res, err)
 }
 

@@ -69,6 +69,8 @@ func failureAttrs(err error) []any {
 	switch {
 	case errors.As(err, &refused):
 		return []any{"kind", "refused", "reason", refused.Reason}
+	case errors.Is(err, transport.ErrFeatureUnsupported):
+		return []any{"kind", "feature_unsupported", "err", err}
 	case errors.Is(err, transport.ErrUnreachable):
 		return []any{"kind", "unreachable", "err", err}
 	case errors.Is(err, transport.ErrTimeout):

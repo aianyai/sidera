@@ -132,7 +132,7 @@ func TestRoundTrips(t *testing.T) {
 			}
 
 			ctx := ctx5(t)
-			receipt, err := a.net.Send(ctx, b.id, sender, []byte("an envelope"))
+			receipt, err := a.net.Send(ctx, b.id, sender, []byte("an envelope"), 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -348,7 +348,7 @@ func TestCallErrors(t *testing.T) {
 		// the target's own deadline and the failure answer it can return.
 		a, b := pairTuned(t, false, true, true, short, nil)
 		send := func(ctx context.Context) error {
-			_, err := a.net.Send(ctx, b.id, endpointOf(1), []byte("envelope"))
+			_, err := a.net.Send(ctx, b.id, endpointOf(1), []byte("envelope"), 0)
 			return err
 		}
 		rows := []struct {
@@ -426,17 +426,17 @@ func TestCallErrors(t *testing.T) {
 		if err := a.net.SetAddressBook(map[ident.NodeID][]string{b.id: {"/ip4/127.0.0.1/tcp/1/p2p/" + b.net.PeerID()}}); err != nil {
 			t.Fatal(err)
 		}
-		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) {
 			t.Fatalf("err = %v, want ErrUnreachable", err)
 		}
 		// The node is not tried again at once, and is when the memo has run out.
-		_, err = a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+		_, err = a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) || !strings.Contains(err.Error(), "a moment ago") {
 			t.Fatalf("second err = %v, want the memo's ErrUnreachable", err)
 		}
 		a.clk.Advance(DefaultUnreachableFor + time.Second)
-		_, err = a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+		_, err = a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) || strings.Contains(err.Error(), "a moment ago") {
 			t.Fatalf("third err = %v, want a fresh attempt", err)
 		}
@@ -445,7 +445,7 @@ func TestCallErrors(t *testing.T) {
 	t.Run("unreachable: no address is known", func(t *testing.T) {
 		a, _ := pair(t, false, true, true, nil)
 		stranger := newPeerNode(t, a.clk, 0x13, 0x93)
-		_, err := a.net.Send(ctx5(t), stranger.id, endpointOf(1), []byte("envelope"))
+		_, err := a.net.Send(ctx5(t), stranger.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) {
 			t.Fatalf("err = %v, want ErrUnreachable", err)
 		}
@@ -458,7 +458,7 @@ func TestCallErrors(t *testing.T) {
 			called.Store(true)
 			return transport.Receipt{}, nil
 		}
-		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) || called.Load() {
 			t.Fatalf("err = %v, handler called = %v; want ErrUnreachable and no call", err, called.Load())
 		}
@@ -466,7 +466,7 @@ func TestCallErrors(t *testing.T) {
 
 	t.Run("unreachable: the caller does not judge the target a member", func(t *testing.T) {
 		a, b := pair(t, false, false, true, nil) // a does not trust b
-		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+		_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 		if !errors.Is(err, transport.ErrUnreachable) {
 			t.Fatalf("err = %v, want ErrUnreachable", err)
 		}
@@ -477,7 +477,7 @@ func TestCallErrors(t *testing.T) {
 // shows that its live connection is closed and a new one is not a member's.
 func TestNewSnapshotClosesWhatNoLongerKeeps(t *testing.T) {
 	a, b := pair(t, false, true, true, nil)
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if !a.net.Connected(b.id) {
@@ -485,7 +485,7 @@ func TestNewSnapshotClosesWhatNoLongerKeeps(t *testing.T) {
 	}
 	a.setMembership(1) // a trusts nobody now
 	eventually(t, "the connection to be closed on both sides", func() bool { return a.connCount() == 0 && b.connCount() == 0 })
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); !errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a call to a node that is no longer a member: %v, want ErrUnreachable", err)
 	}
 }
@@ -499,7 +499,7 @@ func TestNodeThatCameBackIsReachedWhenTheMemoRunsOut(t *testing.T) {
 	addr := b.contact(true)
 	listen := strings.TrimSuffix(addr, "/p2p/"+b.net.PeerID())
 	b.net.Close()
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); !errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a call to a node that is down: %v, want ErrUnreachable", err)
 	}
 
@@ -516,7 +516,7 @@ func TestNodeThatCameBackIsReachedWhenTheMemoRunsOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.clk.Advance(DefaultUnreachableFor + time.Second)
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatalf("the first call after the memo ran out: %v", err)
 	}
 }
@@ -527,14 +527,14 @@ func TestNodeThatCameBackIsReachedWhenTheMemoRunsOut(t *testing.T) {
 // goes through.
 func TestPromotedNodeIsCalledOnANewConnection(t *testing.T) {
 	a, b := pair(t, false, false, true, nil) // a does not trust b yet
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrUnreachable) {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); !errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a call to a node that is not a member: %v, want ErrUnreachable", err)
 	}
 	a.setMembership(1, b)
 	eventually(t, "the non-member connection to be closed on both sides", func() bool { return a.connCount() == 0 && b.connCount() == 0 })
 	// The clock is not advanced: the memo of the failed call must not be what
 	// answers now.
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatalf("a call to the node once it is a member: %v", err)
 	}
 }
@@ -555,12 +555,12 @@ func TestCallThatTimesOutDropsItsConnection(t *testing.T) {
 		<-ctx.Done()
 		return transport.Receipt{}, ctx.Err()
 	}
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); !errors.Is(err, transport.ErrTimeout) {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); !errors.Is(err, transport.ErrTimeout) {
 		t.Fatalf("err = %v, want ErrTimeout", err)
 	}
 	eventually(t, "the connection to be closed", func() bool { return a.connCount() == 0 })
 	begin := time.Now()
-	_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"))
+	_, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0)
 	if !errors.Is(err, transport.ErrUnreachable) || time.Since(begin) > 200*time.Millisecond {
 		t.Fatalf("second err = %v after %v, want ErrUnreachable at once", err, time.Since(begin))
 	}
@@ -612,7 +612,7 @@ func TestMemberConnPrefersTheNewest(t *testing.T) {
 // unreachable.
 func TestCallDoesNotUseAConnectionTheNodeIsClosing(t *testing.T) {
 	a, b := pair(t, false, true, true, func(c *Config) { c.TickEvery = 24 * time.Hour })
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatal(err)
 	}
 	e := a.net.memberConn(b.id)
@@ -625,7 +625,7 @@ func TestCallDoesNotUseAConnectionTheNodeIsClosing(t *testing.T) {
 	e.closeIdle = true
 	a.net.conns[e.conn] = e
 	a.net.mu.Unlock()
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatalf("send while the connection was closing = %v, want a new connection", err)
 	}
 	a.net.mu.Lock()
@@ -655,7 +655,7 @@ func TestRenewedCertificateIsExchangedOnANewConnection(t *testing.T) {
 	// makes the call after the renewal fail now and then (its connection is
 	// reset, or is still being authenticated when the call takes it).
 	a, b := pair(t, false, true, true, func(c *Config) { c.TickEvery = 24 * time.Hour })
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := b.node.noted(); len(got) != 1 || got[0].Serial != 1 {
@@ -668,7 +668,7 @@ func TestRenewedCertificateIsExchangedOnANewConnection(t *testing.T) {
 	a.clk.Advance(time.Hour)
 	a.setMembership(2, b)
 	eventually(t, "the idle connection to be closed", func() bool { return a.connCount() == 0 })
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if now := a.net.memberConn(b.id); now == nil || now == old {
@@ -695,7 +695,7 @@ func TestDialByHeldCertificate(t *testing.T) {
 	if err := a.net.SetAddressBook(map[ident.NodeID][]string{b.id: {bare}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+	if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -705,7 +705,7 @@ func TestDialByHeldCertificate(t *testing.T) {
 func TestCloseLeavesNoGoroutine(t *testing.T) {
 	run := func() {
 		a, b := pair(t, true, true, true, nil)
-		if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope")); err != nil {
+		if _, err := a.net.Send(ctx5(t), b.id, endpointOf(1), []byte("envelope"), 0); err != nil {
 			t.Fatal(err)
 		}
 		a.net.Close()
@@ -725,7 +725,7 @@ func TestCloseLeavesNoGoroutine(t *testing.T) {
 
 type routerRemote struct{ calls []string }
 
-func (r *routerRemote) Send(context.Context, ident.NodeID, ident.EndpointID, []byte) (transport.Receipt, error) {
+func (r *routerRemote) Send(context.Context, ident.NodeID, ident.EndpointID, []byte, transport.Features) (transport.Receipt, error) {
 	r.calls = append(r.calls, "send")
 	return transport.Receipt{}, nil
 }
@@ -751,7 +751,7 @@ func TestRouter(t *testing.T) {
 	r := NewRouter(self.id, transport.NewLoopback(self.id, handler, nil), remote)
 	ctx := context.Background()
 
-	r.Send(ctx, self.id, endpointOf(1), []byte("x"))
+	r.Send(ctx, self.id, endpointOf(1), []byte("x"), 0)
 	r.Pull(ctx, self.id, transport.PullRequest{})
 	r.QueryDirectory(ctx, self.id, endpointOf(1), transport.DirectoryRequest{})
 	if len(remote.calls) != 0 || len(handler.origins) != 3 {
@@ -762,7 +762,7 @@ func TestRouter(t *testing.T) {
 			t.Fatal("a call to this node did not carry a local origin")
 		}
 	}
-	r.Send(ctx, other.id, endpointOf(1), []byte("x"))
+	r.Send(ctx, other.id, endpointOf(1), []byte("x"), 0)
 	r.Pull(ctx, other.id, transport.PullRequest{})
 	r.QueryDirectory(ctx, other.id, endpointOf(1), transport.DirectoryRequest{})
 	if got := strings.Join(remote.calls, ","); got != "send,pull,directory" || len(handler.origins) != 3 {

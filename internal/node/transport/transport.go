@@ -27,8 +27,10 @@ type Handler interface {
 	// control reply, if the envelope was a control signal that has one) as the
 	// receipt. The envelope is the bytes the sender encoded: the receiving side
 	// decodes and judges it. An error means no receipt exists: the target could
-	// not answer, and the sender may send the same envelope again.
-	Inbound(ctx context.Context, from Origin, sender ident.EndpointID, envelope []byte) (Receipt, error)
+	// not answer, and the sender may send the same envelope again. features are
+	// what the protocol the request travelled on can carry: an envelope that needs
+	// a feature the request did not travel with is refused as malformed.
+	Inbound(ctx context.Context, from Origin, sender ident.EndpointID, envelope []byte, features Features) (Receipt, error)
 	// Pull answers a source's pull for the current reports of its deliveries of
 	// one message to the recipients the request names: for each, its signed
 	// report or, when the node holds no record of that delivery, the recipient in
@@ -38,6 +40,22 @@ type Handler interface {
 	// target re-reads its view and authorizes every page under the given origin.
 	QueryDirectory(ctx context.Context, from Origin, sender ident.EndpointID, req DirectoryRequest) (DirectoryPage, error)
 }
+
+// Features are what the protocol a request travels on can carry beyond the base
+// form. They are not part of an [Origin], which says where a request came from:
+// two requests from one node can travel on protocols that differ in what they
+// carry. The loopback carries all of them.
+type Features uint8
+
+const (
+	// FeatureModelChoice: an envelope may choose the model and the effort of a
+	// new session, and the target answers a status request with what each preset
+	// allows.
+	FeatureModelChoice Features = 1 << iota
+)
+
+// Has reports whether every feature of want is in f.
+func (f Features) Has(want Features) bool { return f&want == want }
 
 // DirectoryRequest asks for a live page after the opaque cursor. Zero Limit
 // takes the target's default page size.
@@ -138,7 +156,7 @@ type PullAnswer struct {
 	NoRecord []ident.EndpointID
 }
 
-// The two errors below are the vocabulary of every transport, not of the
+// The errors below are the vocabulary of every transport, not of the
 // loopback alone: an implementation of another package returns them, wrapped as
 // it likes, with exactly this meaning, so that the engine's retry rules do not
 // depend on which transport carried the call. Any other error a call returns is
@@ -154,6 +172,11 @@ var (
 	// request digest) and the target deduplicates by sender node, sender
 	// endpoint, message id and recipient, and compares the request digest.
 	ErrTimeout = errors.New("transport: no answer in time")
+	// ErrFeatureUnsupported means the target does not serve a protocol that
+	// carries what the envelope needs (see [Features]). The call was not made, and
+	// making it again cannot help until the target is updated. It is not an
+	// unreachable target: the sender must not retry it as one.
+	ErrFeatureUnsupported = errors.New("transport: the target cannot take what the envelope carries")
 )
 
 // Refused is the error of a call the target answered with a refusal that comes

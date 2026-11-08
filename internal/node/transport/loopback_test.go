@@ -49,12 +49,12 @@ func (c *ctxRecorder) note(ctx context.Context) {
 	c.values = append(c.values, ctx.Value(ctxKey{}))
 }
 
-func (c *ctxRecorder) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+func (c *ctxRecorder) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, data []byte, features transport.Features) (transport.Receipt, error) {
 	c.note(ctx)
 	if err := ctx.Err(); err != nil {
 		return transport.Receipt{}, err
 	}
-	return c.target.Inbound(ctx, from, sender, data)
+	return c.target.Inbound(ctx, from, sender, data, features)
 }
 
 func (c *ctxRecorder) Pull(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
@@ -84,7 +84,7 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxKey{}, "caller")
 
 	r.knobs.Mutate("m1")
-	if _, err := l.Send(ctx, r.self, ep(9), r.message(t, "m1", "hello")); err != nil {
+	if _, err := l.Send(ctx, r.self, ep(9), r.message(t, "m1", "hello"), 0); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	if _, err := l.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
@@ -107,7 +107,7 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 
 	ended, cancel := context.WithCancel(ctx)
 	cancel()
-	_, err := l.Send(ended, r.self, ep(9), r.message(t, "m2", "hello"))
+	_, err := l.Send(ended, r.self, ep(9), r.message(t, "m2", "hello"), 0)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrTimeout) || errors.Is(err, transport.ErrUnreachable) {
 		t.Errorf("send under an ended context: error %v, want context.Canceled as it is", err)
 	}

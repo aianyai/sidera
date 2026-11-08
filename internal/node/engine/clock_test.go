@@ -61,7 +61,7 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 		}
 	}
 	refused("while the clock is behind the mark")
-	_, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "m", addrOf(t, h, "a"), "", "x"))
+	_, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "m", addrOf(t, h, "a"), "", "x"), 0)
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonClockRollback {
 		t.Errorf("an envelope taken in while the clock is in doubt: %v; want the refusal for the clock", err)
 	}

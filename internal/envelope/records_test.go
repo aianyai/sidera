@@ -2,6 +2,7 @@ package envelope
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -411,6 +412,23 @@ func TestControlReplyRules(t *testing.T) {
 			w.Status.Presets[0], w.Status.Presets[1] = w.Status.Presets[1], w.Status.Presets[0]
 		}},
 		{"a preset name is valid", status, func(w *controlReplyWire) { w.Status.Presets[0].Name = "Default" }},
+		{"a preset's effort is one of the scale", status, func(w *controlReplyWire) { w.Status.Presets[0].Effort = "extreme" }},
+		{"a preset's model is a model name", status, func(w *controlReplyWire) { w.Status.Presets[0].Model = "two words" }},
+		{"an allowed model is a model name", status, func(w *controlReplyWire) {
+			w.Status.Presets[0].Allowed = []allowedWire{{Model: "two words", Efforts: []string{"low"}}}
+		}},
+		{"an allowed model has an effort", status, func(w *controlReplyWire) {
+			w.Status.Presets[0].Allowed = []allowedWire{{Model: "opus", Efforts: []string{}}}
+		}},
+		{"the efforts of an allowed model are one of the scale", status, func(w *controlReplyWire) {
+			w.Status.Presets[0].Allowed = []allowedWire{{Model: "opus", Efforts: []string{"extreme"}}}
+		}},
+		{"the efforts of an allowed model ascend", status, func(w *controlReplyWire) {
+			w.Status.Presets[0].Allowed = []allowedWire{{Model: "opus", Efforts: []string{"high", "low"}}}
+		}},
+		{"the allowed models are sorted by name", status, func(w *controlReplyWire) {
+			w.Status.Presets[0].Allowed = []allowedWire{{Model: "sonnet", Efforts: []string{"low"}}, {Model: "opus", Efforts: []string{"low"}}}
+		}},
 		{"the as-of time is required", status, func(w *controlReplyWire) { w.Status.AsOf = 0 }},
 		{"the queue length fits", status, func(w *controlReplyWire) { w.Status.Queued = 1 << 40 }},
 	}
@@ -441,6 +459,35 @@ func TestControlReplyRules(t *testing.T) {
 		w.Status.Conditions, w.Status.Presets, w.Status.Queued = nil, nil, 0
 		requireNoErr(t, checkReplyWire(t, w))
 	})
+}
+
+// A status reply made for a request on the protocol that carries the model choice
+// keeps what each preset says of it through the signed form, and a reply without it
+// is the reply it always was.
+func TestControlReplyStatusKeepsTheModelChoiceOfEachPreset(t *testing.T) {
+	d := ControlReplyDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(time.Hour))
+	reply := ControlReply{
+		Sender: nodeOf(t, keyIdentityB), Message: "ctl-0006", Recipient: ep(1), IssuedAt: t0.Add(90 * time.Second),
+		Result: ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
+			Activity: adapterproto.ActivityIdle,
+			Presets: []adapterproto.PresetAvailability{
+				{Name: "default", Available: true, Model: "sonnet[1m]", Effort: adapterproto.EffortHigh, AllowedModels: []adapterproto.ModelAllowance{
+					{Model: "opus", Efforts: []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortMax}},
+					{Model: "sonnet[1m]", Efforts: []adapterproto.Effort{adapterproto.EffortHigh}},
+				}},
+				{Name: "fast", Available: true, Effort: adapterproto.EffortLow},
+				{Name: "plain", Available: false},
+			},
+			AsOf: t0.Unix() + 90,
+		}},
+	}
+	rec, err := record.Seal(d, reply, signerOf(t, keyNetworkA))
+	requireNoErr(t, err)
+	got, err := record.Verify(d, rec)
+	requireNoErr(t, err)
+	if !reflect.DeepEqual(got.Payload(), reply) {
+		t.Errorf("verified = %+v\nwant       %+v", got.Payload(), reply)
+	}
 }
 
 func TestControlReplySealRefusesWhatReceiversRefuse(t *testing.T) {

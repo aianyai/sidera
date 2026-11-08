@@ -144,7 +144,7 @@ func TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected(t *testing
 	to := ident.Address{Node: harness.NodeID(), Endpoint: rt}
 	sender := endpointOf(t, h, "a")
 	data := forgedControl(t, h, "control-from-afar", to, envelope.KindSessionCreate, "open")
-	rc, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(other), sender, data)
+	rc, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(other), sender, data, 0)
 	if err != nil || len(rc.Reports) != 1 || rc.ControlReply != nil {
 		t.Fatalf("the receipt: %+v, %v, want one report and no reply", rc, err)
 	}
@@ -174,7 +174,7 @@ func TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated(t *testing
 	first := forgedControl(t, h, "control-refused", to, envelope.KindEndpointStatus, "")
 
 	answer := func(data []byte) error {
-		rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, data)
+		rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, data, 0)
 		if err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated(t *testing
 	if n := len(ctlRecords(t, h)); n != 1 {
 		t.Errorf("%d control records after a repeat, want 1", n)
 	}
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forgedControl(t, h, "control-refused", to, envelope.KindSessionCreate, "default")); err == nil {
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forgedControl(t, h, "control-refused", to, envelope.KindSessionCreate, "default"), 0); err == nil {
 		t.Error("another request under the identifier of a refused control signal was taken in")
 	} else if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonMessageConflict {
 		t.Errorf("another request under the identifier got %v, want the conflict", err)

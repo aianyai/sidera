@@ -48,7 +48,7 @@ import (
 //     execute.go), and one it does not take is answered as not supported at once.
 
 // takeInControl takes in an envelope that carries a control signal.
-func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID, digest delivery.BodyDigest) (transport.Receipt, error) {
+func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID, digest delivery.BodyDigest, features transport.Features) (transport.Receipt, error) {
 	recipients := env.RecipientsOn(e.d.Node)
 	if len(recipients) != 1 {
 		return transport.Receipt{}, invalidArgument("to", errors.New("a control signal has one recipient on this node"))
@@ -73,7 +73,7 @@ func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transp
 	c := newCtlRecord(now, env, key, digest, e.d.Config.EndpointSettings(st.rec.Instance, st.rec.ID).MaxQueue)
 	switch env.Kind {
 	case envelope.KindEndpointStatus:
-		err = e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: e.statusReply(now, st)})
+		err = e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: e.statusReply(now, st, features)})
 	case envelope.KindSessionCreate:
 		err = e.takeInCreate(now, env, from, st, c)
 	case envelope.KindSessionClose, envelope.KindSessionInterrupt:
@@ -237,8 +237,13 @@ func ctlName(c store.CtlRecord) string { return strings.TrimSuffix(c.Name(), ".r
 // statusReply is what the node answers to endpoint.status from what it has
 // observed alone: it asks no adapter. An instance whose adapter is not connected
 // has an activity that cannot be checked, and a preset is available when the
-// adapter is connected and has reported nothing that stops a runtime.
-func (e *Engine) statusReply(now time.Time, st *endpointState) *adapterproto.ControlStatusReply {
+// adapter is connected and has reported nothing that stops a runtime. When the
+// request travelled on a protocol that carries the model choice, each preset also
+// tells what the adapter's last probe resolved of it: its own model and effort and
+// the models a requester may choose. The reply is made once and kept, and a sender
+// that could not read these members never asks on such a protocol, so the form
+// follows the protocol the request came on.
+func (e *Engine) statusReply(now time.Time, st *endpointState, features transport.Features) *adapterproto.ControlStatusReply {
 	ref := adapterproto.EndpointRef(st.rec.ID.String())
 	a := e.adapters[st.rec.Instance]
 	online := a != nil && a.online
@@ -258,8 +263,18 @@ func (e *Engine) statusReply(now time.Time, st *endpointState) *adapterproto.Con
 	if st.rec.Kind == adapterreg.KindRuntime {
 		stopped := containsAnyCondition(r.Conditions, adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionRuntimeAuth, adapterproto.ControlConditionNativeUnavailable)
 		presets := e.d.Config.Presets().Items
+		var probed map[string]adapterproto.PresetStatus
+		if a != nil && features.Has(transport.FeatureModelChoice) {
+			probed = make(map[string]adapterproto.PresetStatus, len(a.probe.Presets))
+			for _, p := range a.probe.Presets {
+				probed[p.Name] = p
+			}
+		}
 		for _, name := range sortedKeys(presets) {
-			r.Presets = append(r.Presets, adapterproto.PresetAvailability{Name: name, Available: !stopped})
+			p := probed[name] // the zero value for a preset the probe did not report
+			r.Presets = append(r.Presets, adapterproto.PresetAvailability{
+				Name: name, Available: !stopped, Model: p.Model, Effort: p.Effort, AllowedModels: p.AllowedModels,
+			})
 		}
 	}
 	return r

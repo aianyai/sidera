@@ -41,7 +41,7 @@ func createChoosing(t testing.TB, h *harness.H, id, model string, effort adapter
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), endpointOf(t, h, "a"), data); err != nil {
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), endpointOf(t, h, "a"), data, 0); err != nil {
 		t.Fatal(err)
 	}
 	return adapterproto.MessageID(id)

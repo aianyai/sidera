@@ -78,6 +78,7 @@ type fakeNode struct {
 	noteErr   error
 	notes     []record.SerialSeen
 	origins   []transport.Origin
+	features  []transport.Features // the features of each send request, in order
 
 	// The pairing side: what the engine saw of its streams, in order. A stream
 	// the network opened for it is given the session pairOpenedAs; a frame is
@@ -96,9 +97,10 @@ type pairEvent struct {
 	frame []byte
 }
 
-func (f *fakeNode) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, envelope []byte) (transport.Receipt, error) {
+func (f *fakeNode) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, envelope []byte, features transport.Features) (transport.Receipt, error) {
 	f.mu.Lock()
 	f.origins = append(f.origins, from)
+	f.features = append(f.features, features)
 	h := f.inbound
 	f.mu.Unlock()
 	if h == nil {

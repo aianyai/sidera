@@ -36,13 +36,28 @@ var gatedByPeer = &lnet.StreamError{ErrorCode: lnet.StreamGated, Remote: true}
 // see the call, ErrTimeout when it may have, Refused when it refused with a
 // reason, a plain error when it could not handle the call, and the caller's own
 // context error as it is.
-func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (_ transport.Receipt, err error) {
+//
+// needs are the features the envelope cannot do without. An envelope that needs
+// none is proposed under every send identifier the node speaks, and the call takes
+// the newest the target serves. One that needs a feature is proposed under the
+// current identifier alone, the only one that carries it: a target that does not
+// serve it is told so by the negotiation, before the request is written, and the
+// call is ErrFeatureUnsupported, which is not an unreachable target and is not
+// made again until the target is updated.
+func (n *Network) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte, needs transport.Features) (_ transport.Receipt, err error) {
 	defer func() { n.noteCall(ctx, target, "send", err) }()
 	req, err := nodeproto.SendRequest{Sender: sender, Envelope: data}.Encode()
 	if err != nil {
 		return transport.Receipt{}, fmt.Errorf("network: send request: %w", err)
 	}
-	answer, err := n.call(ctx, target, nodeproto.ProtocolSend, req)
+	r, err := newMemberRequest(nodeproto.ProtocolSend, req)
+	if err != nil {
+		return transport.Receipt{}, err
+	}
+	if needs != 0 {
+		r = r.carryingOnlyTheCurrentIdentifier()
+	}
+	answer, err := n.callWith(ctx, target, r)
 	if err != nil {
 		return transport.Receipt{}, err
 	}
@@ -168,6 +183,11 @@ func (n *Network) call(ctx context.Context, target ident.NodeID, proto string, r
 	if err != nil {
 		return memberAnswer{}, err
 	}
+	return n.callWith(ctx, target, r)
+}
+
+// callWith is call for a request already made.
+func (n *Network) callWith(ctx context.Context, target ident.NodeID, r memberRequest) (memberAnswer, error) {
 	e, err := n.connect(ctx, target)
 	if err != nil {
 		return memberAnswer{}, err
@@ -182,6 +202,18 @@ type memberRequest struct {
 	plain  []byte // the message, for a 1.0.0 stream
 	framed []byte // the message as a frame, for a 2.0.0 stream
 	limit  nodeproto.Limit
+	// offer is what the call proposes, newest first.
+	offer []string
+	// needsCurrent says that the request carries what only the current identifier
+	// does, so a target that does not serve it cannot be called at all.
+	needsCurrent bool
+}
+
+// carryingOnlyTheCurrentIdentifier is the request proposed under its current
+// identifier alone.
+func (r memberRequest) carryingOnlyTheCurrentIdentifier() memberRequest {
+	r.offer, r.needsCurrent = r.offer[:1], true
+	return r
 }
 
 // newMemberRequest checks the protocol and the size of the request.
@@ -194,7 +226,7 @@ func newMemberRequest(proto string, req []byte) (memberRequest, error) {
 	if err != nil {
 		return memberRequest{}, fmt.Errorf("network: request: %w", err)
 	}
-	return memberRequest{proto: proto, plain: req, framed: framed, limit: limit}, nil
+	return memberRequest{proto: proto, plain: req, framed: framed, limit: limit, offer: nodeproto.Offer(proto)}, nil
 }
 
 // callOn is call on a connection already chosen: the one this side judged a
@@ -208,13 +240,19 @@ func (n *Network) callOn(ctx context.Context, e *connEntry, target ident.NodeID,
 
 	cctx, cancel := context.WithTimeout(ctx, n.cfg.CallTimeout)
 	defer cancel()
-	s, err := n.openStream(cctx, e, nodeproto.Offer(r.proto)...)
+	s, err := n.openStream(cctx, e, r.offer...)
 	if err != nil {
 		if ctx.Err() != nil {
 			return memberAnswer{}, ctx.Err()
 		}
 		if connectionFault(cctx, err) {
 			n.dropConn(e, target)
+		}
+		var unsupported msmux.ErrNotSupported[protocol.ID]
+		if r.needsCurrent && errors.As(err, &unsupported) {
+			// The target is there and answered the negotiation: it is not
+			// unreachable, and no later call will find it different.
+			return memberAnswer{}, fmt.Errorf("%w: %w", transport.ErrFeatureUnsupported, err)
 		}
 		// The cause stays in the chain: a caller may need to tell a peer that does
 		// not serve the protocol (msmux.ErrNotSupported) from one that is gone.
@@ -296,18 +334,27 @@ func noAnswer(ctx context.Context, s lnet.Stream, err error) error {
 
 // runSend handles a send request: it hands the envelope to the engine and
 // answers with the receipt.
-func runSend(ctx context.Context, node Node, _ *connEntry, _ string, from transport.Origin, raw []byte) ([]byte, error) {
+func runSend(ctx context.Context, node Node, _ *connEntry, proto string, from transport.Origin, raw []byte) ([]byte, error) {
 	req, err := nodeproto.DecodeSendRequest(raw)
 	if err != nil {
 		return nil, errInvalidRequest{err}
 	}
-	receipt, err := node.Inbound(ctx, from, req.Sender, req.Envelope)
+	receipt, err := node.Inbound(ctx, from, req.Sender, req.Envelope, featuresOf(proto))
 	if err != nil {
 		return answerFor(node, err, func(o nodeproto.Outcome, reason string) ([]byte, error) {
 			return nodeproto.SendAnswer{Outcome: o, Reason: reason}.Encode()
 		})
 	}
 	return nodeproto.SendAnswer{Outcome: nodeproto.OutcomeOK, Reports: receipt.Reports, ControlReply: receipt.ControlReply}.Encode()
+}
+
+// featuresOf are the features a send request carries under the identifier its
+// stream was opened with: the current one carries all, the older ones none.
+func featuresOf(proto string) transport.Features {
+	if proto == nodeproto.ProtocolSend {
+		return transport.FeatureModelChoice
+	}
+	return 0
 }
 
 // runPull handles a pull request and answers with the reports and the no-record endpoints.

@@ -35,7 +35,7 @@ func FuzzInbound(f *testing.F) {
 		h.MustDirect("a")
 		h.MustDirect("b")
 		a := addrOf(t, h, "a")
-		rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, data)
+		rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, data, 0)
 		if err != nil {
 			return
 		}
@@ -58,7 +58,7 @@ func FuzzInbound(f *testing.F) {
 		}
 		// The same bytes again are the same request: the receipt has the same
 		// reports (the replay is answered from the record, signed anew).
-		again, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, data)
+		again, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, data, 0)
 		if err != nil || len(again.Reports) != len(rc.Reports) {
 			t.Fatalf("a repeat of an accepted envelope: %d reports, %v; the first had %d", len(again.Reports), err, len(rc.Reports))
 		}

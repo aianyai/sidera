@@ -118,12 +118,15 @@ type AckResult struct {
 	Items []adapterproto.PartAck
 }
 
-// ControlInput sends a control signal. Preset and Body mean something for
-// session.create only: the preset to start and the initial message.
+// ControlInput sends a control signal. Preset, Model, Effort and Body mean
+// something for session.create only: the preset to start, the model and the effort
+// the new session is to run with, and the initial message.
 type ControlInput struct {
 	To      string
 	Signal  adapterproto.ControlSignal
 	Preset  string
+	Model   string
+	Effort  adapterproto.Effort
 	Body    string
 	IdemKey string
 }

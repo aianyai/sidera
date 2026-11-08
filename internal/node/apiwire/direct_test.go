@@ -93,13 +93,17 @@ func TestDirectProtocolPreservesSendControlAndReplyFields(t *testing.T) {
 		params adapterproto.SendParams
 		kind   envelope.Kind
 		preset string
+		// model and effort are the choice the creation makes.
+		model  string
+		effort adapterproto.Effort
 	}{
-		{"ordinary", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b), adapterproto.Address(c)}, Body: "ordinary body", ContentType: "text/markdown", DiscloseRecipients: true}, envelope.KindMessage, ""},
-		{"reply", adapterproto.SendParams{Endpoint: refB, To: []adapterproto.Address{adapterproto.Address(a)}, Body: "reply body", ContentType: "text/markdown", ReplyTo: question.MessageID, DiscloseRecipients: true}, envelope.KindMessage, ""},
-		{"creation", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(h.RuntimeAddr())}, Body: "initial body", ContentType: "text/markdown", Control: &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{Preset: "default"}}}, envelope.KindSessionCreate, "default"},
-		{"close", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalSessionClose}}, envelope.KindSessionClose, ""},
-		{"interrupt", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalSessionInterrupt}}, envelope.KindSessionInterrupt, ""},
-		{"status", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalEndpointStatus}}, envelope.KindEndpointStatus, ""},
+		{"ordinary", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b), adapterproto.Address(c)}, Body: "ordinary body", ContentType: "text/markdown", DiscloseRecipients: true}, envelope.KindMessage, "", "", ""},
+		{"reply", adapterproto.SendParams{Endpoint: refB, To: []adapterproto.Address{adapterproto.Address(a)}, Body: "reply body", ContentType: "text/markdown", ReplyTo: question.MessageID, DiscloseRecipients: true}, envelope.KindMessage, "", "", ""},
+		{"creation", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(h.RuntimeAddr())}, Body: "initial body", ContentType: "text/markdown", Control: &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{Preset: "default"}}}, envelope.KindSessionCreate, "default", "", ""},
+		{"choosing", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(h.RuntimeAddr())}, Body: "initial body", ContentType: "text/markdown", Control: &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{Preset: "default", Model: "sonnet[1m]", Effort: adapterproto.EffortHigh}}}, envelope.KindSessionCreate, "default", "sonnet[1m]", adapterproto.EffortHigh},
+		{"close", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalSessionClose}}, envelope.KindSessionClose, "", "", ""},
+		{"interrupt", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalSessionInterrupt}}, envelope.KindSessionInterrupt, "", "", ""},
+		{"status", adapterproto.SendParams{Endpoint: refA, To: []adapterproto.Address{adapterproto.Address(b)}, Control: &adapterproto.Control{Signal: adapterproto.SignalEndpointStatus}}, envelope.KindEndpointStatus, "", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := tc.params
@@ -119,14 +123,14 @@ func TestDirectProtocolPreservesSendControlAndReplyFields(t *testing.T) {
 				}
 				tos = append(tos, a)
 			}
-			if !reflect.DeepEqual(o.Envelope.To, tos) || o.Envelope.Thread != p.Thread || string(o.Envelope.ReplyTo) != string(p.ReplyTo) || o.Envelope.ContentType != p.ContentType || o.Envelope.Preset != tc.preset || o.Outbound.Kind != tc.kind || o.Envelope.DiscloseRecipients != (p.DiscloseRecipients && len(p.To) > 1) || o.Idempotency == nil || o.Idempotency.Key != p.IdempotencyKey || o.Outbound.AcceptBefore.Sub(o.Envelope.SentAt) != 173*time.Second {
+			if !reflect.DeepEqual(o.Envelope.To, tos) || o.Envelope.Thread != p.Thread || string(o.Envelope.ReplyTo) != string(p.ReplyTo) || o.Envelope.ContentType != p.ContentType || o.Envelope.Preset != tc.preset || o.Envelope.Model != tc.model || o.Envelope.Effort != tc.effort || o.Outbound.Kind != tc.kind || o.Envelope.DiscloseRecipients != (p.DiscloseRecipients && len(p.To) > 1) || o.Idempotency == nil || o.Idempotency.Key != p.IdempotencyKey || o.Outbound.AcceptBefore.Sub(o.Envelope.SentAt) != 173*time.Second {
 				t.Fatalf("lost fields: %+v", o)
 			}
 			env := envelope.Envelope{ID: delivery.MessageID(sent.MessageID), To: tos, MultiRecipient: len(tos) > 1,
 				DiscloseRecipients: p.DiscloseRecipients && len(tos) > 1, Kind: tc.kind,
 				ReplyTo: delivery.MessageID(p.ReplyTo), Thread: p.Thread, Seq: o.Envelope.Seq,
 				SentAt: o.Envelope.SentAt, AcceptBefore: o.Outbound.AcceptBefore, ReportBy: o.Envelope.ReportBy,
-				ContentType: p.ContentType, Body: []byte(p.Body), Preset: tc.preset}
+				ContentType: p.ContentType, Body: []byte(p.Body), Preset: tc.preset, Model: tc.model, Effort: tc.effort}
 			if env.Digest() != o.BodyDigest {
 				t.Fatal("persisted request digest lost body or fields")
 			}

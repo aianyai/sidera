@@ -163,8 +163,12 @@ var _ Keys = (*nodekeys.Keys)(nil)
 // engine calls it from its outbound worker only, never from the loop, and in the
 // order the work was given. Waiting is how many of its calls wait out a delay
 // that is not due, which the engine does not count as work.
+//
+// Send is told by needs what the envelope cannot do without. A transport that
+// cannot carry it to the target does not make the call and returns
+// transport.ErrFeatureUnsupported, which the engine does not retry.
 type Transport interface {
-	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, envelope []byte) (transport.Receipt, error)
+	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, envelope []byte, needs transport.Features) (transport.Receipt, error)
 	Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (transport.PullAnswer, error)
 	QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error)
 	Waiting() int

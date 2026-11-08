@@ -18,6 +18,13 @@ type ControlRequest struct {
 	// Preset is the preset a session creation starts; it is required for
 	// session.create and refused for every other signal.
 	Preset string
+	// Model and Effort choose the new session's model and reasoning effort within
+	// what the preset allows; empty takes the preset's own. They are checked as the
+	// adapter protocol checks them and refused for every other signal. Whether the
+	// target takes them is not known here: a target that cannot is told at the
+	// first send, and the delivery then ends as rejected.
+	Model  string
+	Effort adapterproto.Effort
 	// Body is the initial message of a session creation, delivered to the session
 	// the creation makes, and ContentType says what it is (DefaultContentType when
 	// empty). Both are refused for every other signal, and a content type without a
@@ -64,7 +71,7 @@ func (e *Engine) control(now time.Time, c Caller, r ControlRequest) (SendResult,
 	if err != nil {
 		return SendResult{}, err
 	}
-	m := outgoing{to: []ident.Address{r.To}, kind: kind, preset: r.Preset, accept: r.AcceptBefore, idemKey: r.IdempotencyKey}
+	m := outgoing{to: []ident.Address{r.To}, kind: kind, preset: r.Preset, model: r.Model, effort: r.Effort, accept: r.AcceptBefore, idemKey: r.IdempotencyKey}
 	if len(r.Body) > 0 { // an empty body is none, as the protocol says of a creation
 		m.body, m.ctype = r.Body, contentTypeOf(r)
 	}
@@ -76,8 +83,8 @@ func (e *Engine) control(now time.Time, c Caller, r ControlRequest) (SendResult,
 // adapter protocol's own (adapterproto.Control.Validate), not written again here.
 func controlKind(r ControlRequest) (envelope.Kind, error) {
 	ctl := adapterproto.Control{Signal: r.Signal}
-	if r.Preset != "" {
-		ctl.Params = &adapterproto.ControlParams{Preset: r.Preset}
+	if r.Preset != "" || r.Model != "" || r.Effort != "" {
+		ctl.Params = &adapterproto.ControlParams{Preset: r.Preset, Model: r.Model, Effort: r.Effort}
 	}
 	if err := ctl.Validate(); err != nil {
 		return envelope.KindInvalid, invalidArgument("signal", err)

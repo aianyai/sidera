@@ -7,13 +7,13 @@ a test break the loopback on purpose.
 ## What
 
 **The seam has two sides, and each is defined by the side that consumes it.** A
-transport calls the engine through a `Handler`: `Inbound` for an envelope and
+transport calls the engine through a `Handler`: `Inbound` for an envelope (told the `Features` of the protocol the request travelled on) and
 `Pull` for a pull and `QueryDirectory` for visible endpoints, each told the `Origin` of the request, and each running under
 the context of the call that brought the request. `Handler` is defined in
 `internal/node/transport`, which consumes it. The engine calls a transport
 through the interface the engine defines for itself, with three methods: `Send`
-takes the node, the sending endpoint and the envelope as the bytes the engine
-encoded, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message and the recipients the
+takes the node, the sending endpoint, the envelope as the bytes the engine
+encoded and the `Features` the envelope cannot do without, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message and the recipients the
 source tracks on the target) and returns a `PullAnswer`; `QueryDirectory` takes a source endpoint and a
 `DirectoryRequest` and returns a `DirectoryPage`. `*Loopback` has all three, so it satisfies that interface
 without importing the engine, and the engine imports no transport package for
@@ -68,6 +68,21 @@ other error comes from the target and passes unchanged; it means no receipt
 exists. The error of the caller's own context is returned as it is, neither of the
 two: the target may or may not have seen the call.
 
+**Features, and the call that is not made.** `Features` are what the protocol a
+request travels on can carry beyond the base form; there is one, `FeatureModelChoice`:
+an envelope may choose a new session's model and effort, and the target answers a
+status request with what each preset allows. A `Handler` is told the features of the
+protocol the request arrived on, so the receiving engine can refuse an envelope that
+needs one the request lacked. They are not part of an `Origin`: the origin says where
+a request came from, the features say which protocol it took, and two requests of one
+node may differ in the second. The engine tells `Send` what the envelope needs.
+A transport whose target does not serve a protocol that carries it does not make the
+call and returns `ErrFeatureUnsupported`, a third kind of failure beside the two
+ways to get no answer, and not one of them: the target is there and answered the
+negotiation, nothing was sent, and repeating the call cannot help until the target is
+updated, so the engine does not retry it as it does an unreachable target. The loopback
+carries every feature, so it returns it only for a knob.
+
 **A refusal across a wire.** A target in this process hands its own error over, a
 refusal of its engine with a reason. A target on another node cannot: its answer
 says that it refused and names the reason, as text, and the transport returns
@@ -116,6 +131,7 @@ observer:
 | ---- | ----- | ------ |
 | `DropReceipt(n)` | `Send` | The target processes the envelope; the receipt is thrown away and the send returns `ErrTimeout`. Spent one per hit. A send the target refused has no receipt and is not counted. |
 | `Unreachable(node, on)` | `Send`, `Pull`, `QueryDirectory` | A send, pull or directory query to the node returns `ErrUnreachable` and the target is not called. |
+| `Unsupported(node, features)` | `Send` | A send to the node that needs any of the features returns `ErrFeatureUnsupported` and the target is not called, as the network does for a node that serves no protocol that carries them; every other send goes through. No features makes the node carry them again. |
 | `HoldReports(msg)`, `Release(msg)` | `Send`, `Pull` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target: nothing yet for every recipient, never a `NoRecord`. The target processes the envelope as usual. |
 | `Delay(d)` | `Send`, `Pull`, `QueryDirectory` | Every call that starts afterwards waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Delay(0)` affects only calls that start afterwards: a call already waiting stays. `Waiting()` counts the calls whose time has not come, and panics when the clock was set back below the start of one of them. |
 | `Mutate(msg)` | `Send` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (when it has no body, the last character of its thread is changed, or a thread is given to one that has none, so the replay stays valid at the longest thread). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |

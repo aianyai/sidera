@@ -19,6 +19,11 @@ protocol has a version of its own.
   version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
   The Go SDK's `adapterkit/modelchoice` parses a preset's `allowed_models` map and applies the rules that decide
   which model and effort a requester may choose, so adapters apply them alike.
+  Between nodes the choice travels under a new send protocol, `/sidera/send/3.0.0`, which is also the one
+  that lists each preset's choice in the answer to a status request. A creation that chooses a model or an
+  effort is offered to that protocol alone, and a node of an earlier release, which does not serve it, ends
+  the delivery at once as rejected for `node_unsupported` instead of the message being retried until it
+  expires; everything else is sent to such a node as before.
 - **The Claude adapter lets a requester choose the model and effort of a new session.** A preset
   can set `allowed_models`, a map from a model to the efforts that may be chosen with it; without it
   a session's creator cannot choose. A choice the list does not allow is refused when the session is

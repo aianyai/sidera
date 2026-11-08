@@ -21,7 +21,7 @@ func TestLoopbackMakesTheLocalOrigin(t *testing.T) {
 	var seen []transport.Origin
 	h := &originRecorder{target: r.target, seen: &seen}
 	l := transport.NewLoopback(r.self, h, nil)
-	if _, err := l.Send(context.Background(), r.self, ep(9), r.message(t, "m1", "hello")); err != nil {
+	if _, err := l.Send(context.Background(), r.self, ep(9), r.message(t, "m1", "hello"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := l.Pull(context.Background(), r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
@@ -45,9 +45,9 @@ type originRecorder struct {
 	seen   *[]transport.Origin
 }
 
-func (o *originRecorder) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+func (o *originRecorder) Inbound(ctx context.Context, from transport.Origin, sender ident.EndpointID, data []byte, features transport.Features) (transport.Receipt, error) {
 	*o.seen = append(*o.seen, from)
-	return o.target.Inbound(ctx, from, sender, data)
+	return o.target.Inbound(ctx, from, sender, data, features)
 }
 
 func (o *originRecorder) Pull(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {

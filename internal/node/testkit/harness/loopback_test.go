@@ -84,7 +84,7 @@ func TestTheNodeHasRealKeysAndOnlyItsOwnReportsVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, []byte("not an envelope"))
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, []byte("not an envelope"), 0)
 	if err == nil {
 		t.Fatalf("garbage was taken in: %+v", rc)
 	}

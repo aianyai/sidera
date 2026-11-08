@@ -406,7 +406,7 @@ func (h *H) knobHit(hit transport.Hit) {
 // hits the knobs have had, so that a hit between two looks is not missed.
 func (h *H) loopbackQuiet() (bool, uint64) {
 	var n int
-	for k := transport.KnobDropReceipt; k <= transport.KnobMutate; k++ {
+	for k := transport.KnobDropReceipt; k <= transport.KnobFeatureUnsupported; k++ {
 		n += h.knobs.Hits(k)
 	}
 	return true, uint64(n)
@@ -899,6 +899,12 @@ func (h *H) Release(message string) { h.knobs.Release(delivery.MessageID(message
 
 // Delay makes every call that starts from now on wait d on the test clock first.
 func (h *H) Delay(d time.Duration) { h.knobs.Delay(d) }
+
+// Unsupported makes the node itself one that serves no protocol carrying the
+// features, as a node of an earlier release does: a send that needs any of them is
+// refused as ErrFeatureUnsupported before the target sees it, and every other send
+// goes through. No features makes it carry them again.
+func (h *H) Unsupported(features transport.Features) { h.knobs.Unsupported(NodeID(), features) }
 
 // Mutate makes the target take the next send of the message once more, with
 // another body, as if another request had used its identifier.

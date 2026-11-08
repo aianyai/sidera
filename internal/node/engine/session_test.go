@@ -616,11 +616,11 @@ func TestARepeatOfAControlSignalIsAnsweredFromItsRecord(t *testing.T) {
 	envelopeOf := func(id, preset string) []byte { return forgedControl(t, h, id, to, envelope.KindSessionCreate, preset) }
 
 	first := envelopeOf("control-once", "no-such-preset")
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, first)
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, first, 0)
 	if err != nil || rc.ControlReply == nil || len(rc.Reports) != 1 {
 		t.Fatalf("the first send: %+v, %v, want a report and the control reply", rc, err)
 	}
-	again, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, first)
+	again, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, first, 0)
 	if err != nil || again.ControlReply == nil || len(again.Reports) != 1 {
 		t.Fatalf("the repeat: %+v, %v, want the same answer", again, err)
 	}
@@ -635,7 +635,7 @@ func TestARepeatOfAControlSignalIsAnsweredFromItsRecord(t *testing.T) {
 	}
 	// Another request under the same identifier changes nothing.
 	other := envelopeOf("control-once", "default")
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, other); err == nil {
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, other, 0); err == nil {
 		t.Error("another request under the identifier of a control signal was taken in")
 	} else if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonMessageConflict {
 		t.Errorf("another request under the identifier got %v, want the conflict", err)

@@ -28,8 +28,12 @@ const (
 	// KnobMutate: a message that was sent is delivered once more with other
 	// content.
 	KnobMutate
+	// KnobFeatureUnsupported: a node serves no protocol that carries a feature, as
+	// a node of an earlier release does not, so a send that needs it is refused
+	// with ErrFeatureUnsupported before the target sees it.
+	KnobFeatureUnsupported
 
-	knobCount = int(KnobMutate) + 1
+	knobCount = int(KnobFeatureUnsupported) + 1
 )
 
 var knobNames = [...]string{
@@ -38,6 +42,8 @@ var knobNames = [...]string{
 	KnobHoldReports: "hold-reports",
 	KnobDelay:       "delay",
 	KnobMutate:      "mutate",
+
+	KnobFeatureUnsupported: "feature-unsupported",
 }
 
 // String returns the name of the knob as the ledger of a test writes it.
@@ -76,9 +82,9 @@ func (c CallKind) String() string {
 // Hit is one time a knob changed what a call did.
 type Hit struct {
 	Knob Knob
-	// Call is the call the knob acted on. Drop-receipt and mutate act only on
-	// sends; hold-reports acts on sends and pulls; unreachable and delay act on
-	// sends, pulls and directory queries.
+	// Call is the call the knob acted on. Drop-receipt, mutate and
+	// feature-unsupported act only on sends; hold-reports acts on sends and pulls;
+	// unreachable and delay act on sends, pulls and directory queries.
 	Call CallKind
 	// Node is the node the call was for.
 	Node ident.NodeID
@@ -117,6 +123,7 @@ type Knobs struct {
 	delay        time.Duration
 	waits        map[uint64]delayWait // calls waiting out a delay
 	nextWait     uint64
+	unsupported  map[ident.NodeID]Features
 	mutate       map[delivery.MessageID]bool
 	mutated      map[delivery.MessageID]Replay
 	hits         [knobCount]int
@@ -135,6 +142,7 @@ func NewKnobs(clk clock.Clock) *Knobs {
 		unreachable: map[ident.NodeID]bool{},
 		held:        map[delivery.MessageID]bool{},
 		waits:       map[uint64]delayWait{},
+		unsupported: map[ident.NodeID]Features{},
 		mutate:      map[delivery.MessageID]bool{},
 		mutated:     map[delivery.MessageID]Replay{},
 	}
@@ -158,6 +166,20 @@ func (k *Knobs) Unreachable(node ident.NodeID, on bool) {
 		k.unreachable[node] = true
 	} else {
 		delete(k.unreachable, node)
+	}
+}
+
+// Unsupported makes node a node that serves no protocol carrying the features:
+// a send to it that needs any of them returns [ErrFeatureUnsupported] without
+// calling the target, as the network does for a target of an earlier release,
+// and every other send goes through. No features makes it carry them again.
+func (k *Knobs) Unsupported(node ident.NodeID, features Features) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if features == 0 {
+		delete(k.unsupported, node)
+	} else {
+		k.unsupported[node] = features
 	}
 }
 
@@ -319,6 +341,18 @@ func (k *Knobs) refuses(call CallKind, node ident.NodeID) bool {
 		k.hit(Hit{Knob: KnobUnreachable, Call: call, Node: node})
 	}
 	return on
+}
+
+// lacks reports whether a send to node needs a feature the node is made not to
+// carry, and counts it.
+func (k *Knobs) lacks(node ident.NodeID, needs Features) bool {
+	k.mu.Lock()
+	missing := k.unsupported[node]&needs != 0
+	k.mu.Unlock()
+	if missing {
+		k.hit(Hit{Knob: KnobFeatureUnsupported, Call: CallSend, Node: node})
+	}
+	return missing
 }
 
 // watchesMessages reports whether any knob is armed that needs the id of the

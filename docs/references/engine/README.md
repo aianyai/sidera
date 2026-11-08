@@ -840,7 +840,20 @@ tolerance, and once more after it (below); the delivery of a control signal itse
 about on the short waits of `Params.ControlPullRamp` first (2 s, 5 s, 10 s, one for each pull
 after the send was answered, each at most `PullInterval`), and then every `PullInterval` like
 the rest (see the reply of a creation below); after the delivery deadline a node that never
-answered is asked and not sent to. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
+answered is asked and not sent to. A send is told what its envelope cannot do without
+(`transport.Features`: a session creation that chooses a model or an effort needs the
+protocol that carries the choice). A transport whose target serves no such protocol does not make
+the call and returns `transport.ErrFeatureUnsupported`; that is no failure to reach the node and
+is not tried again, because only an update of the target changes it. The engine ends the
+delivery at once as `rejected` with the reason `node_unsupported`, through the envelope
+package's one rule for the delivery of a source record (`Outbound.ApplyNodeUnsupported`), writes
+the record with the feedback a rejection calls for, forgets the record's outbound work and logs
+the refusal at Info. It is the one rejection this node decides itself: no target reports it, it has
+no code in a status report, and a delivery it ends is not pulled. It does not depend on the wall
+clock, which is why it is applied while the clock is in doubt. Which node can take the choice is
+learned at the send, not when the signal is accepted: a connection to the target may not exist
+then, and the negotiation happens when the call is made, so `Control` accepts the signal as
+usual and the rejection is read from its status. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
 verified with the target's certificate and applied to the source record by the envelope
 package's one rule; the record is written with the feedback the change calls for and with
 the body reference dropped once no delivery needs the body. A report that changes neither the
@@ -1349,6 +1362,11 @@ initial message (an empty body is none), `session.close`, `session.interrupt` an
 `endpoint.status`. A message on any other signal, a content type without a message, a
 creation without a preset and a signal with a preset that is not a creation are refused for
 the field (the rule between a signal and its parameters is `adapterproto.Control.Validate`'s).
+A creation may also name the `Model` and the `Effort` its session is to run with, checked by the same
+rule (a model name and an effort of the common scale) and refused for every other signal. They are
+kept in the source record and sent in the envelope, and an adapter's `endpoint.send` control
+carries them along with the preset the same way. Whether the target takes them is not asked when the
+signal is accepted (see the rejection `node_unsupported` under Sending).
 
 The target takes a control signal in by one order. A repeat is answered from the record the
 node holds, with its report and its control reply when it has one, and another body under the
@@ -1366,7 +1384,11 @@ out of range. A repeat is answered from that record. Then the signal is accepted
 answers itself is answered in the same transaction, `control-intake`: `endpoint.status` from
 what the engine has observed (the activity of the endpoint, the messages waiting, the
 conditions `adapterreg.StatusConditions` gives, and for a runtime endpoint which presets can be
-used), and a creation it refuses before it calls the adapter, with the reply
+used; when the request travelled on the send protocol that carries the model choice, also what
+the adapter's last probe resolved of each preset, matched by name: its model and effort and the
+models a requester may choose, left out for a preset the probe did not report or when the adapter
+has not been probed, and always left out for a request on an older identifier. The reply is
+made once and stored, so the form is decided by the request that brought the signal), and a creation it refuses before it calls the adapter, with the reply
 `adapterreg.DaemonCreateFailure` gives and no session endpoint and no intent: the preset is not
 defined (`preset_unknown`), the preset says it is closed to endpoints on this node and the
 signal came from one (`preset_unavailable`, by `authz.LocalCreate`, after the record is accepted
@@ -2306,6 +2328,9 @@ reproducible).
 | A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
 | A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `FuzzInbound` |
 | A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
+| A model or an effort chosen for a creation is taken in only from a request that travelled on a protocol that carries it | `inbound.go` (`takeIn`) | `TestChoiceOnAProtocolThatDoesNotCarryItIsInvalid` |
+| A creation that chooses a model or an effort, for a node that serves no protocol carrying it, is rejected at once as `node_unsupported`, by the sender's node, and not sent again | `outbound.go` (`refuseUnsupported`) | `TestChoiceToANodeThatCannotTakeItIsRejectedAtOnce` |
+| The status of a runtime lists each preset's model choice from the adapter's last probe, only on the protocol that carries it | `intake_control.go` (`statusReply`) | `TestStatusRepliesWithTheModelChoiceOfEachPresetOnlyWhereItIsCarried` |
 | A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline`, `TestSessionCreateAtNodeEndpointLimitFailsAtOnce`, `TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart`, `TestSessionCreateChoosingAModel`, `TestSessionCreateChoosingAModelWhileTheAdapterIsOffline` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
 | A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `reconcileCreations`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |

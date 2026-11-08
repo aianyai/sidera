@@ -14,14 +14,15 @@ no clock but the one its knobs were given.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull and `QueryDirectory` for visible endpoints. All are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`, `QueryDirectory`) and every transport has those methods. |
+| `Handler` | What a transport calls on the engine: `Inbound` for an envelope (with the `Features` of the protocol it travelled on), `Pull` for a pull and `QueryDirectory` for visible endpoints. All are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`, `QueryDirectory`) and every transport has those methods. |
 | `DirectoryRequest`, `DirectoryEntry`, `DirectoryAdapter`, `DirectoryPage` | A live directory request and the open endpoints the target authorized its full source address to see, each with the adapter that serves it when the target says (`DirectoryAdapter`: instance, adapter id, and when known the adapter's version and the runtime). The cursor is opaque to the transport. |
 | `Origin`, `RemoteOrigin(node)` | Where a request came from. `Local()` is true only for a request the loopback handed over. |
 | `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for: one message and the recipients the source tracks on the target. The answer to a pull lists, for each recipient asked about, its signed report or the recipient in `NoRecord` (the target holds no record of that delivery); a recipient in neither means nothing yet. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
 | `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. Every transport implementation returns them with this meaning. |
+| `Features`, `FeatureModelChoice`, `ErrFeatureUnsupported` | What the protocol a request travels on can carry beyond the base form. The engine tells `Send` what the envelope needs, and a transport whose target serves no protocol that carries it returns `ErrFeatureUnsupported` without making the call; the receiving engine is told what the request carried. The loopback carries all. |
 | `Refused{Reason}` | The error of a call a target in another process answered with a refusal; `Reason` is the target engine's reason name. A target in the same process hands its own error over instead. |
-| `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull`, `QueryDirectory` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
-| `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
+| `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send` (with the features the envelope needs), `Pull`, `QueryDirectory` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
+| `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `Unsupported`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
 
 ## Rules
 

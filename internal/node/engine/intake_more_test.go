@@ -235,7 +235,7 @@ func TestAMessageToAnEndpointThatIsNotThereIsRejectedAsMissing(t *testing.T) {
 	a := addrOf(t, h, "a")
 	// An endpoint identifier nobody registered, on this node.
 	stranger := ident.Address{Node: harness.NodeID(), Endpoint: mustEndpoint(t, 200)}
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, forged(t, h, "to-nobody", stranger, "", "x"))
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, forged(t, h, "to-nobody", stranger, "", "x"), 0)
 	if err != nil || len(rc.Reports) != 1 {
 		t.Fatalf("receipt: %+v, %v", rc, err)
 	}
@@ -257,7 +257,7 @@ func TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot(t *testing.T) {
 	}
 	sender := addrOf(t, h, "b").Endpoint
 	data := forged(t, h, "from-afar", aAddr, "", "a stranger's message")
-	if _, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(other), sender, data); err != nil {
+	if _, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(other), sender, data, 0); err != nil {
 		t.Fatalf("a remote envelope: %v", err)
 	}
 	var found bool
@@ -279,14 +279,14 @@ func TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot(t *testing.T) {
 	// is right only while no record from this node's identifier is taken in from outside.
 	// That the trust evaluation itself denies this node as ReasonSelf is covered in
 	// internal/trust.
-	if _, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(harness.NodeID()), sender, forged(t, h, "from-a-twin", aAddr, "", "a twin's message")); err != nil {
+	if _, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(harness.NodeID()), sender, forged(t, h, "from-a-twin", aAddr, "", "a twin's message"), 0); err != nil {
 		t.Fatalf("a remote envelope that names this node: %v", err)
 	}
 	if in := inOf(t, h, "from-a-twin"); in.Record.State != delivery.StateRejected || in.Record.Reject != delivery.RejectUnauthorized {
 		t.Errorf("the message of a remote connection that names this node is %s (%s), want rejected (unauthorized)", in.Record.State, in.Record.Reject)
 	}
 	// The same envelope from the loopback is judged by the endpoint's declarations only.
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), sender, forged(t, h, "from-here", aAddr, "", "a neighbour's message")); err != nil {
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), sender, forged(t, h, "from-here", aAddr, "", "a neighbour's message"), 0); err != nil {
 		t.Fatal(err)
 	}
 	if in := inOf(t, h, "from-here"); in.Record.State != delivery.StateAccepted {
@@ -300,7 +300,7 @@ func TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted(t *testing.T)
 	if fakeagent.CategoryOf(err) != fakeagent.CategoryBackpressure || fakeagent.CodeOf(err) != "clock_rollback" {
 		t.Errorf("send: %v, want backpressure/clock_rollback", err)
 	}
-	_, err = h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "m", addrOf(t, h, "a"), "", "x"))
+	_, err = h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "m", addrOf(t, h, "a"), "", "x"), 0)
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonClockRollback {
 		t.Errorf("an envelope taken in: %v, want a refusal for the clock", err)
 	}
@@ -505,7 +505,7 @@ func TestEvidenceThatDoesNotVerifyIsDiscardedAndTheOwnerIsToldOfIt(t *testing.T)
 		t.Fatal(err)
 	}
 	b := addrOf(t, h, "b")
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), b.Endpoint, forged(t, h, "with-bad-evidence", addrOf(t, h, "a"), msg, "an answer", bad))
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), b.Endpoint, forged(t, h, "with-bad-evidence", addrOf(t, h, "a"), msg, "an answer", bad), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds(t *testing.T) {
 func TestReportsOfASendAreSignedByTheNodeAndNameTheMessage(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	aEP := addrOf(t, h, "a").Endpoint
-	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), aEP, forged(t, h, "plain-1", addrOf(t, h, "b"), "", "x"))
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), aEP, forged(t, h, "plain-1", addrOf(t, h, "b"), "", "x"), 0)
 	if err != nil || len(rc.Reports) != 1 {
 		t.Fatalf("receipt: %+v, %v", rc, err)
 	}
@@ -778,7 +778,7 @@ func TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord(t *t
 				t.Fatalf("bodies %v before the reply, want the one of the question", got)
 			}
 			if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
-				forged(t, h, "the-reply", addrOf(t, h, "a"), msg, c.reply, report)); err != nil {
+				forged(t, h, "the-reply", addrOf(t, h, "a"), msg, c.reply, report), 0); err != nil {
 				t.Fatal(err)
 			}
 			quiet(t, h)

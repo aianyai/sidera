@@ -71,7 +71,10 @@ clock), touches no file and draws randomness only from the reader it is given (f
   the servers go through `serveCall`, which takes the form from the identifier the
   stream negotiated; the client proposes the identifiers newest first, the legacy one
   last (`nodeproto.Offer`), and takes the form of the one the stream got (`call`
-  returns it with the answer). A server is given the connection the request came over,
+  returns it with the answer). A send that needs a feature (the model choice) is
+  proposed under the current identifier alone, and a target that does not serve it
+  fails the call as `transport.ErrFeatureUnsupported` before a request is written;
+  `runSend` tells the engine what the identifier the stream got carries. A server is given the connection the request came over,
   for an answer that depends on the connection and not only on the node, and the
   identifier the stream got, for an answer that differs between identifiers: the
   directory leaves the adapters out of an entry under the two older ones, and a client

@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/pairing"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -300,6 +301,13 @@ func (l LoopSide) Submit(fn func()) bool {
 // the caller's to make, so that a test can offer one a transport must never give.
 func (l LoopSide) ApplyAnswer(name string, node ident.NodeID, reports []record.Record, noRecord []ident.EndpointID) error {
 	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord, nil, nil)
+}
+
+// StatusReply is what the node answers endpoint.status of the endpoint with, for a
+// request that travelled on a protocol with the features. The endpoint must be one
+// of the node's.
+func (l LoopSide) StatusReply(endpoint ident.EndpointID, features transport.Features) *adapterproto.ControlStatusReply {
+	return l.e.statusReply(l.e.d.Clock.Now(), l.e.view.endpoints[endpoint], features)
 }
 
 type cmdHook struct {

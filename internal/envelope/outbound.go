@@ -268,6 +268,18 @@ func (o Outbound) ApplyNoRecord(now time.Time, node ident.NodeID, recipient iden
 	return o.applyFact(now, node, recipient, delivery.Event{Type: delivery.EventNoRecordAtTarget})
 }
 
+// ApplyNodeUnsupported ends the delivery of the message to recipient, original or
+// derived, as rejected for delivery.RejectNodeUnsupported: the sender's own node
+// decided that the node it is on runs a version that cannot take what the message
+// carries, and did not send it. It is the one rejection that no report carries,
+// since no target reports it. The delivery must be on node. An endpoint with no
+// delivery here changes nothing (ReportNotTracked); whether the delivery can be
+// rejected is the rule of delivery.Record.Apply, and the outcome says whether it
+// was. On an error nothing changes.
+func (o Outbound) ApplyNodeUnsupported(now time.Time, node ident.NodeID, recipient ident.EndpointID) (Outbound, ReportEffect, delivery.Outcome, error) {
+	return o.applyFact(now, node, recipient, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectNodeUnsupported})
+}
+
 // ApplyObservation applies to the delivery of the message to recipient, original
 // or derived, a fact the sender observes itself and no report carries: a query of
 // the target that found no receipt (delivery.EventExpiryQueried), contact with the

@@ -52,7 +52,7 @@ func (r *rig) inboundFrom(t testing.TB, e *engine.Engine, from ident.NodeID, to 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Inbound(context.Background(), transport.RemoteOrigin(from), mustEndpoint(t, 2), data); err != nil {
+	if _, err := e.Inbound(context.Background(), transport.RemoteOrigin(from), mustEndpoint(t, 2), data, 0); err != nil {
 		t.Fatalf("Inbound %s: %v", id, err)
 	}
 	for _, in := range r.scan().In {

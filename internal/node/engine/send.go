@@ -75,10 +75,12 @@ type outgoing struct {
 	idemKey  string
 	disclose bool
 	// kind is what the envelope asks for; the zero value is a message. A control
-	// signal has one recipient and no reply to, and preset is the parameter of a
-	// session creation.
+	// signal has one recipient and no reply to, and preset, model and effort are
+	// the parameters of a session creation.
 	kind   envelope.Kind
 	preset string
+	model  string
+	effort adapterproto.Effort
 }
 
 type cmdSend struct {
@@ -250,7 +252,7 @@ func (e *Engine) envelopeOf(now time.Time, sender ident.EndpointID, id delivery.
 		ID: id, To: slices.Clone(m.to), MultiRecipient: len(m.to) > 1, DiscloseRecipients: m.disclose && len(m.to) > 1,
 		Kind: m.kind, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
 		SentAt: now, AcceptBefore: acceptBefore, ReportBy: delivery.ReportBy(acceptBefore), ContentType: m.ctype, Body: m.body,
-		Preset: m.preset,
+		Preset: m.preset, Model: m.model, Effort: m.effort,
 	}
 	for _, to := range m.to {
 		env.Seq[to.Endpoint] = e.view.seq.Next(sender, to)

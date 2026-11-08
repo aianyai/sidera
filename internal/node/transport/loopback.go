@@ -20,6 +20,10 @@ type Loopback struct {
 	knobs *Knobs
 }
 
+// loopbackFeatures are the features of a request the loopback hands over: all of
+// them, since both ends are this node.
+const loopbackFeatures = FeatureModelChoice
+
 // NewLoopback returns the loopback of node self, handing what it carries to h.
 // A nil knobs means no faults. It panics when self is the zero node id or h is
 // nil: a loopback of no node would make local origins that name nobody, and one
@@ -46,12 +50,20 @@ func NewLoopback(self ident.NodeID, h Handler, knobs *Knobs) *Loopback {
 // envelope: send the same request again and the target deduplicates, by sender
 // node, sender endpoint, message id and recipient, comparing the request digest.
 // After ErrUnreachable it certainly did not. Any other error is the target's own.
-func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (Receipt, error) {
+//
+// The loopback carries every feature, so needs is a reason to fail only for a
+// knob ([Knobs.Unsupported]): it is there because a transport to another node
+// must be told what the envelope needs before it makes the call, and every
+// transport has the same method.
+func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte, needs Features) (Receipt, error) {
 	if err := l.knobs.wait(ctx, CallSend, target); err != nil {
 		return Receipt{}, err
 	}
 	if err := l.reach(CallSend, target); err != nil {
 		return Receipt{}, err
+	}
+	if l.knobs.lacks(target, needs) {
+		return Receipt{}, fmt.Errorf("%w: a knob makes the node one that does not carry it", ErrFeatureUnsupported)
 	}
 	var msg delivery.MessageID
 	if l.knobs.watchesMessages() {
@@ -59,7 +71,7 @@ func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.E
 			msg = e.ID
 		}
 	}
-	rc, err := l.h.Inbound(ctx, localOrigin(l.self), sender, data)
+	rc, err := l.h.Inbound(ctx, localOrigin(l.self), sender, data, loopbackFeatures)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -132,7 +144,7 @@ func (l *Loopback) replay(ctx context.Context, msg delivery.MessageID, sender id
 		l.knobs.keepReplay(l.self, msg, Replay{Err: fmt.Errorf("transport: cannot mutate %q: %w", msg, err)}, false)
 		return
 	}
-	rc, err := l.h.Inbound(ctx, localOrigin(l.self), sender, changed)
+	rc, err := l.h.Inbound(ctx, localOrigin(l.self), sender, changed, loopbackFeatures)
 	l.knobs.keepReplay(l.self, msg, Replay{Receipt: rc, Err: err}, true)
 }
 

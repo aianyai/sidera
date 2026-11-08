@@ -87,9 +87,24 @@ type outcomeReasonWire struct {
 	Reason  uint64 `cbor:"2,keyasint,omitempty"`
 }
 
+// allowedWire is a model a requester may choose and the efforts of each, in the
+// order of the scale. The efforts are the words the adapter protocol uses, as the
+// effort of an envelope is: they are handed on to a runtime by name.
+type allowedWire struct {
+	Model   string   `cbor:"1,keyasint"`
+	Efforts []string `cbor:"2,keyasint"`
+}
+
+// presetWire is a preset's availability and, when the request travelled on the
+// protocol that carries them, its own model and effort (keys 3 and 4) and the
+// models a requester may choose (key 5). All three are absent when the preset
+// sets none or the request could not carry them.
 type presetWire struct {
-	Name      string `cbor:"1,keyasint"`
-	Available bool   `cbor:"2,keyasint"`
+	Name      string        `cbor:"1,keyasint"`
+	Available bool          `cbor:"2,keyasint"`
+	Model     string        `cbor:"3,keyasint,omitempty"`
+	Effort    string        `cbor:"4,keyasint,omitempty"`
+	Allowed   []allowedWire `cbor:"5,keyasint,omitempty"`
 }
 
 type statusWire struct {
@@ -143,7 +158,15 @@ func controlReplyToWire(r ControlReply) (controlReplyWire, error) {
 			w.Status.Conditions = append(w.Status.Conditions, uint64(cond))
 		}
 		for _, p := range c.Presets {
-			w.Status.Presets = append(w.Status.Presets, presetWire{Name: p.Name, Available: p.Available})
+			pw := presetWire{Name: p.Name, Available: p.Available, Model: p.Model, Effort: string(p.Effort)}
+			for _, a := range p.AllowedModels {
+				aw := allowedWire{Model: a.Model}
+				for _, e := range a.Efforts {
+					aw.Efforts = append(aw.Efforts, string(e))
+				}
+				pw.Allowed = append(pw.Allowed, aw)
+			}
+			w.Status.Presets = append(w.Status.Presets, pw)
 		}
 	}
 	if set != 1 {
@@ -276,7 +299,15 @@ func statusResultFromWire(w statusWire) (ControlResult, error) {
 		c.Conditions = append(c.Conditions, cond)
 	}
 	for _, p := range w.Presets {
-		c.Presets = append(c.Presets, adapterproto.PresetAvailability{Name: p.Name, Available: p.Available})
+		pa := adapterproto.PresetAvailability{Name: p.Name, Available: p.Available, Model: p.Model, Effort: adapterproto.Effort(p.Effort)}
+		for _, a := range p.Allowed {
+			ma := adapterproto.ModelAllowance{Model: a.Model}
+			for _, e := range a.Efforts {
+				ma.Efforts = append(ma.Efforts, adapterproto.Effort(e))
+			}
+			pa.AllowedModels = append(pa.AllowedModels, ma)
+		}
+		c.Presets = append(c.Presets, pa)
 	}
 	if err := c.Validate(); err != nil {
 		return ControlResult{}, err

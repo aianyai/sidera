@@ -47,9 +47,10 @@ var errConflict = errors.New("same id, different content")
 
 // inbound is one call of the engine's side that the target saw.
 type inbound struct {
-	from   transport.Origin
-	sender ident.EndpointID
-	env    envelope.Envelope
+	from     transport.Origin
+	sender   ident.EndpointID
+	env      envelope.Envelope
+	features transport.Features
 }
 
 // target stands for the engine behind the seam. It keeps what it was handed and
@@ -73,14 +74,14 @@ func reportOf(id delivery.MessageID) record.Record {
 	return record.Record{Type: "test/report", Payload: []byte(id)}
 }
 
-func (g *target) Inbound(_ context.Context, from transport.Origin, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+func (g *target) Inbound(_ context.Context, from transport.Origin, sender ident.EndpointID, data []byte, features transport.Features) (transport.Receipt, error) {
 	e, err := envelope.Decode(data, envelope.DefaultLimits())
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err != nil {
 		return transport.Receipt{}, err
 	}
-	g.calls = append(g.calls, inbound{from, sender, e})
+	g.calls = append(g.calls, inbound{from, sender, e, features})
 	if g.failing != nil {
 		err := g.failing
 		g.failing = nil
@@ -196,7 +197,7 @@ func (r *rig) statusInThread(t testing.TB, id, thread string) []byte {
 }
 
 func (r *rig) send(data []byte) (transport.Receipt, error) {
-	return r.loop.Send(context.Background(), r.self, ep(9), data)
+	return r.loop.Send(context.Background(), r.self, ep(9), data, 0)
 }
 
 // pulled are the recipients every pull of the rig asks about.
@@ -218,7 +219,7 @@ func (r *rig) hitsSeen() map[transport.Knob]int {
 }
 
 var allKnobs = []transport.Knob{
-	transport.KnobDropReceipt, transport.KnobUnreachable, transport.KnobHoldReports, transport.KnobDelay, transport.KnobMutate,
+	transport.KnobDropReceipt, transport.KnobUnreachable, transport.KnobHoldReports, transport.KnobDelay, transport.KnobMutate, transport.KnobFeatureUnsupported,
 }
 
 // wantHits asserts how often each knob was hit, by the counter and by what the

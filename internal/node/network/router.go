@@ -10,7 +10,7 @@ import (
 // Remote is the part of the network layer the router calls for another node. The
 // router consumes it, so a test can stand in for the network.
 type Remote interface {
-	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (transport.Receipt, error)
+	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte, needs transport.Features) (transport.Receipt, error)
 	Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (transport.PullAnswer, error)
 	QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error)
 }
@@ -35,12 +35,13 @@ func NewRouter(self ident.NodeID, local *transport.Loopback, remote Remote) *Rou
 	return &Router{self: self, local: local, remote: remote}
 }
 
-// Send carries an envelope to the target node.
-func (r *Router) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
+// Send carries an envelope to the target node. needs are the features it cannot
+// do without.
+func (r *Router) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte, needs transport.Features) (transport.Receipt, error) {
 	if target == r.self {
-		return r.local.Send(ctx, target, sender, data)
+		return r.local.Send(ctx, target, sender, data, needs)
 	}
-	return r.remote.Send(ctx, target, sender, data)
+	return r.remote.Send(ctx, target, sender, data, needs)
 }
 
 // Pull asks the target node for the reports of a message.

@@ -166,9 +166,36 @@ func TestKnobs(t *testing.T) {
 			hits: map[transport.Knob]int{transport.KnobUnreachable: 2},
 		},
 		{
+			rule: "Unsupported: a send that needs a feature the node does not carry is refused before the target sees it, any other send goes through, and the target is told the loopback carries every feature",
+			run: func(t *testing.T, r *rig) {
+				if _, err := r.loop.Send(context.Background(), r.self, ep(9), r.message(t, "m1", "hello"), transport.FeatureModelChoice); err != nil {
+					t.Fatalf("send before the knob: %v", err)
+				}
+				r.knobs.Unsupported(r.self, transport.FeatureModelChoice)
+				_, err := r.loop.Send(context.Background(), r.self, ep(9), r.message(t, "m2", "hello"), transport.FeatureModelChoice)
+				if !errors.Is(err, transport.ErrFeatureUnsupported) || errors.Is(err, transport.ErrUnreachable) {
+					t.Fatalf("send that needs the feature: error %v, want ErrFeatureUnsupported and no unreachable node", err)
+				}
+				if _, err := r.send(r.message(t, "m3", "hello")); err != nil {
+					t.Fatalf("send that needs nothing: %v", err)
+				}
+				calls := r.target.inbound()
+				if len(calls) != 2 || calls[0].env.ID != "m1" || calls[1].env.ID != "m3" {
+					t.Fatalf("the target saw %d envelopes, want m1 and m3 only", len(calls))
+				}
+				for _, c := range calls {
+					if c.features != transport.FeatureModelChoice {
+						t.Errorf("the target was told the features %v of %s, want all of them", c.features, c.env.ID)
+					}
+				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobFeatureUnsupported, Call: transport.CallSend, Node: r.self})
+			},
+			hits: map[transport.Knob]int{transport.KnobFeatureUnsupported: 1},
+		},
+		{
 			rule: "a loopback reaches only its own node: another node is unreachable without any knob",
 			run: func(t *testing.T, r *rig) {
-				if _, err := r.loop.Send(context.Background(), r.other, ep(9), r.message(t, "m1", "hello")); !errors.Is(err, transport.ErrUnreachable) {
+				if _, err := r.loop.Send(context.Background(), r.other, ep(9), r.message(t, "m1", "hello"), 0); !errors.Is(err, transport.ErrUnreachable) {
 					t.Fatalf("send to another node: error %v, want ErrUnreachable", err)
 				}
 				if _, err := r.loop.Pull(context.Background(), r.other, transport.PullRequest{Message: "m1", Recipients: pulled}); !errors.Is(err, transport.ErrUnreachable) {
@@ -430,7 +457,7 @@ func TestNilKnobsMeansNoFaults(t *testing.T) {
 	self := nodeOf(t, 1)
 	l := transport.NewLoopback(self, g, nil)
 	rg := &rig{self: self, target: g}
-	rc, err := l.Send(context.Background(), self, ep(9), rg.message(t, "m1", "hello"))
+	rc, err := l.Send(context.Background(), self, ep(9), rg.message(t, "m1", "hello"), 0)
 	if err != nil || !sameIDs(reportIDs(t, rc.Reports), []string{"m1"}) {
 		t.Fatalf("send: reports %v, err %v", rc.Reports, err)
 	}

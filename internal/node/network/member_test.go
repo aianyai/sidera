@@ -48,7 +48,7 @@ func memberCalls(t testing.TB) []memberCall {
 				return transport.Receipt{Reports: []record.Record{rep}}, nil
 			}
 		}, call: func(ctx context.Context, a, b *peerNode) error {
-			receipt, err := a.net.Send(ctx, b.id, sender, []byte("an envelope"))
+			receipt, err := a.net.Send(ctx, b.id, sender, []byte("an envelope"), 0)
 			if err == nil && len(receipt.Reports) != 1 {
 				err = fmt.Errorf("receipt %+v", receipt)
 			}
@@ -203,6 +203,67 @@ func TestCurrentClientFallsBackToTheLegacyProtocol(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withoutProtocol removes the handlers of the identifiers, as a node that does
+// not speak them has none.
+func withoutProtocol(b *peerNode, protos ...string) {
+	for _, proto := range protos {
+		b.net.lib.host.RemoveStreamHandler(protocol.ID(proto))
+	}
+}
+
+// featuresSeen are the features of the send requests the node's engine took, in
+// order.
+func (p *peerNode) featuresSeen() []transport.Features {
+	p.node.mu.Lock()
+	defer p.node.mu.Unlock()
+	return append([]transport.Features(nil), p.node.features...)
+}
+
+// TestEnvelopeThatNeedsAFeatureIsOfferedTheCurrentSendIdentifierAlone sends an
+// envelope that chooses a model to a node that serves every send identifier and to
+// one that serves only the two older ones. The first is told what the stream
+// carries. The second is refused at the negotiation, before any request is
+// written: the error says so and is not an unreachable node, the connection is
+// kept, and an envelope that needs nothing goes to the same node under 2.0.0 as
+// before, with nothing carried.
+func TestEnvelopeThatNeedsAFeatureIsOfferedTheCurrentSendIdentifierAlone(t *testing.T) {
+	send := memberCalls(t)[0]
+	sender := endpointOf(1)
+
+	t.Run("a node that serves the current identifier", func(t *testing.T) {
+		a, b := pairOver(t, false)
+		send.serve(b, func() {}, t)
+		if _, err := a.net.Send(ctx5(t), b.id, sender, []byte("an envelope"), transport.FeatureModelChoice); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.featuresSeen(); !reflect.DeepEqual(got, []transport.Features{transport.FeatureModelChoice}) {
+			t.Errorf("the node took the request with the features %v, want the model choice", got)
+		}
+	})
+
+	t.Run("a node that serves only the older identifiers", func(t *testing.T) {
+		a, b := pairOver(t, false)
+		send.serve(b, func() {}, t)
+		withoutProtocol(b, nodeproto.ProtocolSend)
+		_, err := a.net.Send(ctx5(t), b.id, sender, []byte("an envelope"), transport.FeatureModelChoice)
+		if !errors.Is(err, transport.ErrFeatureUnsupported) || errors.Is(err, transport.ErrUnreachable) || errors.Is(err, transport.ErrTimeout) {
+			t.Fatalf("err = %v, want the feature to be unsupported, and no unreachable node", err)
+		}
+		if got := b.featuresSeen(); len(got) != 0 {
+			t.Errorf("the node took %d requests of an envelope that cannot be carried to it", len(got))
+		}
+		if a.net.memberConn(b.id) == nil {
+			t.Error("the connection was dropped")
+		}
+		if err := send.call(ctx5(t), a, b); err != nil {
+			t.Fatalf("an envelope that needs nothing: %v", err)
+		}
+		if got := b.featuresSeen(); !reflect.DeepEqual(got, []transport.Features{0}) {
+			t.Errorf("the node took the request with the features %v, want none under 2.0.0", got)
+		}
+	})
 }
 
 // TestLegacyClientIsServed calls a node that serves both forms in the form of a
