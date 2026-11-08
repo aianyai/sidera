@@ -10,38 +10,39 @@ protocol has a version of its own.
 
 ### Added
 
-- **Agents and the command line can choose the model and effort of a new session.** `sidera control
-  <address> session.create --preset <preset> --model <name> --effort <level>` and the `control` tool of
-  the MCP server (and the Agent interface behind them) take an optional `model` and `effort`
-  (`low`, `medium`, `high`, `xhigh` or `max`); left out, the session gets its preset's own. The
-  preset decides what is allowed: `sidera status <message-id>` of an `endpoint.status` signal now lists, for
-  each preset, its default model and effort and the models that may be chosen with their efforts. A
-  choice the preset does not allow is answered with the creation failure `model_choice_not_allowed`, and a
-  target node of an earlier release ends the delivery as rejected for `node_unsupported`; both are
-  read in `status`, because the call itself only checks that the model name and the effort are well
-  formed. A refused value now names `preset`, `model` or `effort` as the field instead of `signal`.
+- **Agents and people can choose the model and effort of a new session.** `sidera control <address>
+  session.create --preset <preset> --model <name> --effort <level>`, the `control` tool of the MCP
+  server and the console's `sidera-adapter-console new --model <name> --effort <level>` take an
+  optional `model` and `effort` (`low`, `medium`, `high`, `xhigh` or `max`); left out, the session
+  gets its preset's own. The owner decides what may be chosen: a Claude Code or Codex preset can set
+  `allowed_models`, a map from a model to the efforts that may be chosen with it (Codex takes the
+  first four efforts), and without it nobody can choose. `sidera status <message-id>` of an
+  `endpoint.status` signal lists, for each preset, its default model and effort and the models that
+  may be chosen. A choice the preset does not allow ends the creation as `model_choice_not_allowed`,
+  and a target node of an earlier release ends the delivery as rejected for `node_unsupported`; both
+  are read in `status`, because the call itself only checks that the model name and the effort are
+  well formed. The choice is checked when the session is created and stays with the session across
+  resumes and restarts, whatever the preset says later. List only the efforts a model really
+  supports: Claude Code quietly uses the highest level the model supports at or below an effort it
+  does not, and how Codex reacts is not known. A refused value now names `preset`, `model` or
+  `effort` as the field instead of `signal`.
+- **A Hermes card can choose the model and effort of a new session.** A `new_session` card may carry
+  `model` and `effort`, which the Sidera Skill tells the agent to give only when a task needs a
+  stronger or cheaper model than the preset's own; the target node's preset decides which choices it
+  allows. The Skill that Claude Code and Codex sessions read says the same of `control`. `sidera
+  update` and `sidera adapter setup` refresh the Skill.
 - **The adapter protocol can carry the choice of a session's model and effort.** For adapter authors:
   an adapter that declares the runtime capability `model_choice` is sent the optional `model` and
-  `effort` of a `session.create`, answers `model_choice_not_allowed` when the preset does not allow them,
-  and reports each preset's default model and effort and its allowed models in the probe result. The
-  control reply to a creation has a new failure reason, `model_choice_not_allowed`, and a message can now
-  be rejected as `node_unsupported` when the target node's version cannot take what it carries. Protocol
-  version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
-  The Go SDK's `adapterkit/modelchoice` parses a preset's `allowed_models` map and applies the rules that decide
-  which model and effort a requester may choose, so adapters apply them alike.
-  Between nodes the choice travels under a new send protocol, `/sidera/send/3.0.0`, which is also the one
-  that lists each preset's choice in the answer to a status request. A creation that chooses a model or an
-  effort is offered to that protocol alone, and a node of an earlier release, which does not serve it, ends
-  the delivery at once as rejected for `node_unsupported` instead of the message being retried until it
-  expires; everything else is sent to such a node as before.
-- **The Claude adapter lets a requester choose the model and effort of a new session.** A preset
-  can set `allowed_models`, a map from a model to the efforts that may be chosen with it; without it
-  a session's creator cannot choose. A choice the list does not allow is refused when the session is
-  created, and the chosen model and effort stay with the session across resumes and restarts, whatever
-  the preset says later. List only the efforts a model really supports: Claude Code quietly uses the
-  highest level the model supports at or below an effort it does not. A preset whose `model` is not a
-  valid model name (it starts with anything but a letter or digit, or holds a space) is now reported as
-  unusable instead of being passed to Claude Code.
+  `effort` of a `session.create`, answers `model_choice_not_allowed` when the preset does not allow
+  them, and reports each preset's default model and effort and its allowed models in the probe
+  result; an adapter that does not declare it is never sent a choice. A message can now be rejected
+  as `node_unsupported` when the target node's version cannot take what it carries. Protocol
+  version 1 is extended in place. The Go SDK's `adapterkit/modelchoice` parses a preset's
+  `allowed_models` and applies the rules that decide which model and effort a requester may choose,
+  so adapters apply them alike. Between nodes the choice travels under a new send protocol,
+  `/sidera/send/3.0.0`; a creation that chooses is offered to that protocol alone, so a node of an
+  earlier release ends the delivery at once instead of the message being retried until it expires,
+  and everything else is sent to such a node as before.
 - **A manifest can declare a `map` configuration field.** For adapter authors: a field of type `map`
   holds an object of at most 64 entries, each keyed by 1 to 128 visible ASCII characters, with the
   `value` of the field naming the one plain type (`string`, `integer`, `boolean`, `enum`, `directory`
@@ -49,18 +50,6 @@ protocol has a version of its own.
   checks a map like any other value when it is written, stores it with its entries sorted by key, and
   sends it in `adapter.start` only to an adapter whose manifest declares the field. Protocol version 1
   is extended in place; an older daemon refuses a package that declares a `map` field.
-- **A Codex preset can let the requester of a new session choose its model and effort.** The new
-  preset key `allowed_models` lists the models a requester may choose, each with the efforts allowed
-  with it (`low`, `medium`, `high`, `xhigh`); without it nobody can choose. The choice stays with
-  the session across restarts and resumes, and a session whose requester chose nothing follows its
-  preset as before. List only efforts the model supports: how Codex reacts to one it does not support
-  is not known. A preset's `model` must now be a valid model name (letters, digits and `._:/@+[]-`).
-- **`sidera-adapter-console new` can choose the model and effort of the new session.** `--model <name>` and
-  `--effort <low|medium|high|xhigh|max>` are sent with the creation and apply within what the preset allows.
-- **A Hermes card can choose the model and effort of a new session.** A `new_session` card may carry `model`
-  and `effort`, which the Sidera Skill tells the agent to give only when a task needs a stronger or cheaper
-  model than the preset's own. The target node's preset decides which choices it allows. `sidera update` and
-  `sidera adapter setup` refresh the Skill.
 
 ### Changed
 
@@ -72,6 +61,9 @@ protocol has a version of its own.
   with a required setting, such as Hermes, must be enabled with `--config`. A preset section for
   an adapter that is not installed is refused: install the adapter first. Values already stored
   are not checked again.
+- **A Claude Code or Codex preset's `model` must be a valid model name.** It starts with a letter or
+  a digit and holds only letters, digits and `._:/@+[]-`; a preset with another is reported as
+  unusable instead of its name being passed to the agent.
 
 ## [0.17.0] - 2026-11-07
 
