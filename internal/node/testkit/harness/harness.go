@@ -93,6 +93,11 @@ type Options struct {
 	// the JSON object `presets add` takes, added through the configuration's own
 	// change before the first start.
 	Presets map[string]string
+	// StoredPresets are presets written into the presets file as it would hold them,
+	// without the checks of `presets add`: how a node looks whose presets were added
+	// before a rule that `presets add` applies now. Each is the JSON object
+	// `presets add` takes.
+	StoredPresets map[string]string
 	// Adapter, when set, gives the node an adapter host that starts a fake adapter
 	// for the instance Instance (and for each of Adapter.ExtraInstances) in the test
 	// process, on the fixture's test clock, and admits the instances through it as the
@@ -369,6 +374,29 @@ func (h *H) prepare(base fsx.FS) {
 			}); err != nil {
 				h.t.Fatalf("harness: the preset %s: %v", name, err)
 			}
+		}
+	}
+	if len(h.opts.StoredPresets) > 0 {
+		m := MountOn(h.t, h.tab, base, nil, nil)
+		cfg, err := config.Load(m.Writer)
+		if err != nil {
+			h.t.Fatalf("harness: Load: %v", err)
+		}
+		presets := cfg.Presets()
+		items := make(map[string]config.Preset, len(presets.Items)+len(h.opts.StoredPresets))
+		maps.Copy(items, presets.Items)
+		for name, doc := range h.opts.StoredPresets {
+			if items[name], err = config.DecodePreset([]byte(doc)); err != nil {
+				h.t.Fatalf("harness: the stored preset %s: %v", name, err)
+			}
+		}
+		presets.Items = items
+		data, err := presets.Encode()
+		if err != nil {
+			h.t.Fatalf("harness: the presets: %v", err)
+		}
+		if err := fsx.Replace(base, setupTag, config.PresetsPath, data, fsx.ModePrivate); err != nil {
+			h.t.Fatalf("harness: writing the presets: %v", err)
 		}
 	}
 	if h.opts.NodeSettings != "" {

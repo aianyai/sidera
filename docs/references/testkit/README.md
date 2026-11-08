@@ -618,6 +618,9 @@ coverage dimensions.
   saving it must succeed before the engine opens. False leaves the restored state
   alone. An owner clear therefore survives ordinary restart and periodic saving,
   while a forced fixture pauses again on its next start.
+  `Options.StoredPresets` writes presets into the presets file without the checks
+  of `preset add`, for a test of how the node behaves with presets that `preset add`
+  would not take now, as those of a node that stored them before a rule existed.
 - **Session acquisition is fallible.** `H.Session(endpoint)` returns an Agent and
   an error. Invalid identifiers, absent open sessions, record reads and ledger
   writer failures return no Agent; wrapped read errors preserve their cause. A
