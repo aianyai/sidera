@@ -14,11 +14,19 @@ import (
 // (anonymous pipes on Windows have none), so each write is guarded by a timer
 // that closes the transport when it fires; closing makes the blocked Write
 // return.
+//
+// Once the connection has begun to end, only the final line is written: a
+// handler that returns because its context ended queues its answer in the
+// moment before the transport is closed, and that line, like every other not
+// yet written, is discarded.
 func (p *Peer) writeLoop() {
 	defer p.wg.Done()
 	for {
 		select {
 		case it := <-p.out:
+			if !it.last && p.isClosed() {
+				continue
+			}
 			if err := p.writeLine(it.line); err != nil {
 				p.terminate(fmt.Errorf("peer: write: %w", err), nil)
 				p.closeTransport()

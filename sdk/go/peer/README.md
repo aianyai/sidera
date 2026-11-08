@@ -151,7 +151,10 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   invalid body fails the call with `ErrInvalidResponse`.
 - **Close.** `Close` is idempotent. Pending calls end with `ErrClosed`, handler
   contexts are cancelled, lines not yet written are discarded and the transport
-  is closed. `Err()` reports the cause: `ErrClosed` (local `Close`),
+  is closed. A line the writer reaches after the connection began to end, such as the
+  answer of a handler that returned because its context was cancelled, is never
+  written; the one exception is the line-too-long reply, which is written before
+  the close. `Err()` reports the cause: `ErrClosed` (local `Close`),
   `ErrRemoteClosed`, `ErrLineTooLong`, `ErrNotificationOverflow`,
   `ErrWriteTimeout`, or a wrapped read or write error.
 - **Start and Close may race.** `Start` and `Close` are safe to call at the same

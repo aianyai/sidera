@@ -115,3 +115,97 @@ func TestRequestIDIsReleasedBeforeItsReplyIsQueued(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// recordingWriter records every line written to it. The first Write waits for
+// releaseWrite; Close waits for releaseClose.
+type recordingWriter struct {
+	entered      chan struct{}
+	releaseWrite chan struct{}
+	releaseClose chan struct{}
+
+	mu    sync.Mutex
+	lines []string
+	first sync.Once
+}
+
+func (w *recordingWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	w.lines = append(w.lines, string(b))
+	w.mu.Unlock()
+	w.first.Do(func() {
+		close(w.entered)
+		<-w.releaseWrite
+	})
+	return len(b), nil
+}
+
+func (w *recordingWriter) Close() error { <-w.releaseClose; return nil }
+
+func (w *recordingWriter) written() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.lines...)
+}
+
+// untilTrue polls cond, which reads state the test cannot be told about, until
+// it holds.
+func untilTrue(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A handler that sees its context end because the connection is ending may
+// return an answer in the moment before the transport is closed; that answer
+// must not be written, because lines not yet written are discarded once the
+// connection ends. The test holds the transport open (Close blocks) and the
+// writer busy with an earlier line, so the late answer is queued behind it and
+// the writer reaches it while the connection is ending but not yet closed.
+func TestAnswerQueuedWhileTheConnectionEndsIsNotWritten(t *testing.T) {
+	in, inW := io.Pipe()
+	out := &recordingWriter{
+		entered:      make(chan struct{}),
+		releaseWrite: make(chan struct{}),
+		releaseClose: make(chan struct{}),
+	}
+	p, err := New(in, out, Config{Params: Params{WriteTimeout: time.Minute}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	returned := make(chan struct{})
+	p.Handle("quick", func(context.Context, json.RawMessage) (any, error) { return struct{}{}, nil })
+	p.Handle("slow", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done()
+		defer close(returned)
+		return map[string]any{"late": true}, nil
+	})
+	p.Start()
+	defer inW.Close()
+
+	// The writer takes the answer to "quick" and stays in its Write.
+	fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":1,"method":"quick"}`)
+	<-out.entered
+	fmt.Fprintln(inW, `{"jsonrpc":"2.0","id":2,"method":"slow"}`)
+	<-started
+
+	closed := make(chan struct{})
+	go func() { p.Close(); close(closed) }()
+	<-returned
+	untilTrue(t, "the late answer to be queued", func() bool { return len(p.out) == 1 })
+
+	close(out.releaseWrite)
+	untilTrue(t, "the writer to take the late answer", func() bool { return len(p.out) == 0 })
+	close(out.releaseClose)
+	<-closed
+
+	if got := out.written(); len(got) != 1 {
+		t.Fatalf("lines written = %q, want only the answer to the request that finished before the connection ended", got)
+	}
+}
