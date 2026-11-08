@@ -430,11 +430,14 @@ file, and for Codex in the `codex` object:
 - **A preset with a mistake is not usable.** An empty object, a model with an empty list of
   efforts, an effort listed twice or that the adapter does not take, more than 16 models and
   a model name that is not valid (letters, digits and `._:/@+[]-`, starting with a letter
-  or a digit, at most 128 characters) make the preset `not available` in `endpoint.status`, and creating a session from
-  it fails with `preset_unavailable`. An empty list does not mean "every effort": list what
-  you allow. `preset add` itself only checks that the value is an object of lists of
-  strings; the adapter judges the rest when it reads the preset. A preset cannot be
-  edited: remove it and add it again.
+  or a digit, at most 128 characters) make the preset unusable. `endpoint.status` does not
+  say so: the preset still shows as `available`, which reflects only whether the runtime
+  can serve, and its defaults and allowed-models lines are simply missing. Creating a
+  session from it fails with `preset_unavailable`. If a preset shows no
+  allowed models you expected, check its `allowed_models`. An empty list does not mean
+  "every effort": list what you allow. `preset add` itself only checks that the value is an
+  object of lists of strings; the adapter judges the rest when it reads the preset. A preset
+  cannot be edited: remove it and add it again.
 - **List only the efforts a model really supports.** Sidera cannot know that. Claude Code
   does not refuse an effort a model lacks: it quietly runs the highest level the model
   supports below it. How Codex reacts to one is not known.

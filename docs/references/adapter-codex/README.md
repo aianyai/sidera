@@ -575,7 +575,6 @@ the list of efforts allowed with it. `codexcfg.ParsePreset` reads it with the Go
 `modelchoice.ParseAllowed`, and each of its refusals (an empty map, a model with no effort, a
 model name or an effort that is not valid, an effort Codex does not run, an effort listed
 twice) is a problem of the preset, which makes the preset unusable like any other.
-A preset's own `model` must also be a valid model name, since the probe reports it.
 
 A preset's own `model` and `effort` are checked by the SDK's `modelchoice.ParseDefaults`: the
 model must be a valid model name, since the probe reports it, and the effort one of the
