@@ -461,7 +461,7 @@ directory and that you did not end is a leftover that step 6 and the section abo
 
 ```sh
 sidera daemon restart
-sidera daemon restart --expect-version 0.17.0   # after replacing the program
+sidera daemon restart --expect-version 0.18.0   # after replacing the program
 ```
 
 The daemon shuts down in its orderly way and starts the program again as it was started:

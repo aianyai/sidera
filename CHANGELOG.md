@@ -8,6 +8,17 @@ protocol has a version of its own.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-08
+
+Sessions can be started with a model and an effort of the requester's choosing in 0.18, within
+what the owner of the target node allows in the preset, and configuration values are now checked
+against the adapter's manifest when they are written. Restart the Claude Code and Codex sessions
+that were running when you upgrade: they keep the earlier `sidera mcp`, which cannot choose a
+model and cannot read the answer to an `endpoint.status` signal that lists a preset's choice. A
+node of an earlier release is told nothing new: a creation that chooses a model or an effort is
+refused for it at once. Presets are limited to 20 per node, and the checks on what an owner writes
+are under Changed below.
+
 ### Added
 
 - **Agents and people can choose the model and effort of a new session.** `sidera control <address>
@@ -79,6 +90,9 @@ protocol has a version of its own.
   node that had asked kept asking until its request ran out. The node now refuses to make such an
   answer and logs an error naming the signal and the size, so the owner of that node sees why; the
   asking node still gets no answer until the presets are fewer.
+- **The Go SDK's `peer` no longer writes a handler's answer after the connection began to end.** The
+  answer of a handler that returned because its context was cancelled could still be written to a
+  connection that was closing; lines not yet written are discarded once it ends, as documented.
 
 ## [0.17.0] - 2026-11-07
 
@@ -1318,7 +1332,8 @@ and Windows (amd64).
   foreground.
 - The Claude Code adapter on Linux and Windows.
 
-[Unreleased]: https://github.com/aianyai/sidera/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/aianyai/sidera/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/aianyai/sidera/releases/tag/v0.18.0
 [0.17.0]: https://github.com/aianyai/sidera/releases/tag/v0.17.0
 [0.16.0]: https://github.com/aianyai/sidera/releases/tag/v0.16.0
 [0.15.0]: https://github.com/aianyai/sidera/releases/tag/v0.15.0
