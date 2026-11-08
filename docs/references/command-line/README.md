@@ -38,7 +38,7 @@ arguments, purpose and one example (see Help below).
 | `recv [--wait <seconds>] [--msg <id> --part <k>] [--ack <lease>]` | Receive a page with front end `cli`; `next.msg` and `next.part` in a page become `--msg` and `--part`. |
 | `ack <lease> [<message-id>:<part> ...]` | Confirm the visible parts named, or the whole page when no parts are listed; one row per part: `OUTCOME`, `PART`, `MESSAGE`; an outcome that is not an acknowledgement (`refused_no_handout`, `refused_lease`, `too_late`) is yellow on a colored stream. |
 | `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply (see [Human output](#human-output) for how a reply reads). Node status carries one field the daemon does not send: `home`, the data directory this command resolved and reached, so the owner can confirm which node a command talks to. |
-| `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
+| `control <addr> <signal> [--preset <name>] [--model <name>] [--effort <level>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. `--model` and `--effort` (`low`, `medium`, `high`, `xhigh` or `max`) choose the model and the reasoning effort of the new session, within what its preset allows; they are defined for `control` only, and a flag that is not given is not sent, so the preset's own is used. Whether the preset allows the choice is not asked at the call: `status` of the message shows the refusal (`model_choice_not_allowed`, or `node_unsupported` for a node of an earlier release), and `status` of an `endpoint.status` signal shows each preset's defaults and allowed models. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`; the human form says `The node is reachable.` and gives the `Preset` and `Front end`. |
 | `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
 | `setup …` | Not a command. Any form of it (`setup`, `setup controller`, with any flags) is a usage error, exit 2, whose message says it is not a command and that `sidera adapter setup <instance>` sets up the client of an adapter instance (Claude Code, Codex, Hermes). It reads no argument and needs no node. |
@@ -669,7 +669,10 @@ an outcome is unknown.
   stream. Text under a marker line is indented by two columns on every stream.
 - What describes one thing is a block of labelled lines: capitalized labels, left-aligned, two
   spaces, then the value (`me`, `declare`, the answer of a send, a control reply). A value that
-  has several lines (the front ends, the sender list, the presets) continues under the first. A
+  has several lines (the front ends, the sender list, the presets) continues under the first; a
+  preset of an `endpoint.status` reply is `available` or `not available`, and when the preset reports
+  them, a line `defaults: model <name>, effort <level>` and a line `allowed models: <name> (<efforts>),
+  ...` follow under it. A
   label is left out when it has no value. A boolean is written as a word: `accepting` or
   `paused`, `listed` or `hidden`, `connected` or `not connected`, `available` or `not
   available`.

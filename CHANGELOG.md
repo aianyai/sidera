@@ -10,6 +10,16 @@ protocol has a version of its own.
 
 ### Added
 
+- **Agents and the command line can choose the model and effort of a new session.** `sidera control
+  <address> session.create --preset <preset> --model <name> --effort <level>` and the `control` tool of
+  the MCP server (and the Agent interface behind them) take an optional `model` and `effort`
+  (`low`, `medium`, `high`, `xhigh` or `max`); left out, the session gets its preset's own. The
+  preset decides what is allowed: `sidera status <message-id>` of an `endpoint.status` signal now lists, for
+  each preset, its default model and effort and the models that may be chosen with their efforts. A
+  choice the preset does not allow is answered with the creation failure `model_choice_not_allowed`, and a
+  target node of an earlier release ends the delivery as rejected for `node_unsupported`; both are
+  read in `status`, because the call itself only checks that the model name and the effort are well
+  formed. A refused value now names `preset`, `model` or `effort` as the field instead of `signal`.
 - **The adapter protocol can carry the choice of a session's model and effort.** For adapter authors:
   an adapter that declares the runtime capability `model_choice` is sent the optional `model` and
   `effort` of a `session.create`, answers `model_choice_not_allowed` when the preset does not allow them,

@@ -244,6 +244,47 @@ func TestControlReturnsTheAcceptedSignalAndAllowsAnOmittedInitialMessage(t *test
 	}
 }
 
+// A session creation may choose a model and an effort. Only their syntax is judged
+// when the call is made; whether the target allows them is learned from status.
+func TestControlTakesTheModelAndEffortOfASessionCreationAndJudgesTheirSyntax(t *testing.T) {
+	h, token, _ := sessionNode(t)
+	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
+	s.EnableMethods()
+	create := func(members string) string {
+		return `{"to":"` + h.RuntimeAddr() + `","signal":"session.create","preset":"default"` + members + `}`
+	}
+	for _, tc := range []struct {
+		name, body, field string
+	}{
+		{"a model and an effort", create(`,"model":"claude-haiku-4-5","effort":"low"`), ""},
+		{"a model alone", create(`,"model":"gpt-5.1-codex"`), ""},
+		{"an effort alone", create(`,"effort":"max"`), ""},
+		{"a model with a character no model name has", create(`,"model":"two words"`), "model"},
+		{"a model that is too long", create(`,"model":"` + strings.Repeat("m", adapterproto.MaxModelNameLen+1) + `"`), "model"},
+		{"an effort that is not one", create(`,"effort":"extreme"`), "effort"},
+		{"an effort of the wrong case", create(`,"effort":"High"`), "effort"},
+		{"a preset name that is not one", `{"to":"` + h.RuntimeAddr() + `","signal":"session.create","preset":"Not A Preset"}`, "preset"},
+		{"a model on a signal that has no parameters", `{"to":"` + h.RuntimeAddr() + `","signal":"endpoint.status","model":"claude-haiku-4-5"}`, "signal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := request(s, token, "control", tc.body)
+			if tc.field == "" {
+				if w.Code != 200 {
+					t.Fatalf("HTTP %d, %s; want 200", w.Code, w.Body)
+				}
+				return
+			}
+			var got apiwire.Body
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 400 || got.Error.Category != apiwire.CategoryInvalidArgument || got.Error.Code != apiwire.CodeMalformedRequest || got.Error.Details["field"] != tc.field {
+				t.Fatalf("HTTP %d, %s; want invalid_argument/malformed_request with field %q", w.Code, w.Body, tc.field)
+			}
+		})
+	}
+}
+
 func TestStatusCarriesTheEventualControlReply(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})

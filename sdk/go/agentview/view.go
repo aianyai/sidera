@@ -233,7 +233,7 @@ func (v View) controlReplyFields(now time.Time, reply adapterproto.ControlReply)
 		if p.Available {
 			availability = "available"
 		}
-		presets[i] = termout.Field{Label: p.Name, Value: availability}
+		presets[i] = termout.Field{Label: p.Name, Value: strings.Join(append([]string{availability}, presetChoice(p)...), "\n")}
 	}
 	return []termout.Field{
 		{Label: "Activity", Value: st.Activity.String()},
@@ -242,6 +242,35 @@ func (v View) controlReplyFields(now time.Time, reply adapterproto.ControlReply)
 		{Label: "As of", Value: v.Out.Time(time.Unix(st.AsOf, 0), now)},
 		{Label: "Presets", Value: strings.TrimSuffix(v.Out.List(presets, nil, 0), "\n")},
 	}
+}
+
+// presetChoice are the lines that say what a requester may choose on a preset: the
+// model and the effort a session gets when it chooses none, and the models it may
+// choose, each with its efforts. A preset that reports none of it has no lines.
+func presetChoice(p adapterproto.PresetAvailability) []string {
+	var lines []string
+	var defaults []string
+	if p.Model != "" {
+		defaults = append(defaults, "model "+p.Model)
+	}
+	if p.Effort != "" {
+		defaults = append(defaults, "effort "+string(p.Effort))
+	}
+	if len(defaults) > 0 {
+		lines = append(lines, "defaults: "+strings.Join(defaults, ", "))
+	}
+	if len(p.AllowedModels) > 0 {
+		allowed := make([]string, len(p.AllowedModels))
+		for i, a := range p.AllowedModels {
+			efforts := make([]string, len(a.Efforts))
+			for j, e := range a.Efforts {
+				efforts[j] = string(e)
+			}
+			allowed[i] = a.Model + " (" + strings.Join(efforts, ", ") + ")"
+		}
+		lines = append(lines, "allowed models: "+strings.Join(allowed, ", "))
+	}
+	return lines
 }
 
 // reasonText is the name of a reason, or nothing when the reply has none.

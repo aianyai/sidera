@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/aianyai/sidera/internal/envelope"
@@ -87,7 +88,7 @@ func controlKind(r ControlRequest) (envelope.Kind, error) {
 		ctl.Params = &adapterproto.ControlParams{Preset: r.Preset, Model: r.Model, Effort: r.Effort}
 	}
 	if err := ctl.Validate(); err != nil {
-		return envelope.KindInvalid, invalidArgument("signal", err)
+		return envelope.KindInvalid, invalidArgument(controlField(err), err)
 	}
 	kind, ok := envelope.KindOfSignal(r.Signal)
 	if !ok {
@@ -100,6 +101,19 @@ func controlKind(r ControlRequest) (envelope.Kind, error) {
 		return envelope.KindInvalid, invalidArgument("content_type", errors.New("a content type belongs to a message that has a body"))
 	}
 	return kind, nil
+}
+
+// controlField is the field a refusal of the control rule names: the parameter that
+// broke it (preset, model or effort), or the signal for every other breach, the
+// signal's own and a parameter set on a signal that takes none.
+func controlField(err error) string {
+	var ve *adapterproto.ValidationError
+	if errors.As(err, &ve) {
+		if param, ok := strings.CutPrefix(ve.Field, "params."); ok {
+			return param
+		}
+	}
+	return "signal"
 }
 
 // contentTypeOf is the content type of the initial message of a request: the one it

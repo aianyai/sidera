@@ -58,8 +58,12 @@ own interface has other types, as the Agent interface of `sidera` has, maps them
   (`rejected (endpoint_declined)`), control outcomes, reasons, conditions and actions (`message.send`,
   `session.create`) appear as the protocol names them, because agents look them up and pass some
   back to a command. Booleans are words.
+- **A preset's choices are lines under its availability.** A status reply shows each preset as
+  `available` or `not available`, then, when the preset reports them, `defaults: model <name>,
+  effort <level>` and `allowed models: <name> (<efforts>), ...`, one line each, in the order the
+  reply carries them. A preset that reports none shows only its availability.
 - **Nothing here is sanitized.** Every value printed is an identifier, an enumeration or a name
-  that is checked where it enters the node. A result that one day carries text nobody validates
+  that is checked where it enters the node (a model name by `adapterproto.ValidateModelName`, like a preset name by its own rule). A result that one day carries text nobody validates
   goes through `termout.SanitizeLine` where it is printed.
 - **Identifiers are whole**, the identifier is the last column of a table, and an empty cell is `-`.
 

@@ -191,6 +191,16 @@ name, platform, system and Sidera version when known; the adapter that serves an
 and, when known, its runtime), because the model reads them to choose a node and a runtime; the result shapes are
 those of the [Agent interface](../agent-interface/README.md).
 
+The `control` tool takes `to`, `signal`, `preset`, `model`, `effort`, `body` and
+`idempotency_key`. `effort` is an enum of the efforts of the adapter protocol
+(`low`, `medium`, `high`, `xhigh`, `max`); a test compares the advertised list with
+`adapterproto.Efforts()`, so a level added to the protocol is not forgotten here.
+`model` is a string, because which models exist belongs to the target's runtime and
+its preset, not to this catalogue: its description sends the model to the
+`endpoint.status` of the runtime, which lists each preset's defaults and allowed
+models. The tool does not judge a choice itself; the Agent interface judges the
+syntax and the target the rest.
+
 The catalogue's JSON schemas use common object, array, scalar, required, enum and
 numeric-bound keywords without `$ref` or `$schema`. They are both the advertised
 input description and the validator's source of truth. Tool arguments are a schema

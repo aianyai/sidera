@@ -76,11 +76,15 @@ type SendRequest struct {
 }
 
 // ControlRequest sends one control signal. A creation can omit its initial
-// message altogether; a present Body must be non-empty.
+// message altogether; a present Body must be non-empty. A creation may choose the
+// Model and the Effort of its session; the syntax of both is judged here, and
+// whether the preset of the target allows them is learned from status.
 type ControlRequest struct {
 	To             string                     `json:"to"`
 	Signal         adapterproto.ControlSignal `json:"signal"`
 	Preset         string                     `json:"preset,omitempty"`
+	Model          string                     `json:"model,omitempty"`
+	Effort         adapterproto.Effort        `json:"effort,omitempty"`
 	Body           string                     `json:"body,omitempty"`
 	ContentType    string                     `json:"content_type,omitempty"`
 	AcceptBeforeS  int64                      `json:"accept_before_s,omitempty"`
@@ -387,7 +391,7 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 			return nil, err
 		}
 		r, err := s.svc.Control(ctx, caller, engine.ControlRequest{
-			To: to, Signal: in.Signal, Preset: in.Preset,
+			To: to, Signal: in.Signal, Preset: in.Preset, Model: in.Model, Effort: in.Effort,
 			Body: []byte(in.Body), ContentType: in.ContentType,
 			AcceptBefore: accept, IdempotencyKey: in.IdempotencyKey,
 		})

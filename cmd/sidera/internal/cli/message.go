@@ -102,6 +102,8 @@ func (c *command) messageRequest(args []string) (agentRequest, error) {
 	case "control":
 		in["to"], in["signal"] = p[0], p[1]
 		addPresent(f, in, "preset", "preset", m.preset)
+		addPresent(f, in, "model", "model", m.model)
+		addPresent(f, in, "effort", "effort", m.effort)
 	}
 	return agentRequest{method: args[0], params: in, show: c.showSent(args[0])}, nil
 }
@@ -131,6 +133,7 @@ func (c *command) showSent(command string) func(any) error {
 type messageFlags struct {
 	body                             bodyFlags
 	content, key, to, thread, preset string
+	model, effort                    string
 	accept                           int64
 }
 
@@ -149,5 +152,7 @@ func (m *messageFlags) add(f *flag.FlagSet, name string) {
 	}
 	if name == "control" {
 		f.StringVar(&m.preset, "preset", "", "session preset")
+		f.StringVar(&m.model, "model", "", "the model of the new session, as the target's runtime names it; the preset must allow it")
+		f.StringVar(&m.effort, "effort", "", "the reasoning effort of the new session: low, medium, high, xhigh or max; the preset must allow it")
 	}
 }

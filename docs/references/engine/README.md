@@ -1362,6 +1362,8 @@ initial message (an empty body is none), `session.close`, `session.interrupt` an
 `endpoint.status`. A message on any other signal, a content type without a message, a
 creation without a preset and a signal with a preset that is not a creation are refused for
 the field (the rule between a signal and its parameters is `adapterproto.Control.Validate`'s).
+The field a refusal names is the parameter that broke the rule (`preset`, `model` or `effort`), and
+`signal` for every other breach, so a requester is told which value to correct.
 A creation may also name the `Model` and the `Effort` its session is to run with, checked by the same
 rule (a model name and an effort of the common scale) and refused for every other signal. They are
 kept in the source record and sent in the envelope, and an adapter's `endpoint.send` control

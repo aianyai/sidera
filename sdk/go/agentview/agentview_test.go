@@ -175,6 +175,16 @@ func TestControlReplyShowsEveryField(t *testing.T) {
 			Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionRuntimeAuth},
 			Presets:    []adapterproto.PresetAvailability{{Name: "default", Available: true}, {Name: "slow", Available: false}},
 		}}, []string{"endpoint.status", "busy", "4", "2026-11-07 01:58 UTC (2 min ago)", "adapter_offline, runtime_auth", "default available", "slow not available"}},
+		{"status with the choices of a preset", adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
+			Activity: adapterproto.ActivityIdle, AsOf: now.Unix(),
+			Presets: []adapterproto.PresetAvailability{
+				{Name: "fast", Available: true, Model: "claude-haiku-4-5", Effort: adapterproto.EffortLow, AllowedModels: []adapterproto.ModelAllowance{
+					{Model: "claude-haiku-4-5", Efforts: []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortMedium}},
+					{Model: "claude-opus-4-5", Efforts: []adapterproto.Effort{adapterproto.EffortHigh}},
+				}},
+				{Name: "plain", Available: true},
+			},
+		}}, []string{"fast available", "defaults: model claude-haiku-4-5, effort low", "allowed models: claude-haiku-4-5 (low, medium), claude-opus-4-5 (high)", "plain available"}},
 		{"status without presets or conditions", adapterproto.ControlReply{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
 			Activity: adapterproto.ActivityIdle, AsOf: now.Unix(),
 		}}, []string{"idle", "none"}},

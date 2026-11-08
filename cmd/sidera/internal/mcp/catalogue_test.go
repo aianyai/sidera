@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/cmd/sidera/internal/mcp"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -79,6 +80,16 @@ func TestToolCatalogueUsesCommonSchemasAndVersionedResults(t *testing.T) {
 				case "declare", "ack":
 					if !tool.Annotations["idempotentHint"] {
 						t.Fatalf("%s missing idempotent hint", tool.Name)
+					}
+				}
+				if tool.Name == "control" {
+					effort := tool.Schema["properties"].(map[string]any)["effort"].(map[string]any)
+					var advertised []adapterproto.Effort
+					for _, e := range effort["enum"].([]any) {
+						advertised = append(advertised, adapterproto.Effort(e.(string)))
+					}
+					if !reflect.DeepEqual(advertised, adapterproto.Efforts()) {
+						t.Fatalf("control advertises the efforts %v, the protocol's are %v", advertised, adapterproto.Efforts())
 					}
 				}
 				if tool.Name == "send" {

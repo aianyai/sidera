@@ -72,7 +72,7 @@ request durations are integer seconds.
 | `recv` | Required `frontend`; optional receive fields below | The page bytes, including their newline |
 | `ack` | Required `lease`; optional `items` | `{"items":[PartAck...]}` |
 | `status` | `{"message_id":"..."}` | `adapterproto.MessageStatusResult` |
-| `control` | Required `to` string, `signal`; optional control fields below | `{"message_id":"...","to":"...","replayed":false}` |
+| `control` | Required `to` string, `signal`; optional control fields below (`preset`, `model`, `effort`, `body`, ...) | `{"message_id":"...","to":"...","replayed":false}` |
 | `probe` | `{"frontend":"cli"}` or `{"frontend":"mcp"}` | `{"ok":true,"preset":"...","frontend":"cli"}` |
 
 **Identity and declaration.** `me.declaration` has the five snake-case fields
@@ -163,6 +163,22 @@ request automatically. `replayed` says only that the key replayed a request.
 **Control.** `to` is a single address. `signal` is the existing
 `adapterproto.ControlSignal`; the engine calls the protocol's `Control.Validate`
 for its field constraints. `preset` is required exactly for `session.create`.
+A creation may also carry `model` and `effort`, the model and the reasoning effort
+(`low`, `medium`, `high`, `xhigh` or `max`) the new session is to run with, within
+what the preset of the target allows; both are refused on any other signal. Only their
+syntax is judged when the call is made, by the same `Control.Validate`: a model name or
+an effort that breaks it is `400 invalid_argument/malformed_request` with `field` set
+to `model` or `effort` (and to `preset` for a preset name, to `signal` for a signal
+that takes no parameters). The method does not ask whether the target takes the
+choice, because there may be no connection to it when the call is made and the
+protocol the choice needs is negotiated when the message is sent. The answer is read
+afterwards: a target that cannot take it ends the delivery as rejected with
+`node_unsupported`, and a preset that does not allow the choice answers the creation
+with the failure `model_choice_not_allowed`, both in `status`. The `status` of an
+`endpoint.status` signal lists, for each preset, its default `model` and `effort`
+and its `allowed_models` (each model with its efforts), when the preset has them
+and the target reported them over a protocol that carries them. Omitted, the new
+session gets the preset's own model and effort.
 A creation can omit its initial `body` altogether; a present body must be
 non-empty. Only a creation accepts `body` and `content_type`. Other optional
 fields are `idempotency_key` and `accept_before_s`. Acceptance returns the three
