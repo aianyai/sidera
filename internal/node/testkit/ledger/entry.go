@@ -45,6 +45,8 @@ type Attrs struct {
 	LockPath          string  `json:"lock_path,omitempty"`
 	Attempt           string  `json:"attempt,omitempty"`
 	Preset            string  `json:"preset,omitempty"`
+	Model             string  `json:"model,omitempty"`
+	Effort            string  `json:"effort,omitempty"`
 	Endpoint          string  `json:"endpoint,omitempty"`
 	NativeRef         string  `json:"native_ref,omitempty"`
 	RuntimeWriter     string  `json:"runtime_writer,omitempty"`

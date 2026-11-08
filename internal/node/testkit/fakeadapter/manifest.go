@@ -34,6 +34,10 @@ type ManifestOptions struct {
 	ServerRequests bool                    `json:"server_requests,omitempty"`
 	Attach         bool                    `json:"attach,omitempty"`
 
+	// ModelChoice declares the model_choice capability of the runtime: the efforts
+	// it can run. Nil declares none, as an adapter of before the capability does.
+	ModelChoice *adapterproto.ModelChoiceCapability `json:"model_choice,omitempty"`
+
 	// ShutdownIntent declares the shutdown_intent capability. An adapter that
 	// declares it decodes the intent of shutdown strictly; one that does not decodes
 	// shutdown as having no members, as an adapter of before the capability does, so
@@ -138,6 +142,9 @@ func (o ManifestOptions) Capabilities() adapterproto.Capabilities {
 		c.Runtime = &adapterproto.RuntimeCapabilities{
 			Interrupt: o.Interrupt, AckOnBehalf: o.AckOnBehalf, ServerRequests: o.ServerRequests, Attach: o.Attach,
 			Frontends: append([]adapterproto.Frontend(nil), o.Frontends...),
+		}
+		if o.ModelChoice != nil {
+			c.Runtime.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: append([]adapterproto.Effort(nil), o.ModelChoice.Efforts...)}
 		}
 	}
 	if o.Direct {

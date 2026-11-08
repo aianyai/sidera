@@ -605,7 +605,7 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
-	if err := a.log(ledger.KindSessionCreateReceived, ledger.Attrs{Attempt: string(p.Attempt), Preset: p.Preset, Endpoint: string(p.SessionEndpoint)}); err != nil {
+	if err := a.log(ledger.KindSessionCreateReceived, ledger.Attrs{Attempt: string(p.Attempt), Preset: p.Preset, Endpoint: string(p.SessionEndpoint), Model: p.Model, Effort: string(p.Effort)}); err != nil {
 		return nil, err
 	}
 	a.mu.Lock()

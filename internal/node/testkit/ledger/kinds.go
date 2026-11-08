@@ -51,7 +51,7 @@ var kindSpecs = map[string]kindSpec{
 	KindAdapterStarted:          {required: []string{"instance"}},
 	KindAdapterLockAcquired:     {required: []string{"instance", "lock_path"}},
 	KindAdapterLockRefused:      {required: []string{"instance", "lock_path"}},
-	KindSessionCreateReceived:   {required: []string{"attempt", "preset"}, optional: []string{"endpoint"}},
+	KindSessionCreateReceived:   {required: []string{"attempt", "preset"}, optional: []string{"endpoint", "model", "effort"}},
 	KindNativeCreateReturned:    {required: []string{"attempt", "outcome"}, optional: []string{"native_ref", "runtime_writer", "runtime_seq"}},
 	KindPromptDeliverReceived:   {required: []string{"endpoint", "attempt", "text_digest"}},
 	KindPromptForwarded:         {required: []string{"endpoint", "attempt", "text_digest"}},

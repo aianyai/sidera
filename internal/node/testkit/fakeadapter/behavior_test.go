@@ -120,6 +120,30 @@ func TestShutdownIsReadByWhatTheAdapterDeclared(t *testing.T) {
 	}
 }
 
+// The adapter can declare model_choice, and the model and the effort of a
+// session.create it received are on its ledger, for a test of the daemon to read.
+func TestModelChoiceIsDeclaredAndRecorded(t *testing.T) {
+	r := newRig(t, rigOptions{manifest: func(o *fakeadapter.ManifestOptions) {
+		o.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortHigh}}
+	}})
+	caps := r.opts.Capabilities()
+	if caps.Runtime.ModelChoice == nil || len(caps.Runtime.ModelChoice.Efforts) != 2 {
+		t.Fatalf("capabilities = %+v, want model_choice with two efforts", caps.Runtime)
+	}
+	if err := r.opts.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	r.initialize()
+	p := r.createParams(1, "sess-1")
+	p.Model, p.Effort = "sonnet[1m]", adapterproto.EffortHigh
+	var res adapterproto.SessionCreateResult
+	r.mustCall(adapterproto.MethodSessionCreate, p, &res)
+	got := r.ledgerLog().Kind(ledger.KindSessionCreateReceived)
+	if len(got) != 1 || got[0].Attrs.Model != "sonnet[1m]" || got[0].Attrs.Effort != "high" {
+		t.Errorf("session.create.received = %+v, want the model and the effort", got)
+	}
+}
+
 func TestInitializeRefusals(t *testing.T) {
 	good := func() map[string]any {
 		return map[string]any{
