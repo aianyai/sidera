@@ -1362,7 +1362,9 @@ the choice with the session and reports each preset's defaults and allowlist whe
 daemon sends a choice that names another to no adapter. The daemon leaves that member out of
 every page it sends an adapter that did not declare it, because an adapter that decodes a page
 strictly would refuse the whole page, and with it every message queued behind a notice. The Go
-SDK's kit declares it for every adapter that declares direct endpoints.
+SDK's kit declares it for every adapter that declares direct endpoints. The SDK's
+`adapterkit/modelchoice` applies the allowlist and fallback rules of `model_choice`, so that adapters check
+a choice alike.
 
 What an adapter declares is kept apart from what is currently usable. The
 declaration comes from `initialize` and the manifest and is recorded per

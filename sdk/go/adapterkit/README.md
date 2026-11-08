@@ -17,6 +17,7 @@ through `termout`:
 | Package | Holds |
 | ------- | ----- |
 | [`environ`](environ/README.md) | Composes the environment of a child process |
+| [`modelchoice`](modelchoice/README.md) | The allowlist of a preset and the rules that decide which model and effort a requester may choose for a new session |
 | [`process`](process/README.md) | Starting a process detached from the adapter, its identity, listing, interrupting |
 | [`realpath`](realpath/README.md) | The absolute path of an existing path with its symbolic links resolved (and, on Windows, the platform's case and long form) |
 

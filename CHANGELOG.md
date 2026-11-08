@@ -17,6 +17,8 @@ protocol has a version of its own.
   control reply to a creation has a new failure reason, `model_choice_not_allowed`, and a message can now
   be rejected as `node_unsupported` when the target node's version cannot take what it carries. Protocol
   version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
+  The Go SDK's `adapterkit/modelchoice` parses a preset's `allowed_models` map and applies the rules that decide
+  which model and effort a requester may choose, so adapters apply them alike.
 - **A manifest can declare a `map` configuration field.** For adapter authors: a field of type `map`
   holds an object of at most 64 entries, each keyed by 1 to 128 visible ASCII characters, with the
   `value` of the field naming the one plain type (`string`, `integer`, `boolean`, `enum`, `directory`
