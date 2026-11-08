@@ -14,6 +14,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `Record`, `Signature`                             | The envelope `{1: type, 2: payload, 3: signatures}`.                                                       |
 | `Decode(data, maxLen)`, `Record.Encode()`         | Strict decoding with an input-size limit (`DefaultMaxInput` is 64 KiB) and canonical encoding.             |
+| `EncodedLen(typ, payloadLen, signatures)`         | The length `Encode` gives for a record of that type, payload length and number of signatures, without making it: for a caller that must keep a record within what a reader takes. |
 | `Signer`, `NewEd25519Signer`                      | The signing interface callers inject, and an in-memory implementation.                                     |
 | `Sign`, `CoSign(d, r, signer)`                    | Sign a raw payload; verify a partial record against its descriptor and append a second party's signature to an empty slot. |
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |

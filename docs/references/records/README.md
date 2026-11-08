@@ -120,7 +120,12 @@ returns an error that wraps `ErrSignerNotAllowed` and a `*BindingError`; its
 ### Decoding
 
 1. The input length is checked against a limit passed by the caller (64 KiB to
-   start). A limit that is not positive refuses everything.
+   start). A limit that is not positive refuses everything. A caller that makes a
+   record and must know it will pass this check asks `EncodedLen` for the length of
+   the record it would encode, from the type, the payload length and the number of
+   signatures, before it signs (every signature is an Ed25519 one, so those three
+   settle the length; a test compares it with `Encode` at the lengths where the
+   canonical encoding widens a field).
 2. The CBOR library decodes with duplicate map keys, indefinite lengths, tags,
    unknown fields, NaN and Inf refused. Nesting stays at the library's bound of
    32 levels, and records decode into typed structs.

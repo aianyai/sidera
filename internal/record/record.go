@@ -253,6 +253,23 @@ func (r Record) Encode() ([]byte, error) {
 	return MarshalCanonical(w)
 }
 
+// EncodedLen is the length of the wire bytes of a record of the type, with a
+// payload of payloadLen bytes and that many signatures, as Encode gives it. The
+// signatures are all by Ed25519 keys, so the length depends on the lengths alone;
+// a caller that must keep a record within what a reader takes asks it before the
+// record is made, with the payload it would sign.
+func EncodedLen(typ string, payloadLen, signatures int) int {
+	w := recordWire{Type: typ, Payload: make([]byte, payloadLen), Signatures: make([]signatureWire, signatures)}
+	for i := range w.Signatures {
+		w.Signatures[i] = signatureWire{Key: KeyWire{Algorithm: uint64(ident.AlgorithmEd25519), Key: make([]byte, ident.Ed25519KeyLen)}, Sig: make([]byte, SignatureLen)}
+	}
+	b, err := MarshalCanonical(w)
+	if err != nil {
+		panic("record: encoding the shape of a record: " + err.Error()) // the shape holds only byte strings and a string
+	}
+	return len(b)
+}
+
 // Decode parses a record from wire bytes of at most maxLen bytes, strictly.
 // It checks the shape of the envelope, not the signatures or the payload: those
 // are checked by Verify with the record type's descriptor.

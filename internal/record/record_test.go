@@ -849,3 +849,25 @@ func TestMalformedDescriptorPanics(t *testing.T) {
 }
 
 var _ = ident.ErrZero
+
+// EncodedLen is what a caller asks before it makes a record, to know whether the
+// record it would make fits in what a reader takes; it must be the size Encode
+// gives, at the lengths where the canonical encoding widens a length field.
+func TestEncodedLenIsTheLengthOfTheEncodedRecord(t *testing.T) {
+	for _, signers := range []int{1, 2} {
+		for _, n := range []int{1, 23, 24, 255, 256, 65535, 65536, 70000} {
+			ss := []Signer{rfcSigner(t, 1), rfcSigner(t, 2)}[:signers]
+			rec, err := Sign("sidera/test/size/1", bytes.Repeat([]byte{7}, n), ss...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire, err := rec.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := EncodedLen("sidera/test/size/1", n, signers); got != len(wire) {
+				t.Errorf("%d signers, payload of %d bytes: EncodedLen = %d, the record is %d bytes", signers, n, got, len(wire))
+			}
+		}
+	}
+}
