@@ -1425,8 +1425,11 @@ record or hourly count. The
 first prompt's attempt follows from the creation attempt, so a call made again carries what the
 first carried, as the adapter requires. A creation that chose a model or an effort is judged
 once more before each call: when the instance has meanwhile come back as an adapter that does not
-take the choice, it is settled as failed with `model_choice_not_allowed` and the adapter is not
-called, as it would have been refused at intake. Once the intent is settled,
+take the choice, the adapter is not called and the failure is logged at error level. A creation no
+call was made for is settled as failed with `model_choice_not_allowed`, as it would have been
+refused at intake. One whose attempt has a checkpoint may have made a session in an earlier call,
+and `failed` with any other reason says that none was made, so it is settled as failed with
+`control_unknown`, with that reason's alert. Once the intent is settled,
 whatever the outcome (a creation failed because its endpoint was lost included), the checkpoints the adapter kept under the creation attempt and under the first
 prompt's attempt are dropped: no call will be made again. A call that failed, an
 answer of `indeterminate` and an adapter that is not connected are tried again, after
@@ -2333,6 +2336,7 @@ reproducible).
 | A model or an effort chosen for a creation is taken in only from a request that travelled on a protocol that carries it | `inbound.go` (`takeIn`) | `TestChoiceOnAProtocolThatDoesNotCarryItIsInvalid` |
 | A creation that chooses a model or an effort, for a node that serves no protocol carrying it, is rejected at once as `node_unsupported`, by the sender's node, and not sent again | `outbound.go` (`refuseUnsupported`) | `TestChoiceToANodeThatCannotTakeItIsRejectedAtOnce` |
 | The status of a runtime lists each preset's model choice from the adapter's last probe, only on the protocol that carries it | `intake_control.go` (`statusReply`) | `TestStatusRepliesWithTheModelChoiceOfEachPresetOnlyWhereItIsCarried` |
+| A creation that chose a model, meeting an adapter that no longer takes the choice, is not sent to it; it fails as `control_unknown` when an earlier call may have made a session | `create.go` (`startCreate`) | `TestSessionCreateChoosingAModelMeetsAnAdapterThatNoLongerTakesItAfterACall` |
 | A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline`, `TestSessionCreateAtNodeEndpointLimitFailsAtOnce`, `TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart`, `TestSessionCreateChoosingAModel`, `TestSessionCreateChoosingAModelWhileTheAdapterIsOffline` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
 | A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `reconcileCreations`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |

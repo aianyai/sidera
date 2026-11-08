@@ -180,10 +180,18 @@ func (e *Engine) startCreate(now time.Time, key store.TargetKey) {
 	}
 	if choosesModel(c.Model, c.Effort) && !e.adapters[instance].adm.TakesModelChoice(c.Effort) {
 		// The creation was accepted for an adapter that took the choice, and the
-		// instance now runs a version that does not (a downgrade). It is ended as
-		// the adapter's own refusal of the choice would end it, and no request is
-		// sent that the adapter would not understand.
-		e.settleOrRetry(now, c, adapterreg.DaemonCreateFailure(adapterreg.DaemonCreateModelChoiceUnsupported), nil)
+		// instance now runs a version that does not (a downgrade). No request is sent
+		// that the adapter would not understand. A creation no call was made for ends
+		// as the adapter's own refusal of the choice would end it. One an earlier call
+		// may have made a session for (the adapter kept a checkpoint of the attempt)
+		// cannot be said to have made none, which is all a failure other than
+		// control_unknown says, so it ends as a creation whose native session may remain.
+		e.log.Error("a creation chose a model, and the adapter that now serves it does not take the choice", "record", key.String(), "instance", instance, "capability", "model_choice")
+		reply := adapterreg.DaemonCreateFailure(adapterreg.DaemonCreateModelChoiceUnsupported)
+		if _, called := e.view.checkpoints[store.CheckpointKey{Scope: store.CheckpointScopeAttempt, ID: string(c.Intent.Attempt)}]; called {
+			reply = adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
+		}
+		e.settleOrRetry(now, c, reply, nil)
 		return
 	}
 	params, err := e.createParams(c, ep.rec)

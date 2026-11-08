@@ -4,9 +4,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -129,4 +132,57 @@ func TestSessionCreateChoosingAModelWhileTheAdapterIsOffline(t *testing.T) {
 	msg := createChoosing(t, h, "choice-offline", "sonnet", "")
 	engineQuiet(t, h)
 	wantFailed(t, ptr(pulledReply(t, h, msg)), adapterproto.CreateReasonAdapterOffline)
+}
+
+// A creation that chose a model is judged again before each call. When an earlier
+// call may have made a session (the adapter kept a checkpoint of the attempt) and
+// the instance has since come back as an adapter that does not take the choice,
+// the creation cannot be said to have made nothing: it ends as an outcome nobody can
+// vouch for, with the alert of a session that may remain, and the adapter is not
+// called again.
+func TestSessionCreateChoosingAModelMeetsAnAdapterThatNoLongerTakesItAfterACall(t *testing.T) {
+	h := modelChoiceNode(t, []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortHigh})
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate}); err != nil {
+		t.Fatal(err)
+	}
+	msg := createChoosing(t, h, "choice-downgrade", "sonnet", "")
+	quiet(t, h)
+	if n := createRequests(t, h); n != 1 {
+		t.Fatalf("%d creation requests reached the adapter, want the one that could not tell", n)
+	}
+
+	// The instance is admitted again, now declaring no model choice.
+	o := harness.RuntimeAdapterManifest(adapterproto.MaxDirectEndpoints)
+	adm, err := adapterreg.Admit(o.Capabilities(), o.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := adapterproto.InitializeResult{ProtocolVersion: 1, Adapter: adapterproto.AdapterInfo{ID: harness.Instance, Version: "1.0.0"}, Capabilities: adm.Capabilities()}
+	if _, err := h.Engine().AdapterAdmitted(h.Ctx(), harness.Instance, adm, info); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(engine.DefaultParams().CreateRetryBackoff + time.Second)
+	quiet(t, h)
+	h.Advance(controlReplyWait)
+	quiet(t, h)
+
+	wantFailed(t, ptr(pulledReply(t, h, msg)), adapterproto.CreateReasonControlUnknown)
+	if n := createRequests(t, h); n != 1 {
+		t.Errorf("%d creation requests reached the adapter, want still the first", n)
+	}
+	alerts, err := h.Engine().Alerts(h.Ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told bool
+	for _, a := range alerts {
+		told = told || a.Kind == "control_unknown"
+	}
+	if !told {
+		t.Errorf("the alerts are %+v, want one of kind control_unknown", alerts)
+	}
 }
