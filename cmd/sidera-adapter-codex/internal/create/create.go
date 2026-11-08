@@ -4,9 +4,11 @@
 // function serves the first run, a retry and the check after a restart, so there
 // is one set of rules.
 //
-// What is stored (the checkpoint) is only the thread's id and, for a final
+// What is stored of an attempt (the checkpoint) is only the thread's id and, for a final
 // failure, its reason. That the first prompt reached the thread is not stored: the
-// thread's record shows it, and the record cannot disagree with itself.
+// thread's record shows it, and the record cannot disagree with itself. The session
+// checkpoint, which only a session whose requester chose a model or an effort has, is in
+// session.go.
 package create
 
 import (

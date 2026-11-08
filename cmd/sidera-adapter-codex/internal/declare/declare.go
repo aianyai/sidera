@@ -43,13 +43,15 @@ func Info() adapterproto.AdapterInfo {
 
 // Capabilities is what the adapter declares. It interrupts a turn and answers the
 // requests Codex sends it, and it takes over sessions a person opened (attach); it
-// does not acknowledge on the agent's behalf.
+// does not acknowledge on the agent's behalf. It takes a model and an effort a requester
+// chose for a new session, with the efforts Codex runs.
 func Capabilities() adapterproto.Capabilities {
 	return adapterproto.Capabilities{Runtime: &adapterproto.RuntimeCapabilities{
 		Interrupt:      true,
 		ServerRequests: true,
 		Attach:         true,
 		Frontends:      []adapterproto.Frontend{adapterproto.FrontendMCP, adapterproto.FrontendCLI},
+		ModelChoice:    &adapterproto.ModelChoiceCapability{Efforts: codexcfg.SupportedEfforts()},
 	}}
 }
 

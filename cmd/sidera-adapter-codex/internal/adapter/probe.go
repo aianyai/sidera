@@ -84,6 +84,11 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 	for name, e := range a.presets {
 		st := adapterproto.PresetStatus{Name: name, Usable: len(e.problems) == 0, Problems: append([]string(nil), e.problems...)}
 		if st.Usable {
+			// What a requester may choose, and the defaults it is checked against: only
+			// from a preset that parsed without a problem.
+			st.Model, st.Effort, st.AllowedModels = e.preset.Model, adapterproto.Effort(e.preset.Effort), e.preset.Allowed.Entries()
+		}
+		if st.Usable {
 			if fi, err := os.Stat(e.preset.CWD); err != nil || !fi.IsDir() {
 				st.Usable, st.Problems = false, []string{"cwd: the project directory does not exist"}
 			}

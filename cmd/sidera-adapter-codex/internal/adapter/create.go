@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/create"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -21,6 +22,10 @@ type createAttempt struct {
 	mu     sync.Mutex // one run of the attempt at a time
 	params adapterproto.SessionCreateParams
 	final  *adapterproto.SessionCreateResult
+
+	// choice is the model and effort the session runs with when its requester chose,
+	// resolved against the preset at every run of the attempt; nil when it chose none.
+	choice *modelchoice.Choice
 
 	state        create.State
 	checkpointed bool
@@ -117,6 +122,20 @@ func (a *App) runCreate(ctx context.Context, rec *createAttempt, p adapterproto.
 		return failed(adapterproto.CreateFailPresetInvalid, "see the preset's problems in the probe"), nil
 	}
 
+	choice, chosen, err := modelchoice.Resolve(preset.Allowed,
+		modelchoice.Defaults{Model: preset.Model, Effort: adapterproto.Effort(preset.Effort)}, p.Model, p.Effort)
+	if err != nil {
+		// A thread an earlier run started is archived, so that nothing is left running.
+		a.log.Warn("the choice of a model or an effort is not allowed", "attempt", p.Attempt, "preset", p.Preset, "error", err)
+		res := a.fail(ctx, rec, p, adapterproto.CreateFailModelChoiceNotAllowed)
+		res.Detail = cut(err.Error(), adapterproto.MaxDetailLen)
+		return res, nil
+	}
+	rec.choice = nil
+	if chosen {
+		rec.choice = &choice
+	}
+
 	for {
 		if err := ctx.Err(); err != nil {
 			// The daemon gave up waiting (or the connection ended): nothing is
@@ -186,7 +205,7 @@ func (a *App) runCreate(ctx context.Context, rec *createAttempt, p adapterproto.
 				return adapterproto.SessionCreateResult{}, err
 			}
 		case create.Ready:
-			return a.ready(ctx, client, rec, p, preset), nil
+			return a.ready(ctx, client, rec, p, preset)
 		case create.Indeterminate:
 			return indeterminate(adapterproto.GroundsTurnRunning, rec.state.ThreadID), nil
 		case create.Fail:
@@ -229,7 +248,7 @@ func (a *App) precheck(ctx context.Context, rec *createAttempt) (adapterproto.Se
 // startThread starts the thread and registers it as the session, so that its
 // events are reported from the first one.
 func (a *App) startThread(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) (adapterproto.SessionCreateResult, bool, error) {
-	s := newSession(p.SessionEndpoint, p.Preset, "", p.ToolAccess.Env)
+	s := newSession(p.SessionEndpoint, p.Preset, "", p.ToolAccess.Env, rec.choice)
 	th, err := a.threadStart(ctx, c, s, preset)
 	if err != nil {
 		if errors.Is(err, errUnprotected) {
@@ -266,7 +285,7 @@ func (a *App) loadThread(ctx context.Context, rec *createAttempt, p adapterproto
 	// already reported.
 	s := a.sessionOf(p.SessionEndpoint)
 	if s == nil || s.threadID != rec.state.ThreadID {
-		s = newSession(p.SessionEndpoint, p.Preset, rec.state.ThreadID, p.ToolAccess.Env)
+		s = newSession(p.SessionEndpoint, p.Preset, rec.state.ThreadID, p.ToolAccess.Env, rec.choice)
 		s.creating = true
 	}
 	th, err := a.threadResume(ctx, c, s, rec.state.ThreadID, preset)
@@ -403,8 +422,20 @@ func (a *App) awaitWake(ctx context.Context, s *session, d time.Duration, since 
 
 // ready answers created. The turn of the first prompt may already be over when the
 // answer is given, which the daemon cannot learn from a notification that came
-// before it, so the answer says so.
-func (a *App) ready(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) adapterproto.SessionCreateResult {
+// before it, so the answer says so. A session whose requester chose a model or an
+// effort has its choice stored with the daemon first, so that no answer of created
+// exists without it: the thread's own state cannot tell the requester's choice from
+// what Codex defaulted to. A store that fails is an error, and the attempt is asked
+// again.
+func (a *App) ready(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) (adapterproto.SessionCreateResult, error) {
+	if rec.choice != nil {
+		err := a.conn.CheckpointPut(ctx, adapterproto.CheckpointPutParams{
+			Scope: adapterproto.ScopeSession, ID: string(p.SessionEndpoint), State: create.SessionCheckpoint(*rec.choice),
+		})
+		if err != nil {
+			return adapterproto.SessionCreateResult{}, err
+		}
+	}
 	ended := false
 	if turns, _, err := readTurns(ctx, c, rec.state.ThreadID, 1, func(t appserver.Turn) bool { return hasPrompt(t, p.FirstPrompt.Attempt) }); err == nil {
 		for _, t := range turns {
@@ -423,7 +454,7 @@ func (a *App) ready(ctx context.Context, c *appserver.Client, rec *createAttempt
 		NativeRef:      adapterproto.NativeRef(rec.state.ThreadID),
 		Frontends:      preset.Frontends(),
 		FirstTurnEnded: adapterproto.TrueOnly(ended),
-	}
+	}, nil
 }
 
 // fail ends the attempt with a final failure: the reason is stored first, so that

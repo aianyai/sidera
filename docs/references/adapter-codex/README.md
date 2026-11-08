@@ -504,14 +504,16 @@ what was just observed; the same function serves the first run, a retry and the 
 after a restart.
 
 Before a thread exists, the answer is `failed` with `preset_unknown`, `preset_invalid`,
-`dependency_missing` (`codex` or `sidera` not found), `native_unavailable` (the server
+`model_choice_not_allowed` (the requester's model or effort is not allowed, see "A requester's
+choice of model and effort"), `dependency_missing` (`codex` or `sidera` not found), `native_unavailable` (the server
 cannot be reached) or `runtime_auth` (no account); certainly nothing was created. The
 detail names what failed and why (`codex was not found: …`, or the error of connecting to
 or starting the server), and the adapter logs it, because the daemon maps
 `dependency_missing` to `native_unavailable` and passes no detail on. The
 steps are:
 
-1. `thread/start` with the preset's `cwd`, `approvalPolicy` and `model`, the `sandbox` of a
+1. `thread/start` with the preset's `cwd`, `approvalPolicy` and the session's `model` (the
+   preset's, or the requester's choice), the `sandbox` of a
    preset without one, `ephemeral: false` and the thread's configuration, whose permission
    profile has to be reported active (see above). The thread is registered as the session at
    once, so its events are reported from the first one.
@@ -530,7 +532,9 @@ steps are:
    whose `clientId` is that attempt, or the same found in `thread/turns/list`
    (consulted at every wake, so a missed event costs a poll, and by the same call after
    a restart). Only then is the answer `created` with the thread id as `native_ref`
-   and the front ends of the preset.
+   and the front ends of the preset. When the requester chose a model or an effort, the
+   session checkpoint is stored first (see below), and a store that fails is an error of the
+   request, which the daemon repeats.
 
 `created` carries `first_turn_ended: true` when the turn of the first prompt is already
 over at the moment of the answer (found in the record), so a daemon that restarted
@@ -557,6 +561,55 @@ Cancellation of the request (the daemon gave up waiting) concludes nothing.
 
 `control_unknown` is never produced: the server is private to the adapter, and two
 servers on one socket cannot run.
+
+### A requester's choice of model and effort
+
+The adapter declares the capability `model_choice` with the efforts Codex runs (`low`,
+`medium`, `high`, `xhigh`, taken from the one list that the preset's `effort` also reads), so
+the daemon sends the optional `model` and `effort` of a `session.create` to it.
+A preset states what a requester may choose in `allowed_models`, a `map` from a model to
+the list of efforts allowed with it. `codexcfg.ParsePreset` reads it with the Go SDK's
+`modelchoice.ParseAllowed`, and each of its refusals (an empty map, a model with no effort, a
+model name or an effort that is not valid, an effort Codex does not run, an effort listed
+twice) is a problem of the preset, which makes the preset unusable like any other.
+A preset's own `model` must also be a valid model name, since the probe reports it.
+
+The creation resolves the request with `modelchoice.Resolve` against the preset's own
+`model` and `effort`, and nothing is ever downgraded or substituted: what the preset does
+not allow is `failed` with `model_choice_not_allowed`, before any thread exists (a thread an
+earlier run of the attempt started is archived), and the detail goes to the log only. A
+request with neither member is not a choice: the session follows its preset, stores nothing
+and behaves as it did before the capability existed. A member that neither the preset
+states nor the requester gave stays empty and is not sent; Codex decides it by the owner's
+own configuration.
+
+**The session checkpoint.** A session whose requester chose stores `{"v":1,"choice":{"model":…,
+"effort":…}}` (scope `session`, keyed by the session endpoint), the pair `Resolve` returned
+with each member that is empty left out, before the answer is `created`. `adapter.start` reads
+it from the session's `checkpoint` into the session. A checkpoint that cannot be read (a
+version this adapter does not know, an empty choice, a model or an effort that is not valid)
+leaves the session reported `unreachable` and logged, rather than run on values nobody chose.
+A retry of a creation after a restart resolves the request again, so it stores the checkpoint
+again. The pair is stored, not the requester's words, because the allowlist is checked once,
+when the session is created: the session keeps the combination that was checked, even if the
+owner later edits or narrows the preset.
+
+One function (`session.modelAndEffort`) gives the model and the effort of a session, the
+choice if it has one and the preset's otherwise, and `thread/start`, `thread/resume` and every
+`turn/start` take them from it. The thread's own state is not used for this, for two
+reasons found by measuring Codex 0.166: a `thread/resume` that names a model drops the effort
+the thread persisted, and the adapter names the model on every resume; and what a thread
+reports cannot tell the requester's choice from what the runtime defaulted to, nor keep it
+when the owner changes the preset. The effort is therefore sent by each `turn/start`, so the
+effort a resume dropped does not matter.
+
+**The owner's part.** Codex's reaction to an effort the model does not support is not
+established, so the owner lists in `allowed_models` only the efforts each model supports.
+The adapter checks only that an effort is one Codex runs.
+
+The probe reports each usable preset's `model`, `effort` and `allowed_models` in its
+`PresetStatus`, sorted by model with the efforts in the order of the scale; a preset with a
+problem reports its problems alone.
 
 ### Prompts, turns, reconciliation and close
 
@@ -864,8 +917,9 @@ name looked up in `PATH` (on Windows `codex.exe`, not a `.cmd` wrapper, which ca
 be detached or ended reliably). A preset has `cwd` (a directory, required), `sandbox`
 (`read-only`, `workspace-write`, the default, or `danger-full-access`), `approval_policy`
 (`never`, the default, `on-request`, `untrusted`), `approvals` (`deny`, the default, or
-`approve`), and optionally `model`, `effort` (`low`, `medium`, `high`, `xhigh`) and
-`developer_instructions` (UTF-8, at most 32 KiB; see "What the agent is told");
+`approve`), and optionally `model`, `effort` (`low`, `medium`, `high`, `xhigh`),
+`allowed_models` (a `map` from a model to a list of efforts; see "A requester's choice of model
+and effort") and `developer_instructions` (UTF-8, at most 32 KiB; see "What the agent is told");
 what is left out is the owner's own Codex configuration, whose default model may be an
 expensive one, so a preset for unattended use names both. `codexcfg` holds the
 descriptions the manifest declares and the checks that read them, from one list.
@@ -1090,6 +1144,8 @@ code depends on setup.
 
 ### Known limitations
 
+- **How Codex reacts to an effort the model does not support is not established**, which is why
+  the owner lists only supported efforts in `allowed_models`.
 - **No acknowledgement on the agent's behalf**; `ack_markers` is absent for the same reason.
 - **Interrupting ends the processes the server lists for the turn's commands, and looks no
   further.** What a command started on its own (a process it detached) ends only as far as
@@ -1195,7 +1251,8 @@ code depends on setup.
 | Start, connect, working directory, detach, environment, identity and termination | `internal/server/` (`server.go`, `env.go`, `version.go`; tests `terminate_test.go`, `connect_test.go`) |
 | Preset and instance configuration, thread configuration and permission profile, sandbox policy | `internal/codexcfg/` |
 | Starting and resuming threads, and checking the profile took | `internal/adapter/thread.go` |
-| Creation decisions and the checkpoint | `internal/create/` |
+| Creation decisions, the attempt checkpoint and the session checkpoint | `internal/create/` |
+| The allowlist, read with the Go SDK's `adapterkit/modelchoice` | `internal/codexcfg/` |
 | Reconciliation | `internal/reconcile/` |
 | Answers to the server's requests | `internal/serverreq/` |
 | Identity, capabilities, manifest, package | `internal/declare/` |
@@ -1213,7 +1270,12 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 `TestFailureToEndTheServerIsRetried`, `TestPromptDuringTheReplacementIsRefusedAsUnavailable`, `TestBusyReason`
 (the replacement after an upgrade); `TestParsePreset`,
 `TestSandboxIsAProfileNotALegacyMode`, `TestThreadConfig`, `TestFrontendsFollowTheSandbox` (configuration); `TestDecide`,
-`TestCheckpointRoundTrip` (creation); `TestJudge` (reconciliation); `TestHandle`
+`TestCheckpointRoundTrip`, `TestSessionCheckpointRoundTrip`, `TestParseSessionCheckpoint` (creation); `TestParsePresetReadsTheAllowlist`,
+`TestSupportedEffortsAreTheOnesAPresetMayName` (the allowlist and the efforts); `TestChoiceSurvivesARestartAndAResume`,
+`TestSessionWithoutAChoiceFollowsThePreset`, `TestChoiceFillsOnlyWhatTheyStateAndSendsNothingElse`,
+`TestRetriedCreationResolvesTheChoiceAgain`, `TestSameAttemptWithAnotherChoiceConflicts`,
+`TestRefusedChoiceFailsWithoutStartingAThread`, `TestProbeReportsTheChoiceMembersOfEachPreset`,
+`TestUnreadableSessionCheckpointLeavesTheSessionUnreachable` (a requester's choice); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`
 (the package); `TestPlanOfAnInstanceWithNothing`, `TestCheck`, `TestRefresh`, `TestUndoLeavesWhatItDidNotUndoRecorded`
 and the rest of `internal/clientsetup` (the setup against a fake Codex that names each unreadable marketplace with its own directory); `TestCreateSession`, `TestCreateAfterARestartFindsThePromptInTheRecord`,

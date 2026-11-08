@@ -14,6 +14,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/guidance"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -79,8 +80,20 @@ var (
 	sandboxes       = []string{SandboxReadOnly, SandboxWorkspaceWrite, SandboxDangerFullAccess}
 	approvalPolicys = []string{ApprovalNever, ApprovalOnRequest, ApprovalUntrusted}
 	approvals       = []string{ApprovalsDeny, ApprovalsApprove}
-	efforts         = []string{"low", "medium", "high", "xhigh"}
+	// efforts are the reasoning efforts Codex runs, lowest first: what a preset's effort may
+	// name and what the adapter declares a requester may choose.
+	efforts = []string{"low", "medium", "high", "xhigh"}
 )
+
+// SupportedEfforts are the efforts Codex runs, lowest first, as the adapter declares them
+// in its model_choice capability.
+func SupportedEfforts() []adapterproto.Effort {
+	out := make([]adapterproto.Effort, len(efforts))
+	for i, e := range efforts {
+		out[i] = adapterproto.Effort(e)
+	}
+	return out
+}
 
 func raw(v string) json.RawMessage { b, _ := json.Marshal(v); return b }
 
@@ -109,6 +122,8 @@ func PresetFields() []manifest.Field {
 			Description: "The model; the owner's own Codex configuration decides when it is left out."},
 		{Key: KeyEffort, Type: manifest.FieldEnum, Title: "Reasoning effort", Options: slices.Clone(efforts),
 			Description: "The reasoning effort; the owner's own Codex configuration decides when it is left out."},
+		{Key: modelchoice.Key, Type: manifest.FieldMap, Title: "Allowed models", Value: &manifest.MapValue{Type: manifest.FieldStringList},
+			Description: "The models a requester may choose for a new session, each with the efforts allowed with it. Without it a requester cannot choose. List only efforts the model supports: how Codex reacts to one it does not support is not known."},
 		{Key: KeyDeveloperInstructions, Type: manifest.FieldString, Title: "Developer instructions",
 			Description: "Instructions for the agent, after the adapter's own statement of what the Sidera channel is. How the agent treats the messages it receives is decided here."},
 	}
@@ -159,6 +174,9 @@ type Preset struct {
 	Approvals      string
 	Model          string
 	Effort         string
+	// Allowed is the allowlist of models and efforts a requester may choose from; the zero
+	// value allows no choice.
+	Allowed modelchoice.Allowed
 	// DeveloperInstructions is the owner's own text; the package function of the
 	// same name puts the adapter's statement before it.
 	DeveloperInstructions string
@@ -194,6 +212,18 @@ func ParsePreset(name string, v adapterproto.ConfigValues) (Preset, []string) {
 	p.Effort = read(KeyEffort, "", nil)
 	if p.Effort != "" && !slices.Contains(efforts, p.Effort) {
 		problems = append(problems, fmt.Sprintf("%s: %q is not one of %v", KeyEffort, p.Effort, efforts))
+	}
+	if p.Model != "" {
+		if err := adapterproto.ValidateModelName(p.Model); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", KeyModel, err))
+		}
+	}
+	if raw, ok := v[modelchoice.Key]; ok {
+		allowed, err := modelchoice.ParseAllowed(raw, SupportedEfforts())
+		if err != nil {
+			problems = append(problems, err.Error())
+		}
+		p.Allowed = allowed
 	}
 	if raw, ok := v[KeyDeveloperInstructions]; ok && !utf8.Valid(raw) {
 		problems = append(problems, KeyDeveloperInstructions+": not valid UTF-8")

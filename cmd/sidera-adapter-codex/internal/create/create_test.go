@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -59,6 +60,48 @@ func TestCheckpointRoundTrip(t *testing.T) {
 	}
 	for _, bad := range []string{`{"v":2,"thread_id":"t"}`, `[]`, `{"thread_id":"t"}`} {
 		if _, err := ParseCheckpoint([]byte(bad)); err == nil {
+			t.Errorf("checkpoint %s was accepted", bad)
+		}
+	}
+}
+
+func TestSessionCheckpointRoundTrip(t *testing.T) {
+	for _, c := range []modelchoice.Choice{
+		{Model: "gpt-5", Effort: adapterproto.EffortHigh},
+		{Model: "gpt-5"},
+		{Effort: adapterproto.EffortLow},
+	} {
+		got, chosen, err := ParseSessionCheckpoint(SessionCheckpoint(c))
+		if err != nil || !chosen || got != c {
+			t.Errorf("round trip of %+v = %+v, %v, %v", c, got, chosen, err)
+		}
+	}
+	if got := string(SessionCheckpoint(modelchoice.Choice{Model: "gpt-5", Effort: adapterproto.EffortHigh})); got != `{"v":1,"choice":{"model":"gpt-5","effort":"high"}}` {
+		t.Errorf("checkpoint = %s", got)
+	}
+	if got := string(SessionCheckpoint(modelchoice.Choice{Effort: adapterproto.EffortLow})); got != `{"v":1,"choice":{"effort":"low"}}` {
+		t.Errorf("checkpoint = %s: an absent model is left out", got)
+	}
+}
+
+// A session that stored nothing follows its preset; a stored one that cannot be read
+// is an error, so that the session is not run with values nobody chose.
+func TestParseSessionCheckpoint(t *testing.T) {
+	for _, raw := range []string{"", `{"v":1}`} {
+		if _, chosen, err := ParseSessionCheckpoint([]byte(raw)); chosen || err != nil {
+			t.Errorf("%q = chosen %v, %v: want a session that follows its preset", raw, chosen, err)
+		}
+	}
+	for _, bad := range []string{
+		`{"v":2,"choice":{"model":"gpt-5"}}`,
+		`{"choice":{"model":"gpt-5"}}`,
+		`{"v":1,"choice":{}}`,
+		`{"v":1,"choice":{"model":"gpt 5"}}`,
+		`{"v":1,"choice":{"effort":"huge"}}`,
+		`[]`,
+		`{`,
+	} {
+		if _, _, err := ParseSessionCheckpoint([]byte(bad)); err == nil {
 			t.Errorf("checkpoint %s was accepted", bad)
 		}
 	}

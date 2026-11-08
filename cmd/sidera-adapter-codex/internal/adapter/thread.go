@@ -67,8 +67,9 @@ func (a *App) threadStart(ctx context.Context, c *appserver.Client, s *session, 
 	if err != nil {
 		return appserver.Thread{}, err
 	}
+	model, _ := s.modelAndEffort(p)
 	res, err := c.ThreadStart(ctx, appserver.ThreadStartParams{
-		CWD: p.CWD, ApprovalPolicy: p.ApprovalPolicy, Sandbox: p.ThreadSandbox(), Model: p.Model,
+		CWD: p.CWD, ApprovalPolicy: p.ApprovalPolicy, Sandbox: p.ThreadSandbox(), Model: model,
 		Ephemeral: false, Config: cfg,
 		DeveloperInstructions: codexcfg.DeveloperInstructions(p.DeveloperInstructions),
 	})
@@ -85,8 +86,11 @@ func (a *App) threadResume(ctx context.Context, c *appserver.Client, s *session,
 	if err != nil {
 		return appserver.Thread{}, err
 	}
+	// A resume that names a model drops the effort the thread persisted, which is why
+	// every turn carries the effort itself.
+	model, _ := s.modelAndEffort(p)
 	res, err := c.ThreadResume(ctx, appserver.ThreadResumeParams{
-		ThreadID: threadID, CWD: p.CWD, ApprovalPolicy: p.ApprovalPolicy, Sandbox: p.ThreadSandbox(), Model: p.Model,
+		ThreadID: threadID, CWD: p.CWD, ApprovalPolicy: p.ApprovalPolicy, Sandbox: p.ThreadSandbox(), Model: model,
 		ExcludeTurns: true, Config: cfg,
 		DeveloperInstructions: codexcfg.DeveloperInstructions(p.DeveloperInstructions),
 	})

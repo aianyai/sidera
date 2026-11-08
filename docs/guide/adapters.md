@@ -341,12 +341,18 @@ The adapter's own sessions are not affected: they bring their own server.
 
 **Configuration.** Instance keys: `codex_program`, `sidera_program`. Preset keys (under
 `codex` in the preset file): `cwd`, `sandbox`, `approval_policy`, `approvals`, `model`,
-`effort` and `developer_instructions`. Examples are in
+`effort`, `allowed_models` and `developer_instructions`. Examples are in
 [Getting started](getting-started.md#5-add-a-preset-both); every key and its values are
 listed under
 [Configuration, manifest and package](../references/adapter-codex/README.md#configuration-manifest-and-package)
 in the reference. Set `model` and `effort` in a preset for unattended use: otherwise
 the session uses your own Codex defaults.
+
+To let whoever starts a session choose its model and effort, list the choices in
+`allowed_models`: a map from a model to the efforts allowed with it, for example
+`{"gpt-5.1-codex": ["medium", "high"]}`. Without it nobody can choose and every session follows
+the preset. List only efforts the model supports; Sidera accepts `low`, `medium`, `high` and
+`xhigh` for Codex, and how Codex reacts to an effort a model does not support is not known.
 
 ## Hermes
 

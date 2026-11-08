@@ -13,7 +13,7 @@ import (
 // lost thread runs nowhere, so neither holds the replacement back.
 func TestBusyReason(t *testing.T) {
 	mk := func(change func(*session)) *session {
-		s := newSession("ep", "dev", "th", nil)
+		s := newSession("ep", "dev", "th", nil, nil)
 		if change != nil {
 			change(s)
 		}
@@ -77,7 +77,7 @@ func TestEndIdleServer(t *testing.T) {
 			if tc.connected {
 				a.client = &appserver.Client{}
 			}
-			s := newSession("ep", "dev", "th", nil)
+			s := newSession("ep", "dev", "th", nil, nil)
 			if tc.turnActive {
 				s.activeTurn = "tu"
 			}

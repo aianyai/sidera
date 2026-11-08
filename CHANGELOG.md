@@ -26,6 +26,12 @@ protocol has a version of its own.
   checks a map like any other value when it is written, stores it with its entries sorted by key, and
   sends it in `adapter.start` only to an adapter whose manifest declares the field. Protocol version 1
   is extended in place; an older daemon refuses a package that declares a `map` field.
+- **A Codex preset can let the requester of a new session choose its model and effort.** The new
+  preset key `allowed_models` lists the models a requester may choose, each with the efforts allowed
+  with it (`low`, `medium`, `high`, `xhigh`); without it nobody can choose. The choice stays with
+  the session across restarts and resumes, and a session whose requester chose nothing follows its
+  preset as before. List only efforts the model supports: how Codex reacts to one it does not support
+  is not known. A preset's `model` must now be a valid model name (letters, digits and `._:/@+[]-`).
 
 ### Changed
 

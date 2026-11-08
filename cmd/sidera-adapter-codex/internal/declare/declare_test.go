@@ -3,8 +3,10 @@ package declare
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -16,6 +18,9 @@ func TestManifestAndCapabilitiesAreValid(t *testing.T) {
 	}
 	if !Capabilities().Runtime.Attach {
 		t.Error("the adapter does not declare attach")
+	}
+	if mc := Capabilities().Runtime.ModelChoice; mc == nil || !reflect.DeepEqual(mc.Efforts, codexcfg.SupportedEfforts()) {
+		t.Errorf("model_choice = %+v: the adapter declares the efforts Codex runs", mc)
 	}
 	if !Capabilities().Runtime.Interrupt {
 		t.Error("the adapter does not declare interrupt")

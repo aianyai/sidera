@@ -25,10 +25,11 @@ func (a *App) startTurn(ctx context.Context, c *appserver.Client, s *session, pr
 	a.mu.Lock()
 	s.pending = ps
 	a.mu.Unlock()
+	model, effort := s.modelAndEffort(preset)
 	turn, err := c.TurnStart(ctx, appserver.TurnStartParams{
 		ThreadID: s.threadID, ClientUserMessageID: attempt, Input: []appserver.UserInput{appserver.TextInput(text)},
 		CWD: preset.CWD, ApprovalPolicy: preset.ApprovalPolicy, SandboxPolicy: preset.SandboxPolicy(),
-		Model: preset.Model, Effort: preset.Effort,
+		Model: model, Effort: effort,
 	})
 	a.mu.Lock()
 	s.pending = nil

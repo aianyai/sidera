@@ -6,6 +6,8 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/create"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -55,12 +57,24 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	sessions := make(map[adapterproto.EndpointRef]*session, len(p.Sessions))
 	byThread := make(map[string]*session, len(p.Sessions))
 	order := make([]*session, 0, len(p.Sessions))
+	var unreadable []adapterproto.SessionState
 	for _, sa := range p.Sessions {
 		var s *session
 		if sa.Attached {
 			s = newAttachedSession(sa.Endpoint, string(sa.NativeRef))
 		} else {
-			s = newSession(sa.Endpoint, sa.Preset, string(sa.NativeRef), sa.ToolAccess.Env)
+			choice, chosen, err := create.ParseSessionCheckpoint(sa.Checkpoint)
+			if err != nil {
+				// Running the session on its preset would use values nobody chose.
+				a.log.Warn("a session's checkpoint is not usable: it cannot be attached", "endpoint", sa.Endpoint, "error", err)
+				unreadable = append(unreadable, adapterproto.SessionState{Endpoint: sa.Endpoint, State: adapterproto.AttachUnreachable})
+				continue
+			}
+			var held *modelchoice.Choice
+			if chosen {
+				held = &choice
+			}
+			s = newSession(sa.Endpoint, sa.Preset, string(sa.NativeRef), sa.ToolAccess.Env, held)
 		}
 		// The server has not loaded the thread in this adapter's books until the restore
 		// has: whatever an earlier connection held is loaded again, with the
@@ -108,7 +122,7 @@ func (a *App) Start(ctx context.Context, p adapterproto.StartParams) (adapterpro
 	case <-timeout:
 	case <-ctx.Done():
 	}
-	states := rest.answer()
+	states := append(rest.answer(), unreadable...)
 	a.publishAvailability(true)
 	a.versionWatch.Do(func() { go a.watchCodexVersion() })
 	// The sessions the answer waited for are loaded, so the server's idleness is known;

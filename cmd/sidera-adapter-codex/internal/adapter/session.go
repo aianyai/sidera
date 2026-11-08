@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver"
+	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/codexcfg"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -39,6 +41,10 @@ type session struct {
 	// SIDERA_HOME). It lives in memory only: it is not written anywhere, not even
 	// the checkpoint.
 	access map[string]string
+	// choice is the model and effort the session's requester chose when it was created,
+	// nil for a session that follows its preset. It is set when the session is made and
+	// never changes.
+	choice *modelchoice.Choice
 
 	// refusal says why the server takes no prompt for an attached session's thread
 	// (archived, ephemeral, a sub-agent's, unknown) since refusalSince, in Unix
@@ -116,13 +122,13 @@ type pendingStart struct {
 	resolved chan struct{} // closed when the answer to the turn start was processed
 }
 
-func newSession(ep adapterproto.EndpointRef, preset, threadID string, access map[string]string) *session {
+func newSession(ep adapterproto.EndpointRef, preset, threadID string, access map[string]string, choice *modelchoice.Choice) *session {
 	env := make(map[string]string, len(access))
 	for k, v := range access {
 		env[k] = v
 	}
 	return &session{
-		endpoint: ep, preset: preset, threadID: threadID, access: env,
+		endpoint: ep, preset: preset, threadID: threadID, access: env, choice: choice,
 		status:    appserver.ThreadIdle,
 		turns:     map[string]*turnRec{},
 		persisted: newIDSet(256),
@@ -131,9 +137,20 @@ func newSession(ep adapterproto.EndpointRef, preset, threadID string, access map
 	}
 }
 
+// modelAndEffort is the model and effort the session's thread is started and resumed
+// with and every turn asks for: the requester's choice when there is one, otherwise
+// the preset's. A member the choice leaves empty is not sent, and Codex decides it by
+// the owner's own configuration.
+func (s *session) modelAndEffort(p codexcfg.Preset) (model, effort string) {
+	if s.choice == nil {
+		return p.Model, p.Effort
+	}
+	return s.choice.Model, string(s.choice.Effort)
+}
+
 // newAttachedSession returns the session of a thread a person runs.
 func newAttachedSession(ep adapterproto.EndpointRef, threadID string) *session {
-	s := newSession(ep, "", threadID, nil)
+	s := newSession(ep, "", threadID, nil, nil)
 	s.attached = true
 	s.poke = make(chan struct{}, 1)
 	s.queued = map[adapterproto.AttemptID]string{}

@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/guidance"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 func values(kv map[string]any) adapterproto.ConfigValues {
@@ -51,11 +53,87 @@ func TestParsePreset(t *testing.T) {
 				}
 				return
 			}
-			if len(problems) != 0 || got != tc.want {
+			if len(problems) != 0 || !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %+v, %q; want %+v", got, problems, tc.want)
 			}
 		})
 	}
+}
+
+// The allowlist is read with the SDK's rules against the efforts this adapter
+// supports, and every refusal is a problem of the preset.
+func TestParsePresetReadsTheAllowlist(t *testing.T) {
+	cwd := t.TempDir()
+	p, problems := ParsePreset("p", values(map[string]any{"cwd": cwd, "model": "gpt-5", "effort": "low",
+		"allowed_models": map[string][]string{"gpt-5": {"high", "low"}, "gpt-5.1-codex": {"medium"}}}))
+	if len(problems) != 0 {
+		t.Fatalf("problems = %q", problems)
+	}
+	want := []adapterproto.ModelAllowance{
+		{Model: "gpt-5", Efforts: []adapterproto.Effort{"low", "high"}},
+		{Model: "gpt-5.1-codex", Efforts: []adapterproto.Effort{"medium"}},
+	}
+	if got := p.Allowed.Entries(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("allowlist = %+v, want %+v", got, want)
+	}
+	if _, problems := ParsePreset("p", values(map[string]any{"cwd": cwd})); len(problems) != 0 {
+		t.Fatalf("a preset without an allowlist has problems: %q", problems)
+	}
+	for _, tc := range []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{"empty map", map[string]any{"allowed_models": map[string][]string{}}, "allowed_models"},
+		{"model without an effort", map[string]any{"allowed_models": map[string][]string{"gpt-5": {}}}, "lists no effort"},
+		{"effort Codex does not run", map[string]any{"allowed_models": map[string][]string{"gpt-5": {"max"}}}, "supports"},
+		{"unknown effort", map[string]any{"allowed_models": map[string][]string{"gpt-5": {"huge"}}}, "huge"},
+		{"effort twice", map[string]any{"allowed_models": map[string][]string{"gpt-5": {"low", "low"}}}, "twice"},
+		{"model name with a space", map[string]any{"allowed_models": map[string][]string{"gpt 5": {"low"}}}, "model name"},
+		{"not a map", map[string]any{"allowed_models": []string{"gpt-5"}}, "allowed_models"},
+		{"default model with a space", map[string]any{"model": "gpt 5"}, "model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := map[string]any{"cwd": cwd}
+			for k, v := range tc.in {
+				in[k] = v
+			}
+			_, problems := ParsePreset("p", values(in))
+			if !strings.Contains(strings.Join(problems, "; "), tc.want) {
+				t.Fatalf("problems = %q, want one containing %q", problems, tc.want)
+			}
+		})
+	}
+}
+
+// The efforts the manifest offers for a preset's effort and the efforts the adapter
+// declares for a requester's choice are one list.
+func TestSupportedEffortsAreTheOnesAPresetMayName(t *testing.T) {
+	var options []string
+	for _, f := range PresetFields() {
+		if f.Key == KeyEffort {
+			options = f.Options
+		}
+	}
+	var got []string
+	for _, e := range SupportedEfforts() {
+		got = append(got, string(e))
+	}
+	if !reflect.DeepEqual(got, options) || len(got) == 0 {
+		t.Fatalf("supported efforts %v, effort options %v", got, options)
+	}
+}
+
+func TestPresetFieldsDeclareTheAllowlistAsAMapOfStringLists(t *testing.T) {
+	for _, f := range PresetFields() {
+		if f.Key == modelchoice.Key {
+			if f.Type != manifest.FieldMap || f.Value == nil || f.Value.Type != manifest.FieldStringList {
+				t.Fatalf("allowed_models is declared as %+v", f)
+			}
+			return
+		}
+	}
+	t.Fatal("the manifest does not declare allowed_models")
 }
 
 func TestParseInstance(t *testing.T) {
