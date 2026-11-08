@@ -79,8 +79,7 @@ func adapterEnded(t testing.TB, h *harness.H, l *harness.AdapterLaunch) {
 // adapterGone returns when the node knows that the connection of its adapter ended and
 // the engine has done what that makes it do. The host learns of the end on its own
 // goroutine and arms its backoff timer only after it has told the node, so the clock is
-// moved past the backoff with adapterRestarted, which allows for a move that came
-// before the timer.
+// moved past the backoff with adapterRestarted, which waits for the timer.
 func adapterGone(t testing.TB, h *harness.H) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -122,17 +121,26 @@ func adapterRestarted(t testing.TB, h *harness.H, launches int) {
 func adapterRestartedAfter(t testing.TB, h *harness.H, launches int, step time.Duration) {
 	t.Helper()
 	// The host arms its backoff timer a moment after it tells the node that the
-	// adapter is gone, so a move of the clock that came first is not the one that
-	// fires it: the clock is moved again, by the same backoff, until it did.
-	h.Advance(step)
+	// adapter is gone, so the clock is moved only once the host has armed a timer
+	// that fires within step, and by exactly the time that timer has left. A move
+	// made earlier would not fire it, and a move made again on a guess of how long
+	// the host takes would, on a slow machine, take the clock past the restart.
 	deadline := time.Now().Add(10 * time.Second)
-	for moved := time.Now(); len(h.AdapterLaunches(harness.Instance)) < launches; {
+	for {
+		if due, ok := h.HostTimerDue(); ok && due <= step {
+			h.Advance(due)
+			break
+		}
+		if time.Now().After(deadline) {
+			due, ok := h.HostTimerDue()
+			t.Fatalf("the host armed no timer that fires within %v (the earliest has %v left, armed %t)", step, due, ok)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for len(h.AdapterLaunches(harness.Instance)) < launches {
 		if time.Now().After(deadline) {
 			t.Fatalf("the host started %d adapter processes, want %d", len(h.AdapterLaunches(harness.Instance)), launches)
-		}
-		if time.Since(moved) > 50*time.Millisecond {
-			h.Advance(step)
-			moved = time.Now()
 		}
 		time.Sleep(time.Millisecond)
 	}
