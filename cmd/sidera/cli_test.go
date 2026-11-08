@@ -34,6 +34,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	sdkmanifest "github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 var buildOnce sync.Once
@@ -1194,6 +1195,7 @@ func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 	// offline instance, while its installation and persisted settings are real.
 	manifest := harness.AdapterManifest(10)
 	manifest.ID = "cli-adapter"
+	manifest.Config.Instance = append(manifest.Config.Instance, sdkmanifest.Field{Key: "workspace", Type: sdkmanifest.FieldString, Title: "Workspace"})
 	if err := manifest.WritePackage(filepath.Join(home, "package"), binary(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -1268,7 +1270,13 @@ func TestAdapterSetupRunsTheAdaptersProgram(t *testing.T) {
 	clientDir := t.TempDir()
 	script := fakeadapter.SetupConfig{ClientDir: clientDir, Items: []fakeadapter.SetupItem{
 		{ID: "a", Consent: true, Content: "v1"}, {ID: "o", Content: "own"}}}
-	raw, err := json.Marshal(map[string]any{"setup": script})
+	// The daemon checks the configuration against the manifest, where the script is a
+	// string setting holding its JSON text.
+	scriptText, err := json.Marshal(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{"setup": string(scriptText)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1287,6 +1295,7 @@ func TestAdapterSetupRunsTheAdaptersProgram(t *testing.T) {
 
 	m := harness.AdapterManifest(10)
 	m.ID, m.Program, m.Setup = "fake-setup", fakeadapter.DefaultManifestOptions().Program, true
+	m.Config.Instance = append(m.Config.Instance, fakeadapter.SetupField)
 	if err := m.WritePackage(filepath.Join(home, "package"), fakeAdapterBinary(t)); err != nil {
 		t.Fatal(err)
 	}
