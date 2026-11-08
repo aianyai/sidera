@@ -39,6 +39,8 @@ func TestCommandsBecomeTheEndpointCallTheyName(t *testing.T) {
 			`{"op":"send","send":{"endpoint":"","to":["n/a"],"content_type":"text/plain","body":"ok","reply_to":"m-1"}}`},
 		{"new with an initial message", []string{"new", "n/rt", "--preset", "dev", "--body", "go"},
 			`{"op":"send","send":{"endpoint":"","to":["n/rt"],"content_type":"text/plain","body":"go","control":{"signal":"session.create","params":{"preset":"dev"}}}}`},
+		{"new choosing the model and the effort", []string{"new", "n/rt", "--preset", "dev", "--model", "sonnet[1m]", "--effort", "high"},
+			`{"op":"send","send":{"endpoint":"","to":["n/rt"],"body":"","control":{"signal":"session.create","params":{"preset":"dev","model":"sonnet[1m]","effort":"high"}}}}`},
 		{"new without one", []string{"new", "--preset", "dev", "n/rt"},
 			`{"op":"send","send":{"endpoint":"","to":["n/rt"],"body":"","control":{"signal":"session.create","params":{"preset":"dev"}}}}`},
 	} {

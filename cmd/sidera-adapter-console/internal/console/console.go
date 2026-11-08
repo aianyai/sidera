@@ -63,8 +63,8 @@ var help = adapterkit.Help{
 				Purpose: "Show the delivery state of a message sent from the owner endpoint."},
 		}},
 		{Title: "Sessions", Entries: []adapterkit.HelpEntry{
-			{Name: "new", Arguments: "<runtime-address> --preset <name> [--body <text> | --body-file <file>] [--timeout <seconds>, default 120]",
-				Purpose: "Start a session on a runtime endpoint; prints the new session's address."},
+			{Name: "new", Arguments: "<runtime-address> --preset <name> [--model <name>] [--effort <level>] [--body <text> | --body-file <file>] [--timeout <seconds>, default 120]",
+				Purpose: "Start a session on a runtime endpoint; prints the new session's address. --model and --effort choose the session's model (as the runtime names it) and effort (low, medium, high, xhigh or max) within what the preset allows."},
 		}},
 		{Title: "Where things are", Entries: []adapterkit.HelpEntry{
 			{Name: "whoami", Purpose: "Show the address of the owner endpoint."},

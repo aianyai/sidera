@@ -56,6 +56,9 @@ protocol has a version of its own.
   preset as before. List only efforts the model supports: how Codex reacts to one it does not support
   is not known. A preset's `model` must now be a valid model name (letters, digits and `._:/@+[]-`).
 
+- **`sidera-adapter-console new` can choose the model and effort of the new session.** `--model <name>` and
+  `--effort <low|medium|high|xhigh|max>` are sent with the creation and apply within what the preset allows.
+
 ### Changed
 
 - **`sidera preset add`, `sidera adapter enable` and `sidera adapter config` check configuration

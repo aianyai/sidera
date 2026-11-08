@@ -73,14 +73,17 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 	fs.StringVar(&home, "home", "", "")
 	fs.StringVar(&inv.instance, "instance", AdapterID, "")
 	var (
-		preset, body, bodyFile, to string
-		node, cursor               string
-		waitS, timeoutS, limit     int
+		preset, model, effort  string
+		body, bodyFile, to     string
+		node, cursor           string
+		waitS, timeoutS, limit int
 	)
 	positionals := 0
 	switch inv.cmd {
 	case "new":
 		fs.StringVar(&preset, "preset", "", "")
+		fs.StringVar(&model, "model", "", "")
+		fs.StringVar(&effort, "effort", "", "")
 		fs.StringVar(&body, "body", "", "")
 		fs.StringVar(&bodyFile, "body-file", "", "")
 		fs.IntVar(&timeoutS, "timeout", int(defaultNewTimeout/time.Second), "")
@@ -164,7 +167,8 @@ func parseCommand(args []string, env Env) (*invocation, error) {
 			}
 			inv.timeout = time.Duration(timeoutS) * time.Second
 			p.To = []adapterproto.Address{adapterproto.Address(rest[0])}
-			p.Control = &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{Preset: preset}}
+			p.Control = &adapterproto.Control{Signal: adapterproto.SignalSessionCreate, Params: &adapterproto.ControlParams{
+				Preset: preset, Model: model, Effort: adapterproto.Effort(effort)}}
 		}
 		inv.req = request{Op: opSend, Send: p}
 	}
