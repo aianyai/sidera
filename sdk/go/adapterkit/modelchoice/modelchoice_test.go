@@ -207,3 +207,97 @@ func TestResolve(t *testing.T) {
 		})
 	}
 }
+
+// TestChoiceValidate: a stored choice is read back into an argument of a runtime's
+// process, so each class it refuses has a row.
+func TestChoiceValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		choice  modelchoice.Choice
+		wantErr string // empty: accepted
+	}{
+		{"a model", modelchoice.Choice{Model: "opus"}, ""},
+		{"an effort", modelchoice.Choice{Effort: "high"}, ""},
+		{"both", modelchoice.Choice{Model: "gpt-5.1-codex", Effort: "xhigh"}, ""},
+
+		{"neither", modelchoice.Choice{}, "chooses nothing"},
+		{"a model name that breaks the syntax", modelchoice.Choice{Model: "opus 4"}, "model"},
+		{"a model name that starts like an option", modelchoice.Choice{Model: "--opus"}, "model"},
+		{"an effort off the scale", modelchoice.Choice{Effort: "huge"}, `"huge"`},
+		{"a bad model beside a good effort", modelchoice.Choice{Model: "a b", Effort: "low"}, "model"},
+		{"a good model beside a bad effort", modelchoice.Choice{Model: "opus", Effort: "huge"}, `"huge"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.choice.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestChoiceJSON: the stored form is the one the adapters' checkpoints have always
+// had, and a member that is absent stays absent.
+func TestChoiceJSON(t *testing.T) {
+	for _, tc := range []struct {
+		choice modelchoice.Choice
+		json   string
+	}{
+		{modelchoice.Choice{Model: "opus", Effort: "high"}, `{"model":"opus","effort":"high"}`},
+		{modelchoice.Choice{Model: "opus"}, `{"model":"opus"}`},
+		{modelchoice.Choice{Effort: "low"}, `{"effort":"low"}`},
+	} {
+		raw, err := json.Marshal(tc.choice)
+		if err != nil || string(raw) != tc.json {
+			t.Errorf("Marshal(%+v) = %s, %v, want %s", tc.choice, raw, err, tc.json)
+		}
+		var back modelchoice.Choice
+		if err := json.Unmarshal([]byte(tc.json), &back); err != nil || back != tc.choice {
+			t.Errorf("Unmarshal(%s) = %+v, %v, want %+v", tc.json, back, err, tc.choice)
+		}
+	}
+}
+
+// TestParseDefaults: what a preset's own model and effort may be. Both are
+// checked and every problem is reported; the accepted rows show what is not refused.
+func TestParseDefaults(t *testing.T) {
+	codexEfforts := scale[:4]
+	tests := []struct {
+		name      string
+		model     string
+		effort    string
+		supported []adapterproto.Effort
+		want      modelchoice.Defaults
+		problems  []string // each a substring of one problem, in order; none: accepted
+	}{
+		{"none set", "", "", scale, modelchoice.Defaults{}, nil},
+		{"a model", "opus", "", scale, modelchoice.Defaults{Model: "opus"}, nil},
+		{"an effort", "", "max", scale, modelchoice.Defaults{Effort: "max"}, nil},
+		{"both", "gpt-5", "xhigh", codexEfforts, modelchoice.Defaults{Model: "gpt-5", Effort: "xhigh"}, nil},
+
+		{"a model name that breaks the syntax", "opus 4", "", scale, modelchoice.Defaults{}, []string{"model:"}},
+		{"an effort off the scale", "", "huge", scale, modelchoice.Defaults{}, []string{`effort: "huge"`}},
+		{"an effort the adapter does not support", "", "max", codexEfforts, modelchoice.Defaults{}, []string{`effort: "max"`}},
+		{"both wrong", "a b", "huge", scale, modelchoice.Defaults{}, []string{"model:", "effort:"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, problems := modelchoice.ParseDefaults(tc.model, tc.effort, tc.supported)
+			if len(problems) != len(tc.problems) {
+				t.Fatalf("problems = %q, want one containing each of %q", problems, tc.problems)
+			}
+			for i, want := range tc.problems {
+				if !strings.Contains(problems[i], want) {
+					t.Errorf("problem %d = %q, want it to contain %q", i, problems[i], want)
+				}
+			}
+			if len(problems) == 0 && got != tc.want {
+				t.Errorf("ParseDefaults() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}

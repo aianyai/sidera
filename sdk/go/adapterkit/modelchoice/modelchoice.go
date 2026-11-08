@@ -101,11 +101,49 @@ type Defaults struct {
 	Effort adapterproto.Effort
 }
 
+// ParseDefaults checks the model and the effort a preset sets for itself, and says
+// every way they are unusable, as problems of the preset. The model must be a
+// model name the protocol carries, because the probe reports it and a choice keeps
+// it; the effort must be one of supported, the efforts the adapter declares in
+// model_choice, so that a default the adapter could not run is the owner's to fix
+// and not a surprise at the first turn. Empty values are not set and pass.
+func ParseDefaults(model, effort string, supported []adapterproto.Effort) (Defaults, []string) {
+	var problems []string
+	if model != "" {
+		if err := adapterproto.ValidateModelName(model); err != nil {
+			problems = append(problems, fmt.Sprintf("model: %v", err))
+		}
+	}
+	if effort != "" && !slices.Contains(supported, adapterproto.Effort(effort)) {
+		problems = append(problems, fmt.Sprintf("effort: %q is not one of %v", effort, supported))
+	}
+	return Defaults{Model: model, Effort: adapterproto.Effort(effort)}, problems
+}
+
 // Choice is the model and effort a session runs with when a requester chose. A
-// field that is empty is left to the runtime.
+// field that is empty is left to the runtime. It is also the form an adapter stores
+// the choice in with its checkpoints: a member that is empty is left out.
 type Choice struct {
-	Model  string
-	Effort adapterproto.Effort
+	Model  string              `json:"model,omitempty"`
+	Effort adapterproto.Effort `json:"effort,omitempty"`
+}
+
+// Validate refuses a choice that chooses nothing or holds a value that Resolve could
+// not have returned. An adapter reads a stored choice back into the arguments of its
+// runtime's process, so what it reads is checked as strictly as what it resolved.
+func (c Choice) Validate() error {
+	if c.Model == "" && c.Effort == "" {
+		return errors.New("a choice that chooses nothing")
+	}
+	if c.Model != "" {
+		if err := adapterproto.ValidateModelName(c.Model); err != nil {
+			return fmt.Errorf("model: %w", err)
+		}
+	}
+	if c.Effort != "" && !c.Effort.Valid() {
+		return fmt.Errorf("effort %q is not one of %s", c.Effort, scaleText())
+	}
+	return nil
 }
 
 // ErrNotAllowed: the preset does not allow what the requester chose.

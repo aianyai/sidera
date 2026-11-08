@@ -18,7 +18,8 @@ It imports the standard library and `adapterproto`.
 | `Key` | The preset field that holds the allowlist, `allowed_models`. An adapter declares it as a `map` whose value is a `string_list`. |
 | `ParseAllowed(raw, supported)` | Reads the value of `Key` (the JSON of the map). `supported` is the efforts the adapter declares in `model_choice`. Every refusal is a problem of the preset. The zero `Allowed` is a preset with no allowlist. |
 | `Allowed.Entries()` | The allowlist as `[]adapterproto.ModelAllowance`, sorted by model with the efforts of each in the order of the scale: what `PresetStatus.AllowedModels` requires. `nil` for the zero value. |
-| `Defaults`, `Choice` | The preset's own model and effort, and the pair a session runs with. An empty field is left to the runtime. |
+| `Defaults`, `ParseDefaults(model, effort, supported)` | The preset's own model and effort. `ParseDefaults` checks them as problems of the preset: the model against the model-name syntax, the effort against `supported`. |
+| `Choice`, `Choice.Validate()` | The pair a session runs with. An empty field is left to the runtime. `Choice` is also the form an adapter stores in its checkpoints (`{"model"?, "effort"?}`); `Validate` refuses a stored one that chooses nothing or holds a value `Resolve` could not have returned. |
 | `Resolve(allowed, defaults, model, effort)` | The fallback rules. Returns the `Choice`, whether the requester chose at all, and an error that wraps `ErrNotAllowed`. |
 | `ErrNotAllowed` | The adapter answers `model_choice_not_allowed` for it; its text says which rule refused and goes to the log, not to the requester. |
 | `MaxAllowedModels` | The bound on the models of one allowlist, the protocol's own (`adapterproto.MaxAllowedModels`). |
