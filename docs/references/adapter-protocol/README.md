@@ -1917,7 +1917,8 @@ does not remove it.
 ### Why
 
 - **A small field vocabulary, not JSON Schema.** The daemon validates
-  configuration at run time and builds forms from it; a full schema engine would
+  configuration when it is written (`manifest.CheckValues`, which an adapter author
+  can call as well) and builds forms from it; a full schema engine would
   make a validation library a run-time dependency of the daemon, for roughly a
   hundred lines of checks. The examples elsewhere (extension manifests of other
   agent tools) use small vocabularies too.

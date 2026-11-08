@@ -18,6 +18,17 @@ protocol has a version of its own.
   be rejected as `node_unsupported` when the target node's version cannot take what it carries. Protocol
   version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
 
+### Changed
+
+- **`sidera preset add`, `sidera adapter enable` and `sidera adapter config` check configuration
+  values against the adapter's manifest.** A value of the wrong type, an enum value that is not
+  an option, a number outside its bounds, a directory that is not an absolute path, a setting
+  the adapter does not have and a missing required setting are refused when they are written,
+  naming the setting, instead of failing when the adapter starts. A new instance of an adapter
+  with a required setting, such as Hermes, must be enabled with `--config`. A preset section for
+  an adapter that is not installed is refused: install the adapter first. Values already stored
+  are not checked again.
+
 ## [0.17.0] - 2026-11-07
 
 Nodes describe themselves in 0.17: the name, host name, system and Sidera version of every

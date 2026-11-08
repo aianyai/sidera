@@ -36,9 +36,11 @@ type Preset struct {
 
 // ParsePreset reads the configuration values of a preset. It returns the preset
 // as far as it could be read and one problem per value that cannot be used; the
-// preset is usable when there are none. The daemon already checked the values
-// against the manifest's field types, so what is left to find is the meaning:
-// a mode the runtime does not know, a relative directory.
+// preset is usable when there are none. The daemon checks the values against
+// the manifest when they are written, but not those already stored when it began
+// to, nor those of a file the owner edited by hand, so every problem is still
+// reported here, those only the adapter can judge (a directory that is gone)
+// among them.
 func ParsePreset(cfg map[string]json.RawMessage) (Preset, []string) {
 	var p Preset
 	var problems []string

@@ -427,8 +427,10 @@ exists and no profile has an adapter name. The instance registers one endpoint, 
 `Hermes` unless `display_name` says otherwise, which other nodes find with
 `directory`.
 
-**The settings that matter.** A setting the adapter does not know is refused with the
-reason, as is a missing required one; every problem is listed at once.
+**The settings that matter.** `sidera adapter enable` and `sidera adapter config`
+refuse a setting the adapter does not have, a value of the wrong type or outside its
+options, and a missing required setting, naming the setting. What only the adapter can
+judge, such as a `hermes_home` that is not there, it reports when it starts.
 
 | Setting | What it is |
 | --- | --- |

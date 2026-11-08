@@ -36,11 +36,12 @@ const (
 	// front end, never more. A direct endpoint's endpoint.recv has its own cap,
 	// adapterproto.MaxWaitSeconds, which this does not govern.
 	MaxRecvWaitSeconds = 120
-	maxFields          = 64
-	maxMarkers         = 32
-	maxMarkerText      = 1024
-	maxString          = 4096
-	maxIntValue        = 1<<53 - 1
+	// maxFields is the number of values a configuration can hold, so that every
+	// field of a group can be given one.
+	maxFields     = adapterproto.MaxConfigEntries
+	maxMarkers    = 32
+	maxMarkerText = 1024
+	maxIntValue   = 1<<53 - 1
 )
 
 // ErrBeyondSchema is matched by errors.Is for a failed rule that JSON Schema
@@ -176,8 +177,9 @@ type Config struct {
 // FieldType is the type of a configuration field.
 type FieldType string
 
-// The configuration vocabulary. It is deliberately small: the daemon validates
-// values at run time and builds forms from it without a schema engine.
+// The configuration vocabulary. It is deliberately small: the daemon checks
+// values when it writes them (CheckValues) and builds forms from it without a
+// schema engine.
 const (
 	FieldString     FieldType = "string"
 	FieldInteger    FieldType = "integer"
@@ -193,8 +195,9 @@ var fieldTypes = []FieldType{FieldString, FieldInteger, FieldBoolean, FieldEnum,
 func FieldTypes() []FieldType { return slices.Clone(fieldTypes) }
 
 // Field describes one configuration field. A directory value must be an
-// absolute path that exists, which the daemon checks; a preset's project
-// directory is one, because it is fixed per preset.
+// absolute path, which the daemon checks when it writes the value; whether the
+// directory exists is for the adapter to report. A preset's project directory
+// is one, because it is fixed per preset.
 type Field struct {
 	// Key is the name of the value in the configuration.
 	Key         string    `json:"key"`
@@ -511,58 +514,10 @@ func (f Field) validate() error {
 	return nil
 }
 
-func (f Field) validateDefault() error {
-	switch f.Type {
-	case FieldString, FieldDirectory, FieldEnum:
-		var s string
-		if err := decodeValue(f.Default, &s); err != nil {
-			return fail("", "a %s default is a string", f.Type)
-		}
-		if err := length(s, 0, maxString); err != nil {
-			return err
-		}
-		if f.Type == FieldEnum && !slices.Contains(f.Options, s) {
-			return failBeyond("", "%q is not one of the options", s)
-		}
-	case FieldInteger:
-		var n int64
-		if err := decodeValue(f.Default, &n); err != nil {
-			return fail("", "an integer default is a plain integer")
-		}
-		if n < -maxIntValue || n > maxIntValue {
-			return fail("", "%d outside the exact integer range", n)
-		}
-		if f.Min != nil && n < *f.Min {
-			return failBeyond("", "%d is below min %d", n, *f.Min)
-		}
-		if f.Max != nil && n > *f.Max {
-			return failBeyond("", "%d is above max %d", n, *f.Max)
-		}
-	case FieldBoolean:
-		var b bool
-		if err := decodeValue(f.Default, &b); err != nil {
-			return fail("", "a boolean default is true or false")
-		}
-	case FieldStringList:
-		var items []json.RawMessage
-		if err := decodeValue(f.Default, &items); err != nil || items == nil {
-			return fail("", "a string_list default is a list of strings")
-		}
-		if len(items) > 256 {
-			return fail("", "%d items, at most 256", len(items))
-		}
-		for i, it := range items {
-			var s string
-			if err := decodeValue(it, &s); err != nil {
-				return fail(idx(i), "a list holds strings only")
-			}
-			if err := length(s, 0, maxString); err != nil {
-				return under(idx(i), err)
-			}
-		}
-	}
-	return nil
-}
+// validateDefault checks a default as it checks a value, except that it need
+// not be an absolute directory: a manifest is the same on every platform, and
+// a path that is absolute on one is not on another.
+func (f Field) validateDefault() error { return f.checkKind(f.Default) }
 
 // decodeValue decodes one JSON value of a plain kind: null is refused, and a
 // number must be an integer literal for an integer target.

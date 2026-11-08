@@ -69,6 +69,14 @@ declared here or in the package that composes it. It reads no clock.
   same replacement as the new version. The management layer builds the result
   through a `ResultFunc`, which sees the state the change produces; the shape of
   a result is its own.
+- **Values are checked against the manifest when they are written.**
+  `AddPreset`, `EnableAdapter` (a new instance) and `SetInstanceConfig` check the
+  values they carry with `manifest.CheckValues` against the manifest of the adapter,
+  which must be installed and loadable; a failure is a `ChangeInvalid` at
+  `config.<key>` (`config.<adapter id>.<key>` in a preset) or, for an adapter that
+  cannot be checked against, `ChangeAdapterNotInstalled`. The loaders check only
+  the shape, because a manifest may be unavailable at load and a bad package faults
+  its adapter, never the node; values already stored are not checked again.
 - **A preset must state whether local sources may start a session with it.**
   `local_sources` is `"allow"` or `"deny"`, required, with no default. It decodes
   to `authz.PresetLocalAccess`, whose zero value is not a statement; no decoder

@@ -234,8 +234,13 @@ const (
 }
 `
 
+	// The fields are the settings the tests write: strings, so that no test depends
+	// on what an absolute path looks like on the platform it runs on.
 	manifestJSON = `{"manifest_version":1,"id":"example","version":"%s","protocol":{"min":1,"max":1},` +
-		`"entry":{"program":"bin/sidera-adapter-example"},"platforms":[{"os":"linux","arch":"amd64"}]}`
+		`"entry":{"program":"bin/sidera-adapter-example"},"platforms":[{"os":"linux","arch":"amd64"}],` +
+		`"config":{"instance":[{"key":"workspace","type":"string","title":"Workspace"},` +
+		`{"key":"codex_program","type":"string","title":"Codex program"}],` +
+		`"preset":[{"key":"model","type":"string","title":"Model"},{"key":"turns","type":"integer","title":"Turns"}]}}`
 )
 
 func manifestOf(id, version string) string {

@@ -26,7 +26,9 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // What the adapter host asks of the engine for the life of a connection: the
@@ -622,12 +624,23 @@ func asStrings(v adapterproto.ConfigValues) map[string]string {
 
 func TestAdmissionReturnsWhatAdapterStartCarries(t *testing.T) {
 	noLeaks(t)
-	r := newRig(t, 10)
+	// A second adapter is installed, so that a preset can hold a section for it:
+	// that section must never reach "chat".
+	other := fakeadapter.DefaultManifestOptions()
+	other.ID = "other"
+	other.Config = &manifest.Config{Preset: []manifest.Field{{Key: "x", Type: manifest.FieldString, Title: "X"}}}
+	r := newRig(t, 10, withPackage("/src/other", packageDisk(t, map[string]string{
+		"sidera-adapter.json": manifestFile(t, other),
+		other.Program:         "#!other\n",
+	})))
+	e := r.start()
+	if _, err := e.Execute(ctx, installCommand(1, "install other", "/src/other")); err != nil {
+		t.Fatalf("installing the second adapter: %v", err)
+	}
 	r.enableInstance("agent", `{"base_url":"https://api.example.test","retries":3,"debug":true,"tags":["a","b"]}`)
 	r.addPreset("plain", `{"local_sources":"deny"}`)
 	r.addPreset("fast", `{"local_sources":"allow","config":{"chat":{"model":"small","retries":2}}}`)
 	r.addPreset("deep", `{"local_sources":"deny","config":{"chat":{"effort":"high"},"other":{"x":"not for chat"}}}`)
-	e := r.start()
 	rt := runtimeAdmission(t, 10, adapterproto.FrontendCLI)
 
 	// The first connection of "agent": nothing registered yet.

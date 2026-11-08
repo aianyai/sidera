@@ -568,7 +568,9 @@ and the session's Sidera token is visible to everything the agent runs. A full-a
 session, of either runtime, acts as the local owner and can read everything, the data
 directory included.
 
-Add the presets:
+Add the presets (the adapter of every `config` section in the file must be installed:
+`preset add` checks each section against that adapter's settings and refuses a section
+for one that is not):
 
 ```sh
 sidera preset add light --file light.json

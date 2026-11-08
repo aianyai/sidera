@@ -327,7 +327,9 @@ setting.
 
 ### Add the presets
 
-On the machine that has the agent:
+On the machine that has the agent, with its adapter installed: `preset add` checks a
+preset's settings against the adapter's manifest and refuses a section for an adapter
+that is not installed.
 
 ```sh
 sidera preset add light --file claude-light.json   # or codex-light.json, or light.json for both

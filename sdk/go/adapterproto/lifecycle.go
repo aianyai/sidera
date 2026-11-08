@@ -36,15 +36,22 @@ const (
 	maxPathLen       = 4096
 	maxEnvEntries    = 64
 	maxEnvValueLen   = 4096
-	maxConfigEntries = 64
-	maxConfigString  = 4096
-	maxConfigList    = 256
 	maxProblems      = 32
 	maxProbes        = 256
 	// MaxDirectEndpoints bounds max_endpoints in the capabilities.
 	MaxDirectEndpoints = 1000
 	// MaxCheckpointBytes bounds a checkpoint state, measured as compact JSON.
 	MaxCheckpointBytes = 16 * 1024
+)
+
+// The shape of configuration values: how many a ConfigValues holds, how long a
+// string value or a list item is (in characters), and how many items a list
+// holds. The manifest's check of a value (package manifest) uses the same
+// bounds, so a value it accepts is one the daemon can send.
+const (
+	MaxConfigEntries = 64
+	MaxConfigString  = 4096
+	MaxConfigList    = 256
 )
 
 // DaemonInfo identifies the daemon to the adapter.
@@ -363,8 +370,8 @@ func validateEnvEntries(env map[string]string) error {
 func (t ToolAccess) Validate() error { return at("env", validateEnv(t.Env)) }
 
 // ConfigValues are configuration values keyed by field key. A value is a string,
-// an integer, a boolean or a list of strings; the daemon validated it against
-// the manifest's field description before sending it.
+// an integer, a boolean or a list of strings; the daemon checked it against
+// the manifest's field description when it was written.
 type ConfigValues map[string]json.RawMessage
 
 // Validate checks the keys and the kinds of the values.
@@ -372,8 +379,8 @@ func (v ConfigValues) Validate() error {
 	if v == nil {
 		return bad("required map is missing; use an empty map for none")
 	}
-	if len(v) > maxConfigEntries {
-		return bad("%d entries, at most %d", len(v), maxConfigEntries)
+	if len(v) > MaxConfigEntries {
+		return bad("%d entries, at most %d", len(v), MaxConfigEntries)
 	}
 	for k, raw := range v {
 		if err := matches(configKeyRE, k); err != nil {
@@ -397,7 +404,7 @@ func validConfigValue(raw json.RawMessage) error {
 		if err := json.Unmarshal(raw, &s); err != nil {
 			return bad("%v", err)
 		}
-		return strLen(s, 0, maxConfigString)
+		return strLen(s, 0, MaxConfigString)
 	case c == 't' || c == 'f':
 		var b bool
 		if err := json.Unmarshal(raw, &b); err != nil {
@@ -415,8 +422,8 @@ func validConfigValue(raw json.RawMessage) error {
 		if err := json.Unmarshal(raw, &items); err != nil {
 			return bad("%v", err)
 		}
-		if len(items) > maxConfigList {
-			return bad("%d items, at most %d", len(items), maxConfigList)
+		if len(items) > MaxConfigList {
+			return bad("%d items, at most %d", len(items), MaxConfigList)
 		}
 		for i, it := range items {
 			it = bytes.TrimSpace(it)
@@ -427,7 +434,7 @@ func validConfigValue(raw json.RawMessage) error {
 			if err := json.Unmarshal(it, &s); err != nil {
 				return at(index(i), bad("%v", err))
 			}
-			if err := strLen(s, 0, maxConfigString); err != nil {
+			if err := strLen(s, 0, MaxConfigString); err != nil {
 				return at(index(i), err)
 			}
 		}

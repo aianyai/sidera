@@ -138,7 +138,7 @@
       ]
     },
     "Field": {
-      "description": "One configuration field. A directory must be an absolute path that exists; the daemon checks that when it validates a value.",
+      "description": "One configuration field. A directory value must be an absolute path; the daemon checks that when it writes the value, and the adapter reports whether the directory exists.",
       "type": "object",
       "required": ["key", "type", "title"],
       "additionalProperties": false,

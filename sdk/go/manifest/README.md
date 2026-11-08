@@ -21,6 +21,7 @@ the same rules in JSON Schema.
 | `Manifest.Validate()` | Every structural rule; use it on a manifest built in code |
 | `Encode(m)` | The text of `sidera-adapter.json` for a manifest built in code: validated, indented, with a trailing newline |
 | `WritePackage(dir, m, binary)` | An installable package directory: the manifest and a copy of the binary built for the platform at the manifest's `entry.program`, with `.exe` added to both for a Windows package, and to a setup program that names the same binary; what each adapter's `package` subcommand ends in |
+| `Field.CheckValue(raw)`, `CheckValues(fields, values)` | The rule for a configuration value, and for the values of one scope (an instance, or one adapter's section of a preset): the kind, the options of an enum, the bounds of an integer, the limits of a string and a list, an absolute directory, no unknown key, every required field present. The daemon applies it when a value is written; an adapter author can use it to check a configuration in a test. A default is held to the same rule except that a directory default need not be absolute |
 | `FieldTypes()`, `BudgetFrontends()`, `Units()`, `KnownOS()`, `KnownArch()` | The vocabularies the schema is compared with |
 
 ## Rules
@@ -48,8 +49,9 @@ the same rules in JSON Schema.
   `string`, `integer`, `boolean`, `enum`, `directory` and `string_list`. `options`
   belong to enums and are required for them; `min` and `max` belong to integers;
   a `default` has the type of the field, lies among the options of an enum and
-  within the bounds of an integer. A directory value must be an absolute path that
-  exists, which the daemon checks when it validates a value.
+  within the bounds of an integer. A directory value must be an absolute path, which the
+  daemon checks when it writes a value; that the directory exists is for the
+  adapter to report.
 - `budgets` give the output budget per front end (`cli`, `mcp`, `direct`), at most
   one each, with a unit (`chars` or `tokens`) and a limit of 1 to 131072. The
   author subtracts any safety margin.

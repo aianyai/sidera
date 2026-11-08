@@ -194,8 +194,10 @@ func compactValue(raw json.RawMessage) (json.RawMessage, error) {
 
 // checkValues checks and compacts the values of a map of configuration values:
 // the keys have the syntax of a configuration key and no value is null. The
-// manifest says which keys exist and what they may hold; that is checked when
-// the adapter is started.
+// manifest says which keys exist and what they may hold; the changes that write
+// values check them against it, but a file is only read here, because the
+// manifest may be unavailable when it loads and what a file already holds is not
+// checked again.
 func checkValues(values map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	if values == nil {
 		return nil, nil

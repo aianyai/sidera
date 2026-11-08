@@ -216,10 +216,19 @@ preset lets a local agent create a session at once. An owner declares `deny` for
 a preset that an agent on the node must not use, for example one without a
 sandbox.
 
-`config` groups the values of the manifest's preset fields by adapter id. Only
-the shape is checked here (an adapter id, configuration keys, values that are
-not `null`): the adapter may not be installed when the file is read, and the
-manifest says what a value may be, which is checked when an instance starts.
+`config` groups the values of the manifest's preset fields by adapter id. When
+`preset add` writes a preset, each adapter's section is checked against the preset
+fields of that adapter's manifest (`manifest.CheckValues`): every key is a field,
+every value has the field's type and is within its options and bounds, a directory is
+an absolute path, and every required field is there. The adapter must be installed
+and its package must load, because otherwise its values could not be checked and
+would take effect unchecked when it is installed; a section for another adapter is
+refused as `adapter_unknown`. When the file is read only the shape is checked (an
+adapter id, configuration keys, values that are not `null`), because the manifest
+may not be available then and a package that does not load faults only its adapter.
+A value that is already stored is not checked again, by an upgrade or by the
+installation of a newer package: it reaches the adapter as it is, and the adapter
+reports a value it cannot use.
 A preset cannot be changed, only removed and added again. The values reach an adapter
 only in `adapter.start`, so adding or removing a preset restarts the instances that run
 and declare a runtime (the engine reference says which); a restart is the one way a
@@ -250,11 +259,16 @@ instance, because its stable endpoint ids belong to it.
 
 `enable` refuses an adapter that is not installed, an existing instance of
 another adapter, and an existing instance together with a configuration, which
-would be silently ignored or would replace the owner's. The owner replaces the
+would be silently ignored or would replace the owner's. The configuration of a new
+instance (none counts as no values) is checked against the instance fields of the
+adapter's manifest as a preset's section is, so a new instance without a value for
+a required field is refused; turning on an instance that exists changes no value
+and checks none. The owner replaces the
 configuration of an instance that exists with `adapter config`
 (`Config.SetInstanceConfig`): the document replaces `config` whole, is read as
-`enable` reads one (an object whose values are not `null`; `{}` clears it), works on an
-enabled instance and a disabled one, and changes nothing else of the instance. The
+`enable` reads one (an object whose values are not `null`; `{}` clears it, unless a
+field is required), is checked against the manifest of the instance's adapter, works
+on an enabled instance and a disabled one, and changes nothing else of the instance. The
 values reach an adapter only in `adapter.start`, so the caller restarts a running
 instance; this layer only keeps them.
 

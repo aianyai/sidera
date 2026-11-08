@@ -18,6 +18,7 @@ import (
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // checkVersion is where every versioned change begins. The version a request
@@ -40,6 +41,55 @@ func invalidChange(err error) error {
 		return &ChangeError{Reason: ChangeInvalid, Field: fe.Field, Err: fe.Err}
 	}
 	return &ChangeError{Reason: ChangeInvalid, Err: err}
+}
+
+// manifestOf returns the manifest of the installed adapter id, which the values
+// written for the adapter are checked against. An adapter that is not installed,
+// and one whose package cannot be loaded, have no manifest to check against, and
+// a value is never written unchecked: the refusal is ChangeAdapterNotInstalled
+// at field, and its Err says which of the two it is.
+func (st state) manifestOf(id, field string) (manifest.Manifest, error) {
+	a, ok := st.adapters[id]
+	switch {
+	case !ok:
+		return manifest.Manifest{}, &ChangeError{Reason: ChangeAdapterNotInstalled, Field: field, Err: errors.New("the adapter is not installed")}
+	case a.Fault != nil:
+		return manifest.Manifest{}, &ChangeError{Reason: ChangeAdapterNotInstalled, Field: field, Err: fmt.Errorf("the package of the adapter cannot be loaded: %w", a.Fault)}
+	}
+	return a.Manifest, nil
+}
+
+// checkAgainstManifest checks the values of one scope against its fields (see
+// manifest.CheckValues) and turns a failure into the refusal of the change:
+// prefix is the path of the scope, and the path of the offending value follows
+// it.
+func checkAgainstManifest(prefix string, fields []manifest.Field, values map[string]json.RawMessage) error {
+	err := manifest.CheckValues(fields, values)
+	var me *manifest.Error
+	if !errors.As(err, &me) {
+		return err
+	}
+	field := prefix
+	if me.Field != "" {
+		field += "." + me.Field
+	}
+	return &ChangeError{Reason: ChangeInvalid, Field: field, Err: errors.New(me.Msg)}
+}
+
+// instanceFields and presetFields are the fields of the two scopes of a
+// configuration; a manifest without any takes no values in them.
+func instanceFields(m manifest.Manifest) []manifest.Field {
+	if m.Config == nil {
+		return nil
+	}
+	return m.Config.Instance
+}
+
+func presetFields(m manifest.Manifest) []manifest.Field {
+	if m.Config == nil {
+		return nil
+	}
+	return m.Config.Preset
 }
 
 // nextVersion is the version a change produces. The largest version has no
@@ -127,7 +177,9 @@ func (c *Config) SetNodeSettings(req Request, patch []byte, result ResultFunc[No
 }
 
 // AddPreset adds a preset named name from its document. The document must make
-// the statement about local sources; a name that is taken is refused.
+// the statement about local sources; a name that is taken is refused. Each
+// adapter's section is checked against the manifest of that adapter, which must
+// be installed (see checkPresetConfig).
 func (c *Config) AddPreset(req Request, name string, preset []byte, result ResultFunc[Presets]) (Presets, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
@@ -145,6 +197,9 @@ func (c *Config) AddPreset(req Request, name string, preset []byte, result Resul
 	if _, taken := cur.Items[name]; taken {
 		return Presets{}, &ChangeError{Reason: ChangePresetExists, Field: name}
 	}
+	if err := c.checkPresetConfig(p); err != nil {
+		return Presets{}, err
+	}
 	next := clonePresets(cur)
 	version, err := nextVersion(next.Version)
 	if err != nil {
@@ -153,6 +208,25 @@ func (c *Config) AddPreset(req Request, name string, preset []byte, result Resul
 	next.Version = version
 	next.Items[name] = p
 	return c.commitPresets(req, next, result)
+}
+
+// checkPresetConfig checks each adapter's section of a preset against the
+// preset fields of that adapter's manifest. A section for an adapter that is
+// not installed is refused: its values could not be checked now, and would take
+// effect unchecked when the adapter is installed.
+func (c *Config) checkPresetConfig(p Preset) error {
+	st := c.read()
+	for _, id := range sortedKeys(p.Config) {
+		field := "config." + id
+		m, err := st.manifestOf(id, field)
+		if err != nil {
+			return err
+		}
+		if err := checkAgainstManifest(field, presetFields(m), p.Config[id]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RemovePreset removes the preset named name.
@@ -238,7 +312,9 @@ func (c *Config) publishInstances(next Instances) Instances {
 // is given (a JSON object); an existing one is turned on, and keeps what the
 // owner set. An existing instance of another adapter, and an existing instance
 // together with a configuration, which would be silently ignored or replace the
-// owner's, are refused.
+// owner's, are refused. The configuration of a new instance is checked against
+// the manifest of the adapter, so a new instance without one is refused when the
+// adapter has a required field.
 func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceConfig []byte, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
@@ -267,8 +343,16 @@ func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceCo
 	case exists && instanceConfig != nil:
 		return Instances{}, &ChangeError{Reason: ChangeInstanceExists, Field: instance}
 	}
-	if _, installed := st.adapters[adapter]; !installed {
-		return Instances{}, &ChangeError{Reason: ChangeAdapterNotInstalled, Field: adapter}
+	if !exists {
+		// An existing instance keeps the configuration it has; only a new one
+		// is checked, with no values at all when none were given.
+		m, err := st.manifestOf(adapter, adapter)
+		if err != nil {
+			return Instances{}, err
+		}
+		if err := checkAgainstManifest("config", instanceFields(m), cfg); err != nil {
+			return Instances{}, err
+		}
 	}
 	next := cloneInstances(st.instances)
 	version, err := nextVersion(next.Version)
@@ -287,9 +371,10 @@ func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceCo
 }
 
 // decodeInstanceConfig reads the configuration values of an instance, a JSON
-// object, as `enable` and `config` take them. Only their shape is checked here:
-// what a value may be is the manifest's to say, and is judged when the instance
-// starts.
+// object, as `enable` and `config` take them. Only their shape is checked here,
+// as it is whenever the values are read from a file: what a value may be is the
+// manifest's to say, and the changes that write one check it against the
+// manifest of the instance's adapter (see checkAgainstManifest).
 func decodeInstanceConfig(data []byte) (map[string]json.RawMessage, error) {
 	var raw map[string]json.RawMessage
 	if err := decodeStrict(data, &raw); err != nil {
@@ -305,8 +390,10 @@ func decodeInstanceConfig(data []byte) (map[string]json.RawMessage, error) {
 // SetInstanceConfig replaces the configuration of the instance named instance with
 // instanceConfig, a JSON object read as `enable` reads one, so an empty object
 // clears it. The instance stays as it is otherwise, enabled or not, with its
-// endpoint settings and its stable endpoint ids. The adapter reads the values when
-// it starts, so a running instance takes them only when the caller restarts it.
+// endpoint settings and its stable endpoint ids. The values are checked against
+// the manifest of the instance's adapter, whose package must load. The adapter
+// reads the values when it starts, so a running instance takes them only when the
+// caller restarts it.
 func (c *Config) SetInstanceConfig(req Request, instance string, instanceConfig []byte, open OpenEndpoints, result ResultFunc[Instances]) (Instances, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
@@ -314,11 +401,19 @@ func (c *Config) SetInstanceConfig(req Request, instance string, instanceConfig 
 	if err := checkVersion(req, st.instances.Version); err != nil {
 		return Instances{}, err
 	}
-	if _, ok := st.instances.Items[instance]; !ok {
+	current, ok := st.instances.Items[instance]
+	if !ok {
 		return Instances{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
 	}
 	cfg, err := decodeInstanceConfig(instanceConfig)
 	if err != nil {
+		return Instances{}, err
+	}
+	m, err := st.manifestOf(current.Adapter, current.Adapter)
+	if err != nil {
+		return Instances{}, err
+	}
+	if err := checkAgainstManifest("config", instanceFields(m), cfg); err != nil {
 		return Instances{}, err
 	}
 	next := cloneInstances(st.instances)
