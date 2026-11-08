@@ -132,18 +132,10 @@ type Choice struct {
 // not have returned. An adapter reads a stored choice back into the arguments of its
 // runtime's process, so what it reads is checked as strictly as what it resolved.
 func (c Choice) Validate() error {
-	if c.Model == "" && c.Effort == "" {
+	if !adapterproto.ChoosesModel(c.Model, c.Effort) {
 		return errors.New("a choice that chooses nothing")
 	}
-	if c.Model != "" {
-		if err := adapterproto.ValidateModelName(c.Model); err != nil {
-			return fmt.Errorf("model: %w", err)
-		}
-	}
-	if c.Effort != "" && !c.Effort.Valid() {
-		return fmt.Errorf("effort %q is not one of %s", c.Effort, scaleText())
-	}
-	return nil
+	return adapterproto.ValidateModelChoice(c.Model, c.Effort)
 }
 
 // ErrNotAllowed: the preset does not allow what the requester chose.

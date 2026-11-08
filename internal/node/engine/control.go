@@ -84,7 +84,7 @@ func (e *Engine) control(now time.Time, c Caller, r ControlRequest) (SendResult,
 // adapter protocol's own (adapterproto.Control.Validate), not written again here.
 func controlKind(r ControlRequest) (envelope.Kind, error) {
 	ctl := adapterproto.Control{Signal: r.Signal}
-	if r.Preset != "" || r.Model != "" || r.Effort != "" {
+	if r.Preset != "" || adapterproto.ChoosesModel(r.Model, r.Effort) {
 		ctl.Params = &adapterproto.ControlParams{Preset: r.Preset, Model: r.Model, Effort: r.Effort}
 	}
 	if err := ctl.Validate(); err != nil {
