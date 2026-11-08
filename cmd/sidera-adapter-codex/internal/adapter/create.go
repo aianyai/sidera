@@ -23,10 +23,6 @@ type createAttempt struct {
 	params adapterproto.SessionCreateParams
 	final  *adapterproto.SessionCreateResult
 
-	// choice is the model and effort the session runs with when its requester chose,
-	// resolved against the preset at every run of the attempt; nil when it chose none.
-	choice *modelchoice.Choice
-
 	state        create.State
 	checkpointed bool
 	loadedOn     *appserver.Client // the connection the thread was started or resumed in
@@ -69,7 +65,7 @@ func (a *App) CreateSession(ctx context.Context, p adapterproto.SessionCreatePar
 	if rec.final != nil {
 		return *rec.final, nil
 	}
-	if !rec.checkpointed && rec.state == (create.State{}) {
+	if !rec.checkpointed && rec.state.ThreadID == "" && rec.state.Failed == "" {
 		st, err := create.ParseCheckpoint(p.Checkpoint)
 		if err != nil {
 			return adapterproto.SessionCreateResult{}, peer.NewError(peer.CodeInvalidParams, err.Error())
@@ -122,18 +118,23 @@ func (a *App) runCreate(ctx context.Context, rec *createAttempt, p adapterproto.
 		return failed(adapterproto.CreateFailPresetInvalid, "see the preset's problems in the probe"), nil
 	}
 
-	choice, chosen, err := modelchoice.Resolve(preset.Allowed,
-		modelchoice.Defaults{Model: preset.Model, Effort: adapterproto.Effort(preset.Effort)}, p.Model, p.Effort)
-	if err != nil {
-		// A thread an earlier run started is archived, so that nothing is left running.
-		a.log.Warn("the choice of a model or an effort is not allowed", "attempt", p.Attempt, "preset", p.Preset, "error", err)
-		res := a.fail(ctx, rec, p, adapterproto.CreateFailModelChoiceNotAllowed)
-		res.Detail = cut(err.Error(), adapterproto.MaxDetailLen)
-		return res, nil
-	}
-	rec.choice = nil
-	if chosen {
-		rec.choice = &choice
+	// The choice is resolved once, before the thread exists, and stored with the thread's
+	// id. From then on the stored one is used: the first prompt already ran with it, and
+	// the preset it was resolved against may have been changed since (the only way is an
+	// adapter restart), which must neither fail the attempt nor change the pair.
+	if rec.state.ThreadID == "" && rec.state.Failed == "" {
+		choice, chosen, err := modelchoice.Resolve(preset.Allowed,
+			modelchoice.Defaults{Model: preset.Model, Effort: adapterproto.Effort(preset.Effort)}, p.Model, p.Effort)
+		if err != nil {
+			a.log.Warn("the choice of a model or an effort is not allowed", "attempt", p.Attempt, "preset", p.Preset, "error", err)
+			res := a.fail(ctx, rec, p, adapterproto.CreateFailModelChoiceNotAllowed)
+			res.Detail = cut(err.Error(), adapterproto.MaxDetailLen)
+			return res, nil
+		}
+		rec.state.Choice = nil
+		if chosen {
+			rec.state.Choice = &choice
+		}
 	}
 
 	for {
@@ -248,7 +249,7 @@ func (a *App) precheck(ctx context.Context, rec *createAttempt) (adapterproto.Se
 // startThread starts the thread and registers it as the session, so that its
 // events are reported from the first one.
 func (a *App) startThread(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) (adapterproto.SessionCreateResult, bool, error) {
-	s := newSession(p.SessionEndpoint, p.Preset, "", p.ToolAccess.Env, rec.choice)
+	s := newSession(p.SessionEndpoint, p.Preset, "", p.ToolAccess.Env, rec.state.Choice)
 	th, err := a.threadStart(ctx, c, s, preset)
 	if err != nil {
 		if errors.Is(err, errUnprotected) {
@@ -285,7 +286,7 @@ func (a *App) loadThread(ctx context.Context, rec *createAttempt, p adapterproto
 	// already reported.
 	s := a.sessionOf(p.SessionEndpoint)
 	if s == nil || s.threadID != rec.state.ThreadID {
-		s = newSession(p.SessionEndpoint, p.Preset, rec.state.ThreadID, p.ToolAccess.Env, rec.choice)
+		s = newSession(p.SessionEndpoint, p.Preset, rec.state.ThreadID, p.ToolAccess.Env, rec.state.Choice)
 		s.creating = true
 	}
 	th, err := a.threadResume(ctx, c, s, rec.state.ThreadID, preset)
@@ -428,9 +429,9 @@ func (a *App) awaitWake(ctx context.Context, s *session, d time.Duration, since 
 // what Codex defaulted to. A store that fails is an error, and the attempt is asked
 // again.
 func (a *App) ready(ctx context.Context, c *appserver.Client, rec *createAttempt, p adapterproto.SessionCreateParams, preset codexcfg.Preset) (adapterproto.SessionCreateResult, error) {
-	if rec.choice != nil {
+	if rec.state.Choice != nil {
 		err := a.conn.CheckpointPut(ctx, adapterproto.CheckpointPutParams{
-			Scope: adapterproto.ScopeSession, ID: string(p.SessionEndpoint), State: create.SessionCheckpoint(*rec.choice),
+			Scope: adapterproto.ScopeSession, ID: string(p.SessionEndpoint), State: create.SessionCheckpoint(*rec.state.Choice),
 		})
 		if err != nil {
 			return adapterproto.SessionCreateResult{}, err

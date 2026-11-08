@@ -517,9 +517,10 @@ steps are:
    preset without one, `ephemeral: false` and the thread's configuration, whose permission
    profile has to be reported active (see above). The thread is registered as the session at
    once, so its events are reported from the first one.
-2. `checkpoint.put` (scope `attempt`) of `{"v":1,"thread_id":"…"}`, before anything else
-   is done to the thread. Nothing else is ever put: not the credentials, and not that
-   the prompt arrived, which the thread's record shows.
+2. `checkpoint.put` (scope `attempt`) of `{"v":1,"thread_id":"…"}`, with the requester's
+   resolved `choice` (see below) when it chose, before anything else is done to the thread.
+   Nothing else is ever put: not the credentials, and not that the prompt arrived, which the
+   thread's record shows.
 3. `thread/name/set` to `sidera <attempt>`. The server writes a thread to disk from its
    first name on, so this is the step that makes it persistent.
 4. Wait for the channel's MCP server to report in `mcpServer/startupStatus/updated`.
@@ -545,7 +546,8 @@ connection that is gone.
 state is the checkpoint the daemon hands back: the thread is resumed with its
 configuration, and a thread the server does not have (`no rollout found`) was never
 written, because naming comes after the stored checkpoint, so the attempt starts over
-with a new thread and stores that one. A prompt found in the record is never started
+with a new thread and stores that one. A choice the checkpoint holds is used as it is and
+the request is not resolved again (see below). A prompt found in the record is never started
 again. A turn that ended without the prompt in the record is started again, at most
 twice (`MaxStarts`).
 
@@ -555,7 +557,8 @@ repeats the attempt. If the connection ends before the prompt is found it is
 `indeterminate` with `native_unreachable`, and the session is dropped until the repeat
 loads the thread again. If the two starts ended without the prompt, or the server
 refuses a step, it is `failed` with `native_error`. A failure is final: the reason is
-stored in the checkpoint first (`{"v":1,"thread_id":"…","failed":"native_error"}`), the
+stored in the checkpoint first (`{"v":1,"thread_id":"…","failed":"native_error"}`, with the
+`choice` it already held), the
 thread is archived, and every later request of the attempt gets the same failure.
 Cancellation of the request (the daemon gave up waiting) concludes nothing.
 
@@ -574,10 +577,23 @@ model name or an effort that is not valid, an effort Codex does not run, an effo
 twice) is a problem of the preset, which makes the preset unusable like any other.
 A preset's own `model` must also be a valid model name, since the probe reports it.
 
+A preset's own `model` and `effort` are checked by the SDK's `modelchoice.ParseDefaults`: the
+model must be a valid model name, since the probe reports it, and the effort one of the
+efforts Codex runs, the same list the capability declares.
+
 The creation resolves the request with `modelchoice.Resolve` against the preset's own
 `model` and `effort`, and nothing is ever downgraded or substituted: what the preset does
-not allow is `failed` with `model_choice_not_allowed`, before any thread exists (a thread an
-earlier run of the attempt started is archived), and the detail goes to the log only. A
+not allow is `failed` with `model_choice_not_allowed`, before any thread exists, and the
+detail goes to the log only. The request is resolved only while the attempt has no thread. The
+resolved pair is then stored in the attempt's checkpoint, as its `choice` member, in the same
+write that first stores the thread's id; a checkpoint without the member is an attempt
+without a choice, which is what every checkpoint written before a choice could be made is. A
+later run that finds a thread, in memory or in the checkpoint after a restart, uses the stored
+pair and does not resolve again. The first prompt has already run with that pair, and an
+adapter restart is the only way the preset can have changed: resolving again would fail the
+attempt, and archive a thread whose prompt ran, when the allowlist was narrowed, and would
+apply a changed default effort from the second turn on. A thread the server no longer has
+sends the attempt back to the start, and the request is then resolved afresh. A
 request with neither member is not a choice: the session follows its preset, stores nothing
 and behaves as it did before the capability existed. A member that neither the preset
 states nor the requester gave stays empty and is not sent; Codex decides it by the owner's
@@ -589,8 +605,8 @@ with each member that is empty left out, before the answer is `created`. `adapte
 it from the session's `checkpoint` into the session. A checkpoint that cannot be read (a
 version this adapter does not know, an empty choice, a model or an effort that is not valid)
 leaves the session reported `unreachable` and logged, rather than run on values nobody chose.
-A retry of a creation after a restart resolves the request again, so it stores the checkpoint
-again. The pair is stored, not the requester's words, because the allowlist is checked once,
+A retry of a creation after a restart stores the checkpoint again, from the pair the attempt's
+checkpoint holds. The pair is stored, not the requester's words, because the allowlist is checked once,
 when the session is created: the session keeps the combination that was checked, even if the
 owner later edits or narrows the preset.
 
@@ -608,8 +624,8 @@ established, so the owner lists in `allowed_models` only the efforts each model 
 The adapter checks only that an effort is one Codex runs.
 
 The probe reports each usable preset's `model`, `effort` and `allowed_models` in its
-`PresetStatus`, sorted by model with the efforts in the order of the scale; a preset with a
-problem reports its problems alone.
+`PresetStatus`, sorted by model with the efforts in the order of the scale; a preset that is
+not usable after every check, a missing `cwd` included, reports its problems alone.
 
 ### Prompts, turns, reconciliation and close
 
@@ -1273,7 +1289,7 @@ the fake server); `TestEnviron` (the environment of the server); `TestStartRunsT
 `TestCheckpointRoundTrip`, `TestSessionCheckpointRoundTrip`, `TestParseSessionCheckpoint` (creation); `TestParsePresetReadsTheAllowlist`,
 `TestSupportedEffortsAreTheOnesAPresetMayName` (the allowlist and the efforts); `TestChoiceSurvivesARestartAndAResume`,
 `TestSessionWithoutAChoiceFollowsThePreset`, `TestChoiceFillsOnlyWhatTheyStateAndSendsNothingElse`,
-`TestRetriedCreationResolvesTheChoiceAgain`, `TestSameAttemptWithAnotherChoiceConflicts`,
+`TestAttemptCheckpointHoldsTheChoiceWithTheThread`, `TestRetriedCreationKeepsTheChoiceItResolvedFirst`, `TestCheckpointKeepsTheChoice`, `TestSameAttemptWithAnotherChoiceConflicts`,
 `TestRefusedChoiceFailsWithoutStartingAThread`, `TestProbeReportsTheChoiceMembersOfEachPreset`,
 `TestUnreadableSessionCheckpointLeavesTheSessionUnreachable` (a requester's choice); `TestJudge` (reconciliation); `TestHandle`
 (requests of the server); `TestManifestAndCapabilitiesAreValid`, `TestWritePackage`

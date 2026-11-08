@@ -210,14 +210,8 @@ func ParsePreset(name string, v adapterproto.ConfigValues) (Preset, []string) {
 	p.Approvals = read(KeyApprovals, DefaultApprovals, approvals)
 	p.Model = read(KeyModel, "", nil)
 	p.Effort = read(KeyEffort, "", nil)
-	if p.Effort != "" && !slices.Contains(efforts, p.Effort) {
-		problems = append(problems, fmt.Sprintf("%s: %q is not one of %v", KeyEffort, p.Effort, efforts))
-	}
-	if p.Model != "" {
-		if err := adapterproto.ValidateModelName(p.Model); err != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", KeyModel, err))
-		}
-	}
+	_, defaultProblems := modelchoice.ParseDefaults(p.Model, p.Effort, SupportedEfforts())
+	problems = append(problems, defaultProblems...)
 	if raw, ok := v[modelchoice.Key]; ok {
 		allowed, err := modelchoice.ParseAllowed(raw, SupportedEfforts())
 		if err != nil {

@@ -2,6 +2,7 @@ package adapter_test
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-codex/internal/appserver/appservertest"
@@ -171,25 +172,67 @@ func TestChoiceFillsOnlyWhatTheyStateAndSendsNothingElse(t *testing.T) {
 	}
 }
 
-// A creation that is retried after the adapter restarted carries the requester's model
-// and effort again, resolves them again, and stores the session's checkpoint.
-func TestRetriedCreationResolvesTheChoiceAgain(t *testing.T) {
+// The pair a creation resolved is stored with the attempt in the same write as the
+// thread's id, so that no thread exists that a retry could not tell the pair of.
+func TestAttemptCheckpointHoldsTheChoiceWithTheThread(t *testing.T) {
 	codex := newFakeCodex(t)
-	codex.seed("th-9", &fakeTurn{id: "tu-1", status: "completed", clientID: attempt2})
 	h := newHarness(t, codex)
 	h.startWith(choicePresets(t, h.dir))
-	p := createParams(attempt2, sessionEP, "dev")
-	p.Model, p.Effort = "gpt-5.1-codex", adapterproto.EffortMedium
-	p.Checkpoint = json.RawMessage(`{"v":1,"thread_id":"th-9"}`)
-	var got adapterproto.SessionCreateResult
-	h.mustCall(adapterproto.MethodSessionCreate, p, &got)
-	if got.Outcome != adapterproto.CreateCreated || got.NativeRef != "th-9" {
+	if got := h.createChoosing(attempt1, sessionEP, "dev", "gpt-5.1-codex", adapterproto.EffortMedium); got.Outcome != adapterproto.CreateCreated {
 		t.Fatalf("result = %+v", got)
 	}
-	requireSent(t, "thread/resume", codex.callsOf("thread/resume")[0], want("gpt-5.1-codex", ""))
-	cps := h.sessionCheckpoints()
-	if len(cps) != 1 || string(cps[0].State) != `{"v":1,"choice":{"model":"gpt-5.1-codex","effort":"medium"}}` {
-		t.Fatalf("session checkpoints = %+v", cps)
+	var attemptCPs []string
+	for _, c := range h.checkpoints {
+		if c.Scope == adapterproto.ScopeAttempt {
+			attemptCPs = append(attemptCPs, string(c.State))
+		}
+	}
+	if len(attemptCPs) != 1 || attemptCPs[0] != `{"v":1,"thread_id":"th-1","choice":{"model":"gpt-5.1-codex","effort":"medium"}}` {
+		t.Fatalf("attempt checkpoints = %q", attemptCPs)
+	}
+}
+
+// A creation that is retried after the adapter restarted finds the pair it resolved
+// first in the attempt's checkpoint and keeps it, whatever the preset says now: the
+// first prompt already ran with that pair, so a narrowed allowlist must not fail the
+// attempt and a changed default must not apply from the second turn on. The session
+// stores the same pair.
+func TestRetriedCreationKeepsTheChoiceItResolvedFirst(t *testing.T) {
+	stored := `{"v":1,"thread_id":"th-9","choice":{"model":"gpt-5.1-codex","effort":"medium"}}`
+	for _, tc := range []struct {
+		name   string
+		preset map[string]any
+		model  string
+		effort adapterproto.Effort
+	}{
+		{"the allowlist was narrowed", map[string]any{"model": "gpt-5", "effort": "low", "allowed_models": map[string][]string{"gpt-5": {"low"}}},
+			"gpt-5.1-codex", adapterproto.EffortMedium},
+		{"the default effort was changed", map[string]any{"model": "gpt-5", "effort": "high", "allowed_models": map[string][]string{"gpt-5.1-codex": {"low", "medium", "high"}}},
+			"gpt-5.1-codex", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codex := newFakeCodex(t)
+			codex.seed("th-9", &fakeTurn{id: "tu-1", status: "completed", clientID: attempt2})
+			h := newHarness(t, codex)
+			tc.preset["cwd"] = h.dir
+			h.startWith([]adapterproto.PresetConfig{{Name: "dev", Config: presetConfig(t, tc.preset)}})
+			p := createParams(attempt2, sessionEP, "dev")
+			p.Model, p.Effort = tc.model, tc.effort
+			p.Checkpoint = json.RawMessage(stored)
+			var got adapterproto.SessionCreateResult
+			h.mustCall(adapterproto.MethodSessionCreate, p, &got)
+			if got.Outcome != adapterproto.CreateCreated || got.NativeRef != "th-9" {
+				t.Fatalf("result = %+v", got)
+			}
+			if n := len(codex.callsOf("thread/archive")); n != 0 {
+				t.Fatalf("%d threads archived", n)
+			}
+			requireSent(t, "thread/resume", codex.callsOf("thread/resume")[0], want("gpt-5.1-codex", ""))
+			cps := h.sessionCheckpoints()
+			if len(cps) != 1 || string(cps[0].State) != `{"v":1,"choice":{"model":"gpt-5.1-codex","effort":"medium"}}` {
+				t.Fatalf("session checkpoints = %+v", cps)
+			}
+		})
 	}
 }
 
@@ -262,6 +305,10 @@ func TestProbeReportsTheChoiceMembersOfEachPreset(t *testing.T) {
 	presets := append(choicePresets(t, h.dir), adapterproto.PresetConfig{
 		Name: "broken", Config: presetConfig(t, map[string]any{"cwd": h.dir, "model": "gpt-5", "allowed_models": map[string][]string{"gpt-5": {"max"}}}),
 	})
+	gone := filepath.Join(h.dir, "gone")
+	presets = append(presets, adapterproto.PresetConfig{
+		Name: "gone", Config: presetConfig(t, map[string]any{"cwd": gone, "model": "gpt-5", "effort": "low", "allowed_models": map[string][]string{"gpt-5": {"low"}}}),
+	})
 	h.startWith(presets)
 	var res adapterproto.ProbeResult
 	h.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{}}, &res)
@@ -282,6 +329,9 @@ func TestProbeReportsTheChoiceMembersOfEachPreset(t *testing.T) {
 	}
 	if broken := byName["broken"]; broken.Usable || len(broken.Problems) == 0 || broken.Model != "" || broken.AllowedModels != nil {
 		t.Fatalf("broken = %+v: a preset with a problem reports its problems alone", broken)
+	}
+	if gone := byName["gone"]; gone.Usable || len(gone.Problems) == 0 || gone.Model != "" || gone.Effort != "" || gone.AllowedModels != nil {
+		t.Fatalf("gone = %+v: a preset whose directory is missing reports its problem alone", gone)
 	}
 }
 

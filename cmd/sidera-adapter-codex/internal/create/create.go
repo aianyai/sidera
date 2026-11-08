@@ -4,8 +4,11 @@
 // function serves the first run, a retry and the check after a restart, so there
 // is one set of rules.
 //
-// What is stored of an attempt (the checkpoint) is only the thread's id and, for a final
-// failure, its reason. That the first prompt reached the thread is not stored: the
+// What is stored of an attempt (the checkpoint) is the thread's id, for a final failure its
+// reason, and the model and effort the requester chose, if it did. The choice is stored in
+// the write that first stores the thread's id: the first prompt runs with it, so a retry
+// after the adapter restarted must keep it, and the preset it was resolved against may
+// have changed by then. That the first prompt reached the thread is not stored: the
 // thread's record shows it, and the record cannot disagree with itself. The session
 // checkpoint, which only a session whose requester chose a model or an effort has, is in
 // session.go.
@@ -16,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -34,17 +38,22 @@ type State struct {
 	// Failed is the reason the attempt ended in failure; empty while it has not.
 	// A failure is final: every later request of the attempt gets the same one.
 	Failed adapterproto.CreateFailure
+	// Choice is the model and effort the first prompt runs with because the requester
+	// chose them, as the preset allowed when the attempt began; nil when the requester
+	// chose nothing, and for a checkpoint written before a choice could be made.
+	Choice *modelchoice.Choice
 }
 
 type checkpoint struct {
 	V        int                        `json:"v"`
 	ThreadID string                     `json:"thread_id,omitempty"`
 	Failed   adapterproto.CreateFailure `json:"failed,omitempty"`
+	Choice   *modelchoice.Choice        `json:"choice,omitempty"`
 }
 
 // Checkpoint is the state as the daemon stores it.
 func (s State) Checkpoint() json.RawMessage {
-	raw, _ := json.Marshal(checkpoint{V: CheckpointVersion, ThreadID: s.ThreadID, Failed: s.Failed})
+	raw, _ := json.Marshal(checkpoint{V: CheckpointVersion, ThreadID: s.ThreadID, Failed: s.Failed, Choice: s.Choice})
 	return raw
 }
 
@@ -61,7 +70,12 @@ func ParseCheckpoint(raw json.RawMessage) (State, error) {
 	if c.V != CheckpointVersion { // the one format so far; see CheckpointVersion
 		return State{}, fmt.Errorf("create: checkpoint version %d is not %d", c.V, CheckpointVersion)
 	}
-	return State{ThreadID: c.ThreadID, Failed: c.Failed}, nil
+	if c.Choice != nil {
+		if err := c.Choice.Validate(); err != nil {
+			return State{}, fmt.Errorf("create: checkpoint: choice: %w", err)
+		}
+	}
+	return State{ThreadID: c.ThreadID, Failed: c.Failed, Choice: c.Choice}, nil
 }
 
 // Params holds the numbers the decision uses.

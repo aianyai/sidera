@@ -1,6 +1,7 @@
 package create
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -102,6 +103,33 @@ func TestParseSessionCheckpoint(t *testing.T) {
 		`{`,
 	} {
 		if _, _, err := ParseSessionCheckpoint([]byte(bad)); err == nil {
+			t.Errorf("checkpoint %s was accepted", bad)
+		}
+	}
+}
+
+// The choice rides in the attempt's checkpoint beside the thread's id; a checkpoint
+// without one, which is every checkpoint an earlier adapter wrote, reads as no choice.
+func TestCheckpointKeepsTheChoice(t *testing.T) {
+	withChoice := State{ThreadID: "t1", Choice: &modelchoice.Choice{Model: "gpt-5", Effort: adapterproto.EffortHigh}}
+	if got := string(withChoice.Checkpoint()); got != `{"v":1,"thread_id":"t1","choice":{"model":"gpt-5","effort":"high"}}` {
+		t.Errorf("checkpoint = %s", got)
+	}
+	for _, st := range []State{withChoice, {ThreadID: "t1", Choice: &modelchoice.Choice{Effort: adapterproto.EffortLow}}} {
+		got, err := ParseCheckpoint(st.Checkpoint())
+		if err != nil || !reflect.DeepEqual(got, st) {
+			t.Errorf("round trip of %+v = %+v, %v", st, got, err)
+		}
+	}
+	if st, err := ParseCheckpoint([]byte(`{"v":1,"thread_id":"t1"}`)); err != nil || st != (State{ThreadID: "t1"}) {
+		t.Errorf("a checkpoint without a choice = %+v, %v", st, err)
+	}
+	for _, bad := range []string{
+		`{"v":1,"thread_id":"t","choice":{}}`,
+		`{"v":1,"thread_id":"t","choice":{"model":"gpt 5"}}`,
+		`{"v":1,"thread_id":"t","choice":{"effort":"huge"}}`,
+	} {
+		if _, err := ParseCheckpoint([]byte(bad)); err == nil {
 			t.Errorf("checkpoint %s was accepted", bad)
 		}
 	}
