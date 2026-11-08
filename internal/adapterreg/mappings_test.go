@@ -467,7 +467,7 @@ func TestCreateReplyMapsEveryCreateFailure(t *testing.T) {
 // creation with no session endpoint: the daemon allocated none, and nothing was
 // created. The wire values are written out by hand, from the protocol's reply
 // table (outcome 3 failed; reasons 1 preset_unknown, 2 preset_unavailable,
-// 3 adapter_offline, 10 node_endpoint_limit). A preset closed to local sources
+// 3 adapter_offline, 10 node_endpoint_limit, 11 model_choice_not_allowed). A preset closed to local sources
 // reuses preset_unavailable, as an adapter's preset_invalid does: the preset
 // exists and cannot be used for this creation.
 func TestDaemonCreateFailure(t *testing.T) {
@@ -486,6 +486,8 @@ func TestDaemonCreateFailure(t *testing.T) {
 			`{"outcome":"failed","reason":"adapter_offline"}`},
 		{"the node endpoint limit is node_endpoint_limit", adapterreg.DaemonCreateNodeEndpointLimit, 3, 10,
 			`{"outcome":"failed","reason":"node_endpoint_limit"}`},
+		{"a model choice the adapter does not take is model_choice_not_allowed", adapterreg.DaemonCreateModelChoiceUnsupported, 3, 11,
+			`{"outcome":"failed","reason":"model_choice_not_allowed"}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -504,7 +506,7 @@ func TestDaemonCreateFailure(t *testing.T) {
 	}
 	t.Run("the reasons are distinct and none is the zero value", func(t *testing.T) {
 		seen := map[adapterreg.DaemonCreateReason]bool{}
-		for _, r := range []adapterreg.DaemonCreateReason{adapterreg.DaemonCreatePresetUnknown, adapterreg.DaemonCreatePresetClosedToLocalSources, adapterreg.DaemonCreateAdapterOffline, adapterreg.DaemonCreateNodeEndpointLimit} {
+		for _, r := range []adapterreg.DaemonCreateReason{adapterreg.DaemonCreatePresetUnknown, adapterreg.DaemonCreatePresetClosedToLocalSources, adapterreg.DaemonCreateAdapterOffline, adapterreg.DaemonCreateNodeEndpointLimit, adapterreg.DaemonCreateModelChoiceUnsupported} {
 			if r == 0 || seen[r] {
 				t.Errorf("reason %d is zero or repeated", r)
 			}
@@ -512,7 +514,7 @@ func TestDaemonCreateFailure(t *testing.T) {
 		}
 	})
 	t.Run("a value that is no reason gives a reply that is not valid, so it cannot be sent", func(t *testing.T) {
-		for _, in := range []adapterreg.DaemonCreateReason{0, 5, 255} {
+		for _, in := range []adapterreg.DaemonCreateReason{0, 6, 255} {
 			if got := adapterreg.DaemonCreateFailure(in); got != (adapterproto.ControlCreateReply{}) || got.Validate() == nil {
 				t.Errorf("DaemonCreateFailure(%d) = %+v, want the zero reply, which does not validate", in, got)
 			}

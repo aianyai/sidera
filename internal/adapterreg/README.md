@@ -23,6 +23,7 @@ not frame, send or store anything.
 | `Admission.Attaches()` | Whether the adapter declared attached sessions: only then does the daemon send it `session.attach` and `session.detached`, or list an attached session in `adapter.start`. |
 | `GuaranteedSignals(kind, origin)` | The signals guaranteed by an endpoint's kind and origin alone, without an adapter admission; session interrupt still requires a declaration. |
 | `SessionOrigin` | Whether a session endpoint was created by the node (`OriginCreated`, the zero value) or attached at the request of a session a person opened (`OriginAttached`). |
+| `Admission.TakesModelChoice(effort)` | Whether a `session.create` that chooses a model or an effort can be sent to the adapter: it declared `model_choice` and, when an effort is chosen, lists it. The allowlist of the preset is the adapter's to judge. |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
 | `Admission.PartBudgets(kind)` | The budgets a long message is cut for on an endpoint of that kind, whichever front end reads it: those of every front end the endpoint can be read through, so that every front end cuts it in the same parts. |
 | `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |
@@ -36,7 +37,7 @@ not frame, send or store anything.
 | `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations (offline, requests rejected, control unknown). |
 | `RunsOn(manifest, goos, goarch)` | Whether the manifest lists the platform: the one judge of whether a package may be installed on this machine. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
-| `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline, node endpoint limit. |
+| `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline, a model choice the adapter does not take, node endpoint limit. |
 | `ItemAck`, `AckReason`, `ActionOf` | Names of `delivery` and `handoff` values and of authorization actions as the protocol spells them. |
 
 ## Rules

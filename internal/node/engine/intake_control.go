@@ -142,7 +142,7 @@ func (e *Engine) refuseControl(now time.Time, env envelope.Envelope, key store.T
 	c := store.CtlRecord{
 		Key: key, Record: rec,
 		Dedup: delivery.NewDedupRecord(delivery.DedupKey{SenderNode: key.SenderNode, Message: env.ID, Recipient: key.Recipient}, digest, env.ReportBy),
-		Kind:  env.Kind, Preset: env.Preset, AcceptedAt: now, SentAt: env.SentAt,
+		Kind:  env.Kind, Preset: env.Preset, Model: env.Model, Effort: env.Effort, AcceptedAt: now, SentAt: env.SentAt,
 	}
 	if err := e.d.Store.ControlIntake(nil, nil, c, nil); err != nil {
 		return transport.Receipt{}, err
@@ -157,7 +157,7 @@ func newCtlRecord(now time.Time, env envelope.Envelope, key store.TargetKey, dig
 		Key:    key,
 		Record: delivery.NewTargetControlRecord(now, env.AcceptBefore, env.ReportBy),
 		Dedup:  delivery.NewDedupRecord(delivery.DedupKey{SenderNode: key.SenderNode, Message: env.ID, Recipient: key.Recipient}, digest, env.ReportBy),
-		Kind:   env.Kind, Preset: env.Preset, AcceptedAt: now, EndpointMaxQueue: maxQueue, SentAt: env.SentAt,
+		Kind:   env.Kind, Preset: env.Preset, Model: env.Model, Effort: env.Effort, AcceptedAt: now, EndpointMaxQueue: maxQueue, SentAt: env.SentAt,
 	}
 }
 
@@ -282,13 +282,14 @@ func containsAnyCondition(have []adapterproto.ControlCondition, want ...adapterp
 // takeInCreate takes in a session creation: the checks the node makes before it
 // calls the adapter, in the order the reasons are told to the sender (the preset is
 // defined, the preset is open to a source on this node, the adapter is connected,
-// and the node has room for another endpoint), then the session endpoint with
+// the adapter takes the model and the effort the creation chooses, and the node
+// has room for another endpoint), then the session endpoint with
 // its token and the creation intent, written before the adapter hears of it, and
 // the delivery of the initial message the signal carries, if it carries one.
 // A creation the node refuses holds no message: the reply that refuses it says
 // the message did not arrive.
 func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transport.Origin, st *endpointState, c store.CtlRecord) error {
-	if reason, refused := e.createRefusal(env.Preset, from, st); refused {
+	if reason, refused := e.createRefusal(env, from, st); refused {
 		return e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(adapterreg.DaemonCreateFailure(reason))})
 	}
 	ep, err := e.newSessionEndpoint(st, c)
@@ -328,7 +329,16 @@ func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transpo
 // calls the adapter, and why. The rule about a preset's statement on local sources
 // is authz.LocalCreate's, and only a source on this node is judged by it: a source
 // elsewhere is judged by the rules of the node, at intake.
-func (e *Engine) createRefusal(preset string, from transport.Origin, st *endpointState) (adapterreg.DaemonCreateReason, bool) {
+//
+// A creation that chooses a model or an effort is refused when the adapter does
+// not take a choice. It comes after the adapter being offline, because what an
+// adapter takes is known from its admission, which an adapter that is away may
+// not have, and before the node's endpoint limit, because it is a property of
+// this request while the limit is a passing state of the whole node. Whether the
+// choice is within the preset's allowlist is the adapter's to judge: the keys of
+// its presets are its own.
+func (e *Engine) createRefusal(env envelope.Envelope, from transport.Origin, st *endpointState) (adapterreg.DaemonCreateReason, bool) {
+	preset := env.Preset
 	p, ok := e.d.Config.Presets().Items[preset]
 	if !ok {
 		return adapterreg.DaemonCreatePresetUnknown, true
@@ -343,8 +353,12 @@ func (e *Engine) createRefusal(preset string, from transport.Origin, st *endpoin
 			return adapterreg.DaemonCreatePresetClosedToLocalSources, true
 		}
 	}
-	if a := e.adapters[st.rec.Instance]; a == nil || !a.online || e.d.Adapters == nil {
+	a := e.adapters[st.rec.Instance]
+	if a == nil || !a.online || e.d.Adapters == nil {
 		return adapterreg.DaemonCreateAdapterOffline, true
+	}
+	if choosesModel(env.Model, env.Effort) && !a.adm.TakesModelChoice(env.Effort) {
+		return adapterreg.DaemonCreateModelChoiceUnsupported, true
 	}
 	if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {
 		return adapterreg.DaemonCreateNodeEndpointLimit, true

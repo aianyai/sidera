@@ -2,6 +2,7 @@ package envelope
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"math/rand"
 	"slices"
@@ -175,6 +176,12 @@ func TestEnvelopeDecodeRules(t *testing.T) {
 		{"a preset is not empty", create, func(w *envelopeWire) { w.Params.Preset = "" }, ErrParams},
 		{"a preset is lowercase", create, func(w *envelopeWire) { w.Params.Preset = "Default" }, ErrParams},
 		{"a preset is at most 64 characters", create, func(w *envelopeWire) { w.Params.Preset = strings.Repeat("a", 65) }, ErrParams},
+		{"a model is a model name", create, func(w *envelopeWire) { w.Params.Model = "two words" }, ErrParams},
+		{"a model starts with a letter or a digit", create, func(w *envelopeWire) { w.Params.Model = "-opus" }, ErrParams},
+		{"a model is at most 128 bytes", create, func(w *envelopeWire) { w.Params.Model = strings.Repeat("a", 129) }, ErrParams},
+		{"a model has no control character", create, func(w *envelopeWire) { w.Params.Model = "opus\n" }, ErrParams},
+		{"an effort is on the scale", create, func(w *envelopeWire) { w.Params.Effort = "extreme" }, ErrParams},
+		{"an effort is lowercase", create, func(w *envelopeWire) { w.Params.Effort = "High" }, ErrParams},
 		{"session.close has no body", closeSignal, func(w *envelopeWire) { w.ContentType, w.Body = "text/plain", []byte("x") }, ErrBody},
 		{"session.close has no params", closeSignal, func(w *envelopeWire) { w.Params = &paramsWire{Preset: "default"} }, ErrParams},
 		{"session.interrupt has no body", closeSignal, func(w *envelopeWire) {
@@ -353,6 +360,21 @@ func TestEnvelopeStrictBytes(t *testing.T) {
 		requireNoErr(t, err)
 		_, err = Decode(b, testLimits)
 		requireErr(t, err, record.ErrNotCanonical)
+	})
+	t.Run("a model or an effort written empty where the key should be left out", func(t *testing.T) {
+		for name, c := range map[string]struct{ from, to string }{
+			"model":  {"6a736f6e6e65745b316d5d", "60"},
+			"effort": {"6468696768", "60"},
+		} {
+			from, _ := hex.DecodeString(c.from)
+			to, _ := hex.DecodeString(c.to)
+			b := bytes.Replace(goldenEnvelopeSessionCreateChoice, from, to, 1)
+			if bytes.Equal(b, goldenEnvelopeSessionCreateChoice) {
+				t.Fatalf("%s: the golden bytes do not hold %s", name, c.from)
+			}
+			_, err := Decode(b, testLimits)
+			requireErr(t, err, record.ErrNotCanonical)
+		}
 	})
 	t.Run("a text id that is not UTF-8", func(t *testing.T) {
 		b := bytes.Replace(goldenEnvelopeMessage, []byte("msg-0001"), []byte("msg-\xff\xff01"), 1)
@@ -581,6 +603,17 @@ func TestTrimmedForRandom(t *testing.T) {
 	t.Logf("disclosed %d undisclosed %d multi-node %d single-node %d", disclosed, undisclosed, multiNodes, singleNode)
 }
 
+// A choice moves the digest, and the same text as a model and as an effort is
+// not the same request.
+func TestRequestDigestOfAChoice(t *testing.T) {
+	asModel, asEffort := baseCreate(t), baseCreate(t)
+	asModel.Model = "high"
+	asEffort.Effort = "high"
+	if asModel.Digest() == asEffort.Digest() {
+		t.Error("a model and an effort with the same text have the same digest")
+	}
+}
+
 func TestRequestDigest(t *testing.T) {
 	base := baseCreate(t)
 	d0 := base.Digest()
@@ -604,6 +637,8 @@ func TestRequestDigest(t *testing.T) {
 	differs := map[string]func(*Envelope){
 		"kind":                     func(e *Envelope) { e.Kind = KindMessage },
 		"preset":                   func(e *Envelope) { e.Preset = "fast" },
+		"model":                    func(e *Envelope) { e.Model = "sonnet" },
+		"effort":                   func(e *Envelope) { e.Effort = adapterproto.EffortHigh },
 		"content type":             func(e *Envelope) { e.ContentType = "text/markdown" },
 		"body":                     func(e *Envelope) { e.Body = []byte("start there") },
 		"empty body":               func(e *Envelope) { e.Body, e.ContentType = nil, "" },

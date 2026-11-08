@@ -774,6 +774,7 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 		DiscloseRecipients: o.Envelope.DiscloseRecipients, Kind: o.Outbound.Kind, ReplyTo: o.Envelope.ReplyTo, Thread: o.Envelope.Thread,
 		Seq: o.Envelope.Seq, SentAt: o.Envelope.SentAt, AcceptBefore: o.Outbound.AcceptBefore, ReportBy: o.Envelope.ReportBy,
 		ContentType: o.Envelope.ContentType, Body: body, Preset: o.Envelope.Preset,
+		Model: o.Envelope.Model, Effort: o.Envelope.Effort,
 	}
 	if env.ReplyTo != "" {
 		evidence, err := e.evidenceFor(now, o.Key.Sender, env.ReplyTo)

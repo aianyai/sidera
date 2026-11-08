@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/reply"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // ---- tracked deliveries and feedback items
@@ -203,6 +204,8 @@ type outJSON struct {
 	ReportBy           *wtime         `json:"report_by,omitempty"`
 	ContentType        string         `json:"content_type,omitempty"`
 	Preset             string         `json:"preset,omitempty"`
+	Model              string         `json:"model,omitempty"`
+	Effort             string         `json:"effort,omitempty"`
 	Body               *bodyRefJSON   `json:"body,omitempty"`
 	BodyDigest         string         `json:"body_digest,omitempty"`
 	Idempotency        *idemJSON      `json:"idempotency,omitempty"`
@@ -318,6 +321,7 @@ func encodeOut(r OutRecord) ([]byte, error) {
 		return nil, errors.New("report_by is required")
 	}
 	j.ContentType, j.Preset = e.ContentType, e.Preset
+	j.Model, j.Effort = e.Model, string(e.Effort)
 	if r.Body != nil && !o.BodyNonEmpty {
 		return nil, errors.New("a body reference on a message without a body")
 	}
@@ -349,6 +353,7 @@ func zeroRegularOut(r OutRecord) bool {
 	return o.Message == "" && o.From.IsZero() && o.Kind == 0 && !o.BodyNonEmpty && o.AcceptBefore.IsZero() && len(o.Recipients) == 0 &&
 		o.ControlReplyDigest.IsZero() && o.Derived == nil && len(r.Envelope.To) == 0 && !r.Envelope.DiscloseRecipients && r.Envelope.ReplyTo == "" && r.Envelope.Thread == "" &&
 		len(r.Envelope.Seq) == 0 && r.Envelope.SentAt.IsZero() && r.Envelope.ReportBy.IsZero() && r.Envelope.ContentType == "" && r.Envelope.Preset == "" &&
+		r.Envelope.Model == "" && r.Envelope.Effort == "" &&
 		r.Body == nil && r.BodyDigest == delivery.BodyDigest{} && r.Idempotency == nil && len(r.ControlReply) == 0
 }
 
@@ -367,7 +372,7 @@ func decodeOut(key OutKey, body []byte) (OutRecord, error) {
 		rest.Lost, rest.Feedback = nil, nil
 		if rest.Kind != "" || rest.BodyNonEmpty || rest.AcceptBefore != nil || rest.Recipients != nil || rest.ControlReplyDigest != "" || rest.Derived != nil ||
 			rest.To != nil || rest.DiscloseRecipients || rest.ReplyTo != "" || rest.Thread != "" || rest.Seq != nil || rest.SentAt != nil || rest.ReportBy != nil || rest.ContentType != "" ||
-			rest.Preset != "" || rest.Body != nil || rest.BodyDigest != "" || rest.Idempotency != nil || rest.ControlReply != "" {
+			rest.Preset != "" || rest.Model != "" || rest.Effort != "" || rest.Body != nil || rest.BodyDigest != "" || rest.Idempotency != nil || rest.ControlReply != "" {
 			return r, errors.New("a lost out record holds the parts of a regular one")
 		}
 		if len(j.Lost.Deliveries) != len(key.Recipients) {
@@ -473,6 +478,7 @@ func decodeOut(key OutKey, body []byte) (OutRecord, error) {
 		return r, err
 	}
 	r.Envelope.ContentType, r.Envelope.Preset = j.ContentType, j.Preset
+	r.Envelope.Model, r.Envelope.Effort = j.Model, adapterproto.Effort(j.Effort)
 	if r.Body, err = fromBodyRef(j.Body); err != nil {
 		return r, err
 	}

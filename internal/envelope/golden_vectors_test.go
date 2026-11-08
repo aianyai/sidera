@@ -490,6 +490,53 @@ var goldenEnvelopeSessionCreate = hexcat(
 	"6764656661756c74",       // "default"
 )
 
+// The same control.session.create as above, choosing a model and an effort within the preset.
+var goldenEnvelopeSessionCreateChoice = hexcat(
+	"ad",                                   // { 13 pairs: the envelope
+	"01",                                   // 1: type
+	"717369646572612f656e76656c6f70652f31", // "sidera/envelope/1"
+	"02",                                   // 2: id
+	"6863746c2d30303031",                   // "ctl-0001"
+	"03",                                   // 3: to
+	"81",                                   // [ recipients
+	"a2",                                   // { 2 pairs: address
+	"01",                                   // 1: node
+	"5820e25aa4dcbc79b8ec49c25d53c2fafd4c36ef52b713f26e20f9f76075561af01d", // h'e25aa4dcbc79b8ec49c25d53c2fafd4c36ef52b713f26e20f9f76075561af01d'
+	"02",                                 // 2: endpoint
+	"5002020202020202020202020202020202", // h'02020202020202020202020202020202'
+	"04",                                 // 4: multi-recipient
+	"f4",                                 // false
+	"05",                                 // 5: disclose recipients
+	"f4",                                 // false
+	"06",                                 // 6: kind
+	"02",                                 // 2 (control.session.create)
+	"0a",                                 // 10: seq
+	"81",                                 // [ sequence numbers sorted by endpoint
+	"a2",                                 // { 2 pairs: sequence entry
+	"01",                                 // 1: endpoint
+	"5002020202020202020202020202020202", // h'02020202020202020202020202020202'
+	"02",                                 // 2: seq
+	"07",                                 // 7
+	"0b",                                 // 11: sent_at
+	"1a6553f100",                         // 1700000000
+	"0c",                                 // 12: accept_before
+	"1a6553f358",                         // 1700000600
+	"0d",                                 // 13: report_by
+	"1a65541e00",                         // 1700011520
+	"0e",                                 // 14: content type
+	"7819746578742f706c61696e3b20636861727365743d7574662d38", // "text/plain; charset=utf-8"
+	"0f",                     // 15: body
+	"4a73746172742068657265", // "start here"
+	"10",                     // 16: params
+	"a3",                     // { 3 pairs: params
+	"01",                     // 1: preset
+	"6764656661756c74",       // "default"
+	"02",                     // 2: model
+	"6a736f6e6e65745b316d5d", // "sonnet[1m]"
+	"03",                     // 3: effort
+	"6468696768",             // "high"
+)
+
 // A reply from session endpoint 0x03 on node A to two disclosed recipients on node B, with evidence.
 var goldenEnvelopeReply = hexcat(
 	"af",                                   // { 15 pairs: the envelope
@@ -608,6 +655,10 @@ var goldenEnvelopeReply = hexcat(
 )
 
 const goldenSessionCreateRequestDigest = "969d368e36698f0ef78f05632599890299c704a0c66cb26b8f9670c006280d51"
+
+// The digest of the choosing session.create: the request digest of the one above with the fields
+// model ("sonnet[1m]") and effort ("high") appended after report_by, computed with hashlib.
+const goldenSessionCreateChoiceRequestDigest = "cc0e60b1fa8896fbe2cd230f3c857b1eeb60d3a3d0acb32acf8c83043ef013c2"
 const goldenReplyRequestDigest = "36b57c2c0c2c23954a786ecb3d22b1c2574f7ca99ba1d413fd147fca60452abe"
 
 // A control reply: ctl-0002 failed because the node endpoint limit was reached.

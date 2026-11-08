@@ -231,6 +231,42 @@ func TestAttaches(t *testing.T) {
 	}
 }
 
+// A creation that chooses a model or an effort goes only to an adapter that
+// declared model_choice and, when an effort is chosen, lists that effort. A
+// creation that chooses an effort needs the effort listed even when the model is
+// left to the preset, because the effort is what the runtime has to be able to run.
+func TestTakesModelChoice(t *testing.T) {
+	with := func(efforts ...adapterproto.Effort) adapterproto.Capabilities {
+		c := runtimeCaps(false, false, false, "cli")
+		c.Runtime.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: efforts}
+		return c
+	}
+	for _, tc := range []struct {
+		name   string
+		caps   adapterproto.Capabilities
+		effort adapterproto.Effort
+		want   bool
+	}{
+		{"no model_choice declared, no effort", runtimeCaps(false, false, false, "cli"), "", false},
+		{"no model_choice declared, an effort", runtimeCaps(false, false, false, "cli"), adapterproto.EffortLow, false},
+		{"a direct-only adapter", adapterproto.Capabilities{Direct: directCaps(1)}, "", false},
+		{"declared, no effort chosen", with(adapterproto.EffortLow, adapterproto.EffortHigh), "", true},
+		{"declared, the effort is listed", with(adapterproto.EffortLow, adapterproto.EffortHigh), adapterproto.EffortHigh, true},
+		{"declared, the effort is not listed", with(adapterproto.EffortLow, adapterproto.EffortHigh), adapterproto.EffortMax, false},
+	} {
+		a, err := adapterreg.Admit(tc.caps, man())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := a.TakesModelChoice(tc.effort); got != tc.want {
+			t.Errorf("%s: TakesModelChoice(%q) = %v, want %v", tc.name, tc.effort, got, tc.want)
+		}
+	}
+	if (adapterreg.Admission{}).TakesModelChoice("") {
+		t.Error("the zero admission takes a model choice")
+	}
+}
+
 func equalActions(a, b []authz.Action) bool {
 	if len(a) != len(b) {
 		return false
@@ -511,12 +547,17 @@ func TestMarkersDriveTheAckCheck(t *testing.T) {
 
 func TestAdmissionIsIndependentOfItsInputs(t *testing.T) {
 	caps := runtimeCaps(true, true, true, "cli", "mcp")
+	caps.Runtime.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortHigh}}
 	a, err := adapterreg.Admit(caps, man())
 	if err != nil {
 		t.Fatal(err)
 	}
 	caps.Runtime.Interrupt = false
 	caps.Runtime.Frontends[0] = "mcp"
+	caps.Runtime.ModelChoice.Efforts[0] = adapterproto.EffortMax
+	if a.TakesModelChoice(adapterproto.EffortMax) || !a.TakesModelChoice(adapterproto.EffortLow) {
+		t.Error("the admission shares the efforts of its model choice with the capabilities it was given")
+	}
 	if !a.Capabilities().Runtime.Interrupt || a.Capabilities().Runtime.Frontends[0] != "cli" {
 		t.Error("the admission shares memory with the capabilities it was given")
 	}

@@ -158,6 +158,13 @@ func TestGoldenEnvelopes(t *testing.T) {
 		SentAt: t0, AcceptBefore: accept, ReportBy: reportBy,
 		ContentType: "text/plain; charset=utf-8", Body: []byte("start here"), Preset: "default",
 	})
+	goldenEnvelope(t, "session create choosing a model and an effort", goldenEnvelopeSessionCreateChoice, Envelope{
+		ID: "ctl-0001", To: []ident.Address{addr(nodeA, 2)}, Kind: KindSessionCreate,
+		Seq:    map[ident.EndpointID]uint64{ep(2): 7},
+		SentAt: t0, AcceptBefore: accept, ReportBy: reportBy,
+		ContentType: "text/plain; charset=utf-8", Body: []byte("start here"), Preset: "default",
+		Model: "sonnet[1m]", Effort: adapterproto.EffortHigh,
+	})
 	goldenEnvelope(t, "reply with evidence to disclosed recipients", goldenEnvelopeReply, Envelope{
 		ID: "msg-0002", To: []ident.Address{addr(nodeB, 0x0a), addr(nodeB, 0x0b)},
 		MultiRecipient: true, DiscloseRecipients: true, Kind: KindMessage,
@@ -175,6 +182,7 @@ func TestGoldenRequestDigest(t *testing.T) {
 		want     string
 	}{
 		"a session.create with an initial message":      {goldenEnvelopeSessionCreate, goldenSessionCreateRequestDigest},
+		"a session.create choosing a model and effort":  {goldenEnvelopeSessionCreateChoice, goldenSessionCreateChoiceRequestDigest},
 		"a reply with a thread to disclosed recipients": {goldenEnvelopeReply, goldenReplyRequestDigest},
 	} {
 		t.Run(name, func(t *testing.T) {

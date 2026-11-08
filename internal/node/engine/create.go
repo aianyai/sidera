@@ -178,6 +178,14 @@ func (e *Engine) startCreate(now time.Time, key store.TargetKey) {
 		e.log.Error("a creation names a session endpoint the node does not hold", "record", key.String())
 		return
 	}
+	if choosesModel(c.Model, c.Effort) && !e.adapters[instance].adm.TakesModelChoice(c.Effort) {
+		// The creation was accepted for an adapter that took the choice, and the
+		// instance now runs a version that does not (a downgrade). It is ended as
+		// the adapter's own refusal of the choice would end it, and no request is
+		// sent that the adapter would not understand.
+		e.settleOrRetry(now, c, adapterreg.DaemonCreateFailure(adapterreg.DaemonCreateModelChoiceUnsupported), nil)
+		return
+	}
 	params, err := e.createParams(c, ep.rec)
 	if err != nil {
 		e.log.Error("the parameters of a creation are not valid; it is tried again", "record", key.String(), "error", err.Error())
@@ -210,6 +218,8 @@ func (e *Engine) createParams(c store.CtlRecord, ep store.EndpointRecord) (adapt
 		RuntimeEndpoint: adapterproto.EndpointRef(c.Key.Recipient.String()),
 		SessionEndpoint: adapterproto.EndpointRef(ep.ID.String()),
 		Preset:          c.Preset,
+		Model:           c.Model,
+		Effort:          c.Effort,
 		FirstPrompt:     adapterproto.FirstPrompt{Attempt: firstPromptAttempt(c.Intent.Attempt), Text: handoff.NewSessionPromptText},
 		ToolAccess:      access,
 	}
@@ -316,13 +326,25 @@ func (e *Engine) createResult(now time.Time, r *cmdCreateResult) {
 		e.sched.set(schedKey{schedCreateRetry, r.key.String()}, now.Add(e.p.CreateRetryBackoff))
 		return
 	}
-	if err := e.settleCreate(now, c, reply, &r.res); err != nil {
+	e.settleOrRetry(now, c, reply, &r.res)
+}
+
+// settleOrRetry settles a creation (settleCreate) and, when the settlement could
+// not be recorded, has the creation looked at again.
+func (e *Engine) settleOrRetry(now time.Time, c store.CtlRecord, reply adapterproto.ControlCreateReply, native *adapterproto.SessionCreateResult) {
+	if err := e.settleCreate(now, c, reply, native); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
 		if e.fatal == nil {
-			e.log.Warn("the result of a creation could not be recorded; it is tried again", "record", r.key.String(), "error", err.Error())
-			e.sched.set(schedKey{schedCreateRetry, r.key.String()}, now.Add(e.p.RetryBackoff))
+			e.log.Warn("the result of a creation could not be recorded; it is tried again", "record", c.Key.String(), "error", err.Error())
+			e.sched.set(schedKey{schedCreateRetry, c.Key.String()}, now.Add(e.p.RetryBackoff))
 		}
 	}
+}
+
+// choosesModel reports whether a creation chooses a model or an effort, which
+// only an adapter that declared model_choice can take.
+func choosesModel(model string, effort adapterproto.Effort) bool {
+	return model != "" || effort != ""
 }
 
 // lateCreate deals with the result of a call that comes after its intent was

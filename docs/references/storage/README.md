@@ -906,15 +906,32 @@ and `TestEveryStoredFieldSurvivesTheDisk`.
 **What a source record keeps to send again.** The envelope parts the sender needs
 to rebuild the message are the recipients (`to`, every recipient, in the order of
 the key), the sequence numbers, the send time, `report_by`, the content type, the
-thread, the message it answers, the preset and `disclose_recipients`. The flag is
+thread, the message it answers, the preset, the model and the effort of a session
+creation (`model` and `effort`, written right after `preset`, only when the
+creation chose them, and only on a `control.session.create`) and `disclose_recipients`. The flag is
 written only when true, right after `to`: the digest of an envelope covers it, so
 a message sent again must carry the flag it was first sent with, or the target
 would see a different digest for the same message and refuse it as a conflict. That
 the message has several recipients is not stored; it is `len(to) > 1`, because
 `to` holds all of them. Tests: the `out disclosed` vector of `TestRecordGoldenVectors`,
-the disclosure rows of `TestDecodeRecordBodyRules`, the two disclosed records of
+the disclosure rows of `TestDecodeRecordBodyRules`, the `out session creation with a model and an effort`
+vector, the two disclosed records of
 `TestRecordsRoundTrip` and the `store.OutEnvelope` row of
 `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`.
+
+**What a control record keeps of the request.** The kind and, for a session
+creation, the `preset` and the `model` and `effort` the requester chose, in that
+order. `model` and `effort` are written only when chosen and belong to a session
+creation alone: a record of another signal that has either, or a value that is not a
+model name or not an effort of the adapter protocol, is damaged. A creation is
+started again after a restart from this record alone, so the choice is stored with
+it, and a refused creation keeps it too, so that the record says what was asked.
+The format version stays: the members have one spelling (absent or non-empty), a
+record written before them reads as a creation that chose nothing and is written
+again as it was, and a daemon from before them reads a record that has them as
+damaged, so going back to an older daemon is not supported, as for the `origin` of
+an endpoint's session. Tests: the `ctl with a model and an effort` vector of
+`TestRecordGoldenVectors`, and the model and effort rows of `TestDecodeRecordBodyRules`.
 
 **Two shapes of a source record.** A source record is regular or lost. A lost
 record is what replaces a source record that was damaged: it has the key of the

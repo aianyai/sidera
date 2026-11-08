@@ -540,9 +540,12 @@ delivery to a session: when it is judged and how the verdict is recorded.
   control record born rejected with the reason and a receipt that carries its report and no
   control reply (`delivery.NewRejectedTargetControlRecord`; an accepted record is never
   rejected afterwards), and what the node answers itself (a status, a creation it refuses for
-  the preset, the adapter or the node endpoint cap) is answered in the transaction that accepts
+  the preset, the adapter, a model or effort choice the adapter does not take, or the node endpoint cap) is answered in the transaction that accepts
   the signal. The cap gives a failed creation with `node_endpoint_limit`, no session endpoint
   or initial-message delivery, and its stored reply is kept even after room becomes available.
+  A creation that chooses a model or an effort is judged by `Admission.TakesModelChoice` at
+  intake (`createRefusal`) and again before each call to the adapter (`startCreate`); the
+  choice itself is held by the control record, from which the call is rebuilt.
 - **A creation's intent is on disk before the adapter is called, and is settled in one
   transaction.** The call is made again with the same attempt until the reply deadline; then
   the creation is unconfirmed, its endpoint is closed and the owner is alerted. The reply of a
@@ -672,6 +675,7 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
 `operations_adapters_test.go` the installation, enabling and disabling of adapters, the presets, the probe and the crash points of each;
+`session_model_test.go` the creation that chooses a model or an effort;
 `adapters_test.go` the life of a connection (admission and the runtime endpoint, what
 `adapter.start` carries, probe tokens, availability and signals, notifications,
 checkpoints, and `Quiesce` against a test double of the host);

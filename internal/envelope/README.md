@@ -69,8 +69,11 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   a body, and a body is valid UTF-8 (`ErrBody`). A `session.create` may have one: it is the initial message. The other
   control signals have none. The longest body is `Limits.MaxBody`; the
   endpoint-level size caps of the policy are separate.
-- **Params.** Only `session.create` has params, `{1: preset}`, and it requires
-  them; the preset follows `adapterproto.ValidatePresetName`.
+- **Params.** Only `session.create` has params, `{1: preset, 2: model, 3: effort}`,
+  and it requires them; the preset follows `adapterproto.ValidatePresetName`. The
+  model and the effort are optional, follow `adapterproto.ValidateModelName` and
+  `adapterproto.Effort.Valid`, and are never written empty: an empty text is not
+  the encoding of "absent" and the decoder refuses it as non-canonical.
 - **A status report carries no cause of an unknown result.** A state
   delivery_unknown is a delivery handed over and nothing else: a target never
   reports a loss, and the sender learns that a target holds no record from the
@@ -84,7 +87,9 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   deadlines, `reply_to`, `thread`, the multi-recipient flag and
   `disclose_recipients`, and, when recipients are disclosed, the whole `To` list
   in the sender's order (it is what the recipients see, and every path carries it
-  untrimmed); not the recipient list when it is not disclosed (each path carries
+  untrimmed) and, only when the `session.create` chooses them, the model and the
+  effort (a request that chooses neither keeps the digest it had before they
+  existed); not the recipient list when it is not disclosed (each path carries
   a list trimmed for its node), sequence numbers, send time or evidence, which
   differ between attempts of one request.
 - **One mapping from kind to action.** `Kind.Action()`, which takes a control

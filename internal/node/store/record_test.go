@@ -96,6 +96,14 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return r
 	case "ctl":
 		return sessionCtl(1, 5)
+	case "ctl with a model and an effort":
+		c := sessionCtl(1, 5)
+		c.Model, c.Effort = "sonnet[1m]", adapterproto.EffortHigh
+		return c
+	case "out session creation with a model and an effort":
+		r := outCtlRecord(1)
+		r.Envelope.Model, r.Envelope.Effort = "sonnet[1m]", adapterproto.EffortHigh
+		return r
 	case "ctl with an initial message":
 		c, _ := withInitial(sessionCtl(1, 5), 1)
 		return c
@@ -372,6 +380,13 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"sequence numbers twice for one endpoint", "out", `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1}]`, `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1},{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":2}]`},
 		{"a source delivery on the target side in an out record", "out", `"side":"source"`, `"side":"target"`},
 		{"an out record whose to is not the key's recipients", "out", `"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc"]`, `"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zvf3xycnzvf3xycnzvf3xycnzvl5u4cd"]`},
+		{"a model on a control record that is no session creation", "ctl with a model and an effort", `"kind":"control.session.create","preset":"default","model"`, `"kind":"control.session.close","model"`},
+		{"a model that is not a model name", "ctl with a model and an effort", `"model":"sonnet[1m]"`, `"model":"two words"`},
+		{"a model written empty", "ctl with a model and an effort", `"model":"sonnet[1m]",`, `"model":"",`},
+		{"an effort that is not on the scale", "ctl with a model and an effort", `"effort":"high"`, `"effort":"extreme"`},
+		{"an effort written empty", "ctl with a model and an effort", `"effort":"high"`, `"effort":""`},
+		{"a lost out record that holds a model", "out lost at the sender", `"feedback"`, `"model":"sonnet","feedback"`},
+		{"a lost out record that holds an effort", "out lost at the sender", `"feedback"`, `"effort":"high","feedback"`},
 		{"a control record of a kind that is not a control signal", "ctl", `"kind":"control.session.create"`, `"kind":"message"`},
 		{"a control record whose delivery is not a control record", "ctl", `"control":true,`, ``},
 		{"an intent state that is not one", "ctl", `"state":"creating"`, `"state":"started"`},

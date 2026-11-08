@@ -34,6 +34,8 @@ type ctlJSON struct {
 	Dedup              dedupJSON       `json:"dedup"`
 	Kind               string          `json:"kind,omitempty"`
 	Preset             string          `json:"preset,omitempty"`
+	Model              string          `json:"model,omitempty"`
+	Effort             string          `json:"effort,omitempty"`
 	SessionEndpoint    string          `json:"session_endpoint,omitempty"`
 	AcceptedAt         *wtime          `json:"accepted_at,omitempty"`
 	EndpointMaxQueueNS int64           `json:"endpoint_max_queue_ns,omitempty"`
@@ -120,6 +122,13 @@ func encodeCtl(r CtlRecord) ([]byte, error) {
 		return nil, errors.New("a preset belongs to a session creation and to no other signal")
 	}
 	j.Preset = r.Preset
+	if r.Kind != envelope.KindSessionCreate && (r.Model != "" || r.Effort != "") {
+		return nil, errors.New("a model and an effort belong to a session creation and to no other signal")
+	}
+	if err := checkChoice(r.Model, r.Effort); err != nil {
+		return nil, err
+	}
+	j.Model, j.Effort = r.Model, string(r.Effort)
 	if !r.SessionEndpoint.IsZero() {
 		if r.Kind != envelope.KindSessionCreate {
 			return nil, errors.New("a session endpoint belongs to a session creation")
@@ -203,6 +212,13 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 		return r, errors.New("a preset belongs to a session creation and to no other signal")
 	}
 	r.Preset = j.Preset
+	if r.Kind != envelope.KindSessionCreate && (j.Model != "" || j.Effort != "") {
+		return r, errors.New("a model and an effort belong to a session creation and to no other signal")
+	}
+	r.Model, r.Effort = j.Model, adapterproto.Effort(j.Effort)
+	if err := checkChoice(r.Model, r.Effort); err != nil {
+		return r, err
+	}
 	if j.SessionEndpoint != "" {
 		if r.Kind != envelope.KindSessionCreate {
 			return r, errors.New("a session endpoint belongs to a session creation")
@@ -271,4 +287,19 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 		return r, err
 	}
 	return r, nil
+}
+
+// checkChoice checks the model and the effort of a session creation as the
+// adapter protocol defines them: either may be empty, which is the requester
+// choosing nothing.
+func checkChoice(model string, effort adapterproto.Effort) error {
+	if model != "" {
+		if err := adapterproto.ValidateModelName(model); err != nil {
+			return fmt.Errorf("model: %w", err)
+		}
+	}
+	if effort != "" && !effort.Valid() {
+		return fmt.Errorf("effort: %q is not on the scale", effort)
+	}
+	return nil
 }

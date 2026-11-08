@@ -109,6 +109,11 @@ engine applies the delivery rules and calls the writes.
   with no endpoint beside it. The record is final and kept like any finished control
   record, so a resend gets the same report. `checkRefusedCtl` is the one statement of
   that shape, for what is written and what is read.
+- **A session creation's choice of model and effort is kept by the control record and
+  the source record.** `CtlRecord.Model`/`Effort` and `OutEnvelope.Model`/`Effort` are
+  written only when chosen and only on a session creation; the control record checks
+  them as the adapter protocol defines them on the way out and in (`checkChoice`). The
+  format version is unchanged: a record written before them reads as a choice of nothing.
 - **The initial message of a creation is held by a delivery of its own, written after
   the control record.** `ControlIntake` takes the body, the session endpoint, the
   control record and the delivery of the message to the session (`InRecord.Derived`)

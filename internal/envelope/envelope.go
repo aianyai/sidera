@@ -144,6 +144,12 @@ type Envelope struct {
 	// Preset is the parameter of control.session.create: the only params any
 	// kind has. Required for that kind, absent for all others.
 	Preset string
+	// Model and Effort are the model and the reasoning effort the requester
+	// chose for the new session within what the preset allows. They are
+	// parameters of control.session.create too and optional: empty means the
+	// requester chose nothing and the preset's own value applies.
+	Model  string
+	Effort adapterproto.Effort
 }
 
 type addressWire struct {
@@ -158,6 +164,11 @@ type seqWire struct {
 
 type paramsWire struct {
 	Preset string `cbor:"1,keyasint"`
+	// Model and Effort are never written empty: an explicit empty text is not
+	// the encoding of "absent", and decoding refuses it because the envelope is
+	// compared with its own re-encoding.
+	Model  string `cbor:"2,keyasint,omitempty"`
+	Effort string `cbor:"3,keyasint,omitempty"`
 }
 
 type envelopeWire struct {
@@ -259,8 +270,8 @@ func (e Envelope) toWire() (envelopeWire, error) {
 		w.Seq = append(w.Seq, seqWire{Endpoint: ep.Bytes(), Seq: n})
 	}
 	slices.SortFunc(w.Seq, func(a, b seqWire) int { return bytes.Compare(a.Endpoint, b.Endpoint) })
-	if e.Preset != "" {
-		w.Params = &paramsWire{Preset: e.Preset}
+	if e.Preset != "" || e.Model != "" || e.Effort != "" {
+		w.Params = &paramsWire{Preset: e.Preset, Model: e.Model, Effort: string(e.Effort)}
 	}
 	return w, nil
 }
@@ -446,6 +457,18 @@ func fromWireParams(e *Envelope, w envelopeWire) error {
 		return fmt.Errorf("%w: preset: %w", ErrParams, err)
 	}
 	e.Preset = w.Params.Preset
+	if w.Params.Model != "" {
+		if err := adapterproto.ValidateModelName(w.Params.Model); err != nil {
+			return fmt.Errorf("%w: model: %w", ErrParams, err)
+		}
+		e.Model = w.Params.Model
+	}
+	if w.Params.Effort != "" {
+		if !adapterproto.Effort(w.Params.Effort).Valid() {
+			return fmt.Errorf("%w: effort: %q is not on the scale", ErrParams, w.Params.Effort)
+		}
+		e.Effort = adapterproto.Effort(w.Params.Effort)
+	}
 	return nil
 }
 
@@ -573,7 +596,8 @@ func (e Envelope) TrimmedFor(node ident.NodeID) Envelope {
 var requestDomain = frame.Domain("sidera/request-digest/1")
 
 // Digest returns the digest the target stores for deduplication. It covers what
-// a retry of the same request must repeat exactly: the kind, the params, the
+// a retry of the same request must repeat exactly: the kind, the params (the
+// model and the effort among them, when the request chooses them), the
 // content type, the body, the two deadlines, and what the sender chose about
 // the message's place in a conversation and who sees whom (reply_to, thread,
 // the multi-recipient flag, disclose_recipients and, when recipients are
@@ -593,10 +617,20 @@ func (e Envelope) Digest() delivery.BodyDigest {
 	if e.DiscloseRecipients {
 		flags |= 2
 	}
-	return delivery.BodyDigest(sha256.Sum256(frame.Frame(requestDomain,
-		[]byte{byte(kind)}, []byte(e.Preset), []byte(e.ContentType), e.Body,
-		[]byte(e.ReplyTo), []byte(e.Thread), []byte{flags}, e.disclosedRecipients(),
-		unixBE(e.AcceptBefore), unixBE(e.ReportBy))))
+	fields := [][]byte{
+		{byte(kind)}, []byte(e.Preset), []byte(e.ContentType), e.Body,
+		[]byte(e.ReplyTo), []byte(e.Thread), {flags}, e.disclosedRecipients(),
+		unixBE(e.AcceptBefore), unixBE(e.ReportBy),
+	}
+	// The model and the effort follow only when one was chosen. Two empty fields
+	// appended always would change the digest of every request that chooses
+	// nothing, and a retry that crosses an upgrade would then be a conflict.
+	// The framing is injective in the number of fields, so the two shapes never
+	// collide.
+	if e.Model != "" || e.Effort != "" {
+		fields = append(fields, []byte(e.Model), []byte(e.Effort))
+	}
+	return delivery.BodyDigest(sha256.Sum256(frame.Frame(requestDomain, fields...)))
 }
 
 // disclosedRecipients returns the recipient list as the request digest covers it:

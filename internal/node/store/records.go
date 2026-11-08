@@ -83,6 +83,11 @@ type OutEnvelope struct {
 	ContentType        string
 	// Preset is the parameter of a session creation.
 	Preset string
+	// Model and Effort are the model and the effort the requester chose for the
+	// new session, empty when it chose none. Like Preset they belong to a
+	// session creation.
+	Model  string
+	Effort adapterproto.Effort
 }
 
 // Idempotency is the caller's idempotency key of a message and how long the
@@ -242,8 +247,13 @@ type CtlRecord struct {
 	// Dedup holds the stored control reply, once there is one.
 	Dedup delivery.DedupRecord
 
-	Kind             envelope.Kind
-	Preset           string
+	Kind   envelope.Kind
+	Preset string
+	// Model and Effort are the model and the effort the requester chose for the
+	// new session, empty when it chose none. They belong to a session creation,
+	// as Preset does.
+	Model            string
+	Effort           adapterproto.Effort
 	SessionEndpoint  ident.EndpointID
 	AcceptedAt       time.Time
 	EndpointMaxQueue time.Duration

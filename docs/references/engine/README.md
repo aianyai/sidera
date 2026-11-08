@@ -1370,9 +1370,14 @@ used), and a creation it refuses before it calls the adapter, with the reply
 `adapterreg.DaemonCreateFailure` gives and no session endpoint and no intent: the preset is not
 defined (`preset_unknown`), the preset says it is closed to endpoints on this node and the
 signal came from one (`preset_unavailable`, by `authz.LocalCreate`, after the record is accepted
-so that the answer is a control reply), the adapter is not connected (`adapter_offline`), or
+so that the answer is a control reply), the adapter is not connected (`adapter_offline`), the
+creation chooses a model or an effort and the adapter does not take a choice
+(`model_choice_not_allowed`: it did not declare `model_choice`, or does not list the effort), or
 another endpoint would exceed the node cap (`node_endpoint_limit`). These checks run in that
-order. The endpoint limit is a failed creation after acceptance, so the stored reply says no
+order: the choice is judged after the adapter is known to be there, because what an adapter takes
+is known from its admission, and before the cap, because it is a property of this request while
+the cap is a passing state of the whole node. Whether the model and the effort are within the
+preset's allowlist is the adapter's to judge, since the keys of its presets are its own. The endpoint limit is a failed creation after acceptance, so the stored reply says no
 session was created, with no initial-message delivery, and a repeat keeps that answer even
 if room becomes available.
 
@@ -1380,8 +1385,9 @@ if room becomes available.
 the control record with its creation intent and the session endpoint with its token, being
 created and naming the record that makes it; both are on disk before the adapter is called.
 The adapter is called by a worker the engine owns (`session.create`: the attempt of the intent,
-the runtime endpoint, the new endpoint, the preset, the first prompt, the tool access and the
-checkpoint of the attempt), and its result is a command of the loop that settles the intent in
+the runtime endpoint, the new endpoint, the preset, the model and the effort when the creation
+chose them, the first prompt, the tool access and the checkpoint of the attempt; they are built
+from the records alone, and the choice is the control record's), and its result is a command of the loop that settles the intent in
 one transaction, `control-result`: the control reply is made and stored with the deduplication
 record, the delivery of the signal ends as delivered, and the endpoint opens, mapped to the native
 session, when the session was created and is closed with its token dropped when it was not.
@@ -1393,7 +1399,10 @@ receive by token; the first successful recv can only follow that confirmation.
 Without an initial message the text is `NewSessionPromptText`, with no attempts
 record or hourly count. The
 first prompt's attempt follows from the creation attempt, so a call made again carries what the
-first carried, as the adapter requires. Once the intent is settled,
+first carried, as the adapter requires. A creation that chose a model or an effort is judged
+once more before each call: when the instance has meanwhile come back as an adapter that does not
+take the choice, it is settled as failed with `model_choice_not_allowed` and the adapter is not
+called, as it would have been refused at intake. Once the intent is settled,
 whatever the outcome (a creation failed because its endpoint was lost included), the checkpoints the adapter kept under the creation attempt and under the first
 prompt's attempt are dropped: no call will be made again. A call that failed, an
 answer of `indeterminate` and an adapter that is not connected are tried again, after
@@ -2297,7 +2306,7 @@ reproducible).
 | A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
 | A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `FuzzInbound` |
 | A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
-| A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline`, `TestSessionCreateAtNodeEndpointLimitFailsAtOnce`, `TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart` |
+| A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline`, `TestSessionCreateAtNodeEndpointLimitFailsAtOnce`, `TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart`, `TestSessionCreateChoosingAModel`, `TestSessionCreateChoosingAModelWhileTheAdapterIsOffline` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
 | A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `reconcileCreations`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
 | A creation that is not ready by its deadline is unconfirmed, closes its endpoint and alerts the owner; one past its deadline at the start is settled the same way | `create.go` (`createDeadline`, `reconcileCreations`) | `TestSessionCreateNotReadyByItsDeadlineIsUnconfirmedAndALateSessionIsAlerted`, `TestCreationOverdueAtStartIsSettledAsUnconfirmed` |

@@ -138,6 +138,9 @@ func cloneCaps(c adapterproto.Capabilities) adapterproto.Capabilities {
 	if c.Runtime != nil {
 		r := *c.Runtime
 		r.Frontends = slices.Clone(r.Frontends)
+		if r.ModelChoice != nil {
+			r.ModelChoice = &adapterproto.ModelChoiceCapability{Efforts: slices.Clone(r.ModelChoice.Efforts)}
+		}
 		out.Runtime = &r
 	}
 	if c.Direct != nil {
@@ -211,6 +214,17 @@ func (a Admission) DeclaredKinds() []EndpointKind {
 // the daemon send it session.attach and session.detached, or list an attached
 // session in adapter.start.
 func (a Admission) Attaches() bool { return a.caps.Runtime != nil && a.caps.Runtime.Attach }
+
+// TakesModelChoice reports whether a session.create that chooses a model or an
+// effort can be sent to this adapter: it declared model_choice and, when an
+// effort is chosen, lists that effort. Whether the model and the effort are in
+// the preset's allowlist is the adapter's to judge, as it owns the preset's keys.
+func (a Admission) TakesModelChoice(effort adapterproto.Effort) bool {
+	if a.caps.Runtime == nil || a.caps.Runtime.ModelChoice == nil {
+		return false
+	}
+	return effort == "" || slices.Contains(a.caps.Runtime.ModelChoice.Efforts, effort)
+}
 
 // MaxDirectEndpoints is the most direct endpoints the adapter may register; zero
 // when it declared none.

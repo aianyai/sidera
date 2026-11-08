@@ -34,7 +34,7 @@ is a new type string.
 | 12 | `accept_before` | Unix seconds |
 | 13 | `report_by` | Unix seconds; must be `accept_before` plus the report offset of the delivery rules |
 | 14, 15 | `content_type`, `body` | both present or both absent; the body is valid UTF-8 |
-| 16 | `params` | `{1: preset}`, only for `control.session.create` |
+| 16 | `params` | `{1: preset, 2: model, 3: effort}`, only for `control.session.create`; `model` and `effort` are optional text, a model name and an effort of the adapter protocol (`adapterproto.ValidateModelName`, `adapterproto.Effort`), and are left out when the requester chose nothing: written as an empty text they make the envelope non-canonical and are refused |
 
 Rules: a message has a body; a `session.create` may have one (the initial
 message); the other control signals have neither body nor params; a control
@@ -77,7 +77,9 @@ deduplication record of each delivery of the request. It covers the kind, the
 preset, the content type, the body, the two deadlines, `reply_to`, `thread`, the
 multi-recipient flag and `disclose_recipients`, and, when `disclose_recipients`
 is set, the whole `to` list (each address as node then endpoint bytes, in the
-sender's order). It covers nothing a retry may change (the recipient list as
+sender's order). When the `session.create` chooses a model or an effort, the
+model and then the effort follow as two more fields; when it chooses neither,
+the digest is the one it was before they existed. It covers nothing a retry may change (the recipient list as
 trimmed for a path when it is not disclosed, sequence numbers, the send time, the
 evidence). A retry with the same id and another digest is a conflict; this also
 means a `message.send` under the id of a control signal's initial message
@@ -372,6 +374,25 @@ which may still admit it.
   it is what the recipients are shown, so a retry under the same id that listed
   other recipients, or the same in another order, is another request and must
   conflict rather than be taken for the one already held.
+- **The model and the effort extend the digest only when they are chosen.** A
+  digest that always carried the two fields, empty ones included, would differ
+  from the digest every request made before them has, and a retry of such a
+  request that crosses an upgrade of the target would be taken for another
+  request under the same id: a `message_conflict`, after which the sender gives
+  the message up. The digest frames every field behind its length, so a digest
+  with the two fields and one without them never collide.
+- **The model and the effort are text in `params`, and the envelope type string
+  stays.** The adapter protocol codes its states as integers because they are
+  protocol state; an effort is a word handed to the runtime, as a model name is,
+  and a code would only be a second spelling of the same word. An incompatible
+  change of the envelope is a new type string, and the new keys are one that an
+  older reader refuses. The type string stays because an envelope that
+  carries them is meant for a reader that takes them and for none else: an
+  envelope is read only on the stream it arrives on, is not signed, not stored as
+  bytes and not forwarded (the source record keeps its fields, the target keeps a
+  digest), so which readers meet a key is decided by the stream and what the
+  sending node knows of the node it sends to, never by the bytes. A signed record is different: a status report is
+  passed on and carried as evidence, so a new member of it is a new type string.
 - **The sending node in reports and replies.** The deduplication key is (sender
   node, message id, recipient endpoint), so a report that named only the id and
   the endpoint would fit every sender that used that id. Naming the sender makes

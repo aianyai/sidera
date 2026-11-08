@@ -296,7 +296,7 @@ func (e *Engine) sourceRecord(now time.Time, sender ident.EndpointID, env envelo
 		},
 		Envelope: store.OutEnvelope{
 			To: env.To, DiscloseRecipients: env.DiscloseRecipients, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq, SentAt: env.SentAt,
-			ReportBy: env.ReportBy, ContentType: env.ContentType, Preset: env.Preset,
+			ReportBy: env.ReportBy, ContentType: env.ContentType, Preset: env.Preset, Model: env.Model, Effort: env.Effort,
 		},
 		BodyDigest: env.Digest(),
 	}

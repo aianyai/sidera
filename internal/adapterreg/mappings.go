@@ -262,6 +262,10 @@ const (
 	DaemonCreateAdapterOffline
 	// DaemonCreateNodeEndpointLimit: another endpoint would exceed the node cap.
 	DaemonCreateNodeEndpointLimit
+	// DaemonCreateModelChoiceUnsupported: the creation chooses a model or an
+	// effort and the adapter does not take the choice (it did not declare
+	// model_choice, or does not list the effort).
+	DaemonCreateModelChoiceUnsupported
 )
 
 // DaemonCreateFailure is the reply to a session.create the daemon refuses
@@ -281,6 +285,8 @@ func DaemonCreateFailure(r DaemonCreateReason) adapterproto.ControlCreateReply {
 		reason = adapterproto.CreateReasonAdapterOffline
 	case DaemonCreateNodeEndpointLimit:
 		reason = adapterproto.CreateReasonNodeEndpointLimit
+	case DaemonCreateModelChoiceUnsupported:
+		reason = adapterproto.CreateReasonModelChoiceNotAllowed
 	default:
 		return adapterproto.ControlCreateReply{}
 	}

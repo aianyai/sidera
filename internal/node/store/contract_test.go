@@ -26,7 +26,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		fields string
 	}{
 		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown StateAt Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
-		{"store.OutEnvelope", reflect.TypeOf(store.OutEnvelope{}), "To ReplyTo Thread Seq SentAt ReportBy ContentType Preset DiscloseRecipients"},
+		{"store.OutEnvelope", reflect.TypeOf(store.OutEnvelope{}), "To ReplyTo Thread Seq SentAt ReportBy ContentType Preset Model Effort DiscloseRecipients"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
 		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
@@ -218,7 +218,7 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 	out.Outbound.ControlReplyDigest = [32]byte{1, 2, 3}
 	out.Outbound.Kind = envelope.KindSessionCreate
 	out.Key.Control = true
-	out.Envelope.Preset = "p"
+	out.Envelope.Preset, out.Envelope.Model, out.Envelope.Effort = "p", "m", adapterproto.EffortMax
 	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(base, out.Outbound.AcceptBefore), Arrival: envelope.Arrival{ArrivedAt: base}}
 	out.Outbound.Derived = &derived
 	out.ControlReply = []byte{0, 1, 2, 255}
@@ -241,6 +241,7 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 
 	// A control record's stored reply and a target record's digest.
 	c := sessionCtl(1, 5)
+	c.Model, c.Effort = "m", adapterproto.EffortMax
 	c.Dedup.Digest = delivery.BodyDigest{9, 9, 9}
 	c.Dedup, _ = c.Dedup.WithReply([]byte("stored reply"))
 	data, err = store.EncodeRecord(c)
