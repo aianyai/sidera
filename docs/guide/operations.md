@@ -675,9 +675,10 @@ echo '{"codex_program": "/full/path/to/codex"}' > codex-instance.json
 sidera adapter config codex --config codex-instance.json
 ```
 
-**A session cannot be created: `preset_unknown` or `preset_invalid`.** The preset
-name does not exist on the target node, or its working directory does not exist
-there, or it is missing a required key (`project_dir` and `permission_mode` for
+**A session cannot be created: `preset_unknown` or `preset_unavailable`.** With
+`preset_unknown` the preset name does not exist on the target node. With
+`preset_unavailable` it exists but cannot be used: its working directory does not
+exist there, or it is missing a required key (`project_dir` and `permission_mode` for
 Claude, `cwd` for Codex). Check with `sidera preset list` on the target node.
 
 **An agent keeps seeing the same message.** It does not acknowledge. See

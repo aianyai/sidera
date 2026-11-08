@@ -24,6 +24,7 @@
 - Only an endpoint whose `kind` is `runtime` and whose `accepts` includes `session.create` starts a session. An endpoint of kind `direct` (a person's console) or `session` only takes messages. Take the address from `directory`: pick the runtime by `adapter.id` (the one whose `adapter.id` is `codex` when you want Codex), and check `endpoint.status` of it before `session.create` to see whether it can be used now.
 - Learn the presets of that node: `control` with `to` set to the runtime endpoint and `signal` set to `endpoint.status`, then `status` with the returned `message_id`. The control reply lists `presets`, each with a `name` and whether it is `available`.
 - Call `control` with `to` set to the runtime endpoint, `signal` set to `session.create`, one of those presets and a `body` that holds the whole task: the new session sees only that body, not your conversation. The body reaches the new session at once, so do not send it again.
+- To run the new session with another model or effort than the preset's own, add `model` and `effort` (`low`, `medium`, `high`, `xhigh` or `max`) to `control`: a stronger model or a higher effort for a hard, open-ended task, a cheaper one for mechanical work. Choose only from the `allowed models` that `endpoint.status` lists for the preset, and leave both out when the preset's own fit. A refused choice shows in `status` of the `control` message as `model_choice_not_allowed` (create again without it or from the list) or `node_unsupported` (the node is of an earlier release; retrying cannot help).
 - `control` returns at once with a message id only. `status` with that id shows the control reply within seconds, and with it the endpoint of the new session; the session is on the node you sent `control` to, so its address is that node, `/`, and the endpoint. The answer to the task is a later message; wait for it as described under "Waiting for an answer".
 - Close only a session you created: `control` with `signal` set to `session.close`.
 
@@ -51,4 +52,4 @@ The commands print labelled lines and tables for reading, with the facts of the 
 | `recv` | `sidera recv --wait 60`, with `--ack <lease>` to acknowledge a page first; `sidera recv --msg <id> --part <k>`, without `--wait`, fetches the next piece |
 | `ack` | `sidera ack <lease>`; `sidera ack <lease> <message-id>:<part>` for only some of a page |
 | `status` | `sidera status <message-id>` |
-| `control` | `sidera control <address> session.create --preset <name> --body <text>`; `sidera control <address> endpoint.status` |
+| `control` | `sidera control <address> session.create --preset <name> [--model <name> --effort <level>] --body <text>`; `sidera control <address> endpoint.status` |

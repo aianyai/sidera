@@ -148,7 +148,9 @@ that starts sessions), not a console and not an existing session.
    ```
 
    `session.create` delivers the first message into the new session at once.
-   There is no need to `send` it again.
+   There is no need to `send` it again. To run the session with another model or effort
+   than the preset's own, add `--model <name>` and `--effort <level>`; see
+   [Letting a requester choose the model and effort](#letting-a-requester-choose-the-model-and-effort).
 3. Wait for the answer with `recv`, as above. `sidera control` returns as soon as
    the request is accepted, and its output holds only the message id and the target:
    **it does not carry the new session's address.** `sidera status <message-id>`
@@ -386,3 +388,66 @@ owner. A Claude Code `light` session cannot, and neither can a Codex
 `workspace-write` session on Linux and macOS (on Windows this was not measured). The
 details are in
 [Presets and access](getting-started.md#the-management-interface-trusts-the-user-not-the-session).
+
+## Letting a requester choose the model and effort
+
+A session runs with the `model` and `effort` of its preset. An agent or person who starts
+a session can ask for others, to give a hard task a stronger model or a trivial one a cheaper
+model:
+
+```sh
+sidera control <runtime-address> session.create --preset light --model <name> --effort high --body-file task.txt
+```
+
+(In the MCP tool, `control` takes `model` and `effort` besides `preset`. `effort` is
+`low`, `medium`, `high`, `xhigh` or `max`.) You decide what may be chosen, by writing
+`allowed_models` in the preset: an object from a model name to the efforts that may be
+chosen with it. For Claude Code it goes in the `claude` object of `config` in the preset
+file, and for Codex in the `codex` object:
+
+```json
+{
+  "local_sources": "allow",
+  "config": {
+    "claude": {
+      "project_dir": "<absolute path of an existing directory>",
+      "permission_mode": "dontAsk",
+      "model": "sonnet",
+      "effort": "medium",
+      "allowed_models": {"opus": ["high", "max"], "sonnet": ["low", "medium", "high"]}
+    }
+  }
+}
+```
+
+- **Without `allowed_models`, nobody can choose.** A creation that gives a `model` or an
+  `effort` is refused with `model_choice_not_allowed`, and a creation that gives neither
+  follows the preset as before. Nothing is substituted: a value that is not on the list
+  is refused, never replaced by the nearest one.
+- **The efforts an adapter takes.** Claude Code takes all five (`low`, `medium`, `high`,
+  `xhigh`, `max`); Codex takes the first four. A list holding an effort the adapter does
+  not take is a mistake in the preset.
+- **A preset with a mistake is not usable.** An empty object, a model with an empty list of
+  efforts, an effort listed twice or that the adapter does not take, more than 16 models and
+  a model name that is not valid (letters, digits and `._:/@+[]-`, starting with a letter
+  or a digit, at most 128 characters) make the preset `not available` in `endpoint.status`, and creating a session from
+  it fails with `preset_unavailable`. An empty list does not mean "every effort": list what
+  you allow. `preset add` itself only checks that the value is an object of lists of
+  strings; the adapter judges the rest when it reads the preset. A preset cannot be
+  edited: remove it and add it again.
+- **List only the efforts a model really supports.** Sidera cannot know that. Claude Code
+  does not refuse an effort a model lacks: it quietly runs the highest level the model
+  supports below it. How Codex reacts to one is not known.
+- **The preset's own `model` and `effort`.** A requester who gives only a model gets the
+  preset's `effort` with it, and one who gives only an effort is checked against the
+  preset's `model` (or, when the preset has none or it is not on the list, may only repeat
+  the preset's `effort`). Agents are told to give both, so set the preset's own `model` and
+  `effort` to values on the list.
+- **The choice is checked once, when the session is created, and stays with the session.**
+  The model and effort a session started with are kept across turns, resumes and restarts,
+  whatever the preset says later, so narrowing or removing the list does not change the
+  sessions that exist.
+- **An agent reads the choices from `endpoint.status`** of your runtime: for each preset
+  it shows the defaults and the allowed models with their efforts. A node of an earlier
+  release cannot take a choice; a request that has one is rejected as `node_unsupported`
+  until that node is updated.

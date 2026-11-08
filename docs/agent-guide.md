@@ -742,9 +742,10 @@ warning about the unconfirmed backup on every call.
 
 If `new` fails with `native_unavailable`, the daemon on the other machine cannot
 find `codex` or `claude` on its `PATH`: restart that daemon with the `PATH` set as in
-step 4 (on Windows through the script there). If it fails with `preset_unknown` or
-`preset_invalid`, the preset does not exist there under that name or its directory
-does not exist.
+step 4 (on Windows through the script there). If it fails with `preset_unknown`, the
+preset does not exist there under that name; if it fails with `preset_unavailable`,
+the preset exists but cannot be used: its directory does not exist or a required key
+is missing.
 
 If you are a controller (a Claude Code or Codex session your owner opened with the
 `sidera` MCP server added; see Part 2), you can run the same check with your own tools
@@ -854,6 +855,39 @@ them there without your owner's yes (see "Ask your owner before").
    message id: the control reply lists `presets`, each with a `name` and whether it is
    `available`. Put the whole task in the first message: it reaches the new session at
    once, so do not send it again.
+
+   **Choose the model and the effort to fit the task.** A session runs with the model and
+   effort of its preset. When the task needs another, give `model` and `effort` (`low`,
+   `medium`, `high`, `xhigh` or `max`) on `session.create`:
+
+   ```sh
+   sidera control <runtime-address> session.create --preset light --model <name> --effort high --body-file task.txt
+   ```
+
+   (MCP: `control` with `model` and `effort` besides the members above.) Read the
+   target's `endpoint.status` first, as above: under each preset's name it shows
+   `defaults: model <name>, effort <level>` and `allowed models: <name> (<efforts>), ...`
+   (in JSON the preset's `model`, `effort` and `allowed_models`, a list of a `model` with
+   its `efforts`). The owner of the node decides what may be chosen, so give only a model
+   that is listed, with an effort that is listed for it, and give both together. Leave
+   both out when the preset's own fit the task: the session then gets the preset's
+   `model` and `effort`, and where the preset sets none, the runtime's own. Nothing is
+   substituted: a choice that is refused is refused, and you read the refusal in `status`
+   of the `control` message, not in the answer of `control`:
+
+   - `model_choice_not_allowed` (a failed creation): the preset does not allow that
+     model, that effort or that combination, or it allows no choice at all, or the
+     runtime's adapter does not take a choice. Create the session again without `model`
+     and `effort`, or with a model and an effort from the `allowed models` of that
+     preset. Repeating the same call cannot succeed.
+   - `node_unsupported` (the delivery is `rejected`): the target node runs a release
+     that cannot take a choice. Retrying cannot help until its owner updates it; create
+     the session without `model` and `effort`, or tell your owner.
+
+   Choose by the work. Give a hard, open-ended task (a design, a subtle bug, a review
+   that must find what is wrong) a stronger model or a higher effort, and mechanical work
+   (a lookup, a rename, a summary of a short text) a cheaper model or a lower effort,
+   which answers sooner and costs less. When unsure, leave the preset's own.
 8. **Know how you will get the answer.** `control` returns at once with the message id
    only: its result does not carry the new session. To learn it, call `status` with the
    message id (MCP: `status` with `message_id`): the control reply appears there within

@@ -238,9 +238,11 @@ history.
 [Configuration](../references/adapter-claude/README.md#configuration) in the reference.
 
 `allowed_models` lets whoever creates a session choose its model and effort within a list you
-write, for example `{"opus": ["high", "max"], "sonnet": ["low", "medium"]}`; without it the
-creator cannot choose. List only the efforts a model really supports: Claude Code does not refuse
-an effort a model lacks, it quietly uses the highest level the model supports below it.
+write, for example `{"opus": ["high", "max"], "sonnet": ["low", "medium"]}`, with any of the five
+efforts; without it the creator cannot choose
+([how it works](agents.md#letting-a-requester-choose-the-model-and-effort)). List only the efforts
+a model really supports: Claude Code does not refuse an effort a model lacks, it quietly uses the
+highest level the model supports below it.
 
 ## Codex
 
@@ -356,8 +358,9 @@ the session uses your own Codex defaults.
 To let whoever starts a session choose its model and effort, list the choices in
 `allowed_models`: a map from a model to the efforts allowed with it, for example
 `{"gpt-5.1-codex": ["medium", "high"]}`. Without it nobody can choose and every session follows
-the preset. List only efforts the model supports; Sidera accepts `low`, `medium`, `high` and
-`xhigh` for Codex, and how Codex reacts to an effort a model does not support is not known.
+the preset ([how it works](agents.md#letting-a-requester-choose-the-model-and-effort)). List only
+efforts the model supports; Sidera accepts `low`, `medium`, `high` and `xhigh` for Codex, and how
+Codex reacts to an effort a model does not support is not known.
 
 ## Hermes
 
