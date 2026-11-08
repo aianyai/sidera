@@ -133,7 +133,7 @@ func adapterRestartedAfter(t testing.TB, h *harness.H, launches int, step time.D
 		}
 		if time.Now().After(deadline) {
 			due, ok := h.HostTimerDue()
-			t.Fatalf("the host armed no timer that fires within %v (the earliest has %v left, armed %t)", step, due, ok)
+			t.Fatalf("the host reported no timer that fires within %v (the earliest has %v left, reported %t): it reports a timer only while it is idle, so it may still be working", step, due, ok)
 		}
 		time.Sleep(time.Millisecond)
 	}

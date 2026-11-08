@@ -996,12 +996,27 @@ func (h *H) Set(t time.Time) {
 }
 
 // HostTimerDue is the time from now until the earliest timer the adapter host has
-// armed fires, and false when it has armed none. The host arms its restart backoff
-// a moment after it tells the node that the adapter is gone, so a test that moves
-// the clock to the restart waits for this first, and moves the clock by exactly
-// this, which fires the timer and no more. The clock must be moved through Advance
-// and Set: a move made on Clock directly is not followed by a set-back.
-func (h *H) HostTimerDue() (time.Duration, bool) { return h.hostClk.nextDue() }
+// armed fires, and false when it has armed none or when the host of any instance is
+// not idle, that is working or with a request in flight. The host arms its restart
+// backoff a moment after it tells the node that the adapter is gone, and before
+// that it waits for the process to end under a timer of its own (the shutdown
+// wait) while it works; only once it is idle is the backoff the timer a test means
+// to fire. A test that moves the clock to the restart waits for this first, and
+// moves the clock by exactly this, which fires the timer and no more. The clock
+// must be moved through Advance and Set: a move made on Clock directly is not
+// followed by a set-back.
+func (h *H) HostTimerDue() (time.Duration, bool) {
+	p, err := h.currentProcess()
+	if err != nil || p.host == nil {
+		return 0, false
+	}
+	for _, inst := range h.instances {
+		if c := p.host.Counts(inst); c.Working || len(c.Calls) > 0 {
+			return 0, false
+		}
+	}
+	return h.hostClk.nextDue()
+}
 
 // BeginStep announces the script step that is about to run: it sets the step the
 // ledger stamps on every entry written from now on and writes the entry that says

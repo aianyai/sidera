@@ -390,12 +390,16 @@ func TestHostTimerDueIsTheRestartBackoffOnceTheHostHasArmedIt(t *testing.T) {
 	h.AdapterLaunches(harness.Instance)[0].End()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if due, ok := h.HostTimerDue(); ok && due == restartAfter {
+		// The first answer is the backoff: the host waits for the process to end
+		// under a timer of its own first, and that one is not reported.
+		if due, ok := h.HostTimerDue(); ok {
+			if due != restartAfter {
+				t.Fatalf("HostTimerDue() = %v, true after the adapter ended, want the backoff in %v", due, restartAfter)
+			}
 			break
 		}
 		if time.Now().After(deadline) {
-			due, ok := h.HostTimerDue()
-			t.Fatalf("HostTimerDue() = %v, %v after the adapter ended, want the backoff in %v", due, ok, restartAfter)
+			t.Fatalf("HostTimerDue() reported no timer after the adapter ended, want the backoff in %v", restartAfter)
 		}
 		time.Sleep(time.Millisecond)
 	}

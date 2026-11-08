@@ -787,7 +787,10 @@ coverage dimensions.
   keeps the remaining time of the timers the host armed, because the shared clock only
   counts its armed timers, those of the engine and the knobs among them, and a count
   cannot say that the host's restart backoff exists. `HostTimerDue` reports the time
-  until the earliest of them fires: a test that moves the clock to an adapter restart
+  until the earliest of them fires, and only while the host of every instance is idle
+  (not working, no request in flight): after an adapter ends the host first waits for the
+  process to exit under a timer of its own, and only then arms the restart backoff, so the
+  earliest timer of a host that is still working is not the one a test means to fire. A test that moves the clock to an adapter restart
   waits for it and advances by exactly that, never by a guess made on real time, which on
   a slow machine moves the clock once too often. `Set` keeps the remaining time of those
   timers across a set-back, as the fake clock does. The fake adapter runs on pipes in the test process and
