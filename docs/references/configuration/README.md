@@ -228,7 +228,10 @@ adapter id, configuration keys, values that are not `null`), because the manifes
 may not be available then and a package that does not load faults only its adapter.
 A value that is already stored is not checked again, by an upgrade or by the
 installation of a newer package: it reaches the adapter as it is, and the adapter
-reports a value it cannot use.
+reports a value it cannot use. A map value (a `map` field) is stored in one form
+whatever order and spacing it was written in: compact, with its entries sorted by
+key, as every map of the configuration is, so two spellings of one map are the same
+bytes in the file and in what the owner is shown.
 A preset cannot be changed, only removed and added again. The values reach an adapter
 only in `adapter.start`, so adding or removing a preset restarts the instances that run
 and declare a runtime (the engine reference says which); a restart is the one way a

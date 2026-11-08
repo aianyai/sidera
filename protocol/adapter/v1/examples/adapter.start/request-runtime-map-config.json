@@ -1,0 +1,32 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "adapter.start",
+  "params": {
+    "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "runtime_endpoint": "11111111111111111111111111111111",
+    "config": {
+      "home": "/home/dev/.example"
+    },
+    "presets": [
+      {
+        "name": "default",
+        "config": {
+          "project_dir": "/home/dev/projects/api",
+          "efforts_by_model": {
+            "standard": [
+              "low",
+              "high"
+            ],
+            "fast": [],
+            "claude-opus-4-6[1m]": [
+              "high"
+            ]
+          }
+        }
+      }
+    ],
+    "sessions": [],
+    "direct_endpoints": []
+  }
+}

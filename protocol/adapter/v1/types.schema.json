@@ -97,6 +97,11 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{0,63}$"
     },
+    "ConfigMapKey": {
+      "description": "The key of one entry of a map value: 1 to 128 visible ASCII characters.",
+      "type": "string",
+      "pattern": "^[!-~]{1,128}$"
+    },
     "EnvName": {
       "type": "string", "maxLength": 128,
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
@@ -113,13 +118,27 @@
       "propertyNames": { "$ref": "#/$defs/EnvName" },
       "additionalProperties": { "type": "string", "maxLength": 4096 }
     },
-    "ConfigValue": {
-      "description": "A configuration value: a string, an integer, a boolean or a list of strings.",
+    "ConfigPlainValue": {
+      "description": "A configuration value that is not a map: a string, an integer, a boolean or a list of strings.",
       "oneOf": [
         { "type": "string", "maxLength": 4096 },
         { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         { "type": "boolean" },
         { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } }
+      ]
+    },
+    "ConfigMap": {
+      "description": "A map value: at most 64 entries, each keyed by a ConfigMapKey and holding a plain value. A map holds no map.",
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/ConfigMapKey" },
+      "additionalProperties": { "$ref": "#/$defs/ConfigPlainValue" }
+    },
+    "ConfigValue": {
+      "description": "A configuration value: a string, an integer, a boolean, a list of strings or a map.",
+      "oneOf": [
+        { "$ref": "#/$defs/ConfigPlainValue" },
+        { "$ref": "#/$defs/ConfigMap" }
       ]
     },
     "ConfigValues": {

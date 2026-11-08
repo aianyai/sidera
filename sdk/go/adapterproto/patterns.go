@@ -22,6 +22,11 @@ const (
 	PresetNamePattern = `^[a-z0-9][a-z0-9._-]*$`
 	// ConfigKeyPattern is the key of a configuration field.
 	ConfigKeyPattern = `^[a-z][a-z0-9_]{0,63}$`
+	// ConfigMapKeyPattern is the key of one entry of a map value. It holds
+	// visible ASCII only (U+0021 to U+007E): an owner writes it and no other rule
+	// checks it, and without blanks or control characters it can be shown as it
+	// is. 128 characters hold any model name.
+	ConfigMapKeyPattern = `^[!-~]{1,128}$`
 	// EnvNamePattern is the name of an environment variable the adapter injects.
 	EnvNamePattern = `^[A-Za-z_][A-Za-z0-9_]*$`
 	// ModelNamePattern is the name of a model as a runtime spells it: an alias, a
@@ -41,30 +46,32 @@ const MaxPresetNameLen = 64
 const MaxModelNameLen = 128
 
 var (
-	adapterIDRE  = regexp.MustCompile(AdapterIDPattern)
-	presetNameRE = regexp.MustCompile(PresetNamePattern)
-	modelNameRE  = regexp.MustCompile(ModelNamePattern)
-	configKeyRE  = regexp.MustCompile(ConfigKeyPattern)
-	envNameRE    = regexp.MustCompile(EnvNamePattern)
-	reasonWordRE = regexp.MustCompile(reasonWordPattern)
+	adapterIDRE    = regexp.MustCompile(AdapterIDPattern)
+	presetNameRE   = regexp.MustCompile(PresetNamePattern)
+	modelNameRE    = regexp.MustCompile(ModelNamePattern)
+	configKeyRE    = regexp.MustCompile(ConfigKeyPattern)
+	configMapKeyRE = regexp.MustCompile(ConfigMapKeyPattern)
+	envNameRE      = regexp.MustCompile(EnvNamePattern)
+	reasonWordRE   = regexp.MustCompile(reasonWordPattern)
 )
 
 // Patterns returns every pattern of the protocol keyed by the name of its
 // definition in the schema.
 func Patterns() map[string]string {
 	return map[string]string{
-		"AttemptID":   attemptIDPattern,
-		"LeaseRef":    leaseRefPattern,
-		"Token":       tokenPattern,
-		"AdapterID":   AdapterIDPattern,
-		"PresetName":  PresetNamePattern,
-		"DisplayName": PersonTextPattern(),
-		"Description": DescriptionPattern(),
-		"ModelName":   ModelNamePattern,
-		"ConfigKey":   ConfigKeyPattern,
-		"EnvName":     EnvNamePattern,
-		"ReasonWord":  reasonWordPattern,
-		"SemVer":      semver.Pattern,
+		"AttemptID":    attemptIDPattern,
+		"LeaseRef":     leaseRefPattern,
+		"Token":        tokenPattern,
+		"AdapterID":    AdapterIDPattern,
+		"PresetName":   PresetNamePattern,
+		"DisplayName":  PersonTextPattern(),
+		"Description":  DescriptionPattern(),
+		"ModelName":    ModelNamePattern,
+		"ConfigKey":    ConfigKeyPattern,
+		"ConfigMapKey": ConfigMapKeyPattern,
+		"EnvName":      EnvNamePattern,
+		"ReasonWord":   reasonWordPattern,
+		"SemVer":       semver.Pattern,
 	}
 }
 
@@ -370,6 +377,14 @@ func ValidateAdapterID(s string) error { return matches(adapterIDRE, s) }
 
 // ValidateConfigKey checks the syntax of a configuration key.
 func ValidateConfigKey(s string) error { return matches(configKeyRE, s) }
+
+// ValidateConfigMapKey checks the syntax of the key of one entry of a map value.
+func ValidateConfigMapKey(s string) error {
+	if err := strLen(s, 1, 128); err != nil {
+		return err
+	}
+	return matches(configMapKeyRE, s)
+}
 
 // ValidateSemVer checks that s is a Semantic Versioning 2.0.0 version.
 func ValidateSemVer(s string) error {

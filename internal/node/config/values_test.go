@@ -33,7 +33,8 @@ const strictManifest = `{"manifest_version":1,"id":"strict","version":"1.0.0","p
 	`"config":{"instance":[{"key":"token","type":"string","title":"Token","required":true},` +
 	`{"key":"retries","type":"integer","title":"Retries","min":0,"max":5}],` +
 	`"preset":[{"key":"mode","type":"enum","title":"Mode","options":["fast","slow"]},` +
-	`{"key":"names","type":"string_list","title":"Names"}]}}`
+	`{"key":"names","type":"string_list","title":"Names"},` +
+	`{"key":"limits","type":"map","title":"Limits","value":{"type":"string_list"}}]}}`
 
 func loadedWithValues(t testing.TB) (*rig, *config.Config) {
 	t.Helper()
@@ -135,5 +136,27 @@ func TestWritingValuesTheManifestAllows(t *testing.T) {
 	}
 	if got := c.Instances().Items["second"].Config; !reflect.DeepEqual(got, map[string]json.RawMessage{"token": json.RawMessage(`"u"`)}) {
 		t.Errorf("configuration = %s", got)
+	}
+}
+
+// A map value is stored in one form, whatever order and spacing it was written
+// in: its entries sorted by key, with no blanks. Two spellings of the same map
+// then store the same bytes, so the file and its displays do not change between
+// two writes of the same configuration.
+func TestAMapValueIsStoredSortedByKey(t *testing.T) {
+	for _, doc := range []string{
+		`{"b": ["x"], "a": ["y", "z"]}`,
+		`{"a":["y","z"],"b":["x"]}`,
+	} {
+		_, c := loadedWithValues(t)
+		var presets []config.Presets
+		req := `{"local_sources": "deny", "config": {"strict": {"limits": ` + doc + `}}}`
+		if _, err := c.AddPreset(request(1, 2), "new", []byte(req), result(&presets, `{}`)); err != nil {
+			t.Fatalf("AddPreset: %v", err)
+		}
+		const want = `{"a":["y","z"],"b":["x"]}`
+		if got := c.Presets().Items["new"].Config["strict"]["limits"]; string(got) != want {
+			t.Errorf("%s is stored as %s, want %s", doc, got, want)
+		}
 	}
 }

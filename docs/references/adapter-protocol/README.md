@@ -583,7 +583,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Eleven
+reader of an earlier shape is deployed that the change could break. Twelve
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -654,7 +654,14 @@ have sent to a new version:
   members above. `node_unsupported` is the one rejection reason that no target reports: the
   sender's own node decides it when the target's node cannot take the message, and it is
   never signed. The record is kept because rule 3 would otherwise have sent all of it to a
-  new version.
+  new version;
+- the configuration field type `map` and map values in `ConfigValues`. An older daemon refuses
+  a manifest that declares a `map` field (`unknown field type`); the only older daemons are
+  Sidera's own releases, and `sidera update` restarts the daemon before it installs adapter
+  packages, so a package that declares one meets an older daemon only when installed by hand,
+  and is refused with that error. The daemon checks every value against the manifest when it is
+  written, so a map value is only ever sent to an adapter whose manifest declares the field, and
+  an adapter that predates the type never receives one.
 
 Three removals were made the same way, because nothing outside this repository reads
 what they took away:
@@ -1882,7 +1889,8 @@ In short: `id` and `version` are checked as the adapter reports them in
 announcement are checked against each other; `setup` is optional and declares the
 program (and arguments) the core CLI runs to bring an instance's client in line with
 the instance, a package path judged exactly like `entry`'s, one rule in the schema
-(`$defs/Program`) and in `manifest.Entry`; an adapter without it has no setup; configuration uses a small field vocabulary; budgets map to the output
+(`$defs/Program`) and in `manifest.Entry`; an adapter without it has no setup; configuration uses a small field vocabulary
+(`string`, `integer`, `boolean`, `enum`, `directory`, `string_list` and `map`); budgets map to the output
 budget of `recv` for that front end, and a front end without one gets the default;
 `recv_wait_limits` give, per agent front end (`cli` or `mcp`, never `direct`), the
 longest an agent's `recv` may wait for a message, in whole seconds from 1 to 120
@@ -1922,6 +1930,21 @@ does not remove it.
   make a validation library a run-time dependency of the daemon, for roughly a
   hundred lines of checks. The examples elsewhere (extension manifests of other
   agent tools) use small vocabularies too.
+- **A map is one level deep, and its values are described by a `MapValue`.** A `map`
+  field holds an object whose entries are keyed by 1 to 128 visible ASCII characters
+  (`adapterproto.ConfigMapKeyPattern`; an owner writes the keys and nothing else checks
+  them, and without blanks and control characters a key can be shown as it is) and whose
+  values are all of one plain type, described by the field's `value`: a type with the
+  options or bounds it takes, and never `map`. With one level the daemon still needs no
+  schema engine, and `ConfigValues` stays a flat object of plain values and maps of plain
+  values. `value` is a `MapValue` and not a nested field because a field's key, title,
+  requirement and default belong to the map and would all have to be refused on the
+  nested one; a later kind of value (a record of named members) is a new member of
+  `MapValue`. A map has at most 64 entries and counts as one of the 64 values of its
+  configuration. No bound on its bytes is added: a list can already reach 256 strings of
+  4096 characters and a map is no wider, and the line limit of the connection ends
+  anything past it. An empty map is valid, as an empty list is; a use that needs entries
+  says so itself.
 - **No "secret" type.** Native credentials are read by the adapter from their
   native place; they never enter Sidera's configuration.
 - **Markers are data, and compiled once.** The runtime-specific notice that

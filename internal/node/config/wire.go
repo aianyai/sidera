@@ -183,13 +183,37 @@ func compactObject(raw json.RawMessage) (json.RawMessage, error) {
 	return b.Bytes(), nil
 }
 
-// compactValue returns raw as compact JSON that is not null.
+// compactValue returns raw as compact JSON that is not null. An object, a map
+// value, is returned with its entries sorted by key at every depth, so that two
+// spellings of the same map are stored as the same bytes.
 func compactValue(raw json.RawMessage) (json.RawMessage, error) {
 	var b bytes.Buffer
 	if err := json.Compact(&b, raw); err != nil || bytes.Equal(b.Bytes(), []byte("null")) {
 		return nil, errors.New("must be a JSON value that is not null")
 	}
-	return b.Bytes(), nil
+	if b.Bytes()[0] != '{' {
+		return b.Bytes(), nil
+	}
+	var entries map[string]json.RawMessage
+	if err := decodeStrict(b.Bytes(), &entries); err != nil {
+		return nil, err
+	}
+	for k, v := range entries {
+		c, err := compactValue(v)
+		if err != nil {
+			return nil, err
+		}
+		entries[k] = c
+	}
+	// The encoder sorts the keys of a map, and keeps what the values hold as it
+	// is; HTML escaping is off so that a key is stored as it is written.
+	b.Reset()
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(entries); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
 // checkValues checks and compacts the values of a map of configuration values:

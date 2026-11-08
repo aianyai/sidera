@@ -187,9 +187,10 @@ const (
 	FieldEnum       FieldType = "enum"
 	FieldDirectory  FieldType = "directory"
 	FieldStringList FieldType = "string_list"
+	FieldMap        FieldType = "map"
 )
 
-var fieldTypes = []FieldType{FieldString, FieldInteger, FieldBoolean, FieldEnum, FieldDirectory, FieldStringList}
+var fieldTypes = []FieldType{FieldString, FieldInteger, FieldBoolean, FieldEnum, FieldDirectory, FieldStringList, FieldMap}
 
 // FieldTypes lists the field types.
 func FieldTypes() []FieldType { return slices.Clone(fieldTypes) }
@@ -197,7 +198,10 @@ func FieldTypes() []FieldType { return slices.Clone(fieldTypes) }
 // Field describes one configuration field. A directory value must be an
 // absolute path, which the daemon checks when it writes the value; whether the
 // directory exists is for the adapter to report. A preset's project directory
-// is one, because it is fixed per preset.
+// is one, because it is fixed per preset. The value of a map field is an
+// object of at most adapterproto.MaxConfigMapEntries entries, each keyed by a
+// name of adapterproto.ConfigMapKeyPattern and holding a value of the type
+// that Value describes.
 type Field struct {
 	// Key is the name of the value in the configuration.
 	Key         string    `json:"key"`
@@ -212,6 +216,26 @@ type Field struct {
 	Max *int64 `json:"max,omitempty"`
 	// Options are the values of an enum field.
 	Options []string `json:"options,omitempty"`
+	// Value describes the entries of a map field; no other field has one.
+	Value *MapValue `json:"value,omitempty"`
+}
+
+// MapValue describes the values of a map field: one of the plain field types,
+// with the options or bounds that type takes. It is not a Field, because a
+// key, a title, a requirement and a default belong to the map field itself; and
+// its type is never map, so a map is one level deep and checking a value needs
+// no schema engine.
+type MapValue struct {
+	Type    FieldType `json:"type"`
+	Min     *int64    `json:"min,omitempty"`
+	Max     *int64    `json:"max,omitempty"`
+	Options []string  `json:"options,omitempty"`
+}
+
+// field returns the field that a value of the map is checked as: the same type,
+// bounds and options, under no key.
+func (m MapValue) field() Field {
+	return Field{Type: m.Type, Min: m.Min, Max: m.Max, Options: m.Options}
 }
 
 // Frontend is where a budget applies.
@@ -478,33 +502,18 @@ func (f Field) validate() error {
 			return under("description", err)
 		}
 	}
-	if f.Type != FieldInteger && (f.Min != nil || f.Max != nil) {
-		return fail("min", "min and max belong to integer fields")
+	if err := checkTypeParams(f.Type, f.Min, f.Max, f.Options); err != nil {
+		return err
 	}
-	if f.Type == FieldEnum {
-		if n := len(f.Options); n < 1 || n > 64 {
-			return fail("options", "an enum field has 1..64 options, got %d", n)
+	if f.Type == FieldMap {
+		if f.Value == nil {
+			return fail("value", "a map field describes its values")
 		}
-		for i, o := range f.Options {
-			if err := length(o, 1, 128); err != nil {
-				return under("options"+idx(i), err)
-			}
+		if err := f.Value.validate(); err != nil {
+			return under("value", err)
 		}
-		if err := unique("options", f.Options); err != nil {
-			return err
-		}
-	} else if f.Options != nil {
-		return fail("options", "only an enum field has options")
-	}
-	if f.Type == FieldInteger {
-		for _, b := range []*int64{f.Min, f.Max} {
-			if b != nil && (*b < -maxIntValue || *b > maxIntValue) {
-				return fail("min", "bound %d outside the exact integer range", *b)
-			}
-		}
-		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
-			return failBeyond("min", "min %d is above max %d", *f.Min, *f.Max)
-		}
+	} else if f.Value != nil {
+		return fail("value", "only a map field has a value description")
 	}
 	if f.Default != nil {
 		if err := f.validateDefault(); err != nil {
@@ -514,10 +523,51 @@ func (f Field) validate() error {
 	return nil
 }
 
-// validateDefault checks a default as it checks a value, except that it need
-// not be an absolute directory: a manifest is the same on every platform, and
-// a path that is absolute on one is not on another.
-func (f Field) validateDefault() error { return f.checkKind(f.Default) }
+// checkTypeParams checks the bounds and the options that go with a type, for a
+// field and for the value description of a map alike: min and max belong to an
+// integer, options to an enum, and an enum has some.
+func checkTypeParams(t FieldType, min, max *int64, options []string) error {
+	if t != FieldInteger && (min != nil || max != nil) {
+		return fail("min", "min and max belong to integer fields")
+	}
+	if t == FieldEnum {
+		if n := len(options); n < 1 || n > 64 {
+			return fail("options", "an enum field has 1..64 options, got %d", n)
+		}
+		for i, o := range options {
+			if err := length(o, 1, 128); err != nil {
+				return under("options"+idx(i), err)
+			}
+		}
+		if err := unique("options", options); err != nil {
+			return err
+		}
+	} else if options != nil {
+		return fail("options", "only an enum field has options")
+	}
+	if t == FieldInteger {
+		for _, b := range []*int64{min, max} {
+			if b != nil && (*b < -maxIntValue || *b > maxIntValue) {
+				return fail("min", "bound %d outside the exact integer range", *b)
+			}
+		}
+		if min != nil && max != nil && *min > *max {
+			return failBeyond("min", "min %d is above max %d", *min, *max)
+		}
+	}
+	return nil
+}
+
+func (m MapValue) validate() error {
+	if !slices.Contains(fieldTypes, m.Type) || m.Type == FieldMap {
+		return fail("type", "a map holds values of type string, integer, boolean, enum, directory or string_list, not %q", string(m.Type))
+	}
+	return checkTypeParams(m.Type, m.Min, m.Max, m.Options)
+}
+
+// validateDefault checks a default as a value is checked, except that a
+// directory need not be absolute (see check).
+func (f Field) validateDefault() error { return f.check(f.Default, false) }
 
 // decodeValue decodes one JSON value of a plain kind: null is refused, and a
 // number must be an integer literal for an integer target.

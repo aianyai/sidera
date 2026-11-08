@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"encoding/json"
+	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -10,25 +12,13 @@ import (
 )
 
 // CheckValue checks one configuration value against the field: its kind, the
-// options of an enum, the bounds of an integer, the limits of a string and a
-// list, and that a directory is an absolute path. The directory is not looked
-// for: it may be made later, or removed, and whether it exists is for the
+// options of an enum, the bounds of an integer, the limits of a string, a list
+// and a map, and that a directory is an absolute path. The directory is not
+// looked for: it may be made later, or removed, and whether it exists is for the
 // adapter to report. A failure is a *Error whose Field is the place inside the
-// value (empty for the value as a whole, "[2]" for the third item of a list).
-func (f Field) CheckValue(raw json.RawMessage) error {
-	if err := f.checkKind(raw); err != nil {
-		return err
-	}
-	if f.Type == FieldDirectory {
-		var s string
-		// checkKind has shown that it is a string.
-		_ = json.Unmarshal(raw, &s)
-		if !filepath.IsAbs(s) {
-			return fail("", "a directory is an absolute path")
-		}
-	}
-	return nil
-}
+// value (empty for the value as a whole, "[2]" for the third item of a list,
+// the entry key for an entry of a map).
+func (f Field) CheckValue(raw json.RawMessage) error { return f.check(raw, true) }
 
 // CheckValues checks the configuration values of one scope (an instance, or
 // one adapter's section of a preset) against the fields of that scope: every
@@ -59,12 +49,13 @@ func CheckValues(fields []Field, values map[string]json.RawMessage) error {
 	return nil
 }
 
-// checkKind checks everything about a value that does not depend on the
-// machine it is checked on. It is the rule for a default as well as for a
-// value, so that a manifest cannot declare a default the field would refuse.
-// Each kind says what it expects in its own error, with an empty path or the
-// index of a list item.
-func (f Field) checkKind(raw json.RawMessage) error {
+// check checks a value. A default is checked as a value is, so that a manifest
+// cannot declare a default the field would refuse, except that it need not be
+// an absolute directory (here is false): a manifest is the same on every
+// platform, and a path that is absolute on one is not on another. Each kind says
+// what it expects in its own error, with an empty path, the index of a list item
+// or the key of a map entry.
+func (f Field) check(raw json.RawMessage, here bool) error {
 	switch f.Type {
 	case FieldString, FieldDirectory, FieldEnum:
 		var s string
@@ -76,6 +67,9 @@ func (f Field) checkKind(raw json.RawMessage) error {
 		}
 		if f.Type == FieldEnum && !slices.Contains(f.Options, s) {
 			return failBeyond("", "%q is not one of the options", s)
+		}
+		if f.Type == FieldDirectory && here && !filepath.IsAbs(s) {
+			return fail("", "a directory is an absolute path")
 		}
 	case FieldInteger:
 		var n int64
@@ -113,8 +107,41 @@ func (f Field) checkKind(raw json.RawMessage) error {
 				return under(idx(i), err)
 			}
 		}
+	case FieldMap:
+		var entries map[string]json.RawMessage
+		if err := decodeValue(raw, &entries); err != nil || entries == nil {
+			return fail("", "must be a map")
+		}
+		if len(entries) > adapterproto.MaxConfigMapEntries {
+			return fail("", "%d entries, at most %d", len(entries), adapterproto.MaxConfigMapEntries)
+		}
+		if f.Value == nil {
+			return fail("", "a map field describes its values")
+		}
+		entry := f.Value.field()
+		for _, k := range slices.Sorted(maps.Keys(entries)) {
+			if err := adapterproto.ValidateConfigMapKey(k); err != nil {
+				return under("", err)
+			}
+			if err := entry.check(entries[k], here); err != nil {
+				// A schema shows that an entry is a plain value. That it is of the
+				// kind the value description names is a rule between two parts of
+				// a manifest, which a schema cannot state.
+				return beyondSchema(under(k, err))
+			}
+		}
 	default:
 		return fail("", "unknown field type %q", string(f.Type))
 	}
 	return nil
+}
+
+// beyondSchema marks the error of a check as a rule that JSON Schema cannot
+// state. The error is one of this package's, as under returns.
+func beyondSchema(err error) error {
+	var me *Error
+	if errors.As(err, &me) {
+		me.Beyond = true
+	}
+	return err
 }

@@ -3,6 +3,7 @@ package manifest_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -190,7 +191,8 @@ func TestConfigFieldRules(t *testing.T) {
 		{"every type", func(m *manifest.Manifest) {
 			m.Config = &manifest.Config{Instance: []manifest.Field{
 				f("string", nil), {Key: "i", Type: "integer", Title: "T"}, {Key: "b", Type: "boolean", Title: "T"},
-				{Key: "e", Type: "enum", Title: "T", Options: []string{"x"}}, {Key: "d", Type: "directory", Title: "T"}, {Key: "l", Type: "string_list", Title: "T"}}}
+				{Key: "e", Type: "enum", Title: "T", Options: []string{"x"}}, {Key: "d", Type: "directory", Title: "T"}, {Key: "l", Type: "string_list", Title: "T"},
+				{Key: "m", Type: "map", Title: "T", Value: &manifest.MapValue{Type: "string_list"}}}}
 		}, "", false},
 		{"type unknown", field(f("path", nil)), "type", false},
 		{"type missing", field(f("", nil)), "type", false},
@@ -237,6 +239,45 @@ func TestConfigFieldRules(t *testing.T) {
 		{"default list of numbers", field(f("string_list", func(x *manifest.Field) { x.Default = raw(`[1]`) })), "default[0]", false},
 		{"default list holding null", field(f("string_list", func(x *manifest.Field) { x.Default = raw(`["a",null]`) })), "default[1]", false},
 		{"default string for a list", field(f("string_list", func(x *manifest.Field) { x.Default = str("a") })), "default", false},
+		{"map of every plain type", func(m *manifest.Manifest) {
+			var fs []manifest.Field
+			for i, v := range []manifest.MapValue{{Type: "string"}, {Type: "integer", Min: ptr(int64(0)), Max: ptr(int64(9))},
+				{Type: "boolean"}, {Type: "enum", Options: []string{"a"}}, {Type: "directory"}, {Type: "string_list"}} {
+				fs = append(fs, manifest.Field{Key: fmt.Sprintf("m%d", i), Type: "map", Title: "T", Value: &v})
+			}
+			m.Config = &manifest.Config{Instance: fs}
+		}, "", false},
+		{"map without a value description", field(f("map", nil)), "value", false},
+		{"value description on a string", field(f("string", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string"} })), "value", false},
+		{"map of maps", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "map"} })), "value.type", false},
+		{"map of an unknown type", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "path"} })), "value.type", false},
+		{"map of no type", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{} })), "value.type", false},
+		{"map of enums without options", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "enum"} })), "value.options", false},
+		{"map of strings with options", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string", Options: []string{"a"}} })), "value.options", false},
+		{"map of strings with a bound", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string", Min: ptr(int64(1))} })), "value.min", false},
+		{"map of integers with min above max", field(f("map", func(x *manifest.Field) {
+			x.Value = &manifest.MapValue{Type: "integer", Min: ptr(int64(5)), Max: ptr(int64(4))}
+		})), "value.min", true},
+		{"options on the map itself", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string"}; x.Options = []string{"a"} })), "options", false},
+		{"default map", field(f("map", func(x *manifest.Field) {
+			x.Value = &manifest.MapValue{Type: "string_list"}
+			x.Default = raw(`{"a":["x"]}`)
+		})), "", false},
+		{"default empty map", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string_list"}; x.Default = raw(`{}`) })), "", false},
+		{"default list for a map", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string_list"}; x.Default = raw(`[]`) })), "default", false},
+		{"default map with a bad key", field(f("map", func(x *manifest.Field) {
+			x.Value = &manifest.MapValue{Type: "string_list"}
+			x.Default = raw(`{"a b":[]}`)
+		})), "default", false},
+		{"default map with an entry of the wrong kind", field(f("map", func(x *manifest.Field) { x.Value = &manifest.MapValue{Type: "string_list"}; x.Default = raw(`{"a":1}`) })), "default.a", true},
+		{"default map with an entry that is no option", field(f("map", func(x *manifest.Field) {
+			x.Value = &manifest.MapValue{Type: "enum", Options: []string{"a"}}
+			x.Default = raw(`{"k":"b"}`)
+		})), "default.k", true},
+		{"default map with a directory", field(f("map", func(x *manifest.Field) {
+			x.Value = &manifest.MapValue{Type: "directory"}
+			x.Default = raw(`{"k":"/srv"}`)
+		})), "", false},
 		{"duplicate keys in a group", func(m *manifest.Manifest) {
 			m.Config = &manifest.Config{Instance: []manifest.Field{f("string", nil), f("boolean", nil)}}
 		}, "instance[1].key", true},
@@ -479,8 +520,8 @@ func TestParse(t *testing.T) {
 }
 
 func TestVocabularies(t *testing.T) {
-	if got := len(manifest.FieldTypes()); got != 6 {
-		t.Errorf("%d field types, want 6", got)
+	if got := len(manifest.FieldTypes()); got != 7 {
+		t.Errorf("%d field types, want 7", got)
 	}
 	if got := manifest.BudgetFrontends(); len(got) != 3 || got[0] != "cli" || got[1] != "mcp" || got[2] != "direct" {
 		t.Errorf("budget front ends = %v", got)

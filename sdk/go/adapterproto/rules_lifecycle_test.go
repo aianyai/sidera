@@ -2,6 +2,7 @@ package adapterproto_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -133,6 +134,15 @@ func TestToolAccessRules(t *testing.T) {
 	})
 }
 
+// mapOf is a map value of n entries.
+func mapOf(n int) string {
+	entries := make([]string, n)
+	for i := range entries {
+		entries[i] = `"m` + strconv.Itoa(i) + `":1`
+	}
+	return "{" + strings.Join(entries, ",") + "}"
+}
+
 func TestConfigValuesRules(t *testing.T) {
 	good := func() adapterproto.ConfigValues {
 		return adapterproto.ConfigValues{"home": raw(`"/home/dev"`), "retries": raw(`3`), "verbose": raw(`true`), "extra": raw(`["a","b"]`), "none": raw(`[]`)}
@@ -145,7 +155,23 @@ func TestConfigValuesRules(t *testing.T) {
 		{"key of 65 characters", func(v *adapterproto.ConfigValues) { (*v)["a"+repeat("b", 64)] = raw(`"x"`) }, "a", false},
 		{"null value", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`null`) }, "k", false},
 		{"missing value", func(v *adapterproto.ConfigValues) { (*v)["k"] = nil }, "k", false},
-		{"object value", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{}`) }, "k", false},
+		{"empty map", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{}`) }, "", false},
+		{"map of every plain kind", func(v *adapterproto.ConfigValues) {
+			(*v)["k"] = raw(`{"s":"x","i":-3,"b":false,"l":["a"],"e":[]}`)
+		}, "", false},
+		{"map entry key of 128", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"` + repeat("m", 128) + `":1}`) }, "", false},
+		{"map entry key of 129", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"` + repeat("m", 129) + `":1}`) }, "k", false},
+		{"map entry key empty", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"":1}`) }, "k", false},
+		{"map entry key with a space", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a b":1}`) }, "k", false},
+		{"map entry key with a control character", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a\u001bb":1}`) }, "k", false},
+		{"map entry key outside ASCII", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"é":1}`) }, "k", false},
+		{"map of 64 entries", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(mapOf(64)) }, "", false},
+		{"map of 65 entries", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(mapOf(65)) }, "k", false},
+		{"map holding null", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a":null}`) }, "k.a", false},
+		{"map holding a float", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a":1.5}`) }, "k.a", false},
+		{"map holding a map", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a":{}}`) }, "k.a", false},
+		{"map holding a list of numbers", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a":[1]}`) }, "k.a[0]", false},
+		{"map holding a string over the limit", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`{"a":"` + repeat("s", 4097) + `"}`) }, "k.a", false},
 		{"float value", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`1.5`) }, "k", false},
 		{"negative integer", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`-7`) }, "", false},
 		{"integer at the exact bound", func(v *adapterproto.ConfigValues) { (*v)["k"] = raw(`9007199254740991`) }, "", false},

@@ -45,11 +45,17 @@ the same rules in JSON Schema.
   probe is what proves a program works.
 - `config` has two groups, `instance` and `preset`, of fields with a key
   (`[a-z][a-z0-9_]{0,63}`, unique in the group), a type, a title and optional
-  description, `required`, `default`, `min`, `max` and `options`. Types are
-  `string`, `integer`, `boolean`, `enum`, `directory` and `string_list`. `options`
+  description, `required`, `default`, `min`, `max`, `options` and `value`. Types are
+  `string`, `integer`, `boolean`, `enum`, `directory`, `string_list` and `map`. `options`
   belong to enums and are required for them; `min` and `max` belong to integers;
   a `default` has the type of the field, lies among the options of an enum and
-  within the bounds of an integer. A directory value must be an absolute path, which the
+  within the bounds of an integer. A `map` field requires `value` (a `MapValue`: the
+  `type` of every entry, one of the six other types and so never `map`, with the
+  `options` or `min` and `max` that type takes, by the same rules) and no other type
+  has one; its value is an object of at most 64 entries, each keyed by 1 to 128
+  visible ASCII characters, and its `default` is such an object whose entries obey
+  `value`. `CheckValue` names an entry by its key, `limits.opus` for the entry `opus` of
+  the field `limits`. A directory value must be an absolute path, which the
   daemon checks when it writes a value; that the directory exists is for the
   adapter to report.
 - `budgets` give the output budget per front end (`cli`, `mcp`, `direct`), at most

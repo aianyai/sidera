@@ -30,6 +30,20 @@ func TestCheckValue(t *testing.T) {
 	bounded := manifest.Field{Key: "k", Type: manifest.FieldInteger, Title: "T", Min: ptr(int64(2)), Max: ptr(int64(9))}
 	boolean := manifest.Field{Key: "k", Type: manifest.FieldBoolean, Title: "T"}
 	strs := manifest.Field{Key: "k", Type: manifest.FieldStringList, Title: "T"}
+	mapOf := func(v manifest.MapValue) manifest.Field {
+		return manifest.Field{Key: "k", Type: manifest.FieldMap, Title: "T", Value: &v}
+	}
+	lists := mapOf(manifest.MapValue{Type: manifest.FieldStringList})
+	ints := mapOf(manifest.MapValue{Type: manifest.FieldInteger, Min: ptr(int64(2)), Max: ptr(int64(9))})
+	options := mapOf(manifest.MapValue{Type: manifest.FieldEnum, Options: []string{"low", "high"}})
+	dirs := mapOf(manifest.MapValue{Type: manifest.FieldDirectory})
+	entries := func(n int) string {
+		items := make([]string, n)
+		for i := range items {
+			items[i] = fmt.Sprintf(`"m%d":[]`, i)
+		}
+		return "{" + strings.Join(items, ",") + "}"
+	}
 
 	rows := []struct {
 		name  string
@@ -85,6 +99,33 @@ func TestCheckValue(t *testing.T) {
 		{"a list holding null", strs, `[null]`, "k[0]"},
 		{"a string for a list", strs, `"a"`, "k"},
 		{"null for a list", strs, `null`, "k"},
+
+		{"an empty map", lists, `{}`, ""},
+		{"a map of lists", lists, `{"a":["x"],"b":[]}`, ""},
+		{"a map of the largest size", lists, entries(adapterproto.MaxConfigMapEntries), ""},
+		{"a map over the largest size", lists, entries(adapterproto.MaxConfigMapEntries + 1), "k"},
+		{"an entry key of the largest length", lists, `{"` + repeat("m", 128) + `":[]}`, ""},
+		{"an entry key over the largest length", lists, `{"` + repeat("m", 129) + `":[]}`, "k"},
+		{"an empty entry key", lists, `{"":[]}`, "k"},
+		{"an entry key with a space", lists, `{"a b":[]}`, "k"},
+		{"an entry key with a control character", lists, `{"a\u0007":[]}`, "k"},
+		{"an entry key outside ASCII", lists, `{"é":[]}`, "k"},
+		{"an entry key of punctuation", lists, `{"claude-opus-4-6[1m]":[]}`, ""},
+		{"a string for a map", lists, `"a"`, "k"},
+		{"a list for a map", lists, `[]`, "k"},
+		{"null for a map", lists, `null`, "k"},
+		{"an entry of the wrong kind", lists, `{"a":"x"}`, "k.a"},
+		{"a list item of the wrong kind", lists, `{"a":[1]}`, "k.a[0]"},
+		{"null as an entry", lists, `{"a":null}`, "k.a"},
+		{"a map as an entry", lists, `{"a":{}}`, "k.a"},
+		{"an entry error is named by the first bad key", lists, `{"b":1,"a":2}`, "k.a"},
+		{"an entry at min", ints, `{"a":2}`, ""},
+		{"an entry below min", ints, `{"a":1}`, "k.a"},
+		{"an entry above max", ints, `{"a":10}`, "k.a"},
+		{"an entry that is an option", options, `{"a":"low"}`, ""},
+		{"an entry that is no option", options, `{"a":"medium"}`, "k.a"},
+		{"an absolute directory as an entry", dirs, `{"a":` + abs + `}`, ""},
+		{"a relative directory as an entry", dirs, `{"a":"work"}`, "k.a"},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {

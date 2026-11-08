@@ -3,6 +3,7 @@ package adapterproto
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"time"
 
@@ -47,11 +48,14 @@ const (
 // The shape of configuration values: how many a ConfigValues holds, how long a
 // string value or a list item is (in characters), and how many items a list
 // holds. The manifest's check of a value (package manifest) uses the same
-// bounds, so a value it accepts is one the daemon can send.
+// bounds, so a value it accepts is one the daemon can send. A map value counts
+// as one of the MaxConfigEntries of its configuration, and its own entries are
+// bounded by MaxConfigMapEntries.
 const (
-	MaxConfigEntries = 64
-	MaxConfigString  = 4096
-	MaxConfigList    = 256
+	MaxConfigEntries    = 64
+	MaxConfigMapEntries = 64
+	MaxConfigString     = 4096
+	MaxConfigList       = 256
 )
 
 // DaemonInfo identifies the daemon to the adapter.
@@ -370,8 +374,10 @@ func validateEnvEntries(env map[string]string) error {
 func (t ToolAccess) Validate() error { return at("env", validateEnv(t.Env)) }
 
 // ConfigValues are configuration values keyed by field key. A value is a string,
-// an integer, a boolean or a list of strings; the daemon checked it against
-// the manifest's field description when it was written.
+// an integer, a boolean, a list of strings or a map: an object of at most
+// MaxConfigMapEntries entries, each keyed by a ConfigMapKeyPattern name and
+// holding one of the first four kinds (a map holds no map). The daemon checked
+// the value against the manifest's field description when it was written.
 type ConfigValues map[string]json.RawMessage
 
 // Validate checks the keys and the kinds of the values.
@@ -439,8 +445,41 @@ func validConfigValue(raw json.RawMessage) error {
 			}
 		}
 		return nil
+	case c == '{':
+		return validConfigMap(raw)
 	}
-	return bad("a value is a string, an integer, a boolean or a list of strings")
+	return bad("a value is a string, an integer, a boolean, a list of strings or a map")
+}
+
+// validConfigMap checks a map value: its size, the key of each entry and the
+// kind of each value, which is any value but a map.
+func validConfigMap(raw json.RawMessage) error {
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return bad("%v", err)
+	}
+	if len(entries) > MaxConfigMapEntries {
+		return bad("%d entries, at most %d", len(entries), MaxConfigMapEntries)
+	}
+	// Sorted, so that the same value always gets the same answer.
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if err := ValidateConfigMapKey(k); err != nil {
+			return err
+		}
+		v := bytes.TrimSpace(entries[k])
+		if len(v) > 0 && v[0] == '{' {
+			return at(k, bad("a map holds no map"))
+		}
+		if err := validConfigValue(v); err != nil {
+			return at(k, err)
+		}
+	}
+	return nil
 }
 
 // validCheckpoint checks a stored state: a JSON object that fits the limit.

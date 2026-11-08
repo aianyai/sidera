@@ -123,7 +123,8 @@
     "GOARCH": {
       "enum": ["386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle", "mips64", "mips64le", "mips64p32", "mips64p32le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64", "wasm"]
     },
-    "FieldType": { "enum": ["string", "integer", "boolean", "enum", "directory", "string_list"] },
+    "FieldType": { "enum": ["string", "integer", "boolean", "enum", "directory", "string_list", "map"] },
+    "MapValueType": { "enum": ["string", "integer", "boolean", "enum", "directory", "string_list"] },
     "Marker": {
       "description": "A literal substring or an RE2 regular expression, exactly one.",
       "oneOf": [
@@ -134,6 +135,32 @@
         {
           "type": "object", "required": ["regexp"], "additionalProperties": false,
           "properties": { "regexp": { "type": "string", "maxLength": 1024 } }
+        }
+      ]
+    },
+    "MapValue": {
+      "description": "The values of a map field: one of the plain field types, with the options or bounds that type takes.",
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "$ref": "#/$defs/MapValueType" },
+        "min": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "max": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "options": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "enum" } }, "required": ["type"] },
+          "then": { "required": ["options"] },
+          "else": { "properties": { "options": false } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } }, "required": ["type"] },
+          "else": { "properties": { "min": false, "max": false } }
         }
       ]
     },
@@ -149,6 +176,7 @@
         "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "required": { "type": "boolean" },
         "default": {},
+        "value": { "$ref": "#/$defs/MapValue" },
         "min": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         "max": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         "options": {
@@ -181,6 +209,11 @@
         {
           "if": { "properties": { "type": { "const": "string_list" } }, "required": ["type"] },
           "then": { "properties": { "default": { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "map" } }, "required": ["type"] },
+          "then": { "required": ["value"], "properties": { "default": { "$ref": "types.schema.json#/$defs/ConfigMap" } } },
+          "else": { "properties": { "value": false } }
         }
       ]
     }

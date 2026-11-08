@@ -2,7 +2,7 @@
   "expect": "both",
   "kind": "request",
   "method": "adapter.start",
-  "note": "config value object",
+  "note": "config map holding a map",
   "document": {
     "jsonrpc": "2.0",
     "id": 1,
@@ -10,7 +10,9 @@
     "params": {
       "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
       "config": {
-        "x": {}
+        "x": {
+          "a": {}
+        }
       },
       "presets": [],
       "sessions": [],

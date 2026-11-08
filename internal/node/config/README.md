@@ -77,6 +77,9 @@ declared here or in the package that composes it. It reads no clock.
   cannot be checked against, `ChangeAdapterNotInstalled`. The loaders check only
   the shape, because a manifest may be unavailable at load and a bad package faults
   its adapter, never the node; values already stored are not checked again.
+- **A value is stored compact, and an object in sorted key order.** A map value
+  written in two orders is the same bytes, so the file's version comparison and
+  what the owner is shown do not depend on how it was typed.
 - **A preset must state whether local sources may start a session with it.**
   `local_sources` is `"allow"` or `"deny"`, required, with no default. It decodes
   to `authz.PresetLocalAccess`, whose zero value is not a statement; no decoder

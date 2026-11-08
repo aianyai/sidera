@@ -17,6 +17,13 @@ protocol has a version of its own.
   control reply to a creation has a new failure reason, `model_choice_not_allowed`, and a message can now
   be rejected as `node_unsupported` when the target node's version cannot take what it carries. Protocol
   version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
+- **A manifest can declare a `map` configuration field.** For adapter authors: a field of type `map`
+  holds an object of at most 64 entries, each keyed by 1 to 128 visible ASCII characters, with the
+  `value` of the field naming the one plain type (`string`, `integer`, `boolean`, `enum`, `directory`
+  or `string_list`, with its options or bounds) that every entry has. A map holds no map. The daemon
+  checks a map like any other value when it is written, stores it with its entries sorted by key, and
+  sends it in `adapter.start` only to an adapter whose manifest declares the field. Protocol version 1
+  is extended in place; an older daemon refuses a package that declares a `map` field.
 
 ### Changed
 
