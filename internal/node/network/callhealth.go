@@ -24,10 +24,16 @@ type callStreak struct {
 
 // noteCall records the outcome of a finished call to a node, as the caller of
 // Send, Pull or QueryDirectory sees it. A call that ended because the caller's
-// own context did says nothing about the node.
+// own context did says nothing about the node. A call refused because the node
+// does not serve a feature the call needs reached the node and was answered by
+// its negotiation, so it counts as the node working: it neither starts a run of
+// failures nor leaves one standing.
 func (n *Network) noteCall(ctx context.Context, target ident.NodeID, call string, err error) {
 	if err != nil && ctx.Err() != nil {
 		return
+	}
+	if errors.Is(err, transport.ErrFeatureUnsupported) {
+		err = nil
 	}
 	now := n.clock.Now()
 	n.mu.Lock()
@@ -69,8 +75,6 @@ func failureAttrs(err error) []any {
 	switch {
 	case errors.As(err, &refused):
 		return []any{"kind", "refused", "reason", refused.Reason}
-	case errors.Is(err, transport.ErrFeatureUnsupported):
-		return []any{"kind", "feature_unsupported", "err", err}
 	case errors.Is(err, transport.ErrUnreachable):
 		return []any{"kind", "unreachable", "err", err}
 	case errors.Is(err, transport.ErrTimeout):

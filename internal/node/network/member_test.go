@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,6 +257,9 @@ func TestEnvelopeThatNeedsAFeatureIsOfferedTheCurrentSendIdentifierAlone(t *test
 		}
 		if a.net.memberConn(b.id) == nil {
 			t.Error("the connection was dropped")
+		}
+		if got := a.log.String(); strings.Contains(got, "calls to a node are failing") {
+			t.Errorf("a node that answered the negotiation was logged as failing:\n%s", got)
 		}
 		if err := send.call(ctx5(t), a, b); err != nil {
 			t.Fatalf("an envelope that needs nothing: %v", err)
