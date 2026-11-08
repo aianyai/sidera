@@ -45,7 +45,8 @@ func TestAControlReplyNoReaderCouldTakeIsNotCommitted(t *testing.T) {
 }
 
 // The error that refuses the reply is the one the log carries, so it names the
-// signal and says how large the reply would be.
+// signal and says how large the reply would be and, for a status, why: it lists
+// every preset.
 func TestTheRefusalOfAControlReplyNamesTheSignalAndTheSize(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	status := &adapterproto.ControlStatusReply{Activity: adapterproto.ActivityIdle, AsOf: 1}
@@ -68,5 +69,8 @@ func TestTheRefusalOfAControlReplyNamesTheSignalAndTheSize(t *testing.T) {
 	}
 	if msg := perr.Error(); !strings.Contains(msg, "a-message") || !strings.Contains(msg, "signed it is") {
 		t.Errorf("err = %q, want the id of the signal and the size", msg)
+	}
+	if msg := perr.Error(); !strings.Contains(msg, string(adapterproto.SignalEndpointStatus)) || !strings.Contains(msg, "fewer presets") {
+		t.Errorf("err = %q, want the signal it answers and that fewer presets make it fit", msg)
 	}
 }

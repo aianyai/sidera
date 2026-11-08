@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // errNoKeys is what a method that signs or sends returns for an engine that was
@@ -122,7 +123,11 @@ func (e *Engine) controlReplyPayload(now time.Time, key store.TargetKey, result 
 		return nil, fmt.Errorf("engine: the control reply of %s: %w", key.Message, err)
 	}
 	if err := envelope.CheckControlReplySize(len(payload)); err != nil {
-		return nil, fmt.Errorf("engine: the control reply of %s: %w", key.Message, err)
+		hint := ""
+		if result.Signal == adapterproto.SignalEndpointStatus {
+			hint = " (a status reply lists every preset, so fewer presets make it fit)"
+		}
+		return nil, fmt.Errorf("engine: the %s reply of %s%s: %w", result.Signal, key.Message, hint, err)
 	}
 	return payload, nil
 }
