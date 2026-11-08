@@ -19,8 +19,9 @@ protocol has a version of its own.
   first four efforts), and without it nobody can choose. `sidera status <message-id>` of an
   `endpoint.status` signal lists, for each preset, its default model and effort and the models that
   may be chosen. A choice the preset does not allow ends the creation as `model_choice_not_allowed`,
-  and a target node of an earlier release ends the delivery as rejected for `node_unsupported`; both
-  are read in `status`, because the call itself only checks that the model name and the effort are
+  and a target node of an earlier release ends the delivery as rejected for `node_unsupported`, which the
+  notice and the console say is this node's refusal because of the target's release, not the target's;
+  both are read in `status`, because the call itself only checks that the model name and the effort are
   well formed. The choice is checked when the session is created and stays with the session across
   resumes and restarts, whatever the preset says later. List only the efforts a model really
   supports: Claude Code quietly uses the highest level the model supports at or below an effort it

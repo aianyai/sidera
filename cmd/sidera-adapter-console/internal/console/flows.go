@@ -61,6 +61,9 @@ func refused(recipients []adapterproto.RecipientStatus) (string, bool) {
 	for _, r := range recipients {
 		switch r.State {
 		case adapterproto.DeliveryRejected:
+			if !r.Reason.FromTarget() {
+				return fmt.Sprintf("this node did not send it to %s, whose node runs an older release that cannot take it (a model or effort chosen for a new session), and sending it again cannot help until that node is updated (%s)", r.To, r.Reason), true
+			}
 			return fmt.Sprintf("%s rejected it (%s)", r.To, r.Reason), true
 		case adapterproto.DeliveryExpiredUnconfirmed, adapterproto.DeliveryClosedUnconfirmed:
 			return fmt.Sprintf("%s is %s", r.To, r.State), true

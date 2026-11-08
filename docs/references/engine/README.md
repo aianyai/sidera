@@ -1102,8 +1102,10 @@ notice formed again after a crash is the same record. It covers its items by the
 notice is written the items are taken off those records (`FeedbackClear`), a write
 of that which failed is tried again after the retry back-off (`retryClears`), and the
 replay of feedback at the start does it for a crash in between. The words of a
-notice are the summaries of the kinds (`delivery.Kind.Summary`), one line for each
-delivery. Closing ends an endpoint's life for feedback: an endpoint that is not open
+notice are the summaries of the feedback (`delivery.Feedback.Summary`: that of the kind, and for
+a rejection that no target made, `node_unsupported`, a statement of its own that says this node
+refused it because the target runs an older release), under one heading for each kind and
+statement, then one line for each delivery. Closing ends an endpoint's life for feedback: an endpoint that is not open
 when its notice is due is told nothing, and a direct or runtime endpoint opened again
 with the same id does not hear of what happened before it was closed, as the records
 queued for a closing endpoint are not carried over to the reopened one either; the

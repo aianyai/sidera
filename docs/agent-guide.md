@@ -881,8 +881,10 @@ them there without your owner's yes (see "Ask your owner before").
      and `effort`, or with a model and an effort from the `allowed models` of that
      preset. Repeating the same call cannot succeed.
    - `node_unsupported` (the delivery is `rejected`): the target node runs a release
-     that cannot take a choice. Retrying cannot help until its owner updates it; create
-     the session without `model` and `effort`, or tell your owner.
+     that cannot take a choice. Your own node ends the delivery without sending it, and the
+     notice you then read says so: it is not a refusal by the target's preset or policy.
+     Retrying cannot help until its owner updates it; create the session without `model`
+     and `effort`, or tell your owner.
 
    Choose by the work. Give a hard, open-ended task (a design, a subtle bug, a review
    that must find what is wrong) a stronger model or a higher effort, and mechanical work

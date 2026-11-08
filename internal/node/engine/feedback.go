@@ -468,22 +468,29 @@ func noticeKey(node ident.NodeID, n delivery.Notice) store.TargetKey {
 	}
 }
 
-// noticeText is what the notice says to the agent: for each kind of feedback the
-// words that say what the agent may conclude (delivery.Kind.Summary, the one place
-// they are written), then one line for each delivery it is about.
+// noticeText is what the notice says to the agent: for each kind of feedback and
+// each statement it calls for, the words that say what the agent may conclude
+// (delivery.Feedback.Summary, the one place they are written), then one line for
+// each delivery it is about. A rejection the target did not make is a statement of
+// its own under the kind, so it is not told as the target's.
 func noticeText(items []delivery.Item) []byte {
-	var kinds []delivery.Kind
+	type heading struct {
+		kind    delivery.Kind
+		summary string
+	}
+	headingOf := func(it delivery.Item) heading { return heading{it.Feedback.Kind, it.Feedback.Summary()} }
+	var headings []heading
 	for _, it := range items {
-		if !slices.Contains(kinds, it.Feedback.Kind) {
-			kinds = append(kinds, it.Feedback.Kind)
+		if h := headingOf(it); !slices.Contains(headings, h) {
+			headings = append(headings, h)
 		}
 	}
 	var b strings.Builder
 	b.WriteString("Notice from the channel of this node, not a message from another endpoint.\n")
-	for _, k := range kinds {
-		fmt.Fprintf(&b, "\n%s: %s\n", k, k.Summary())
+	for _, h := range headings {
+		fmt.Fprintf(&b, "\n%s: %s\n", h.kind, h.summary)
 		for _, it := range items {
-			if it.Feedback.Kind != k {
+			if headingOf(it) != h {
 				continue
 			}
 			b.WriteString("- " + itemLine(it) + "\n")

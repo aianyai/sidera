@@ -555,6 +555,11 @@ var rejectReasons = []RejectReason{
 // Valid reports whether r is a known reason.
 func (r RejectReason) Valid() bool { return slices.Contains(rejectReasons, r) }
 
+// FromTarget reports whether the target node can report the reason. Every reason
+// but RejectNodeUnsupported is the target's verdict; that one is the sender's
+// own node's, so a text that says who refused must not name the target for it.
+func (r RejectReason) FromTarget() bool { return r != RejectNodeUnsupported }
+
 // Effort is the reasoning effort of a session, on a scale that every runtime
 // with the choice shares. A runtime that supports fewer levels declares which in
 // its model_choice capability.

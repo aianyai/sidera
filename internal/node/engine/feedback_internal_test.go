@@ -67,6 +67,40 @@ func TestTheKeyOfANoticeFollowsFromItsItemsAlone(t *testing.T) {
 	}
 }
 
+// A notice says whose refusal a rejection was: the target's, or the sender's own
+// node's for the one reason no target reports. The two are told under separate
+// statements, so a reader is not sent to look for a problem at the target when the
+// cause is the release of its node.
+func TestANoticeSaysWhoRefusedTheMessage(t *testing.T) {
+	at := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	item := func(msg string, recipient byte, reason delivery.RejectReason) delivery.Item {
+		it := feedbackItem(t, msg, recipient, delivery.KindRejected, at)
+		it.Feedback.Reject = reason
+		return it
+	}
+	line := func(it delivery.Item) string {
+		return "- message " + string(it.Ref.Message) + " to " + it.Ref.Recipient.String() + " (" + it.Feedback.Reject.String() + ")\n"
+	}
+	header := "Notice from the channel of this node, not a message from another endpoint.\n"
+	declined := item("m-1", 60, delivery.RejectEndpointDeclined)
+	unsupported := item("m-2", 61, delivery.RejectNodeUnsupported)
+	targetWords := "\nrejected: the target rejected the message; it was not delivered\n"
+	senderWords := "\nrejected: this node did not send the message, because the target node runs an older release that cannot take what it carries (a model or an effort chosen for a new session); it was not delivered, and sending it again cannot help until the target node is updated\n"
+
+	for name, c := range map[string]struct {
+		items []delivery.Item
+		want  string
+	}{
+		"a reason of the target":                      {[]delivery.Item{declined}, header + targetWords + line(declined)},
+		"a reason of the sender's node":               {[]delivery.Item{unsupported}, header + senderWords + line(unsupported)},
+		"both, each under the statement that is true": {[]delivery.Item{declined, unsupported, item("m-3", 62, delivery.RejectBacklogFull)}, header + targetWords + line(declined) + line(item("m-3", 62, delivery.RejectBacklogFull)) + senderWords + line(unsupported)},
+	} {
+		if got := string(noticeText(c.items)); got != c.want {
+			t.Errorf("%s: the notice is\n%s\nwant\n%s", name, got, c.want)
+		}
+	}
+}
+
 // The identifier of a notice names each kind by its name and not by its number, so a
 // kind inserted among the others later does not change the identifier of a notice
 // of a kind that was there, which a notice formed again after an upgrade would need.

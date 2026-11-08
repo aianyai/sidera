@@ -429,6 +429,11 @@ func TestRejectReasonTable(t *testing.T) {
 	if adapterproto.RejectBacklogFull != "backlog_full" || !adapterproto.RejectBacklogFull.Valid() {
 		t.Errorf("RejectBacklogFull = %q, Valid %v", adapterproto.RejectBacklogFull, adapterproto.RejectBacklogFull.Valid())
 	}
+	for _, why := range want {
+		if got := adapterproto.RejectReason(why).FromTarget(); got != (why != "node_unsupported") {
+			t.Errorf("reason %s: FromTarget = %v", why, got)
+		}
+	}
 	m := mustLookup(t, adapterproto.MethodEndpointMessageStatus)
 	for _, why := range want {
 		in := `{"recipients":[{"to":"` + addr1 + `","state":"rejected","reason":"` + why + `"}]}`

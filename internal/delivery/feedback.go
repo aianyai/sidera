@@ -120,6 +120,13 @@ func (k Kind) Summary() string {
 	return ""
 }
 
+// rejectedBySenderSummary is the statement of a rejection that no target made:
+// the sender's own node refused the message before sending it (RejectNodeUnsupported).
+// Saying "the target rejected the message" of it would send the reader to look for
+// a problem at the target's preset or policy, when the cause is the release of the
+// target's node and nothing but updating that node changes it.
+const rejectedBySenderSummary = "this node did not send the message, because the target node runs an older release that cannot take what it carries (a model or an effort chosen for a new session); it was not delivered, and sending it again cannot help until the target node is updated"
+
 func (k Kind) valid() bool { return k >= KindUnreachable && k <= KindLostUnknownMessage }
 
 // KindSet is a set of Kind values. A Record uses it to remember which
@@ -151,6 +158,17 @@ type Feedback struct {
 	Reject RejectReason
 	// State is the state the delivery has now; it is the news of a correction.
 	State State
+}
+
+// Summary is what the sender may conclude from the feedback: the summary of its
+// kind, except for a rejection the target did not make (see RejectReason.FromTarget),
+// which says whose refusal it was and why. Every renderer of feedback reads this, so
+// the distinction has this one home.
+func (f Feedback) Summary() string {
+	if f.Kind == KindRejected && f.Reject != RejectNone && !f.Reject.FromTarget() {
+		return rejectedBySenderSummary
+	}
+	return f.Kind.Summary()
 }
 
 // TransitionFeedback returns the feedback a change of state calls for, given

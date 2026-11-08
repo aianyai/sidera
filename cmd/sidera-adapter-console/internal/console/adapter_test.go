@@ -292,17 +292,23 @@ func TestNewReportsAFailedCreationAndARejectedDelivery(t *testing.T) {
 	rejected := adapterproto.MessageStatusResult{
 		Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectUnauthorized}},
 	}
+	// The one reason the sender's own node decides is not told as the target's refusal.
+	unsupported := adapterproto.MessageStatusResult{
+		Recipients: []adapterproto.RecipientStatus{{To: "node-2/rt", State: adapterproto.DeliveryRejected, Reason: adapterproto.RejectNodeUnsupported}},
+	}
 	for name, tc := range map[string]struct {
 		status adapterproto.MessageStatusResult
 		want   string
+		not    string
 	}{
-		"failed creation":   {failed, "preset_unknown"},
-		"rejected delivery": {rejected, "unauthorized"},
+		"failed creation":              {failed, "preset_unknown", ""},
+		"rejected delivery":            {rejected, "node-2/rt rejected it (unauthorized)", ""},
+		"delivery refused by the node": {unsupported, "this node did not send it to node-2/rt, whose node runs an older release", "rejected it"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, &daemon{statusAnswer: func(int) adapterproto.MessageStatusResult { return tc.status }})
-			if code := h.run("new", "node-2/rt", "--preset", "dev"); code != exitFailed || !strings.Contains(h.errOut.String(), tc.want) {
-				t.Errorf("exit %d, stderr %q, want exit 1 naming %s", code, h.errOut.String(), tc.want)
+			if code := h.run("new", "node-2/rt", "--preset", "dev"); code != exitFailed || !strings.Contains(h.errOut.String(), tc.want) || (tc.not != "" && strings.Contains(h.errOut.String(), tc.not)) {
+				t.Errorf("exit %d, stderr %q, want exit 1 naming %q and not %q", code, h.errOut.String(), tc.want, tc.not)
 			}
 		})
 	}

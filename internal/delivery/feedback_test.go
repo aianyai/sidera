@@ -86,4 +86,31 @@ func TestSummaries(t *testing.T) {
 			t.Errorf("summary %q", KindRejected.Summary())
 		}
 	})
+	t.Run("a rejection the sender's own node decided does not say the target rejected it", func(t *testing.T) {
+		for r := RejectUnauthorized; r.known(); r++ {
+			f := Feedback{Kind: KindRejected, Reject: r}
+			got := f.Summary()
+			if r.FromTarget() {
+				if got != KindRejected.Summary() {
+					t.Errorf("%s: summary %q, want that of the kind", r, got)
+				}
+				continue
+			}
+			if strings.Contains(got, "the target rejected") || got == KindRejected.Summary() {
+				t.Errorf("%s: summary %q blames the target", r, got)
+			}
+			for _, want := range []string{"this node did not send", "older release", "model", "effort", "not delivered", "cannot help until the target node is updated"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s: summary %q lacks %q", r, got, want)
+				}
+			}
+		}
+	})
+	t.Run("a feedback of another kind has the summary of its kind", func(t *testing.T) {
+		for k := KindUnreachable; k.valid(); k++ {
+			if got := (Feedback{Kind: k}).Summary(); got != k.Summary() {
+				t.Errorf("%s: summary %q, want %q", k, got, k.Summary())
+			}
+		}
+	})
 }

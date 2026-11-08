@@ -210,6 +210,9 @@ func (d *DeliveryEvidence) observeNotice(m adapterproto.PageMessage, local ident
 					break
 				}
 			}
+			if sender := (delivery.Feedback{Kind: delivery.KindRejected, Reject: delivery.RejectNodeUnsupported}); line == sender.Kind.String()+": "+sender.Summary() {
+				kind = sender.Kind
+			}
 			if kind == 0 {
 				return fmt.Errorf("system notice %s has unknown feedback heading %q", m.ID, line)
 			}
