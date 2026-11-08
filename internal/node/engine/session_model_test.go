@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // modelChoiceNode is a node whose adapter declares model_choice with the efforts
@@ -134,6 +135,20 @@ func TestSessionCreateChoosingAModelWhileTheAdapterIsOffline(t *testing.T) {
 	wantFailed(t, ptr(pulledReply(t, h, msg)), adapterproto.CreateReasonAdapterOffline)
 }
 
+// admitWithoutModelChoice admits the instance again, now declaring no model choice.
+func admitWithoutModelChoice(t *testing.T, h *harness.H) {
+	t.Helper()
+	o := harness.RuntimeAdapterManifest(adapterproto.MaxDirectEndpoints)
+	adm, err := adapterreg.Admit(o.Capabilities(), o.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := adapterproto.InitializeResult{ProtocolVersion: 1, Adapter: adapterproto.AdapterInfo{ID: harness.Instance, Version: "1.0.0"}, Capabilities: adm.Capabilities()}
+	if _, err := h.Engine().AdapterAdmitted(h.Ctx(), harness.Instance, adm, info); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A creation that chose a model is judged again before each call. When an earlier
 // call may have made a session (the adapter kept a checkpoint of the attempt) and
 // the instance has since come back as an adapter that does not take the choice,
@@ -155,16 +170,7 @@ func TestSessionCreateChoosingAModelMeetsAnAdapterThatNoLongerTakesItAfterACall(
 		t.Fatalf("%d creation requests reached the adapter, want the one that could not tell", n)
 	}
 
-	// The instance is admitted again, now declaring no model choice.
-	o := harness.RuntimeAdapterManifest(adapterproto.MaxDirectEndpoints)
-	adm, err := adapterreg.Admit(o.Capabilities(), o.Manifest())
-	if err != nil {
-		t.Fatal(err)
-	}
-	info := adapterproto.InitializeResult{ProtocolVersion: 1, Adapter: adapterproto.AdapterInfo{ID: harness.Instance, Version: "1.0.0"}, Capabilities: adm.Capabilities()}
-	if _, err := h.Engine().AdapterAdmitted(h.Ctx(), harness.Instance, adm, info); err != nil {
-		t.Fatal(err)
-	}
+	admitWithoutModelChoice(t, h)
 	h.Advance(engine.DefaultParams().CreateRetryBackoff + time.Second)
 	quiet(t, h)
 	h.Advance(controlReplyWait)
@@ -184,5 +190,36 @@ func TestSessionCreateChoosingAModelMeetsAnAdapterThatNoLongerTakesItAfterACall(
 	}
 	if !told {
 		t.Errorf("the alerts are %+v, want one of kind control_unknown", alerts)
+	}
+}
+
+// The same re-check before a call that no earlier call preceded: the adapter kept no
+// checkpoint of the attempt, so nothing may have been made, and the creation ends as
+// the adapter's own refusal of the choice would end it, not as an outcome nobody can
+// vouch for. The first call fails before it makes anything and is tried again.
+func TestSessionCreateChoosingAModelMeetsAnAdapterThatNoLongerTakesItBeforeAnyCall(t *testing.T) {
+	h := modelChoiceNode(t, []adapterproto.Effort{adapterproto.EffortLow, adapterproto.EffortHigh})
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError}); err != nil {
+		t.Fatal(err)
+	}
+	msg := createChoosing(t, h, "choice-downgrade-early", "sonnet", "")
+	quiet(t, h)
+	if n := createRequests(t, h); n != 1 {
+		t.Fatalf("%d creation requests reached the adapter, want the one that failed", n)
+	}
+
+	admitWithoutModelChoice(t, h)
+	h.Advance(engine.DefaultParams().CreateRetryBackoff + time.Second)
+	quiet(t, h)
+	h.Advance(controlReplyWait)
+	quiet(t, h)
+
+	wantFailed(t, ptr(pulledReply(t, h, msg)), adapterproto.CreateReasonModelChoiceNotAllowed)
+	if n := createRequests(t, h); n != 1 {
+		t.Errorf("%d creation requests reached the adapter, want still the first", n)
 	}
 }
