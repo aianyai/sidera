@@ -150,6 +150,8 @@ read from the manifest built into the executable.
 The manifest declares two instance keys, `claude_path` and `sidera_path`, and the preset keys
 `project_dir` (the working directory), `permission_mode` (required, one of `default`,
 `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`), `model`, `effort`,
+`allowed_models` (a map from a model to the efforts a requester may choose with it, see
+[The model and effort of a session](#the-model-and-effort-of-a-session)),
 `allowed_tools`, `append_system_prompt` and `background_wait_ms` (the runtime's
 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, how long a turn process waits for background tasks
 before it ends, 10 minutes if unset). The output budgets are 27000 characters for the command
@@ -158,6 +160,49 @@ file and the default limit is 25000 tokens, about one token per character for CJ
 wait 100 seconds on either front end. The manifest lists macOS, Linux and Windows on amd64 and arm64. The per-turn files live
 under the instance's `state_dir`, which the daemon provides, so the adapter has no setting for
 them.
+
+### The model and effort of a session
+
+The adapter declares the runtime capability `model_choice` with all five efforts, so a requester
+may choose the `model` and `effort` of a new session within the preset's `allowed_models`, a map
+from a model name (as `--model` takes it: an alias, a full name, with or without `[1m]`) to the
+efforts allowed with it, for example `{"opus": ["high", "max"], "sonnet": ["low", "medium"]}`.
+The adapter reads it with the SDK's `adapterkit/modelchoice`, which holds the rules once for every
+adapter (what is refused, and how a model given without an effort, or an effort without a model,
+is checked against the preset's own `model` and `effort`). A preset without `allowed_models` allows
+no choice. `ParsePreset` adds every refusal of the allowlist to the preset's problems, and also
+refuses a `model` that is not a valid model name, because the probe reports the preset's model to
+the daemon and a session that chose keeps it.
+
+- **Refusal.** A choice the preset does not allow is answered `failed` with
+  `model_choice_not_allowed` before anything is stored or started, like an unusable preset. It is
+  checked only when the session is created: an owner who narrows the list later does not touch the
+  sessions that exist.
+- **What is kept.** When the requester gave a model or an effort, the adapter stores the pair the
+  rules resolved, `choice` with a `model` and an `effort` of which either may be missing, in the
+  attempt's checkpoint and, when the session is opened, in the session's checkpoint. Every turn of
+  the session, after a resume or a restart of the adapter, starts with that pair in place of the
+  preset's `model` and `effort`, and a member that is missing is not passed (no `--model` or no
+  `--effort`), as when the preset does not set it. The pair is stored, and not only the requester's
+  own values, because the other member may come from the preset: were it read again every turn, an
+  owner who rebuilds the preset would change a combination that was checked once. A session whose
+  requester chose nothing stores no choice and follows the preset as it is, rebuilt or not.
+- **A repeated attempt.** The attempt's checkpoint also keeps the `model` and `effort` as the
+  requester gave them. Asked again with other values the attempt is `1005`, also after the adapter
+  restarted and knows the attempt only from its checkpoint; it is the request that is compared, not
+  its outcome, which depends on the preset of the time.
+- **The probe** reports each usable preset's `model`, `effort` and `allowed_models` (sorted by
+  model, the efforts of each in the order of the scale) as the preset was read. A preset with a
+  problem reports its problems and none of these.
+- **Checkpoint version.** Both checkpoints stay at version 1: the new members are optional, and an
+  older checkpoint reads as "no choice", which is what it is. A stored choice that is empty, or
+  holds a model that is not a valid model name or an effort off the scale, makes the session
+  unreachable, because the values go onto a command line.
+
+**The owner lists only the efforts a model really supports.** Claude Code does not refuse an
+effort a model does not support: it silently falls back to the highest level the model supports at
+or below the one set. The adapter cannot see that, so an allowlist that offers an effort the model
+lacks gives the requester a session that runs with another effort than the one it asked for.
 
 ### The program
 
@@ -322,11 +367,13 @@ on macOS, Linux and Windows):
 `session.create` is answered `failed` before anything is persisted or started when the preset is
 unknown (`preset_unknown`), its values or working directory are invalid or its record directory
 name too long (`preset_invalid`), `claude` or `sidera` is not found (`dependency_missing`), the
-runtime is not logged in (`runtime_auth`) or `claude auth status` cannot be run (`native_unavailable`).
+runtime is not logged in (`runtime_auth`), `claude auth status` cannot be run (`native_unavailable`)
+or the preset does not allow the model and effort the requester chose (`model_choice_not_allowed`).
 Otherwise the attempt's checkpoint is stored first: the attempt, the session uuid and first prompt
 id allocated now, the record directory and working directory, the preset, the session endpoint and
-a digest of the first prompt's text, and then each state `create.State` goes through. A repeated
-request for the attempt with another preset, session endpoint or first prompt is `1005`; the
+a digest of the first prompt's text, the model and effort the requester gave and the choice they
+resolved to, and then each state `create.State` goes through. A repeated
+request for the attempt with another preset, session endpoint, first prompt, model or effort is `1005`; the
 checkpoint holds no token, because `tool_access` is sent with every request that needs it.
 
 The loop takes one listing of the process table, then reads the session file, then asks `Decide`
@@ -641,6 +688,9 @@ claude -p (--session-id|--resume) <uuid> --input-format stream-json
   --disallowedTools "Read(//<data dir>/**)" "Edit(//<data dir>/**)"
   [--model M] [--effort E] --append-system-prompt <adapter text + preset text>
 ```
+
+`M` and `E` are the session's chosen pair when its requester chose, else the preset's own values,
+and each is left out when it is not set.
 
 - The prompt is the one line on standard input, a stream-json user message whose
   `uuid` is the prompt's attempt id. Claude Code writes that uuid as the uuid of

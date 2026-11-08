@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -32,6 +33,9 @@ func TestManifestAndDeclarationAgree(t *testing.T) {
 	if !cfg.Capabilities.Runtime.Attach {
 		t.Fatal("the adapter implements attached sessions and must declare it")
 	}
+	if mc := cfg.Capabilities.Runtime.ModelChoice; mc == nil || !slices.Equal(mc.Efforts, adapterproto.Efforts()) {
+		t.Fatalf("the adapter takes all five efforts and must declare model_choice with them: %+v", mc)
+	}
 	var declared []string
 	for _, f := range cfg.Capabilities.Runtime.Frontends {
 		declared = append(declared, string(f))
@@ -52,11 +56,15 @@ func TestManifestAndDeclarationAgree(t *testing.T) {
 		presetKeys = append(presetKeys, f.Key)
 	}
 	slices.Sort(presetKeys)
-	if want := []string{"allowed_tools", "append_system_prompt", "background_wait_ms", "effort", "model", "permission_mode", "project_dir"}; !slices.Equal(presetKeys, want) {
+	if want := []string{"allowed_models", "allowed_tools", "append_system_prompt", "background_wait_ms", "effort", "model", "permission_mode", "project_dir"}; !slices.Equal(presetKeys, want) {
 		t.Fatalf("preset keys %v, the adapter reads %v", presetKeys, want)
 	}
 	for _, f := range m.Config.Preset {
 		switch f.Key {
+		case modelchoice.Key:
+			if f.Type != manifest.FieldMap || f.Value == nil || f.Value.Type != manifest.FieldStringList {
+				t.Errorf("%s must be a map of string lists, is %+v", f.Key, f)
+			}
 		case "permission_mode":
 			if !slices.Equal(f.Options, claudeargs.PermissionModes) {
 				t.Errorf("permission modes: manifest %v, adapter %v", f.Options, claudeargs.PermissionModes)

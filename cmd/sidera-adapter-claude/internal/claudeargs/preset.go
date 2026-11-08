@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // PermissionModes are the values of the preset's permission_mode, the modes
@@ -15,6 +18,10 @@ var PermissionModes = []string{"default", "acceptEdits", "plan", "auto", "dontAs
 // Efforts are the values of the preset's effort.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
+// SupportedEfforts are the efforts `claude --effort` takes, which the adapter
+// declares as the efforts a requester may choose.
+func SupportedEfforts() []adapterproto.Effort { return adapterproto.Efforts() }
+
 // Preset is the runtime preset of a Claude session: how its turn processes are
 // started. It holds what the owner wrote, with no default for the permission
 // mode: loosening permissions is the owner's decision to make in the preset.
@@ -22,8 +29,12 @@ type Preset struct {
 	// ProjectDir is the working directory of every turn process, an absolute path.
 	ProjectDir     string
 	PermissionMode string
-	Model          string
-	Effort         string
+	// Model and Effort are the preset's own defaults, empty when it sets none. A
+	// session whose requester chose runs with the chosen pair instead.
+	Model  string
+	Effort string
+	// AllowedModels is what a requester may choose; the zero value allows no choice.
+	AllowedModels modelchoice.Allowed
 	// AllowedTools are extra `--allowedTools` rules, after the ones for the
 	// channel's tools.
 	AllowedTools []string
@@ -70,6 +81,20 @@ func ParsePreset(cfg map[string]json.RawMessage) (Preset, []string) {
 		} else {
 			p.BackgroundWaitMS = &n
 		}
+	}
+
+	if p.Model != "" {
+		// The model is also reported to the daemon and kept with a session that chose.
+		if err := adapterproto.ValidateModelName(p.Model); err != nil {
+			problems = append(problems, fmt.Sprintf("model: %v", err))
+		}
+	}
+	if raw, ok := cfg[modelchoice.Key]; ok {
+		allowed, err := modelchoice.ParseAllowed(raw, SupportedEfforts())
+		if err != nil {
+			problems = append(problems, err.Error())
+		}
+		p.AllowedModels = allowed
 	}
 
 	switch {

@@ -26,6 +26,9 @@ type session struct {
 	preset    string
 	cwd       string
 	recordDir string
+	// choice is the model and effort the session's requester chose, nil when it
+	// chose none and the session follows its preset.
+	choice *choiceCheckpoint
 	// toolEnv is the channel access of the session. It lives in memory only:
 	// the daemon sends it again with every request that needs it.
 	toolEnv map[string]string
@@ -240,7 +243,7 @@ func adoptUnknown(p turn.Process) *turn.State { return &turn.State{Process: p} }
 // persistSession stores the session's checkpoint. The caller holds s.mu.
 func (a *App) persistSession(ctx context.Context, s *session) error {
 	err := a.putCheckpoint(ctx, adapterproto.ScopeSession, string(s.endpoint), sessionCheckpoint{
-		V: checkpointVersion, Session: s.id, Cwd: s.cwd, RecordDir: s.recordDir, Turn: s.turn,
+		V: checkpointVersion, Session: s.id, Cwd: s.cwd, RecordDir: s.recordDir, Choice: s.choice, Turn: s.turn,
 	})
 	if err != nil {
 		return err

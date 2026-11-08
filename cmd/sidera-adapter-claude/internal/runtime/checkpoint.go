@@ -20,6 +20,33 @@ import (
 // wrote, is refused rather than guessed at.
 const checkpointVersion = 1
 
+// choiceCheckpoint is the model and effort a session runs with because its
+// requester chose them: the pair the preset's allowlist let through when the
+// session was created. A session whose requester chose nothing has none and
+// follows the preset. A member left out is left to Claude Code, as it is when the
+// preset does not set it.
+type choiceCheckpoint struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
+// validate refuses a stored choice that is empty or holds a value that could not
+// have been resolved: it ends up in an argument of a turn process.
+func (c choiceCheckpoint) validate() error {
+	if c.Model == "" && c.Effort == "" {
+		return fmt.Errorf("a choice that chooses nothing")
+	}
+	if c.Model != "" {
+		if err := adapterproto.ValidateModelName(c.Model); err != nil {
+			return fmt.Errorf("model: %w", err)
+		}
+	}
+	if c.Effort != "" && !adapterproto.Effort(c.Effort).Valid() {
+		return fmt.Errorf("effort %q is not an effort", c.Effort)
+	}
+	return nil
+}
+
 // attemptCheckpoint is what a creation attempt stores with the daemon: the state
 // of the attempt, one field for each of create.State's, and what the attempt
 // was asked, so that a repeat with other parameters is told from a retry. It
@@ -34,6 +61,12 @@ type attemptCheckpoint struct {
 	Cwd             string `json:"cwd"`
 	Preset          string `json:"preset"`
 	SessionEndpoint string `json:"session_endpoint"`
+	// Model and Effort are what the requester asked for, as asked, so that a repeat
+	// that asks for other values is told from a retry; Choice is what that came to
+	// under the preset of the time, nil when the requester asked for neither.
+	Model  string            `json:"model,omitempty"`
+	Effort string            `json:"effort,omitempty"`
+	Choice *choiceCheckpoint `json:"choice,omitempty"`
 	// The numbers of Stage and FailReason are persisted values and never change.
 	Stage     int    `json:"stage"`
 	PID       int    `json:"pid,omitempty"`
@@ -84,6 +117,11 @@ func decodeAttemptCheckpoint(raw json.RawMessage) (attemptCheckpoint, error) {
 	if c.V != checkpointVersion { // the one format so far; see checkpointVersion
 		return c, fmt.Errorf("attempt checkpoint: version %d is not %d", c.V, checkpointVersion)
 	}
+	if c.Choice != nil {
+		if err := c.Choice.validate(); err != nil {
+			return c, fmt.Errorf("attempt checkpoint: choice: %w", err)
+		}
+	}
 	return c, nil
 }
 
@@ -95,14 +133,15 @@ type dispatchCheckpoint struct {
 	Session string `json:"session"`
 }
 
-// sessionCheckpoint is what an open session stores: where its files are and the
-// last turn.
+// sessionCheckpoint is what an open session stores: where its files are, the
+// model and effort its requester chose, if it did, and the last turn.
 type sessionCheckpoint struct {
-	V         int         `json:"v"`
-	Session   string      `json:"session"`
-	Cwd       string      `json:"cwd"`
-	RecordDir string      `json:"record_dir"`
-	Turn      *turn.State `json:"turn,omitempty"`
+	V         int               `json:"v"`
+	Session   string            `json:"session"`
+	Cwd       string            `json:"cwd"`
+	RecordDir string            `json:"record_dir"`
+	Choice    *choiceCheckpoint `json:"choice,omitempty"`
+	Turn      *turn.State       `json:"turn,omitempty"`
 }
 
 func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
@@ -115,6 +154,11 @@ func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
 	}
 	if c.Session == "" || c.RecordDir == "" || c.Cwd == "" {
 		return c, fmt.Errorf("session checkpoint: incomplete")
+	}
+	if c.Choice != nil {
+		if err := c.Choice.validate(); err != nil {
+			return c, fmt.Errorf("session checkpoint: choice: %w", err)
+		}
 	}
 	return c, nil
 }

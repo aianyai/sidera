@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/record"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
@@ -85,6 +86,7 @@ func (a *App) CreateSession(ctx context.Context, p adapterproto.SessionCreatePar
 // conflict is the error for the same attempt asked again with other parameters.
 func conflict(cp attemptCheckpoint, p adapterproto.SessionCreateParams) error {
 	if cp.Preset == p.Preset && cp.SessionEndpoint == string(p.SessionEndpoint) &&
+		cp.Model == p.Model && cp.Effort == string(p.Effort) &&
 		cp.FirstPrompt == string(p.FirstPrompt.Attempt) && cp.FirstDigest == digest(p.FirstPrompt.Text) {
 		return nil
 	}
@@ -131,6 +133,13 @@ func (a *App) loadAttempt(ctx context.Context, at *attempt, p adapterproto.Sessi
 	if perr != nil {
 		return failed(perr.failure, perr.Error()), true, nil
 	}
+	choice, chosen, err := modelchoice.Resolve(preset.AllowedModels, modelchoice.Defaults{Model: preset.Model, Effort: adapterproto.Effort(preset.Effort)}, p.Model, p.Effort)
+	switch {
+	case errors.Is(err, modelchoice.ErrNotAllowed):
+		return failed(adapterproto.CreateFailModelChoiceNotAllowed, err.Error()), true, nil
+	case err != nil:
+		return res, true, err
+	}
 	session, err := newUUID(a.o.Rand)
 	if err != nil {
 		return res, true, err
@@ -143,7 +152,11 @@ func (a *App) loadAttempt(ctx context.Context, at *attempt, p adapterproto.Sessi
 		V: checkpointVersion, Attempt: string(p.Attempt), Session: session,
 		FirstPrompt: string(p.FirstPrompt.Attempt), FirstDigest: digest(p.FirstPrompt.Text),
 		RecordDir: preset.RecordDir, Cwd: preset.Cwd, Preset: p.Preset, SessionEndpoint: string(p.SessionEndpoint),
+		Model: p.Model, Effort: string(p.Effort),
 	}.withState(st)
+	if chosen {
+		cp.Choice = &choiceCheckpoint{Model: choice.Model, Effort: string(choice.Effort)}
+	}
 	if err := a.putCheckpoint(ctx, adapterproto.ScopeAttempt, cp.Attempt, cp); err != nil {
 		return res, true, err
 	}
@@ -258,7 +271,7 @@ func failedFor(reason create.Reason) adapterproto.SessionCreateResult {
 // attempt: a repeated request tries again. A process that started but cannot be
 // identified is an error, never a failure.
 func (a *App) startFirstTurn(at *attempt, p adapterproto.SessionCreateParams, resume bool) (proc.Started, *adapterproto.SessionCreateResult, error) {
-	preset, err := a.loadPreset(at.cp.Preset)
+	preset, err := a.loadPreset(at.cp.Preset, at.cp.Choice)
 	if err != nil {
 		return proc.Started{}, nil, err
 	}
@@ -283,10 +296,14 @@ func (a *App) startFirstTurn(at *attempt, p adapterproto.SessionCreateParams, re
 	return started, nil, nil
 }
 
-// loadPreset reads the values of a preset that an attempt in progress needs
-// again; one that was removed or became invalid since is an error and not a
-// failed attempt, because a process of the attempt may be running.
-func (a *App) loadPreset(name string) (claudeargs.Preset, error) {
+// loadPreset reads the values of a preset that a turn is started with: the
+// first turn of an attempt in progress and every later one. One that was removed
+// or became invalid since is an error and not a failed attempt, because a process
+// of the attempt may be running. The model and effort a requester chose replace
+// the preset's own, and an absent member of the choice is not passed, so every
+// turn of a session starts with the same model and effort whatever the owner does
+// to the preset later; a session with no choice follows the preset as it is.
+func (a *App) loadPreset(name string, choice *choiceCheckpoint) (claudeargs.Preset, error) {
 	a.mu.Lock()
 	values, ok := a.presets[name]
 	a.mu.Unlock()
@@ -296,6 +313,9 @@ func (a *App) loadPreset(name string) (claudeargs.Preset, error) {
 	preset, problems := claudeargs.ParsePreset(values)
 	if len(problems) > 0 {
 		return claudeargs.Preset{}, fmt.Errorf("preset %q is no longer valid: %s", name, strings.Join(problems, "; "))
+	}
+	if choice != nil {
+		preset.Model, preset.Effort = choice.Model, choice.Effort
 	}
 	return preset, nil
 }
@@ -357,7 +377,7 @@ func (a *App) finishCreate(ctx context.Context, at *attempt, p adapterproto.Sess
 	if fresh {
 		s = &session{
 			endpoint: p.SessionEndpoint, id: cp.Session, preset: cp.Preset, cwd: cp.Cwd, recordDir: cp.RecordDir,
-			toolEnv: p.ToolAccess.Env,
+			choice: cp.Choice, toolEnv: p.ToolAccess.Env,
 			turn: &turn.State{
 				Attempt: cp.FirstPrompt, Digest: cp.FirstDigest,
 				Process: cp.process(),

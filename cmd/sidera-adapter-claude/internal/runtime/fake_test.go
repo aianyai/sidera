@@ -570,6 +570,14 @@ func startApp(t *testing.T, app *App, sessions ...adapterproto.SessionAttach) ad
 			{Name: "dev", Config: adapterproto.ConfigValues{
 				"project_dir": raw(workDir), "permission_mode": raw("dontAsk"), "background_wait_ms": raw(1000),
 			}},
+			{Name: "choosy", Config: adapterproto.ConfigValues{
+				"project_dir": raw(workDir), "permission_mode": raw("dontAsk"), "model": raw("sonnet"), "effort": raw("high"),
+				"allowed_models": raw(map[string][]string{"sonnet": {"low", "high"}, "opus": {"high", "max"}}),
+			}},
+			{Name: "lean", Config: adapterproto.ConfigValues{
+				"project_dir": raw(workDir), "permission_mode": raw("dontAsk"),
+				"allowed_models": raw(map[string][]string{"opus": {"high"}}),
+			}},
 			{Name: "gone", Config: adapterproto.ConfigValues{"project_dir": raw(workDir + "-missing"), "permission_mode": raw("plan")}},
 			{Name: "bad", Config: adapterproto.ConfigValues{"project_dir": raw(workDir), "permission_mode": raw("yolo")}},
 		},

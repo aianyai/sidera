@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -278,6 +279,45 @@ func TestParsePreset(t *testing.T) {
 			}
 			if !reflect.DeepEqual(problems, tc.problems) {
 				t.Errorf("problems\n got %q\nwant %q", problems, tc.problems)
+			}
+		})
+	}
+}
+
+// A preset's allowlist and its default model are read when the preset is: each
+// refusal of the allowlist is a problem of the preset, and a default model the
+// protocol could not carry is one too.
+func TestParsePresetReportsTheModelChoiceAsProblems(t *testing.T) {
+	base := func(kv ...string) map[string]json.RawMessage {
+		m := map[string]json.RawMessage{"project_dir": json.RawMessage(strconv.Quote(abs("work"))), "permission_mode": json.RawMessage(`"plan"`)}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i]] = json.RawMessage(kv[i+1])
+		}
+		return m
+	}
+	tests := []struct {
+		name string
+		cfg  map[string]json.RawMessage
+		bad  string // a text the one problem contains; empty when the preset is usable
+	}{
+		{"an allowlist", base("allowed_models", `{"opus":["high","max"],"sonnet":["low"]}`), ""},
+		{"not a map", base("allowed_models", `["opus"]`), "allowed_models"},
+		{"an empty map", base("allowed_models", `{}`), "allowed_models"},
+		{"a model without an effort", base("allowed_models", `{"opus":[]}`), "allowed_models"},
+		{"an effort off the scale", base("allowed_models", `{"opus":["ultracode"]}`), "allowed_models"},
+		{"an effort twice", base("allowed_models", `{"opus":["high","high"]}`), "allowed_models"},
+		{"a model name with a space", base("allowed_models", `{"my model":["high"]}`), "allowed_models"},
+		{"a default model with a space", base("model", `"my model"`), "model"},
+		{"a default model that starts like a flag", base("model", `"--dangerous"`), "model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, problems := ParsePreset(tc.cfg)
+			switch {
+			case tc.bad == "" && len(problems) != 0:
+				t.Fatalf("problems %q", problems)
+			case tc.bad != "" && (len(problems) != 1 || !strings.Contains(problems[0], tc.bad)):
+				t.Fatalf("problems %q, want one about %s", problems, tc.bad)
 			}
 		})
 	}

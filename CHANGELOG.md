@@ -19,6 +19,14 @@ protocol has a version of its own.
   version 1 is extended in place; an older adapter that does not declare the capability is never sent a choice.
   The Go SDK's `adapterkit/modelchoice` parses a preset's `allowed_models` map and applies the rules that decide
   which model and effort a requester may choose, so adapters apply them alike.
+- **The Claude adapter lets a requester choose the model and effort of a new session.** A preset
+  can set `allowed_models`, a map from a model to the efforts that may be chosen with it; without it
+  a session's creator cannot choose. A choice the list does not allow is refused when the session is
+  created, and the chosen model and effort stay with the session across resumes and restarts, whatever
+  the preset says later. List only the efforts a model really supports: Claude Code quietly uses the
+  highest level the model supports at or below an effort it does not. A preset whose `model` is not a
+  valid model name (it starts with anything but a letter or digit, or holds a space) is now reported as
+  unusable instead of being passed to Claude Code.
 - **A manifest can declare a `map` configuration field.** For adapter authors: a field of type `map`
   holds an object of at most 64 entries, each keyed by 1 to 128 visible ASCII characters, with the
   `value` of the field naming the one plain type (`string`, `integer`, `boolean`, `enum`, `directory`

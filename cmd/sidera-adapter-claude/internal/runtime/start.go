@@ -123,7 +123,7 @@ func (a *App) attach(at adapterproto.SessionAttach, list []proc.Entry, snapErr e
 
 	s := &session{
 		endpoint: at.Endpoint, id: cp.Session, preset: at.Preset, cwd: cp.Cwd, recordDir: cp.RecordDir,
-		toolEnv: at.ToolAccess.Env, turn: cp.Turn,
+		choice: cp.Choice, toolEnv: at.ToolAccess.Env, turn: cp.Turn,
 	}
 	running := a.turnProcesses(list, s.id)
 	if len(running) > 1 {

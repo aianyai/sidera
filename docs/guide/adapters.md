@@ -233,9 +233,14 @@ history.
 
 **Configuration.** Instance keys: `claude_path`, `sidera_path`. Preset keys (under
 `claude` in the preset file): `project_dir`, `permission_mode`, `model`, `effort`,
-`allowed_tools`, `append_system_prompt` and `background_wait_ms`. Examples are in
+`allowed_models`, `allowed_tools`, `append_system_prompt` and `background_wait_ms`. Examples are in
 [Getting started](getting-started.md#5-add-a-preset-both); every key is listed under
 [Configuration](../references/adapter-claude/README.md#configuration) in the reference.
+
+`allowed_models` lets whoever creates a session choose its model and effort within a list you
+write, for example `{"opus": ["high", "max"], "sonnet": ["low", "medium"]}`; without it the
+creator cannot choose. List only the efforts a model really supports: Claude Code does not refuse
+an effort a model lacks, it quietly uses the highest level the model supports below it.
 
 ## Codex
 

@@ -28,6 +28,9 @@ for the rules and their reasons.
   orders the notifications; every handler that changes the turn holds the same lock.
 - A session's checkpoint is stored when its turn changes, not at every poll; each store is a
   durable transaction with the daemon.
+- Every turn of a session, the first and each later one, takes its model and effort from
+  `loadPreset`: the pair the session's requester chose when it chose, else the preset's own values.
+  A member neither gives is not passed to `claude`.
 - Nothing the adapter logs or stores holds a token or a prompt's text (a digest is stored).
 - The turn files (`turns/<session>/<attempt>.{in,out,err}.jsonl`) are private to the user.
 - An attached session is the person's: the adapter never starts, signals or closes anything of it

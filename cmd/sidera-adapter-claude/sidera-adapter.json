@@ -25,6 +25,8 @@
        "options": ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]},
       {"key": "model", "type": "string", "title": "Model"},
       {"key": "effort", "type": "enum", "title": "Effort", "options": ["low", "medium", "high", "xhigh", "max"]},
+      {"key": "allowed_models", "type": "map", "title": "Models a requester may choose, with the efforts allowed for each",
+       "value": {"type": "string_list"}},
       {"key": "allowed_tools", "type": "string_list", "title": "Extra --allowedTools rules"},
       {"key": "append_system_prompt", "type": "string", "title": "Extra system prompt"},
       {"key": "background_wait_ms", "type": "integer", "title": "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "min": 0, "max": 3600000}

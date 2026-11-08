@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/claudeargs"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/setup"
 	"github.com/aianyai/sidera/internal/release"
@@ -122,6 +123,9 @@ func config(app adapterkit.Application, logger *slog.Logger) (adapterkit.Config,
 			// A session a person opened can be attached: woken through its inbox socket and
 			// followed through its registry entry and its transcript.
 			Attach: true,
+			// A requester may choose the model and effort of a new session within the
+			// allowlist of the preset; Claude Code takes all five efforts.
+			ModelChoice: &adapterproto.ModelChoiceCapability{Efforts: claudeargs.SupportedEfforts()},
 		}},
 		App: app, Logger: logger,
 	}, nil

@@ -615,7 +615,7 @@ func TestProbe(t *testing.T) {
 			t.Errorf("preset %s is unusable without a problem", p.Name)
 		}
 	}
-	if !slices.Equal(usable, []string{"dev"}) || len(res.Presets) != 3 {
+	if !slices.Equal(usable, []string{"choosy", "dev", "lean"}) || len(res.Presets) != 5 {
 		t.Fatalf("presets %+v", res.Presets)
 	}
 	if res.ToolProbes[0].Outcome != adapterproto.ProbeRan || res.ToolProbes[0].Method != adapterproto.ProbeUnsandboxed {

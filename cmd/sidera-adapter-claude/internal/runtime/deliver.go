@@ -117,7 +117,7 @@ func (a *App) DeliverPrompt(ctx context.Context, p adapterproto.PromptDeliverPar
 	if err := a.putCheckpoint(ctx, adapterproto.ScopeAttempt, string(p.Attempt), dispatchCheckpoint{V: checkpointVersion, Stage: "dispatching", Session: s.id}); err != nil {
 		return adapterproto.PromptDeliverResult{}, err
 	}
-	preset, err := a.loadPreset(s.preset)
+	preset, err := a.loadPreset(s.preset, s.choice)
 	if err != nil {
 		a.log.Warn("a prompt cannot be delivered", "endpoint", s.endpoint, "error", err)
 		return refused(adapterproto.RefusalNativeUnavailable)

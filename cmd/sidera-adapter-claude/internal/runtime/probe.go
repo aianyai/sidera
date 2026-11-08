@@ -87,9 +87,11 @@ func (a *App) Probe(ctx context.Context, p adapterproto.ProbeParams) (adapterpro
 		case !statusKnown || !status.LoggedIn:
 			ps.Problems = []string{"claude is not logged in"}
 		default:
-			_, perr := a.resolvePreset(name, status.ProjectsDirectory)
+			resolved, perr := a.resolvePreset(name, status.ProjectsDirectory)
 			if perr != nil {
 				ps.Problems = perr.problems
+			} else {
+				ps.Model, ps.Effort, ps.AllowedModels = resolved.Model, adapterproto.Effort(resolved.Effort), resolved.AllowedModels.Entries()
 			}
 		}
 		for i := range ps.Problems {
