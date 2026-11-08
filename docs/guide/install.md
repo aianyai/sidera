@@ -199,7 +199,9 @@ refusals and how to go back are in [Upgrade](operations.md#upgrade); what the se
 in [Setting up an adapter's client](adapters.md#setting-up-an-adapters-client).
 After an upgrade to 0.17, restart the Claude Code and Codex sessions that were running when
 you upgraded: they keep the `sidera mcp` of the earlier release, which cannot read the new
-`peers` and `directory` results (see [Upgrade](operations.md#upgrade)).
+`peers` and `directory` results (see [Upgrade](operations.md#upgrade)). The same goes for an
+upgrade to 0.18: those sessions cannot choose the model and effort of a new session, and their
+`status` tool cannot read an `endpoint.status` answer that lists the choice a preset allows.
 
 ## Build from source
 

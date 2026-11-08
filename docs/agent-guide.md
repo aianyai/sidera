@@ -249,7 +249,11 @@ Choose A (release archive) or B (source).
    Code and Codex; [Hermes](guide/adapters.md#hermes) for the profiles). An upgrade from a
    release before 0.17 also leaves running Claude Code and Codex sessions with the earlier
    `sidera mcp`, whose `peers` and `directory` tools then fail with `outcome_unknown`: tell
-   your owner to restart those sessions (including your own).
+   your owner to restart those sessions (including your own). The same holds for an upgrade
+from a release before 0.18: those sessions have no `model` and `effort` on `control`, and
+their `status` tool fails with `answer_unreadable` on the answer to an `endpoint.status`
+signal in which a preset reports its default model or effort or the models that may be
+chosen.
 
 ### B. Build from source
 

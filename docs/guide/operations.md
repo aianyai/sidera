@@ -90,8 +90,31 @@ the program of 0.16 or earlier cannot read the new members of the `peers` and `d
 results: those two tools fail with `outcome_unknown` in such a session until it is
 restarted, while its other tools keep working. `sidera peers` and `sidera directory` from a
 shell, and every session started after the upgrade, work at once. From 0.17 on a program
-ignores members that a later release adds, so later upgrades do not need this restart for
-that reason.
+ignores members that a later release adds to a result, except inside the control reply that
+`status` shows.
+
+An upgrade to 0.18 needs the same restart for the choice of a new session's model and
+effort. A session that was running keeps the `sidera mcp` of the earlier release, whose
+`control` tool has no `model` and `effort`, so that session cannot choose a model, and whose
+`status` tool cannot read the answer to an `endpoint.status` signal in which a preset reports
+its default model or effort or the models that may be chosen: it fails with `answer_unreadable`
+and advises restarting the session. Everything else keeps working, and `sidera status`
+from a shell and every session started after the upgrade read the answer at once.
+
+A node that runs a release before 0.18 takes everything it took before. When a model or an
+effort is chosen for a new session on it, your node does not send the message: it ends as
+rejected with `node_unsupported` at once, and the notice says that the refusal is this node's
+because of the other node's release. Update that node to use the choice. The owner of a node
+decides what may be chosen through the `allowed_models` of a preset (see
+[Letting a requester choose the model and effort](agents.md#letting-a-requester-choose-the-model-and-effort)).
+
+Two checks are new in 0.18 and apply to what you write after the upgrade. `sidera preset add`
+refuses the twenty-first preset, and `sidera preset add`, `sidera adapter enable` and
+`sidera adapter config` refuse a configuration value that the adapter's manifest does not
+allow (a value of the wrong type, outside its options or bounds, a setting the adapter does
+not have, a missing required one), naming the setting; a preset section for an adapter that is
+not installed is refused too, so install the adapter first. What a node already holds is not
+checked again: presets beyond twenty and values stored earlier stay and keep working.
 
 ### With `sidera update`
 
