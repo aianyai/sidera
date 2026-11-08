@@ -643,9 +643,12 @@ have sent to a new version:
   `node_unsupported`. The capability alone would need no new version, but new members of
   objects that are decoded strictly would. The daemon sends `model` and `effort` in
   `session.create` only to an adapter that declared the capability, and an older daemon never
-  sees a declaration it would act on, so no deployed adapter meets them; an adapter reports the
-  members of a preset in its probe result only when it declared the capability, so an older
-  daemon, which decodes that result strictly, never meets them either. A requester that sends
+  sees a declaration it would act on, so no deployed adapter meets them. An older daemon
+  ignores the capability and decodes the probe result strictly, so what keeps the members of a
+  preset in that result from it is the manifest: every adapter that declares the capability
+  also declares the configuration field `allowed_models`, which is a `map` field, and an older
+  daemon refuses such a manifest when the adapter is installed (see the `map` entry below);
+  `sidera update` restarts the daemon before it installs adapter packages. A requester that sends
   `model` or `effort` to an older daemon has the call refused as malformed, and an older
   reader of a control reply refuses reason 11, which only a request that chose a model or an
   effort can earn. The members of `endpoint.status` reach the console adapter in
