@@ -381,3 +381,27 @@ func TestAnExtraInstanceHasItsOwnAdapterRuntimeAndEndpoints(t *testing.T) {
 		t.Errorf("the adapter %s went offline with the adapter of %s", harness.Instance, other)
 	}
 }
+
+// The host arms its restart backoff after it has told the node that the adapter is
+// gone, so a test learns from the fixture when the timer exists and how far away it
+// is, and a clock that is set back does not change that distance.
+func TestHostTimerDueIsTheRestartBackoffOnceTheHostHasArmedIt(t *testing.T) {
+	h := withAdapter(t)
+	h.AdapterLaunches(harness.Instance)[0].End()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if due, ok := h.HostTimerDue(); ok && due == restartAfter {
+			break
+		}
+		if time.Now().After(deadline) {
+			due, ok := h.HostTimerDue()
+			t.Fatalf("HostTimerDue() = %v, %v after the adapter ended, want the backoff in %v", due, ok, restartAfter)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	h.Advance(restartAfter / 2)
+	h.Set(h.Clock().Now().Add(-time.Hour))
+	if due, ok := h.HostTimerDue(); !ok || due != restartAfter/2 {
+		t.Fatalf("HostTimerDue() = %v, %v after a move forward and a set-back, want %v: a timer keeps its remaining time", due, ok, restartAfter/2)
+	}
+}

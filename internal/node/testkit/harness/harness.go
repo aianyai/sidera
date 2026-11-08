@@ -124,7 +124,10 @@ type H struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	clk     *clocktest.Fake
+	clk *clocktest.Fake
+	// hostClk is the clock the adapter host is given: clk, with the timers of the host
+	// told apart.
+	hostClk *hostClock
 	led     *ledger.Memory
 	fixture *ledger.Writer
 	tab     *txn.Table
@@ -226,6 +229,7 @@ func NewStopped(t testing.TB, o Options) *H {
 		admit: AdapterAdmission(t, o.MaxDirect),
 		names: map[string]endpoint{}, agent: map[string]fakeagent.Agent{}, steps: map[string]bool{},
 	}
+	h.hostClk = newHostClock(h.clk)
 	h.knobs = transport.NewKnobs(h.clk)
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	var err error
@@ -466,7 +470,7 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 		// The host runs on the test clock: its pings, its backoff and its waits for a
 		// process to end are moved by Advance, and nothing in it waits for real time.
 		p.host, err = adapterhost.New(adapterhost.Config{
-			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.clk,
+			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.hostClk,
 		})
 		if err != nil {
 			return fmt.Errorf("adapterhost.New: %w", err)
@@ -950,7 +954,20 @@ func (h *H) VerifyControlReply(rec record.Record) (envelope.ControlReply, error)
 func (h *H) Advance(d time.Duration) { h.clk.Advance(d) }
 
 // Set sets the clock, backwards too; going back fires no timer.
-func (h *H) Set(t time.Time) { h.clk.Set(t) }
+func (h *H) Set(t time.Time) {
+	if back := h.clk.Now().Sub(t); back > 0 {
+		h.hostClk.setBack(back)
+	}
+	h.clk.Set(t)
+}
+
+// HostTimerDue is the time from now until the earliest timer the adapter host has
+// armed fires, and false when it has armed none. The host arms its restart backoff
+// a moment after it tells the node that the adapter is gone, so a test that moves
+// the clock to the restart waits for this first, and moves the clock by exactly
+// this, which fires the timer and no more. The clock must be moved through Advance
+// and Set: a move made on Clock directly is not followed by a set-back.
+func (h *H) HostTimerDue() (time.Duration, bool) { return h.hostClk.nextDue() }
 
 // BeginStep announces the script step that is about to run: it sets the step the
 // ledger stamps on every entry written from now on and writes the entry that says
