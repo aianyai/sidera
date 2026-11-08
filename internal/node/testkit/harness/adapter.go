@@ -21,6 +21,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // AdapterOptions give the fixture an adapter host, and with it a fake adapter for
@@ -91,7 +92,28 @@ func AdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptio
 		Direct: true, MaxDirectEndpoints: maxDirect,
 		ShutdownIntent: true,
 		Program:        adapterProgram,
+		Config:         &manifest.Config{Instance: fixtureSettings, Preset: fixturePresetSettings},
 	}
+}
+
+// fixtureSettings and fixturePresetSettings are the settings the tests of the
+// node write for the fixture's adapter, in an instance and in a preset. The
+// daemon checks a value against the fields the manifest declares, so a test
+// cannot write a setting that is not declared here.
+var fixtureSettings = []manifest.Field{
+	{Key: "k", Type: manifest.FieldString, Title: "K"},
+	{Key: "mode", Type: manifest.FieldString, Title: "Mode"},
+	{Key: "program", Type: manifest.FieldString, Title: "Program"},
+	{Key: "base_url", Type: manifest.FieldString, Title: "Base URL"},
+	{Key: "retries", Type: manifest.FieldInteger, Title: "Retries"},
+	{Key: "debug", Type: manifest.FieldBoolean, Title: "Debug"},
+	{Key: "tags", Type: manifest.FieldStringList, Title: "Tags"},
+}
+
+var fixturePresetSettings = []manifest.Field{
+	{Key: "model", Type: manifest.FieldString, Title: "Model"},
+	{Key: "effort", Type: manifest.FieldString, Title: "Effort"},
+	{Key: "retries", Type: manifest.FieldInteger, Title: "Retries"},
 }
 
 // RuntimeAdapterManifest is AdapterManifest for an adapter that also declares a

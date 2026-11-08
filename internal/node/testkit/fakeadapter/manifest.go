@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -61,6 +62,11 @@ type ManifestOptions struct {
 	// Program and Args are the entry of the adapter package.
 	Program string   `json:"program"`
 	Args    []string `json:"args,omitempty"`
+
+	// Config declares the configuration fields of the adapter. The daemon checks the
+	// values written for an instance or a preset against them, so a test that writes
+	// a value declares the field it writes.
+	Config *manifest.Config `json:"config,omitempty"`
 
 	// Setup declares the setup command of the program (`<program> setup`), the
 	// scripted setup of this package (see SetupCommand).
@@ -151,6 +157,9 @@ func (o ManifestOptions) Manifest() manifest.Manifest {
 		Entry:           manifest.Entry{Program: o.Program, Args: append([]string(nil), o.Args...)},
 		Platforms:       []manifest.Platform{{OS: runtime.GOOS, Arch: runtime.GOARCH}},
 		Budgets:         append([]manifest.Budget(nil), o.Budgets...),
+	}
+	if o.Config != nil {
+		m.Config = &manifest.Config{Instance: slices.Clone(o.Config.Instance), Preset: slices.Clone(o.Config.Preset)}
 	}
 	if o.Setup {
 		m.Setup = &manifest.Entry{Program: o.Program, Args: []string{"setup"}}

@@ -17,7 +17,7 @@ three operating systems and both tag sets.
 | ---- | ------- |
 | `StartPipe(ctx, Config)` → `PipeProcess` | `Serve` on a pair of pipes with the shape of a child process (`Stream`, `PID`, `Kill`, `Wait`), for an engine-layer fixture that hands the adapter host a process to supervise. |
 | `Serve(ctx, r, w, Config)` | The adapter side of the protocol over a reader and a writer: in a test process the two ends of an `io.Pipe`, in a program standard input and output. |
-| `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. |
+| `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. `ManifestOptions.Config` declares the configuration fields of the manifest (none by default), for a test that writes settings the daemon checks against it. |
 | `ToolProbeConfig` | Optional static commands for real tool probes, shared by `Config` and `ProcessConfig`. |
 | `ExternalInputs`, `InputReceiver`, `InputRegistry`, `NewInputRegistry` | Explicit per-instance conditions owned by a test run; `Set` replaces them and `Attach` installs them before publishing a generation. `HandleControl` supplies the process handshake. |
 | `Knobs`, `Outcome`, `NewKnobs` | The test's handles. |
