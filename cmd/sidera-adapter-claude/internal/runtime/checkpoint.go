@@ -9,6 +9,7 @@ import (
 
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/create"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -19,33 +20,6 @@ import (
 // checkpoint of a version newer than this adapter knows, which only a later adapter
 // wrote, is refused rather than guessed at.
 const checkpointVersion = 1
-
-// choiceCheckpoint is the model and effort a session runs with because its
-// requester chose them: the pair the preset's allowlist let through when the
-// session was created. A session whose requester chose nothing has none and
-// follows the preset. A member left out is left to Claude Code, as it is when the
-// preset does not set it.
-type choiceCheckpoint struct {
-	Model  string `json:"model,omitempty"`
-	Effort string `json:"effort,omitempty"`
-}
-
-// validate refuses a stored choice that is empty or holds a value that could not
-// have been resolved: it ends up in an argument of a turn process.
-func (c choiceCheckpoint) validate() error {
-	if c.Model == "" && c.Effort == "" {
-		return fmt.Errorf("a choice that chooses nothing")
-	}
-	if c.Model != "" {
-		if err := adapterproto.ValidateModelName(c.Model); err != nil {
-			return fmt.Errorf("model: %w", err)
-		}
-	}
-	if c.Effort != "" && !adapterproto.Effort(c.Effort).Valid() {
-		return fmt.Errorf("effort %q is not an effort", c.Effort)
-	}
-	return nil
-}
 
 // attemptCheckpoint is what a creation attempt stores with the daemon: the state
 // of the attempt, one field for each of create.State's, and what the attempt
@@ -64,9 +38,9 @@ type attemptCheckpoint struct {
 	// Model and Effort are what the requester asked for, as asked, so that a repeat
 	// that asks for other values is told from a retry; Choice is what that came to
 	// under the preset of the time, nil when the requester asked for neither.
-	Model  string            `json:"model,omitempty"`
-	Effort string            `json:"effort,omitempty"`
-	Choice *choiceCheckpoint `json:"choice,omitempty"`
+	Model  string              `json:"model,omitempty"`
+	Effort string              `json:"effort,omitempty"`
+	Choice *modelchoice.Choice `json:"choice,omitempty"`
 	// The numbers of Stage and FailReason are persisted values and never change.
 	Stage     int    `json:"stage"`
 	PID       int    `json:"pid,omitempty"`
@@ -118,7 +92,7 @@ func decodeAttemptCheckpoint(raw json.RawMessage) (attemptCheckpoint, error) {
 		return c, fmt.Errorf("attempt checkpoint: version %d is not %d", c.V, checkpointVersion)
 	}
 	if c.Choice != nil {
-		if err := c.Choice.validate(); err != nil {
+		if err := c.Choice.Validate(); err != nil {
 			return c, fmt.Errorf("attempt checkpoint: choice: %w", err)
 		}
 	}
@@ -136,12 +110,12 @@ type dispatchCheckpoint struct {
 // sessionCheckpoint is what an open session stores: where its files are, the
 // model and effort its requester chose, if it did, and the last turn.
 type sessionCheckpoint struct {
-	V         int               `json:"v"`
-	Session   string            `json:"session"`
-	Cwd       string            `json:"cwd"`
-	RecordDir string            `json:"record_dir"`
-	Choice    *choiceCheckpoint `json:"choice,omitempty"`
-	Turn      *turn.State       `json:"turn,omitempty"`
+	V         int                 `json:"v"`
+	Session   string              `json:"session"`
+	Cwd       string              `json:"cwd"`
+	RecordDir string              `json:"record_dir"`
+	Choice    *modelchoice.Choice `json:"choice,omitempty"`
+	Turn      *turn.State         `json:"turn,omitempty"`
 }
 
 func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
@@ -156,7 +130,7 @@ func decodeSessionCheckpoint(raw json.RawMessage) (sessionCheckpoint, error) {
 		return c, fmt.Errorf("session checkpoint: incomplete")
 	}
 	if c.Choice != nil {
-		if err := c.Choice.validate(); err != nil {
+		if err := c.Choice.Validate(); err != nil {
 			return c, fmt.Errorf("session checkpoint: choice: %w", err)
 		}
 	}

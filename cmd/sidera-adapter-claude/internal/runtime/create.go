@@ -155,7 +155,7 @@ func (a *App) loadAttempt(ctx context.Context, at *attempt, p adapterproto.Sessi
 		Model: p.Model, Effort: string(p.Effort),
 	}.withState(st)
 	if chosen {
-		cp.Choice = &choiceCheckpoint{Model: choice.Model, Effort: string(choice.Effort)}
+		cp.Choice = &choice
 	}
 	if err := a.putCheckpoint(ctx, adapterproto.ScopeAttempt, cp.Attempt, cp); err != nil {
 		return res, true, err
@@ -303,7 +303,7 @@ func (a *App) startFirstTurn(at *attempt, p adapterproto.SessionCreateParams, re
 // the preset's own, and an absent member of the choice is not passed, so every
 // turn of a session starts with the same model and effort whatever the owner does
 // to the preset later; a session with no choice follows the preset as it is.
-func (a *App) loadPreset(name string, choice *choiceCheckpoint) (claudeargs.Preset, error) {
+func (a *App) loadPreset(name string, choice *modelchoice.Choice) (claudeargs.Preset, error) {
 	a.mu.Lock()
 	values, ok := a.presets[name]
 	a.mu.Unlock()
@@ -315,7 +315,7 @@ func (a *App) loadPreset(name string, choice *choiceCheckpoint) (claudeargs.Pres
 		return claudeargs.Preset{}, fmt.Errorf("preset %q is no longer valid: %s", name, strings.Join(problems, "; "))
 	}
 	if choice != nil {
-		preset.Model, preset.Effort = choice.Model, choice.Effort
+		preset.Model, preset.Effort = choice.Model, string(choice.Effort)
 	}
 	return preset, nil
 }

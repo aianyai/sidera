@@ -271,3 +271,21 @@ func TestASessionWhoseStoredChoiceIsNotAChoiceIsUnreachable(t *testing.T) {
 }
 
 func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }
+
+// A checkpoint an earlier adapter stored is read and written back byte for byte: the
+// daemon keeps checkpoints across an upgrade of the adapter, so the form of the
+// choice in them must not move.
+func TestStoredChoiceKeepsItsBytes(t *testing.T) {
+	const session = "6ee62271-42c1-4558-89cf-0e32c50e0c1b"
+	for _, choice := range []string{`{"model":"opus","effort":"high"}`, `{"model":"opus"}`, `{"effort":"low"}`} {
+		stored := `{"v":1,"session":"` + session + `","cwd":"/work","record_dir":"/records","choice":` + choice + `}`
+		cp, err := decodeSessionCheckpoint(json.RawMessage(stored))
+		if err != nil {
+			t.Fatalf("decode %s: %v", stored, err)
+		}
+		again, err := json.Marshal(cp)
+		if err != nil || string(again) != stored {
+			t.Errorf("session checkpoint written back as %s (%v), stored was %s", again, err, stored)
+		}
+	}
+}

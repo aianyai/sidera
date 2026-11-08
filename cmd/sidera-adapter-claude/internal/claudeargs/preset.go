@@ -15,12 +15,20 @@ import (
 // `claude --permission-mode` accepts.
 var PermissionModes = []string{"default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"}
 
-// Efforts are the values of the preset's effort.
+// Efforts are the values of the preset's effort, lowest first. SupportedEfforts derives
+// from them, so one list decides both what a preset may name and what a requester may
+// choose.
 var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // SupportedEfforts are the efforts `claude --effort` takes, which the adapter
 // declares as the efforts a requester may choose.
-func SupportedEfforts() []adapterproto.Effort { return adapterproto.Efforts() }
+func SupportedEfforts() []adapterproto.Effort {
+	out := make([]adapterproto.Effort, len(Efforts))
+	for i, e := range Efforts {
+		out[i] = adapterproto.Effort(e)
+	}
+	return out
+}
 
 // Preset is the runtime preset of a Claude session: how its turn processes are
 // started. It holds what the owner wrote, with no default for the permission
@@ -83,12 +91,9 @@ func ParsePreset(cfg map[string]json.RawMessage) (Preset, []string) {
 		}
 	}
 
-	if p.Model != "" {
-		// The model is also reported to the daemon and kept with a session that chose.
-		if err := adapterproto.ValidateModelName(p.Model); err != nil {
-			problems = append(problems, fmt.Sprintf("model: %v", err))
-		}
-	}
+	// The model is also reported to the daemon and kept with a session that chose.
+	_, defaultProblems := modelchoice.ParseDefaults(p.Model, p.Effort, SupportedEfforts())
+	problems = append(problems, defaultProblems...)
 	if raw, ok := cfg[modelchoice.Key]; ok {
 		allowed, err := modelchoice.ParseAllowed(raw, SupportedEfforts())
 		if err != nil {
@@ -108,9 +113,6 @@ func ParsePreset(cfg map[string]json.RawMessage) (Preset, []string) {
 		problems = append(problems, "permission_mode: required")
 	case !slices.Contains(PermissionModes, p.PermissionMode):
 		problems = append(problems, fmt.Sprintf("permission_mode: %q is not one of %v", p.PermissionMode, PermissionModes))
-	}
-	if p.Effort != "" && !slices.Contains(Efforts, p.Effort) {
-		problems = append(problems, fmt.Sprintf("effort: %q is not one of %v", p.Effort, Efforts))
 	}
 	return p, problems
 }

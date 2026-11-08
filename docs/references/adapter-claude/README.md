@@ -170,9 +170,12 @@ efforts allowed with it, for example `{"opus": ["high", "max"], "sonnet": ["low"
 The adapter reads it with the SDK's `adapterkit/modelchoice`, which holds the rules once for every
 adapter (what is refused, and how a model given without an effort, or an effort without a model,
 is checked against the preset's own `model` and `effort`). A preset without `allowed_models` allows
-no choice. `ParsePreset` adds every refusal of the allowlist to the preset's problems, and also
-refuses a `model` that is not a valid model name, because the probe reports the preset's model to
-the daemon and a session that chose keeps it.
+no choice. `ParsePreset` adds every refusal of the allowlist to the preset's problems. It checks
+the preset's own `model` and `effort` with the same module: a `model` that is not a valid model
+name is refused, because the probe reports the preset's model to the daemon and a session that
+chose keeps it, and an `effort` is refused unless it is one of the efforts the adapter declares,
+the one list that decides both what a preset names and what a requester may choose. The stored
+choice is the module's own `Choice`, validated by the module when it is read back.
 
 - **Refusal.** A choice the preset does not allow is answered `failed` with
   `model_choice_not_allowed` before anything is stored or started, like an unusable preset. It is

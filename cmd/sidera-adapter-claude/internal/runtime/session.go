@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/record"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/runtime/proc"
 	"github.com/aianyai/sidera/cmd/sidera-adapter-claude/internal/turn"
+	"github.com/aianyai/sidera/sdk/go/adapterkit/modelchoice"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -28,7 +29,7 @@ type session struct {
 	recordDir string
 	// choice is the model and effort the session's requester chose, nil when it
 	// chose none and the session follows its preset.
-	choice *choiceCheckpoint
+	choice *modelchoice.Choice
 	// toolEnv is the channel access of the session. It lives in memory only:
 	// the daemon sends it again with every request that needs it.
 	toolEnv map[string]string

@@ -9,7 +9,7 @@ What a Claude Code turn process is started with, as pure functions. Read
 | Name | Does |
 | ---- | ---- |
 | `ParsePreset(values)` | Reads the configuration values of a preset into a `Preset`, with one problem per value that cannot be used. That includes the preset's `allowed_models`, read with `adapterkit/modelchoice`. |
-| `SupportedEfforts()` | The efforts `--effort` takes, which the adapter declares as `model_choice`. |
+| `SupportedEfforts()` | The efforts `--effort` takes, derived from `Efforts`, the list a preset's own `effort` is checked against, so one list decides both; the adapter declares them as `model_choice`. |
 | `Preset.Env()` | The environment variables the preset adds to a turn process. |
 | `Turn.Argv()` | The argument vector of `claude -p` for one launch, argv[0] included. |
 | `DataDirDenyRules(dir)` | The `--disallowedTools` rules that deny Claude's file tools the data directory (best effort); every `Turn` carries them. |
